@@ -21,7 +21,7 @@ other contributors.
 ## Motivations
 
 Now, back at this project. Why we believe DeepSeek v4 Flash to be a pretty special
-model deserving a stand alone engine? Because after comparing it with powerful smaller
+model deserving a standalone engine? Because after comparing it with powerful smaller
 dense models, we can report that:
 
 1. DeepSeek v4 Flash is faster because of less active parameters.
