@@ -566,6 +566,11 @@ typedef struct {
     size_t max_len;
 } stop_list;
 
+static void stop_list_clear(stop_list *stops);
+static bool id_list_contains(const stop_list *ids, const char *id);
+static void id_list_push_unique(stop_list *ids, const char *id);
+static bool responses_live_has_call_id(server *s, const char *id);
+
 typedef struct {
     req_kind kind;
     api_style api;
@@ -590,6 +595,25 @@ typedef struct {
      * client opted in via reasoning.summary. Other APIs leave this false; the
      * field is ignored on those code paths. */
     bool reasoning_summary_emit;
+    /* Responses continuation contract:
+     *
+     * A live Responses tool loop is not a normal "new prompt with a long
+     * prefix" request.  The protocol gives tool outputs a call_id that binds
+     * them to a prior assistant tool call.  If that call_id is still known in
+     * memory, the live KV is the authoritative prefix, including any hidden
+     * thinking that the client did not replay.  These fields carry the parsed
+     * evidence needed by generate_job() to append only the new suffix.
+     *
+     * A tool-output-only request has no stateless prefix to match.  If the live
+     * call_id binding is gone by the time the worker executes it, DS4 must ask
+     * for a full replay rather than cold-prefilling a prompt that starts with a
+     * naked tool result.  Similarly, if live state is gone, a reasoning-mode
+     * tool replay must contain the prior reasoning item (or an equivalent
+     * opaque reasoning state from a future implementation). */
+    bool responses_requires_live_tool_state;
+    bool responses_requires_live_reasoning;
+    stop_list responses_live_call_ids;
+    char *responses_live_suffix_text;
     tool_replay_stats tool_replay;
 } request;
 
@@ -708,6 +732,9 @@ static void request_free(request *r) {
     free(r->stops.v);
     free(r->raw_body);
     free(r->prompt_text);
+    stop_list_clear(&r->responses_live_call_ids);
+    free(r->responses_live_call_ids.v);
+    free(r->responses_live_suffix_text);
     tool_schema_orders_free(&r->tool_orders);
     memset(r, 0, sizeof(*r));
 }
@@ -2258,6 +2285,177 @@ static char *render_chat_prompt_text(const chat_msgs *msgs, const char *tool_sch
     return buf_take(&out);
 }
 
+/* Render only the semantic tail that must be appended to the live KV for a
+ * Responses continuation.
+ *
+ * In the common Codex/pi tool path, the previous assistant tool-call turn is
+ * already in the model session, including hidden thinking.  The next request
+ * only provides function_call_output/custom_tool_call_output items, sometimes
+ * inside a full visible replay and sometimes as a short tail.  Re-rendering the
+ * assistant call here would duplicate it and destroy cache alignment, so this
+ * function starts at the first new item and emits only:
+ *
+ *   previous EOS, tool results, and the next assistant prefix.
+ *
+ * This is intentionally independent from req.prompt's already-tokenized suffix:
+ * suffix tokenization happens later after the cache decision, using the live
+ * token prefix as the boundary.  That avoids BPE merges across the visible
+ * replay/live-KV boundary. */
+static char *render_responses_live_tail(const chat_msgs *msgs, int start,
+                                        ds4_think_mode think_mode) {
+    const bool think = ds4_think_mode_enabled(think_mode);
+    buf out = {0};
+    buf_puts(&out, "<｜end▁of▁sentence｜>");
+
+    bool pending_assistant = false;
+    bool pending_tool_result = false;
+    for (int i = start; msgs && i < msgs->len; i++) {
+        const chat_msg *m = &msgs->v[i];
+        if (role_is_system(m->role)) {
+            continue;
+        } else if (!strcmp(m->role, "user")) {
+            buf_puts(&out, "<｜User｜>");
+            buf_puts(&out, m->content ? m->content : "");
+            pending_assistant = true;
+            pending_tool_result = false;
+        } else if (!strcmp(m->role, "tool") || !strcmp(m->role, "function")) {
+            if (!pending_tool_result) buf_puts(&out, "<｜User｜>");
+            buf_puts(&out, "<tool_result>");
+            append_dsml_text_escaped(&out, m->content);
+            buf_puts(&out, "</tool_result>");
+            pending_assistant = true;
+            pending_tool_result = true;
+        } else if (!strcmp(m->role, "assistant")) {
+            if (pending_assistant) {
+                buf_puts(&out, "<｜Assistant｜>");
+                if (think) {
+                    buf_puts(&out, "<think>");
+                    buf_puts(&out, m->reasoning ? m->reasoning : "");
+                    buf_puts(&out, "</think>");
+                } else {
+                    buf_puts(&out, "</think>");
+                }
+            }
+            buf_puts(&out, m->content ? m->content : "");
+            append_dsml_tool_calls_text(&out, &m->calls);
+            buf_puts(&out, "<｜end▁of▁sentence｜>");
+            pending_assistant = false;
+            pending_tool_result = false;
+        }
+    }
+
+    if (pending_assistant) {
+        buf_puts(&out, "<｜Assistant｜>");
+        buf_puts(&out, think ? "<think>" : "</think>");
+    }
+    return buf_take(&out);
+}
+
+static bool chat_msg_has_call_id(const chat_msg *m, const char *id) {
+    if (!m || !id || !id[0] || strcmp(m->role, "assistant")) return false;
+    for (int i = 0; i < m->calls.len; i++) {
+        if (m->calls.v[i].id && !strcmp(m->calls.v[i].id, id)) return true;
+    }
+    return false;
+}
+
+static const chat_msg *responses_find_prior_call_msg(const chat_msgs *msgs,
+                                                     int before,
+                                                     const char *id) {
+    if (!msgs || !id || !id[0]) return NULL;
+    if (before > msgs->len) before = msgs->len;
+    for (int i = before - 1; i >= 0; i--) {
+        if (chat_msg_has_call_id(&msgs->v[i], id)) return &msgs->v[i];
+    }
+    return NULL;
+}
+
+/* Validate Responses tool outputs before rendering.
+ *
+ * A tool output with a call_id is meaningful only if either:
+ *   1. DS4 still has the matching live assistant call in memory, or
+ *   2. the same request replays the prior assistant call item.
+ *
+ * Case 1 is the fast, protocol-native continuation path: keep the live KV and
+ * append only the tool result.  Case 2 is stateless replay after restart or
+ * branching.  In thinking mode, case 2 is only complete if the replay also
+ * carries reasoning state for the assistant call.  Official Responses clients
+ * can do this with reasoning items / encrypted reasoning content; a visible
+ * transcript alone is not enough because it omits hidden tokens that affected
+ * the next-token distribution. */
+static bool responses_validate_tool_outputs(server *s, const chat_msgs *msgs,
+                                            ds4_think_mode think_mode,
+                                            bool *requires_live_tool_state,
+                                            bool *requires_live_reasoning,
+                                            char *err, size_t errlen) {
+    if (!msgs) return true;
+    if (requires_live_tool_state) *requires_live_tool_state = false;
+    if (requires_live_reasoning) *requires_live_reasoning = false;
+    const bool needs_reasoning = ds4_think_mode_enabled(think_mode);
+    for (int i = 0; i < msgs->len; i++) {
+        const chat_msg *m = &msgs->v[i];
+        if (strcmp(m->role, "tool") && strcmp(m->role, "function")) continue;
+        if (!m->tool_call_id || !m->tool_call_id[0]) continue;
+
+        const bool live_known = responses_live_has_call_id(s, m->tool_call_id);
+        const chat_msg *prior = responses_find_prior_call_msg(msgs, i, m->tool_call_id);
+        if (!live_known && !prior) {
+            snprintf(err, errlen,
+                     "unknown tool output call_id %s; replay full Responses history",
+                     m->tool_call_id);
+            return false;
+        }
+        if (!prior) {
+            if (requires_live_tool_state) *requires_live_tool_state = true;
+            continue;
+        }
+        if (needs_reasoning &&
+            (!prior->reasoning || !prior->reasoning[0]))
+        {
+            if (requires_live_reasoning) *requires_live_reasoning = true;
+        }
+    }
+    return true;
+}
+
+/* Record the call ids and suffix candidate for a live Responses continuation.
+ *
+ * This only prepares evidence.  generate_job() later checks that the live
+ * server state is still exactly at the remembered token frontier before using
+ * it.  If another request already replaced the session, normal token/text/disk
+ * prefix matching handles the request instead. */
+static void responses_prepare_live_continuation(request *r,
+                                                const chat_msgs *msgs) {
+    if (!r || r->api != API_RESPONSES || !msgs || msgs->len == 0) return;
+
+    int tail_start = msgs->len;
+    while (tail_start > 0) {
+        const chat_msg *m = &msgs->v[tail_start - 1];
+        if (strcmp(m->role, "tool") && strcmp(m->role, "function")) break;
+        tail_start--;
+    }
+    if (tail_start == msgs->len) return;
+
+    stop_list_clear(&r->responses_live_call_ids);
+    if (tail_start > 0) {
+        const int anchor = tail_start - 1;
+        const chat_msg *assistant = &msgs->v[anchor];
+        if (strcmp(assistant->role, "assistant") || assistant->calls.len == 0) return;
+        for (int i = 0; i < assistant->calls.len; i++) {
+            id_list_push_unique(&r->responses_live_call_ids, assistant->calls.v[i].id);
+        }
+    } else {
+        for (int i = tail_start; i < msgs->len; i++) {
+            id_list_push_unique(&r->responses_live_call_ids, msgs->v[i].tool_call_id);
+        }
+    }
+    if (r->responses_live_call_ids.len == 0) return;
+
+    free(r->responses_live_suffix_text);
+    r->responses_live_suffix_text =
+        render_responses_live_tail(msgs, tail_start, r->think_mode);
+}
+
 /* The API parsers are intentionally selective JSON parsers: they keep only
  * fields that affect model semantics, rendering, streaming, or cache keys, and
  * skip extension fields.  The output is always a rendered DS4 chat/completion
@@ -2750,12 +2948,22 @@ fail:
     return false;
 }
 
-/* Codex' /v1/responses input items have a `type` discriminator (message,
+/* Codex /v1/responses input items have a `type` discriminator (message,
  * function_call, function_call_output, reasoning, custom_tool_call,
  * custom_tool_call_output, ...). We collapse them into chat_msgs the same way
  * the chat completion / Anthropic parsers do, so the rest of the engine sees a
- * single conversation history shape. Reasoning items are merged into the next
- * assistant message so render_chat_prompt_text can wrap them in <think>. */
+ * single conversation history shape.
+ *
+ * Protocol contract for stateless replay:
+ *   - The client must replay response.output items before tool outputs.
+ *   - For reasoning models, the replay must also include reasoning state.  DS4
+ *     can render plain reasoning summaries/content, but it cannot decrypt
+ *     reasoning.encrypted_content.  If live state is unavailable and the replay
+ *     only contains visible messages/tool calls, later validation marks it
+ *     incomplete and the request is rejected.
+ *
+ * Reasoning items are merged into the next assistant message so
+ * render_chat_prompt_text can wrap them in <think>. */
 static bool parse_responses_input(const char **p, chat_msgs *msgs,
                                   buf *loaded_tool_schemas,
                                   tool_schema_orders *orders) {
@@ -3458,10 +3666,16 @@ static bool parse_responses_request(ds4_engine *e, server *s, const char *body, 
         } else if (!strcmp(key, "previous_response_id") ||
                    !strcmp(key, "conversation"))
         {
-            /* DS4 doesn't persist conversation state across requests — the
-             * client is expected to replay the full input every turn. A
-             * non-null previous_response_id / conversation reference would
-             * silently answer with truncated history; reject explicitly. */
+            /* Official Responses state can be durable:
+             *   previous_response_id chains to a stored prior response, and
+             *   conversation points at a persistent Conversations object.
+             *
+             * DS4 does not yet implement that durable store.  The supported
+             * modes are either (a) a live in-memory continuation checked by
+             * visible transcript / tool call ids, or (b) stateless replay of
+             * the full input items.  Accepting a non-null durable reference
+             * without loading the referenced items would silently truncate the
+             * prompt, so reject it explicitly. */
             json_ws(&p);
             if (!json_lit(&p, "null")) {
                 snprintf(err, errlen,
@@ -3525,10 +3739,23 @@ static bool parse_responses_request(ds4_engine *e, server *s, const char *body, 
     if (!got_thinking && model_alias_enables_thinking(r->model)) thinking_enabled = true;
     r->think_mode = ds4_think_mode_for_context(
         think_mode_from_enabled(thinking_enabled, reasoning_effort), ctx_size);
+    if (!responses_validate_tool_outputs(s, &msgs, r->think_mode,
+                                         &r->responses_requires_live_tool_state,
+                                         &r->responses_requires_live_reasoning,
+                                         err, errlen)) {
+        chat_msgs_free(&msgs);
+        buf_free(&combined_tool_schemas);
+        buf_free(&loaded_tool_schemas);
+        free(instructions);
+        free(tool_schemas);
+        request_free(r);
+        return false;
+    }
     kv_cache_restore_tool_memory_for_messages(s, &msgs);
     tool_memory_attach_to_messages(s, &msgs, &r->tool_replay);
     r->prompt_preserves_reasoning =
         chat_history_uses_tool_context(&msgs, active_tool_schemas);
+    responses_prepare_live_continuation(r, &msgs);
     r->prompt_text = render_chat_prompt_text(&msgs, active_tool_schemas,
                                              &r->tool_orders, r->think_mode);
     ds4_tokenize_rendered_chat(e, r->prompt_text, &r->prompt);
@@ -6714,12 +6941,36 @@ typedef struct {
     uint64_t scan_clock;
 } tool_memory;
 
+typedef struct {
+    bool valid;
+    /* Token frontier of the live model session after the last successful
+     * Responses assistant turn.  Continuing from this point preserves hidden
+     * thinking and sampled DSML bytes that are not necessarily present in the
+     * client-visible replay. */
+    int live_tokens;
+    /* Rendered conversation text that the client is expected to replay.  This
+     * is deliberately the visible protocol transcript, not a dump of live KV:
+     * when reasoning summaries are not requested, hidden thinking is omitted.
+     * If a later request starts with this text, DS4 can continue from
+     * live_tokens and tokenize only the new suffix. */
+    char *visible_text;
+    size_t visible_len;
+    /* Tool-call ids generated at the same live frontier.  A following
+     * function_call_output/custom_tool_call_output for these ids is a direct
+     * protocol continuation and should not trigger prompt-prefix matching. */
+    stop_list call_ids;
+} responses_live_state;
+
+static bool id_list_contains(const stop_list *ids, const char *id);
+static void id_list_push_unique(stop_list *ids, const char *id);
+
 struct server {
     ds4_engine *engine;
     ds4_session *session;
     int default_tokens;
     kv_disk_cache kv;
     tool_memory tool_mem;
+    responses_live_state responses_live;
     bool disable_exact_dsml_tool_replay;
     pthread_mutex_t tool_mu;
     pthread_mutex_t mu;
@@ -6935,6 +7186,78 @@ static void tool_memory_free(tool_memory *m) {
     memset(m, 0, sizeof(*m));
 }
 
+/* Single live Responses state.
+ *
+ * This is not an implementation of persistent previous_response_id or the
+ * Conversations API.  DS4 currently rejects those durable-state parameters.
+ * The state below is only an in-memory optimization for the current local
+ * session, where the next request is expected to arrive immediately from the
+ * same agent loop.  If it does not match, DS4 falls back to the same prefix and
+ * disk-cache machinery used by chat/completions. */
+static void responses_live_clear_locked(responses_live_state *st) {
+    if (!st) return;
+    stop_list_clear(&st->call_ids);
+    free(st->visible_text);
+    st->visible_text = NULL;
+    st->visible_len = 0;
+    st->valid = false;
+    st->live_tokens = 0;
+}
+
+static void responses_live_free(responses_live_state *st) {
+    if (!st) return;
+    responses_live_clear_locked(st);
+    free(st->call_ids.v);
+    memset(st, 0, sizeof(*st));
+}
+
+static void responses_live_remember(server *s, const char *visible_text,
+                                    const tool_calls *calls) {
+    if (!s || !visible_text || !visible_text[0]) return;
+    pthread_mutex_lock(&s->tool_mu);
+    responses_live_clear_locked(&s->responses_live);
+    s->responses_live.visible_text = xstrdup(visible_text);
+    s->responses_live.visible_len = strlen(visible_text);
+    if (calls) {
+        for (int i = 0; i < calls->len; i++) {
+            id_list_push_unique(&s->responses_live.call_ids, calls->v[i].id);
+        }
+    }
+    s->responses_live.live_tokens = ds4_session_pos(s->session);
+    s->responses_live.valid = true;
+    pthread_mutex_unlock(&s->tool_mu);
+}
+
+static void responses_live_clear(server *s) {
+    if (!s) return;
+    pthread_mutex_lock(&s->tool_mu);
+    responses_live_clear_locked(&s->responses_live);
+    pthread_mutex_unlock(&s->tool_mu);
+}
+
+static bool responses_live_has_call_id(server *s, const char *id) {
+    if (!s || !id || !id[0]) return false;
+    pthread_mutex_lock(&s->tool_mu);
+    bool found = s->responses_live.valid &&
+                 id_list_contains(&s->responses_live.call_ids, id);
+    pthread_mutex_unlock(&s->tool_mu);
+    return found;
+}
+
+static bool responses_live_matches_request(server *s, const stop_list *ids,
+                                           int live_tokens) {
+    if (!s || !ids || ids->len == 0) return false;
+    pthread_mutex_lock(&s->tool_mu);
+    bool ok = s->responses_live.valid &&
+              s->responses_live.live_tokens == live_tokens &&
+              s->responses_live.call_ids.len == ids->len;
+    for (int i = 0; ok && i < ids->len; i++) {
+        ok = id_list_contains(&s->responses_live.call_ids, ids->v[i]);
+    }
+    pthread_mutex_unlock(&s->tool_mu);
+    return ok;
+}
+
 static bool tool_memory_has_id(server *s, const char *id) {
     if (!s || s->disable_exact_dsml_tool_replay || !id || !id[0]) return false;
     pthread_mutex_lock(&s->tool_mu);
@@ -7097,10 +7420,15 @@ static void apply_openai_stream_tool_ids(tool_calls *calls,
  *   DS4 engine payload written by ds4_session_save_payload()
  *   optional tool-id map section
  *
- * The filename is SHA1(rendered text bytes), not SHA1(token ids).  The optional
- * tool-id map is not part of model state, but it is needed to render future
- * client JSON back to the exact DSML sampled by the model.  We persist only
- * mappings whose DSML block appears in the saved rendered text.
+ * The filename is SHA1(cache text bytes), not SHA1(token ids).  For ordinary
+ * checkpoints the cache text is the rendered token prefix.  For live Responses
+ * checkpoints it can instead be the client-visible transcript: the payload
+ * still contains hidden reasoning KV, but the lookup key must be what the
+ * client can replay after a process restart or session switch.
+ *
+ * The optional tool-id map is not part of model state, but it is needed to
+ * render future client JSON back to the exact DSML sampled by the model.  We
+ * persist only mappings whose DSML block appears in the saved cache text.
  */
 
 #define KV_CACHE_MAGIC0 'K'
@@ -7121,6 +7449,7 @@ static void apply_openai_stream_tool_ids(tool_calls *calls,
 #define KV_CACHE_DEFAULT_CONTINUED_INTERVAL_TOKENS 10000
 #define KV_CACHE_DEFAULT_MB 4096
 #define KV_EXT_TOOL_MAP (1u << 0)
+#define KV_EXT_RESPONSES_VISIBLE (1u << 1)
 #define KV_TOOL_MAP_MAGIC0 'K'
 #define KV_TOOL_MAP_MAGIC1 'T'
 #define KV_TOOL_MAP_MAGIC2 'M'
@@ -7918,8 +8247,9 @@ static void kv_cache_rewrite_tool_map(server *s, const char *path, const char *t
     (void)ok;
 }
 
-static bool kv_cache_store_live_prefix(server *s, const ds4_tokens *tokens,
-                                       int store_len, const char *reason) {
+static bool kv_cache_store_live_prefix_text(server *s, const ds4_tokens *tokens,
+                                            int store_len, const char *reason,
+                                            const char *cache_text_override) {
     kv_disk_cache *kc = &s->kv;
     if (!kc->enabled) return false;
     if (!tokens || store_len < kc->opt.min_tokens) return false;
@@ -7958,7 +8288,14 @@ static bool kv_cache_store_live_prefix(server *s, const ds4_tokens *tokens,
     }
 
     size_t text_len = 0;
-    char *text = render_tokens_text(s->engine, &store_tokens, &text_len);
+    char *text = NULL;
+    const bool visible_key = cache_text_override && cache_text_override[0];
+    if (visible_key) {
+        text = xstrdup(cache_text_override);
+        text_len = strlen(text);
+    } else {
+        text = render_tokens_text(s->engine, &store_tokens, &text_len);
+    }
     if (text_len > UINT32_MAX) {
         server_log(DS4_LOG_KVCACHE, "ds4-server: kv cache skipped tokens=%d because rendered text is too large", store_tokens.len);
         free(text);
@@ -7997,6 +8334,7 @@ static bool kv_cache_store_live_prefix(server *s, const ds4_tokens *tokens,
     const uint64_t now = (uint64_t)time(NULL);
     uint8_t h[KV_CACHE_FIXED_HEADER];
     uint8_t ext_flags = tool_memory_count_dsml_in_text(s, text) > 0 ? KV_EXT_TOOL_MAP : 0;
+    if (visible_key) ext_flags |= KV_EXT_RESPONSES_VISIBLE;
     kv_fill_header(h, (uint8_t)quant_bits, kv_reason_code(reason), ext_flags,
                    (uint32_t)store_tokens.len, 0,
                    (uint32_t)ds4_session_ctx(s->session), now, now, payload_bytes);
@@ -8028,10 +8366,11 @@ static bool kv_cache_store_live_prefix(server *s, const ds4_tokens *tokens,
         unlink(tmp);
     } else {
         server_log(DS4_LOG_KVCACHE,
-                   "ds4-server: kv cache stored tokens=%d trimmed=%d reason=%s size=%.2f MiB save=%.1f ms",
+                   "ds4-server: kv cache stored tokens=%d trimmed=%d reason=%s key=%s size=%.2f MiB save=%.1f ms",
                    store_tokens.len,
                    original_len - store_tokens.len,
                    reason,
+                   visible_key ? "responses-visible" : "token-text",
                    (double)(KV_CACHE_FIXED_HEADER + 4ull + text_len + payload_bytes + tool_map_bytes) / (1024.0 * 1024.0),
                    save_ms);
         kv_cache_evict(kc, live_tokens);
@@ -8043,9 +8382,38 @@ static bool kv_cache_store_live_prefix(server *s, const ds4_tokens *tokens,
     return ok;
 }
 
+static bool kv_cache_store_live_prefix(server *s, const ds4_tokens *tokens,
+                                       int store_len, const char *reason) {
+    return kv_cache_store_live_prefix_text(s, tokens, store_len, reason, NULL);
+}
+
 static void kv_cache_store_current(server *s, const char *reason) {
     const ds4_tokens *tokens = ds4_session_tokens(s->session);
-    if (tokens) kv_cache_store_live_prefix(s, tokens, tokens->len, reason);
+    if (!tokens) return;
+
+    char *responses_visible_text = NULL;
+    pthread_mutex_lock(&s->tool_mu);
+    if (s->responses_live.valid &&
+        s->responses_live.live_tokens == tokens->len &&
+        s->responses_live.visible_text &&
+        s->responses_live.visible_text[0])
+    {
+        responses_visible_text = xstrdup(s->responses_live.visible_text);
+    }
+    pthread_mutex_unlock(&s->tool_mu);
+
+    /* A Responses live checkpoint can contain hidden reasoning that the client
+     * intentionally does not replay.  For disk recovery after a session switch,
+     * key that payload by the visible protocol transcript, not by rendering the
+     * hidden tokens.  On load, DS4 restores the hidden KV payload and tokenizes
+     * only the visible suffix that follows this key. */
+    if (responses_visible_text) {
+        kv_cache_store_live_prefix_text(s, tokens, tokens->len, reason,
+                                        responses_visible_text);
+        free(responses_visible_text);
+    } else {
+        kv_cache_store_live_prefix(s, tokens, tokens->len, reason);
+    }
 }
 
 static void kv_cache_note_store(kv_disk_cache *kc, int tokens) {
@@ -8091,8 +8459,10 @@ static int kv_cache_find_text_prefix(kv_disk_cache *kc, const char *prompt_text,
 
 static int kv_cache_try_load_text(server *s, const char *prompt_text,
                                   ds4_tokens *effective_prompt,
-                                  char **loaded_path_out) {
+                                  char **loaded_path_out,
+                                  uint8_t *loaded_ext_flags_out) {
     if (loaded_path_out) *loaded_path_out = NULL;
+    if (loaded_ext_flags_out) *loaded_ext_flags_out = 0;
     if (effective_prompt) effective_prompt->len = 0;
     kv_disk_cache *kc = &s->kv;
     if (!kc->enabled || !prompt_text) return 0;
@@ -8174,17 +8544,20 @@ static int kv_cache_try_load_text(server *s, const char *prompt_text,
     if (loaded > 0) {
         const double load_ms = (now_sec() - load_t0) * 1000.0;
         if (loaded_path_out) *loaded_path_out = xstrdup(path);
+        if (loaded_ext_flags_out) *loaded_ext_flags_out = hdr.ext_flags;
         kc->continued_last_store_tokens = loaded;
+        const char *key_kind = (hdr.ext_flags & KV_EXT_RESPONSES_VISIBLE) ?
+            "responses-visible" : "token-text";
         if (kc->opt.cold_max_tokens > 0 && loaded > kc->opt.cold_max_tokens) {
             unlink(path);
             server_log(DS4_LOG_KVCACHE,
-                       "ds4-server: kv cache hit text tokens=%d text=%u quant=%u load=%.1f ms consumed file=%s",
-                       loaded, text_bytes, hdr.quant_bits, load_ms, path);
+                       "ds4-server: kv cache hit text tokens=%d text=%u quant=%u key=%s load=%.1f ms consumed file=%s",
+                       loaded, text_bytes, hdr.quant_bits, key_kind, load_ms, path);
         } else {
             kv_cache_touch_file(path, hdr.hits + 1);
             server_log(DS4_LOG_KVCACHE,
-                       "ds4-server: kv cache hit text tokens=%d text=%u quant=%u load=%.1f ms file=%s",
-                       loaded, text_bytes, hdr.quant_bits, load_ms, path);
+                       "ds4-server: kv cache hit text tokens=%d text=%u quant=%u key=%s load=%.1f ms file=%s",
+                       loaded, text_bytes, hdr.quant_bits, key_kind, load_ms, path);
         }
     }
     free(cached_text);
@@ -8194,9 +8567,11 @@ static int kv_cache_try_load_text(server *s, const char *prompt_text,
 
 static int kv_cache_try_load(server *s, const request *req,
                              ds4_tokens *effective_prompt,
-                             char **loaded_path_out) {
+                             char **loaded_path_out,
+                             uint8_t *loaded_ext_flags_out) {
     return kv_cache_try_load_text(s, req ? req->prompt_text : NULL,
-                                  effective_prompt, loaded_path_out);
+                                  effective_prompt, loaded_path_out,
+                                  loaded_ext_flags_out);
 }
 
 static int live_text_prefix_prompt(server *s, const request *req,
@@ -8223,6 +8598,74 @@ static int live_text_prefix_prompt(server *s, const request *req,
         s->engine, live_tokens, req->prompt_text + live_text_len,
         effective_prompt);
     free(live_text);
+    return live_tokens->len;
+}
+
+/* Tool-output-only Responses continuation.
+ *
+ * Some clients send just the new tool outputs after a tool call.  There is no
+ * long visible prefix to match in that shape; the call_id itself is the
+ * protocol binding to the previous live assistant output.  Use it only when the
+ * remembered live frontier and call-id set match exactly. */
+static int responses_live_continuation_prompt(server *s, const request *req,
+                                              int live_pos,
+                                              ds4_tokens *effective_prompt,
+                                              int *matched_ids) {
+    if (!s || !req || !effective_prompt) return 0;
+    if (req->api != API_RESPONSES || !req->responses_live_suffix_text) return 0;
+    if (req->responses_live_call_ids.len == 0) return 0;
+    if (!responses_live_matches_request(s, &req->responses_live_call_ids,
+                                        live_pos)) return 0;
+
+    const ds4_tokens *live_tokens = ds4_session_tokens(s->session);
+    if (!live_tokens || live_tokens->len != live_pos) return 0;
+
+    build_prompt_from_exact_prefix_and_text_suffix(
+        s->engine, live_tokens, req->responses_live_suffix_text,
+        effective_prompt);
+    if (matched_ids) *matched_ids = req->responses_live_call_ids.len;
+    return live_tokens->len;
+}
+
+/* Visible-replay Responses continuation.
+ *
+ * Other clients send the full visible transcript on every turn even though the
+ * API semantics still make the request a continuation.  For Responses, exact
+ * token-prefix matching is the wrong first question: hidden reasoning may be
+ * live in KV but absent from the replay by design.  Instead, verify that the
+ * request's rendered text begins with the visible transcript remembered at the
+ * live frontier.  If it does, continue from the live token prefix and tokenize
+ * only the bytes after that visible boundary.
+ *
+ * If this check fails, DS4 has no special Responses state to trust.  The caller
+ * then uses normal token/text/disk matching, which is the correct fallback for
+ * cold starts, edits, restarts, or cross-client replays. */
+static int responses_live_visible_prefix_prompt(server *s, const request *req,
+                                                int live_pos,
+                                                ds4_tokens *effective_prompt) {
+    if (!s || !req || !req->prompt_text || !effective_prompt) return 0;
+    if (req->api != API_RESPONSES) return 0;
+
+    const size_t prompt_len = strlen(req->prompt_text);
+    size_t visible_len = 0;
+    pthread_mutex_lock(&s->tool_mu);
+    bool ok = s->responses_live.valid &&
+              s->responses_live.live_tokens == live_pos &&
+              s->responses_live.visible_text &&
+              s->responses_live.visible_len < prompt_len &&
+              byte_prefix_match(req->prompt_text, prompt_len,
+                                s->responses_live.visible_text,
+                                s->responses_live.visible_len);
+    if (ok) visible_len = s->responses_live.visible_len;
+    pthread_mutex_unlock(&s->tool_mu);
+    if (!ok) return 0;
+
+    const ds4_tokens *live_tokens = ds4_session_tokens(s->session);
+    if (!live_tokens || live_tokens->len != live_pos) return 0;
+
+    build_prompt_from_exact_prefix_and_text_suffix(
+        s->engine, live_tokens, req->prompt_text + visible_len,
+        effective_prompt);
     return live_tokens->len;
 }
 
@@ -8696,22 +9139,36 @@ static void server_progress_cb(void *ud, const char *event, int current, int tot
     if (p->srv && current > p->cached_tokens) kv_cache_maybe_store_continued(p->srv);
 }
 
-static bool request_replays_reasoning_for_tools(const request *r) {
-    if (!r || !ds4_think_mode_enabled(r->think_mode)) return false;
-    /* Responses only sends reasoning items when the client opted into
-     * reasoning.summary.  Without that, Codex cannot replay the hidden text on
-     * the next turn, so the live checkpoint must be canonicalized without it. */
-    if (r->api == API_RESPONSES) return r->reasoning_summary_emit;
-    return true;
-}
-
 static char *build_tool_checkpoint_suffix(const request *r, const char *content,
                                           const char *reasoning, const tool_calls *calls) {
     buf suffix = {0};
     if (ds4_think_mode_enabled(r->think_mode)) {
-        const char *replayed_reasoning =
-            request_replays_reasoning_for_tools(r) ? reasoning : NULL;
-        buf_puts(&suffix, replayed_reasoning ? replayed_reasoning : "");
+        buf_puts(&suffix, reasoning ? reasoning : "");
+        buf_puts(&suffix, "</think>");
+    }
+    buf_puts(&suffix, content ? content : "");
+    append_dsml_tool_calls_text(&suffix, calls);
+    buf_puts(&suffix, "<｜end▁of▁sentence｜>");
+    return buf_take(&suffix);
+}
+
+static char *build_responses_visible_assistant_suffix(const request *r,
+                                                      const char *content,
+                                                      const char *reasoning,
+                                                      const tool_calls *calls) {
+    buf suffix = {0};
+    /* This suffix mirrors what a Responses client can replay, not necessarily
+     * every token in KV.  Hidden reasoning stays live in the session unless the
+     * next client replay is expected to include it.  In practice, pi replays
+     * reasoning summaries for tool-call turns, but not for final assistant
+     * answers; Codex currently requests no summaries at all.  So only include
+     * reasoning in the remembered visible prefix when this assistant turn ended
+     * in tool calls.  A client that does replay final-answer reasoning will not
+     * match this visible shortcut and can still use exact token-prefix replay. */
+    if (ds4_think_mode_enabled(r->think_mode)) {
+        if (r->reasoning_summary_emit && calls && calls->len > 0) {
+            buf_puts(&suffix, reasoning ? reasoning : "");
+        }
         buf_puts(&suffix, "</think>");
     }
     buf_puts(&suffix, content ? content : "");
@@ -8785,7 +9242,7 @@ static void canonicalize_thinking_checkpoint(server *s, const job *j, const char
         char *path = NULL;
         ds4_tokens effective = {0};
         int loaded = kv_cache_try_load_text(s, rendered.ptr ? rendered.ptr : "",
-                                            &effective, &path);
+                                            &effective, &path, NULL);
         if (loaded == 0) ds4_session_invalidate(s->session);
 
         char sync_err[160] = {0};
@@ -8892,7 +9349,7 @@ static void canonicalize_tool_checkpoint(server *s, const job *j, const char *ct
         char *path = NULL;
         ds4_tokens effective = {0};
         int loaded = kv_cache_try_load_text(s, rendered.ptr ? rendered.ptr : "",
-                                            &effective, &path);
+                                            &effective, &path, NULL);
         if (loaded == 0) ds4_session_invalidate(s->session);
 
         char sync_err[160] = {0};
@@ -8951,16 +9408,58 @@ static void generate_job(server *s, job *j) {
     const int old_pos = ds4_session_pos(s->session);
     const int common = ds4_session_common_prefix(s->session, &j->req.prompt);
     trace_cache_diag cache_diag = {0};
-    if (s->trace) {
-        trace_cache_capture(&cache_diag, ds4_session_tokens(s->session),
-                            &j->req.prompt, old_pos, common);
-    }
+    trace_cache_capture(&cache_diag, ds4_session_tokens(s->session),
+                        &j->req.prompt, old_pos, common);
     ds4_tokens effective_prompt = {0};
     const ds4_tokens *prompt_for_sync = &j->req.prompt;
-    int cached = common == old_pos && j->req.prompt.len >= old_pos ? common : 0;
-    const char *cache_source = cached > 0 ? "memory-token" : "none";
+    bool responses_live_continuation = false;
+    const char *responses_live_match = NULL;
+    int responses_live_match_ids = 0;
+    /* Responses gets the first chance to continue from live state.  This is
+     * the whole point of the API shape: a request that is bound to prior live
+     * output by visible transcript or tool call ids does not need to prove an
+     * exact token-prefix match.  Exact token/text/disk matching remains the
+     * fallback when the live state is absent or no longer describes the
+     * request. */
+    int cached = responses_live_visible_prefix_prompt(s, &j->req, old_pos,
+                                                      &effective_prompt);
+    const char *cache_source = cached > 0 ? "responses-visible" : "none";
+    if (cached > 0) {
+        responses_live_match = "visible-prefix";
+        if (responses_live_matches_request(s, &j->req.responses_live_call_ids,
+                                           old_pos))
+        {
+            responses_live_match_ids = j->req.responses_live_call_ids.len;
+        }
+    }
+    if (cached == 0) {
+        cached = responses_live_continuation_prompt(s, &j->req, old_pos,
+                                                    &effective_prompt,
+                                                    &responses_live_match_ids);
+        cache_source = cached > 0 ? "responses-tool-output" : "none";
+        if (cached > 0) responses_live_match = "tool-output-ids";
+    }
+    if (cached > 0) {
+        responses_live_continuation = true;
+        prompt_for_sync = &effective_prompt;
+    } else if (j->req.api == API_RESPONSES &&
+               j->req.responses_requires_live_tool_state)
+    {
+        /* The parser saw a valid live call_id, but by worker execution time the
+         * live frontier no longer matches.  Since the request did not replay
+         * the prior assistant call, there is no stateless prefix to match and
+         * no disk key to search by. */
+        ds4_tokens_free(&effective_prompt);
+        http_error(j->fd, 400,
+                   "Responses tool output requires live call state; replay full input instead");
+        return;
+    } else {
+        cached = common == old_pos && j->req.prompt.len >= old_pos ? common : 0;
+        cache_source = cached > 0 ? "memory-token" : "none";
+    }
     int disk_cached = 0;
     char *disk_cache_path = NULL;
+    uint8_t disk_cache_ext_flags = 0;
     if (cached == 0) {
         int text_cached = live_text_prefix_prompt(s, &j->req, &effective_prompt);
         if (text_cached > 0) {
@@ -8968,6 +9467,12 @@ static void generate_job(server *s, job *j) {
             cache_source = "memory-text";
             prompt_for_sync = &effective_prompt;
         }
+    }
+    if (cached == 0 && old_pos > 0) {
+        server_log(DS4_LOG_WARNING,
+                   "ds4-server: live kv cache miss live=%d prompt=%d common=%d reason=%s",
+                   old_pos, j->req.prompt.len, common,
+                   trace_cache_miss_reason(&cache_diag));
     }
     if (cached == 0) s->kv.continued_last_store_tokens = 0;
     if (s->kv.enabled && cached == 0 && old_pos >= s->kv.opt.min_tokens) {
@@ -8978,12 +9483,34 @@ static void generate_job(server *s, job *j) {
     }
     if (cached == 0) {
         disk_cached = kv_cache_try_load(s, &j->req, &effective_prompt,
-                                        &disk_cache_path);
+                                        &disk_cache_path,
+                                        &disk_cache_ext_flags);
         if (disk_cached > 0) {
             cached = disk_cached;
             cache_source = "disk-text";
             prompt_for_sync = &effective_prompt;
         }
+    }
+    if (j->req.api == API_RESPONSES &&
+        j->req.responses_requires_live_reasoning &&
+        !(cached > 0 &&
+          ((!strcmp(cache_source, "responses-visible") ||
+            !strcmp(cache_source, "responses-tool-output")) ||
+           (!strcmp(cache_source, "disk-text") &&
+            (disk_cache_ext_flags & KV_EXT_RESPONSES_VISIBLE)))))
+    {
+        /* A stateless replay that includes a prior tool call but omits the
+         * reasoning state is not equivalent to the live session.  Give disk
+         * recovery one chance first: a Responses-visible disk checkpoint is
+         * keyed by the visible transcript but carries the hidden KV payload and
+         * is therefore a valid substitute for live memory after client/session
+         * switching.  Ordinary token-text checkpoints before the missing
+         * reasoning are not enough. */
+        ds4_tokens_free(&effective_prompt);
+        free(disk_cache_path);
+        http_error(j->fd, 400,
+                   "Responses replay is missing reasoning state; retry with live state or full reasoning items");
+        return;
     }
     const int prompt_tokens = prompt_for_sync->len;
     const double t0 = now_sec();
@@ -9003,6 +9530,14 @@ static void generate_job(server *s, job *j) {
     snprintf(progress.ctx, sizeof(progress.ctx), "%s", ctx_span);
     char req_flags[64];
     log_flags(req_flags, sizeof(req_flags), j->req.has_tools, false, false, false);
+    if (responses_live_continuation) {
+        server_log(DS4_LOG_PREFILL,
+                   "ds4-server: responses live continuation match=%s ids=%d cached=%d prompt=%d",
+                   responses_live_match ? responses_live_match : "unknown",
+                   responses_live_match_ids,
+                   cached,
+                   prompt_tokens);
+    }
     server_log(DS4_LOG_PREFILL,
                "ds4-server: %s ctx=%s%s%s prompt start",
                j->req.kind == REQ_CHAT ? "chat" : "completion",
@@ -9048,6 +9583,9 @@ static void generate_job(server *s, job *j) {
         http_error(j->fd, 500, err);
         return;
     }
+    /* Once a non-live request wins, the old Responses live binding is stale.
+     * Keep it only when the current request explicitly continued from it. */
+    if (!responses_live_continuation) responses_live_clear(s);
     ds4_session_set_progress(s->session, NULL, NULL);
     server_log(DS4_LOG_PREFILL,
                "ds4-server: %s ctx=%s%s%s prompt done %.3fs",
@@ -9389,6 +9927,8 @@ static void generate_job(server *s, job *j) {
             assign_tool_call_ids(s, &parsed_calls, j->req.api);
             tool_memory_remember(s, &parsed_calls);
             final_finish = "tool_calls";
+        } else if (j->req.api == API_RESPONSES) {
+            responses_live_clear(s);
         }
     }
     log_tool_calls_summary(ctx_span, &parsed_calls);
@@ -9398,7 +9938,37 @@ static void generate_job(server *s, job *j) {
                  parsed_content ? parsed_content : (text.ptr ? text.ptr : ""),
                  parsed_reasoning, &parsed_calls, now_sec() - t0);
 
-    if (j->req.kind == REQ_CHAT && parsed_calls.len) {
+    if (j->req.api == API_RESPONSES) {
+        if (strcmp(final_finish, "error") && strcmp(final_finish, "length")) {
+            /* Store the post-turn visible transcript plus the live token
+             * frontier.  The next Responses request may replay only this
+             * visible surface, while the real session also contains hidden
+             * reasoning and exact sampled tool-call bytes. */
+            char *visible_suffix =
+                build_responses_visible_assistant_suffix(&j->req,
+                    parsed_content ? parsed_content : "",
+                    parsed_reasoning,
+                    &parsed_calls);
+            buf visible = {0};
+            buf_puts(&visible, j->req.prompt_text ? j->req.prompt_text : "");
+            buf_puts(&visible, visible_suffix ? visible_suffix : "");
+            responses_live_remember(s, visible.ptr ? visible.ptr : "",
+                                    parsed_calls.len ? &parsed_calls : NULL);
+            buf_free(&visible);
+            free(visible_suffix);
+        } else {
+            responses_live_clear(s);
+        }
+    }
+
+    if (j->req.kind == REQ_CHAT && parsed_calls.len &&
+        j->req.api != API_RESPONSES)
+    {
+        /* Chat/completions has no protocol object that binds the next request
+         * to this live KV state, so canonicalize the tool-call checkpoint for
+         * future prefix matching.  Responses deliberately skips this path:
+         * canonicalizing a tool-call turn would rebuild from the visible replay
+         * and can drop hidden reasoning. */
         canonicalize_tool_checkpoint(s, j, ctx_span, trace_id,
                                      parsed_content ? parsed_content : "",
                                      parsed_reasoning, &parsed_calls);
@@ -9924,6 +10494,7 @@ static void server_close_resources(server *s) {
     }
     kv_cache_close(&s->kv);
     tool_memory_free(&s->tool_mem);
+    responses_live_free(&s->responses_live);
     pthread_mutex_destroy(&s->tool_mu);
     pthread_mutex_destroy(&s->trace_mu);
     pthread_cond_destroy(&s->clients_cv);
@@ -11469,32 +12040,6 @@ static void test_tool_checkpoint_suffix_is_future_prompt_canonical(void) {
     tool_schema_orders_free(&orders);
 }
 
-static void test_responses_tool_checkpoint_drops_unemitted_reasoning(void) {
-    tool_calls calls = {0};
-    tool_call tc = {0};
-    tc.name = xstrdup("exec_command");
-    tc.arguments = xstrdup("{\"cmd\":\"ls\"}");
-    tool_calls_push(&calls, tc);
-
-    request r;
-    request_init(&r, REQ_CHAT, 128);
-    r.api = API_RESPONSES;
-    r.think_mode = DS4_THINK_HIGH;
-    r.reasoning_summary_emit = false;
-    char *suffix = build_tool_checkpoint_suffix(&r, "", "hidden thought", &calls);
-    TEST_ASSERT(strstr(suffix, "hidden thought") == NULL);
-    TEST_ASSERT(!strncmp(suffix, "</think>", 8));
-    free(suffix);
-
-    r.reasoning_summary_emit = true;
-    suffix = build_tool_checkpoint_suffix(&r, "", "hidden thought", &calls);
-    TEST_ASSERT(strstr(suffix, "hidden thought</think>") != NULL);
-    free(suffix);
-
-    request_free(&r);
-    tool_calls_free(&calls);
-}
-
 static void test_tool_checkpoint_minifies_json_parameters(void) {
     tool_schema_orders orders = {0};
     tool_schema_orders_add_json(&orders,
@@ -11630,6 +12175,182 @@ static void test_tool_memory_replays_sampled_dsml(void) {
     tool_calls_free(&sampled);
     tool_memory_free(&s.tool_mem);
     pthread_mutex_destroy(&s.tool_mu);
+}
+
+static void test_responses_live_tail_renders_tool_outputs_only(void) {
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_RESPONSES;
+    r.think_mode = DS4_THINK_HIGH;
+
+    chat_msgs msgs = {0};
+    chat_msg assistant = {0};
+    assistant.role = xstrdup("assistant");
+    tool_call tc = {0};
+    tc.id = xstrdup("call_live");
+    tc.name = xstrdup("exec_command");
+    tc.arguments = xstrdup("{\"cmd\":\"pwd\"}");
+    tool_calls_push(&assistant.calls, tc);
+    chat_msgs_push(&msgs, assistant);
+
+    chat_msg tool = {0};
+    tool.role = xstrdup("tool");
+    tool.tool_call_id = xstrdup("call_live");
+    tool.content = xstrdup("/tmp");
+    chat_msgs_push(&msgs, tool);
+
+    responses_prepare_live_continuation(&r, &msgs);
+    TEST_ASSERT(r.responses_live_call_ids.len == 1);
+    TEST_ASSERT(!strcmp(r.responses_live_call_ids.v[0], "call_live"));
+    TEST_ASSERT(r.responses_live_suffix_text != NULL);
+    TEST_ASSERT(!strncmp(r.responses_live_suffix_text,
+                         "<｜end▁of▁sentence｜><｜User｜><tool_result>",
+                         strlen("<｜end▁of▁sentence｜><｜User｜><tool_result>")));
+    TEST_ASSERT(strstr(r.responses_live_suffix_text, "/tmp</tool_result>") != NULL);
+    TEST_ASSERT(strstr(r.responses_live_suffix_text, "<｜Assistant｜><think>") != NULL);
+    TEST_ASSERT(strstr(r.responses_live_suffix_text, "exec_command") == NULL);
+
+    chat_msgs_free(&msgs);
+    request_free(&r);
+}
+
+static void test_responses_tool_output_id_validation(void) {
+    server s = {0};
+    pthread_mutex_init(&s.tool_mu, NULL);
+
+    chat_msgs msgs = {0};
+    chat_msg tool = {0};
+    tool.role = xstrdup("tool");
+    tool.tool_call_id = xstrdup("call_missing");
+    tool.content = xstrdup("out");
+    chat_msgs_push(&msgs, tool);
+
+    char err[160] = {0};
+    TEST_ASSERT(!responses_validate_tool_outputs(&s, &msgs, DS4_THINK_HIGH, NULL, NULL,
+                                                 err, sizeof(err)));
+    TEST_ASSERT(strstr(err, "unknown tool output call_id") != NULL);
+
+    pthread_mutex_lock(&s.tool_mu);
+    s.responses_live.valid = true;
+    s.responses_live.live_tokens = 10;
+    id_list_push_unique(&s.responses_live.call_ids, "call_missing");
+    pthread_mutex_unlock(&s.tool_mu);
+    err[0] = '\0';
+    bool needs_live_tool_state = false;
+    TEST_ASSERT(responses_validate_tool_outputs(&s, &msgs, DS4_THINK_HIGH,
+                                                &needs_live_tool_state, NULL,
+                                                err, sizeof(err)));
+    TEST_ASSERT(needs_live_tool_state);
+
+    chat_msgs_free(&msgs);
+    responses_live_free(&s.responses_live);
+    pthread_mutex_destroy(&s.tool_mu);
+}
+
+static void test_responses_stateless_tool_replay_requires_reasoning(void) {
+    server s = {0};
+    pthread_mutex_init(&s.tool_mu, NULL);
+
+    chat_msgs msgs = {0};
+    chat_msg assistant = {0};
+    assistant.role = xstrdup("assistant");
+    tool_call tc = {0};
+    tc.id = xstrdup("call_replay");
+    tc.name = xstrdup("exec_command");
+    tc.arguments = xstrdup("{\"cmd\":\"pwd\"}");
+    tool_calls_push(&assistant.calls, tc);
+    chat_msgs_push(&msgs, assistant);
+
+    chat_msg tool = {0};
+    tool.role = xstrdup("tool");
+    tool.tool_call_id = xstrdup("call_replay");
+    tool.content = xstrdup("/tmp");
+    chat_msgs_push(&msgs, tool);
+
+    char err[160] = {0};
+    bool needs_live_reasoning = false;
+    bool needs_live_tool_state = false;
+    TEST_ASSERT(responses_validate_tool_outputs(&s, &msgs, DS4_THINK_HIGH,
+                                                &needs_live_tool_state,
+                                                &needs_live_reasoning,
+                                                err, sizeof(err)));
+    TEST_ASSERT(!needs_live_tool_state);
+    TEST_ASSERT(needs_live_reasoning);
+
+    pthread_mutex_lock(&s.tool_mu);
+    s.responses_live.valid = true;
+    s.responses_live.live_tokens = 123;
+    id_list_push_unique(&s.responses_live.call_ids, "call_replay");
+    pthread_mutex_unlock(&s.tool_mu);
+    err[0] = '\0';
+    needs_live_reasoning = false;
+    needs_live_tool_state = false;
+    TEST_ASSERT(responses_validate_tool_outputs(&s, &msgs, DS4_THINK_HIGH,
+                                                &needs_live_tool_state,
+                                                &needs_live_reasoning,
+                                                err, sizeof(err)));
+    TEST_ASSERT(!needs_live_tool_state);
+    TEST_ASSERT(needs_live_reasoning);
+
+    free(msgs.v[0].reasoning);
+    msgs.v[0].reasoning = xstrdup("replayed hidden reasoning");
+    err[0] = '\0';
+    needs_live_reasoning = false;
+    needs_live_tool_state = false;
+    TEST_ASSERT(responses_validate_tool_outputs(&s, &msgs, DS4_THINK_HIGH,
+                                                &needs_live_tool_state,
+                                                &needs_live_reasoning,
+                                                err, sizeof(err)));
+    TEST_ASSERT(!needs_live_tool_state);
+    TEST_ASSERT(!needs_live_reasoning);
+
+    free(msgs.v[0].reasoning);
+    msgs.v[0].reasoning = NULL;
+    err[0] = '\0';
+    needs_live_reasoning = false;
+    needs_live_tool_state = false;
+    TEST_ASSERT(responses_validate_tool_outputs(&s, &msgs, DS4_THINK_NONE,
+                                                &needs_live_tool_state,
+                                                &needs_live_reasoning,
+                                                err, sizeof(err)));
+    TEST_ASSERT(!needs_live_tool_state);
+    TEST_ASSERT(!needs_live_reasoning);
+
+    chat_msgs_free(&msgs);
+    responses_live_free(&s.responses_live);
+    pthread_mutex_destroy(&s.tool_mu);
+}
+
+static void test_responses_visible_suffix_matches_client_replay(void) {
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_RESPONSES;
+    r.think_mode = DS4_THINK_HIGH;
+    r.reasoning_summary_emit = true;
+
+    char *suffix = build_responses_visible_assistant_suffix(&r, "5",
+                                                            "hidden summary",
+                                                            NULL);
+    TEST_ASSERT(strstr(suffix, "hidden summary") == NULL);
+    TEST_ASSERT(strstr(suffix, "</think>5") != NULL);
+    free(suffix);
+
+    tool_calls calls = {0};
+    tool_call tc = {0};
+    tc.id = xstrdup("call_live");
+    tc.name = xstrdup("bash");
+    tc.arguments = xstrdup("{\"command\":\"pwd\"}");
+    tool_calls_push(&calls, tc);
+
+    suffix = build_responses_visible_assistant_suffix(&r, "",
+                                                      "tool summary",
+                                                      &calls);
+    TEST_ASSERT(strstr(suffix, "tool summary</think>") != NULL);
+    TEST_ASSERT(strstr(suffix, "<｜DSML｜tool_calls>") != NULL);
+    free(suffix);
+
+    tool_calls_free(&calls);
+    request_free(&r);
 }
 
 static void test_exact_dsml_tool_replay_can_be_disabled(void) {
@@ -12624,9 +13345,12 @@ static void ds4_server_unit_tests_run(void) {
     test_dsml_parser_recovers_loose_nested_parameters();
     test_tool_parse_failure_returns_recoverable_finish();
     test_tool_checkpoint_suffix_is_future_prompt_canonical();
-    test_responses_tool_checkpoint_drops_unemitted_reasoning();
     test_tool_checkpoint_minifies_json_parameters();
     test_tool_memory_replays_sampled_dsml();
+    test_responses_live_tail_renders_tool_outputs_only();
+    test_responses_tool_output_id_validation();
+    test_responses_stateless_tool_replay_requires_reasoning();
+    test_responses_visible_suffix_matches_client_replay();
     test_exact_dsml_tool_replay_can_be_disabled();
     test_dsml_decode_state_separates_structure_and_payload();
     test_tool_memory_max_ids_prunes_oldest();
