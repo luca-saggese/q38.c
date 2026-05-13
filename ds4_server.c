@@ -8696,11 +8696,22 @@ static void server_progress_cb(void *ud, const char *event, int current, int tot
     if (p->srv && current > p->cached_tokens) kv_cache_maybe_store_continued(p->srv);
 }
 
+static bool request_replays_reasoning_for_tools(const request *r) {
+    if (!r || !ds4_think_mode_enabled(r->think_mode)) return false;
+    /* Responses only sends reasoning items when the client opted into
+     * reasoning.summary.  Without that, Codex cannot replay the hidden text on
+     * the next turn, so the live checkpoint must be canonicalized without it. */
+    if (r->api == API_RESPONSES) return r->reasoning_summary_emit;
+    return true;
+}
+
 static char *build_tool_checkpoint_suffix(const request *r, const char *content,
                                           const char *reasoning, const tool_calls *calls) {
     buf suffix = {0};
     if (ds4_think_mode_enabled(r->think_mode)) {
-        buf_puts(&suffix, reasoning ? reasoning : "");
+        const char *replayed_reasoning =
+            request_replays_reasoning_for_tools(r) ? reasoning : NULL;
+        buf_puts(&suffix, replayed_reasoning ? replayed_reasoning : "");
         buf_puts(&suffix, "</think>");
     }
     buf_puts(&suffix, content ? content : "");
@@ -11458,6 +11469,32 @@ static void test_tool_checkpoint_suffix_is_future_prompt_canonical(void) {
     tool_schema_orders_free(&orders);
 }
 
+static void test_responses_tool_checkpoint_drops_unemitted_reasoning(void) {
+    tool_calls calls = {0};
+    tool_call tc = {0};
+    tc.name = xstrdup("exec_command");
+    tc.arguments = xstrdup("{\"cmd\":\"ls\"}");
+    tool_calls_push(&calls, tc);
+
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_RESPONSES;
+    r.think_mode = DS4_THINK_HIGH;
+    r.reasoning_summary_emit = false;
+    char *suffix = build_tool_checkpoint_suffix(&r, "", "hidden thought", &calls);
+    TEST_ASSERT(strstr(suffix, "hidden thought") == NULL);
+    TEST_ASSERT(!strncmp(suffix, "</think>", 8));
+    free(suffix);
+
+    r.reasoning_summary_emit = true;
+    suffix = build_tool_checkpoint_suffix(&r, "", "hidden thought", &calls);
+    TEST_ASSERT(strstr(suffix, "hidden thought</think>") != NULL);
+    free(suffix);
+
+    request_free(&r);
+    tool_calls_free(&calls);
+}
+
 static void test_tool_checkpoint_minifies_json_parameters(void) {
     tool_schema_orders orders = {0};
     tool_schema_orders_add_json(&orders,
@@ -12587,6 +12624,7 @@ static void ds4_server_unit_tests_run(void) {
     test_dsml_parser_recovers_loose_nested_parameters();
     test_tool_parse_failure_returns_recoverable_finish();
     test_tool_checkpoint_suffix_is_future_prompt_canonical();
+    test_responses_tool_checkpoint_drops_unemitted_reasoning();
     test_tool_checkpoint_minifies_json_parameters();
     test_tool_memory_replays_sampled_dsml();
     test_exact_dsml_tool_replay_can_be_disabled();
