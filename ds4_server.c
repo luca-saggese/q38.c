@@ -2416,11 +2416,13 @@ static const chat_msg *responses_find_prior_call_msg(const chat_msgs *msgs,
  *
  * Case 1 is the fast, protocol-native continuation path: keep the live KV and
  * append only the tool result.  Case 2 is stateless replay after restart or
- * branching.  In thinking mode, case 2 is only complete if the replay also
- * carries reasoning state for the assistant call.  Official Responses clients
- * can do this with reasoning items / encrypted reasoning content; a visible
- * transcript alone is not enough because it omits hidden tokens that affected
- * the next-token distribution. */
+ * branching.  In thinking mode, case 2 is less faithful if the replay omits
+ * reasoning state for the assistant call.  Official Responses clients can
+ * carry that state with reasoning items / encrypted reasoning content; when
+ * they do not, the request is still renderable as visible history.  Mark that
+ * condition so generate_job() can prefer live / visible checkpoints and emit a
+ * warning if it must fall back to visible replay instead of aborting the
+ * session. */
 static bool responses_validate_tool_outputs(server *s, const chat_msgs *msgs,
                                             ds4_think_mode think_mode,
                                             bool *requires_live_tool_state,
@@ -2442,7 +2444,7 @@ static bool responses_validate_tool_outputs(server *s, const chat_msgs *msgs,
             const chat_msg *prior = responses_find_prior_call_msg(msgs, i, id);
             if (!live_known && !prior) {
                 snprintf(err, errlen,
-                         "unknown tool output call_id %s; replay full Responses history",
+                         "Responses continuation state is not available for call_id %s; retry by replaying the full input history",
                          id);
                 id_list_free(&ids);
                 return false;
@@ -2532,7 +2534,7 @@ static bool anthropic_validate_tool_results(server *s, const chat_msgs *msgs,
             const chat_msg *prior = responses_find_prior_call_msg(msgs, i, id);
             if (!live_known && !prior) {
                 snprintf(err, errlen,
-                         "unknown Anthropic tool_result tool_use_id %s; replay full messages",
+                         "Anthropic continuation state is not available for tool_use_id %s; retry by replaying the full messages history",
                          id);
                 id_list_free(&ids);
                 return false;
@@ -3092,8 +3094,9 @@ fail:
  *   - For reasoning models, the replay must also include reasoning state.  DS4
  *     can render plain reasoning summaries/content, but it cannot decrypt
  *     reasoning.encrypted_content.  If live state is unavailable and the replay
- *     only contains visible messages/tool calls, later validation marks it
- *     incomplete and the request is rejected.
+ *     only contains visible messages/tool calls, later validation marks it as a
+ *     lower-fidelity replay; generate_job() logs that and continues from the
+ *     visible transcript rather than killing a recoverable agent session.
  *
  * Reasoning items are merged into the next assistant message so
  * render_chat_prompt_text can wrap them in <think>. */
@@ -4634,6 +4637,7 @@ static bool http_response(int fd, int code, const char *type, const char *body) 
     const char *reason = code == 200 ? "OK" :
                          code == 400 ? "Bad Request" :
                          code == 404 ? "Not Found" :
+                         code == 409 ? "Conflict" :
                          code == 500 ? "Internal Server Error" : "Error";
     buf h = {0};
     buf_printf(&h,
@@ -9802,15 +9806,15 @@ static void generate_job(server *s, job *j) {
          * the prior assistant call, there is no stateless prefix to match and
          * no disk key to search by. */
         ds4_tokens_free(&effective_prompt);
-        http_error(j->fd, 400,
-                   "Responses tool output requires live call state; replay full input instead");
+        http_error(j->fd, 409,
+                   "Responses continuation state is not available; retry by replaying the full input history");
         return;
     } else if (cached == 0 && j->req.api == API_ANTHROPIC &&
                j->req.anthropic_requires_live_tool_state)
     {
         ds4_tokens_free(&effective_prompt);
-        http_error(j->fd, 400,
-                   "Anthropic tool_result requires live tool state; replay full messages instead");
+        http_error(j->fd, 409,
+                   "Anthropic continuation state is not available; retry by replaying the full messages history");
         return;
     } else if (cached == 0) {
         cached = common == old_pos && j->req.prompt.len >= old_pos ? common : 0;
@@ -9862,27 +9866,16 @@ static void generate_job(server *s, job *j) {
             prompt_for_sync = &effective_prompt;
         }
     }
-    if (responses_protocol &&
+    const bool responses_reasoning_state_preserved =
+        cached > 0 &&
+        ((!strcmp(cache_source, "responses-visible") ||
+          !strcmp(cache_source, "responses-tool-output")) ||
+         (!strcmp(cache_source, "disk-text") &&
+          (disk_cache_ext_flags & KV_EXT_RESPONSES_VISIBLE)));
+    const bool responses_visible_replay_without_reasoning =
+        responses_protocol &&
         j->req.responses_requires_live_reasoning &&
-        !(cached > 0 &&
-          ((!strcmp(cache_source, "responses-visible") ||
-            !strcmp(cache_source, "responses-tool-output")) ||
-           (!strcmp(cache_source, "disk-text") &&
-            (disk_cache_ext_flags & KV_EXT_RESPONSES_VISIBLE)))))
-    {
-        /* A stateless replay that includes a prior tool call but omits the
-         * reasoning state is not equivalent to the live session.  Give disk
-         * recovery one chance first: a Responses-visible disk checkpoint is
-         * keyed by the visible transcript but carries the hidden KV payload and
-         * is therefore a valid substitute for live memory after client/session
-         * switching.  Ordinary token-text checkpoints before the missing
-         * reasoning are not enough. */
-        ds4_tokens_free(&effective_prompt);
-        free(disk_cache_path);
-        http_error(j->fd, 400,
-                   "Responses replay is missing reasoning state; retry with live state or full reasoning items");
-        return;
-    }
+        !responses_reasoning_state_preserved;
     const int prompt_tokens = prompt_for_sync->len;
     const double t0 = now_sec();
     uint64_t trace_id = trace_begin(s, j, cached, prompt_tokens, &cache_diag,
@@ -9921,6 +9914,23 @@ static void generate_job(server *s, job *j) {
                    "ds4-server: thinking live continuation match=visible-prefix cached=%d prompt=%d",
                    cached,
                    prompt_tokens);
+    }
+    if (responses_visible_replay_without_reasoning) {
+        /* The request replays a prior tool-call turn but omits the hidden
+         * reasoning that originally led to it.  A live Responses checkpoint, or
+         * a responses-visible disk checkpoint, would preserve that hidden KV.
+         * If neither is available, continue from the visible transcript instead
+         * of surfacing a hard error to the user.  This is lower fidelity, but it
+         * lets old / restarted agent sessions recover and is exactly what the
+         * client asked us to prefill. */
+        server_log(DS4_LOG_WARNING,
+                   "ds4-server: responses replay RESPPROTO missing reasoning state; continuing from visible history source=%s cached=%d prompt=%d",
+                   cache_source,
+                   cached,
+                   prompt_tokens);
+        trace_event(s, trace_id,
+                    "responses replay missing reasoning state; continuing from visible history source=%s cached=%d",
+                    cache_source, cached);
     }
     server_log(DS4_LOG_PREFILL,
                "ds4-server: %s ctx=%s%s%s prompt start",
@@ -12715,7 +12725,7 @@ static void test_anthropic_tool_result_id_validation(void) {
     char err[160] = {0};
     TEST_ASSERT(!anthropic_validate_tool_results(&s, &msgs, NULL,
                                                  err, sizeof(err)));
-    TEST_ASSERT(strstr(err, "unknown Anthropic tool_result") != NULL);
+    TEST_ASSERT(strstr(err, "Anthropic continuation state is not available") != NULL);
 
     pthread_mutex_lock(&s.tool_mu);
     s.anthropic_live.valid = true;
@@ -12845,7 +12855,7 @@ static void test_responses_tool_output_id_validation(void) {
     char err[160] = {0};
     TEST_ASSERT(!responses_validate_tool_outputs(&s, &msgs, DS4_THINK_HIGH, NULL, NULL,
                                                  err, sizeof(err)));
-    TEST_ASSERT(strstr(err, "unknown tool output call_id") != NULL);
+    TEST_ASSERT(strstr(err, "Responses continuation state is not available") != NULL);
 
     pthread_mutex_lock(&s.tool_mu);
     s.responses_live.valid = true;
