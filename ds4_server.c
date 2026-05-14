@@ -1669,6 +1669,7 @@ static bool append_anthropic_block_content(buf *dst, const char *text) {
  * assistant tool_use blocks to tool_calls, and keeps tool_result blocks as
  * escaped text because DS4 sees tool results in its chat template. */
 static bool parse_anthropic_content_block(const char **p, const char *role, chat_msg *msg) {
+    (void)role;
     if (**p != '{') return false;
     (*p)++;
     char *type = NULL;
@@ -1743,7 +1744,12 @@ static bool parse_anthropic_content_block(const char **p, const char *role, chat
     if (**p != '}') goto bad;
     (*p)++;
 
-    if (type && !strcmp(type, "tool_use") && !strcmp(role, "assistant")) {
+    /* JSON object member order is not meaningful.  Some Anthropic-compatible
+     * clients serialize a message as {"content": ..., "role": ...}, so the
+     * caller may not know the enclosing role yet while parsing content blocks.
+     * Classify protocol blocks by their own "type" field; later rendering and
+     * validation use the final message role. */
+    if (type && !strcmp(type, "tool_use")) {
         tool_call tc = {0};
         tc.id = id ? xstrdup(id) : NULL;
         tc.name = name ? xstrdup(name) : xstrdup("");
@@ -13233,6 +13239,52 @@ static void test_anthropic_full_replay_allows_unknown_live_id(void) {
     pthread_mutex_destroy(&s.tool_mu);
 }
 
+static void test_anthropic_tool_use_parses_before_role(void) {
+    server s = {0};
+    pthread_mutex_init(&s.tool_mu, NULL);
+
+    /* GitHub #127 regression: Crush can replay full Anthropic history with
+     * message objects serialized as {"content": ..., "role": ...}.  The parser
+     * must still remember prior assistant tool_use ids, otherwise old
+     * tool_result blocks are mistaken for live-only continuations and rejected
+     * once the live frontier has moved on to newer tool calls. */
+    pthread_mutex_lock(&s.tool_mu);
+    s.anthropic_live.valid = true;
+    s.anthropic_live.live_tokens = 100;
+    id_list_push_unique(&s.anthropic_live.call_ids, "toolu_current");
+    pthread_mutex_unlock(&s.tool_mu);
+
+    const char *json =
+        "["
+        "{\"content\":["
+        "{\"type\":\"tool_use\",\"id\":\"toolu_old\",\"name\":\"Bash\","
+        "\"input\":{\"command\":\"ls\"}}"
+        "],\"role\":\"assistant\"},"
+        "{\"role\":\"user\",\"content\":["
+        "{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_old\",\"content\":\"ok\"}"
+        "]},"
+        "{\"role\":\"user\",\"content\":\"continue\"}"
+        "]";
+    const char *p = json;
+    chat_msgs msgs = {0};
+    TEST_ASSERT(parse_anthropic_messages(&p, &msgs));
+    TEST_ASSERT(msgs.len == 3);
+    TEST_ASSERT(msgs.v[0].calls.len == 1);
+    TEST_ASSERT(msgs.v[0].calls.v[0].id &&
+                !strcmp(msgs.v[0].calls.v[0].id, "toolu_old"));
+
+    bool needs_live_tool_state = false;
+    char err[160] = {0};
+    TEST_ASSERT(anthropic_validate_tool_results(&s, &msgs,
+                                                &needs_live_tool_state,
+                                                err, sizeof(err)));
+    TEST_ASSERT(!needs_live_tool_state);
+
+    chat_msgs_free(&msgs);
+    live_tool_state_free(&s.anthropic_live);
+    pthread_mutex_destroy(&s.tool_mu);
+}
+
 static void test_tool_checkpoint_canonicalization_gate_exact_replay(void) {
     server s;
     memset(&s, 0, sizeof(s));
@@ -14447,6 +14499,7 @@ static void ds4_server_unit_tests_run(void) {
     test_anthropic_live_tail_renders_tool_results_only();
     test_anthropic_tool_result_id_validation();
     test_anthropic_full_replay_allows_unknown_live_id();
+    test_anthropic_tool_use_parses_before_role();
     test_tool_checkpoint_canonicalization_gate_exact_replay();
     test_responses_live_tail_renders_tool_outputs_only();
     test_responses_tool_output_id_validation();
