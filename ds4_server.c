@@ -4782,15 +4782,18 @@ typedef enum {
 } openai_stream_mode;
 
 typedef enum {
-    OPENAI_TOOL_BETWEEN_INVOKES,
-    OPENAI_TOOL_BETWEEN_PARAMS,
-    OPENAI_TOOL_PARAM_VALUE,
-    OPENAI_TOOL_DONE,
-    OPENAI_TOOL_ERROR,
-} openai_tool_stream_state;
+    DSML_TOOL_BETWEEN_INVOKES,
+    DSML_TOOL_BETWEEN_PARAMS,
+    DSML_TOOL_PARAM_VALUE,
+    DSML_TOOL_DONE,
+    DSML_TOOL_ERROR,
+} dsml_tool_stream_state;
 
+/* Shared states for protocol-specific DSML stream projections.  The model
+ * still samples DSML; these states only translate already-sampled bytes into
+ * OpenAI / Anthropic wire events while final parsing remains authoritative. */
 typedef struct {
-    openai_tool_stream_state state;
+    dsml_tool_stream_state state;
     const char *tool_calls_end;
     const char *invoke_start;
     const char *invoke_end;
@@ -5415,7 +5418,7 @@ static bool openai_tool_stream_init(openai_tool_stream *ts, const char *raw,
     openai_tool_stream_free(ts);
     memset(ts, 0, sizeof(*ts));
     ts->active = true;
-    ts->state = OPENAI_TOOL_BETWEEN_INVOKES;
+    ts->state = DSML_TOOL_BETWEEN_INVOKES;
     ts->parse_pos = pos;
     if (raw_full_lit(raw, raw_len, pos, DS4_TOOL_CALLS_START)) {
         ts->parse_pos += strlen(DS4_TOOL_CALLS_START);
@@ -5440,7 +5443,7 @@ static bool openai_tool_stream_init(openai_tool_stream *ts, const char *raw,
         ts->param_end = "</parameter>";
     } else {
         ts->active = false;
-        ts->state = OPENAI_TOOL_ERROR;
+        ts->state = DSML_TOOL_ERROR;
         return false;
     }
     return true;
@@ -5448,7 +5451,7 @@ static bool openai_tool_stream_init(openai_tool_stream *ts, const char *raw,
 
 static bool openai_tool_stream_fail(openai_tool_stream *ts) {
     ts->active = false;
-    ts->state = OPENAI_TOOL_ERROR;
+    ts->state = DSML_TOOL_ERROR;
     return true;
 }
 
@@ -5472,7 +5475,7 @@ static bool openai_tool_start_invoke(int fd, server *s, const request *r, const 
     ts->args_open = true;
     ts->first_param = true;
     ts->parse_pos = (size_t)(tag_end - raw) + 1;
-    ts->state = OPENAI_TOOL_BETWEEN_PARAMS;
+    ts->state = DSML_TOOL_BETWEEN_PARAMS;
     return true;
 }
 
@@ -5498,7 +5501,7 @@ static bool openai_tool_start_param(int fd, const request *r, const char *id,
 
     ts->param_is_string = string_value;
     ts->parse_pos = (size_t)(tag_end - raw) + 1;
-    ts->state = OPENAI_TOOL_PARAM_VALUE;
+    ts->state = DSML_TOOL_PARAM_VALUE;
     return true;
 }
 
@@ -5516,7 +5519,7 @@ static bool openai_tool_finish_param(int fd, const request *r, const char *id,
     if (ts->param_is_string &&
         !openai_tool_emit_args_fragment(fd, r, id, ts, "\"", 1)) return false;
     ts->parse_pos = value_end + strlen(ts->param_end);
-    ts->state = OPENAI_TOOL_BETWEEN_PARAMS;
+    ts->state = DSML_TOOL_BETWEEN_PARAMS;
     return true;
 }
 
@@ -5524,19 +5527,19 @@ static bool openai_tool_stream_update(int fd, server *s, const request *r, const
                                       openai_tool_stream *ts,
                                       const char *raw, size_t raw_len) {
     while (ts->active && ts->parse_pos < raw_len) {
-        if (ts->state == OPENAI_TOOL_BETWEEN_INVOKES) {
+        if (ts->state == DSML_TOOL_BETWEEN_INVOKES) {
             while (ts->parse_pos < raw_len && isspace((unsigned char)raw[ts->parse_pos])) ts->parse_pos++;
             if (ts->parse_pos >= raw_len) return true;
             if (raw_full_lit(raw, raw_len, ts->parse_pos, ts->tool_calls_end)) {
                 ts->parse_pos += strlen(ts->tool_calls_end);
                 ts->active = false;
-                ts->state = OPENAI_TOOL_DONE;
+                ts->state = DSML_TOOL_DONE;
                 return true;
             }
             if (raw_partial_any(raw, raw_len, ts->parse_pos, ts->tool_calls_end, ts->invoke_start)) return true;
             if (raw_full_lit(raw, raw_len, ts->parse_pos, ts->invoke_start)) {
                 size_t before_pos = ts->parse_pos;
-                openai_tool_stream_state before_state = ts->state;
+                dsml_tool_stream_state before_state = ts->state;
                 if (!openai_tool_start_invoke(fd, s, r, id, ts, raw, raw_len)) return false;
                 if (ts->parse_pos == before_pos && ts->state == before_state) return true;
                 continue;
@@ -5544,7 +5547,7 @@ static bool openai_tool_stream_update(int fd, server *s, const request *r, const
             return openai_tool_stream_fail(ts);
         }
 
-        if (ts->state == OPENAI_TOOL_BETWEEN_PARAMS) {
+        if (ts->state == DSML_TOOL_BETWEEN_PARAMS) {
             while (ts->parse_pos < raw_len && isspace((unsigned char)raw[ts->parse_pos])) ts->parse_pos++;
             if (ts->parse_pos >= raw_len) return true;
             if (raw_full_lit(raw, raw_len, ts->parse_pos, ts->invoke_end)) {
@@ -5553,13 +5556,13 @@ static bool openai_tool_stream_update(int fd, server *s, const request *r, const
                 ts->args_open = false;
                 ts->parse_pos += strlen(ts->invoke_end);
                 ts->index++;
-                ts->state = OPENAI_TOOL_BETWEEN_INVOKES;
+                ts->state = DSML_TOOL_BETWEEN_INVOKES;
                 continue;
             }
             if (raw_partial_any(raw, raw_len, ts->parse_pos, ts->invoke_end, ts->param_start)) return true;
             if (raw_full_lit(raw, raw_len, ts->parse_pos, ts->param_start)) {
                 size_t before_pos = ts->parse_pos;
-                openai_tool_stream_state before_state = ts->state;
+                dsml_tool_stream_state before_state = ts->state;
                 if (!openai_tool_start_param(fd, r, id, ts, raw, raw_len)) return false;
                 if (ts->parse_pos == before_pos && ts->state == before_state) return true;
                 continue;
@@ -5567,7 +5570,7 @@ static bool openai_tool_stream_update(int fd, server *s, const request *r, const
             return openai_tool_stream_fail(ts);
         }
 
-        if (ts->state == OPENAI_TOOL_PARAM_VALUE) {
+        if (ts->state == DSML_TOOL_PARAM_VALUE) {
             const char *end = find_lit_bounded(raw + ts->parse_pos,
                                                raw_len - ts->parse_pos,
                                                ts->param_end);
@@ -6649,6 +6652,7 @@ static bool sse_event(int fd, const char *event, const char *data) {
 typedef enum {
     ANTH_STREAM_THINKING,
     ANTH_STREAM_TEXT,
+    ANTH_STREAM_TOOL,
     ANTH_STREAM_SUPPRESS,
 } anthropic_stream_mode;
 
@@ -6656,8 +6660,27 @@ typedef enum {
     ANTH_BLOCK_NONE,
     ANTH_BLOCK_THINKING,
     ANTH_BLOCK_TEXT,
+    ANTH_BLOCK_TOOL,
 } anthropic_block_type;
 
+typedef struct {
+    dsml_tool_stream_state state;
+    const dsml_syntax *syn;
+    size_t parse_pos;
+    int index;
+    bool active;
+    bool emitted_any;
+    bool args_open;
+    bool first_param;
+    bool param_is_string;
+    char **ids;
+    int ids_cap;
+} anthropic_tool_stream;
+
+/* Anthropic streaming uses the same sampled DSML bytes that will later be
+ * parsed and remembered for exact continuation.  This state is only a wire
+ * projection: it turns an in-progress DSML block into content_block/tool_use
+ * SSE events, and never rewrites the model-visible transcript or cache key. */
 typedef struct {
     anthropic_stream_mode mode;
     anthropic_block_type open_block;
@@ -6667,6 +6690,7 @@ typedef struct {
     bool checked_think_prefix;
     bool sent_thinking;
     bool sent_text;
+    anthropic_tool_stream tool;
 } anthropic_stream;
 
 static bool anthropic_sse_start_live(int fd, const request *r, const char *id,
@@ -6690,6 +6714,55 @@ static bool anthropic_sse_start_live(int fd, const request *r, const char *id,
     return ok;
 }
 
+static void anthropic_tool_stream_free(anthropic_tool_stream *ts) {
+    if (!ts) return;
+    for (int i = 0; i < ts->ids_cap; i++) free(ts->ids[i]);
+    free(ts->ids);
+    ts->ids = NULL;
+    ts->ids_cap = 0;
+}
+
+static void anthropic_stream_free(anthropic_stream *st) {
+    if (!st) return;
+    anthropic_tool_stream_free(&st->tool);
+}
+
+static bool anthropic_tool_stream_has_id(const anthropic_tool_stream *ts,
+                                         const char *id, int upto) {
+    if (!ts || !id || !id[0]) return false;
+    if (upto > ts->ids_cap) upto = ts->ids_cap;
+    for (int i = 0; i < upto; i++) {
+        if (ts->ids[i] && !strcmp(ts->ids[i], id)) return true;
+    }
+    return false;
+}
+
+static const char *anthropic_tool_stream_id(server *s, anthropic_tool_stream *ts,
+                                            int index) {
+    if (!ts || index < 0) return "";
+    if (index >= ts->ids_cap) {
+        int old = ts->ids_cap;
+        int cap = old ? old : 4;
+        while (cap <= index) cap *= 2;
+        ts->ids = xrealloc(ts->ids, (size_t)cap * sizeof(ts->ids[0]));
+        memset(ts->ids + old, 0, (size_t)(cap - old) * sizeof(ts->ids[0]));
+        ts->ids_cap = cap;
+    }
+    if (!ts->ids[index]) {
+        char id[64];
+        for (;;) {
+            random_tool_id(id, sizeof(id), API_ANTHROPIC);
+            if (!anthropic_tool_stream_has_id(ts, id, index) &&
+                !tool_memory_has_id(s, id)) break;
+        }
+        ts->ids[index] = xstrdup(id);
+    }
+    return ts->ids[index];
+}
+
+/* Text and thinking blocks have fixed JSON shapes.  Tool blocks are opened by
+ * name later, after the DSML invoke tag is complete, so they use a dedicated
+ * opener instead of this helper. */
 static bool anthropic_sse_open_block(int fd, anthropic_stream *st,
                                      anthropic_block_type type) {
     if (st->open_block == type) return true;
@@ -6714,6 +6787,27 @@ static bool anthropic_sse_open_block(int fd, anthropic_stream *st,
     return ok;
 }
 
+static bool anthropic_sse_open_tool_block(int fd, anthropic_stream *st,
+                                          const char *tool_id,
+                                          const char *name) {
+    if (st->open_block == ANTH_BLOCK_TOOL) return true;
+    if (st->open_block != ANTH_BLOCK_NONE) return false;
+
+    buf b = {0};
+    buf_printf(&b,
+               "{\"type\":\"content_block_start\",\"index\":%d,"
+               "\"content_block\":{\"type\":\"tool_use\",\"id\":",
+               st->next_index);
+    json_escape(&b, tool_id ? tool_id : "");
+    buf_puts(&b, ",\"name\":");
+    json_escape(&b, name ? name : "");
+    buf_puts(&b, ",\"input\":{}}}");
+    bool ok = sse_event(fd, "content_block_start", b.ptr);
+    buf_free(&b);
+    if (ok) st->open_block = ANTH_BLOCK_TOOL;
+    return ok;
+}
+
 static bool anthropic_sse_delta_live(int fd, const anthropic_stream *st,
                                      anthropic_block_type type,
                                      const char *text, size_t len) {
@@ -6734,6 +6828,25 @@ static bool anthropic_sse_delta_live(int fd, const anthropic_stream *st,
         json_escape_n(&b, text, len);
         buf_puts(&b, "}}");
     }
+    bool ok = sse_event(fd, "content_block_delta", b.ptr);
+    buf_free(&b);
+    return ok;
+}
+
+/* Anthropic's input_json_delta carries a fragment of a JSON object, encoded as
+ * a JSON string.  We stream exactly the same object that the final DSML parser
+ * will build: an opening "{", quoted keys, raw JSON values or escaped string
+ * contents, and the closing "}". */
+static bool anthropic_sse_tool_delta_live(int fd, const anthropic_stream *st,
+                                          const char *text, size_t len) {
+    if (len == 0) return true;
+    buf b = {0};
+    buf_printf(&b,
+               "{\"type\":\"content_block_delta\",\"index\":%d,"
+               "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":",
+               st->next_index);
+    json_escape_n(&b, text, len);
+    buf_puts(&b, "}}");
     bool ok = sse_event(fd, "content_block_delta", b.ptr);
     buf_free(&b);
     return ok;
@@ -6766,6 +6879,228 @@ static bool anthropic_sse_close_block_live(int fd, const char *id,
         st->next_index++;
     }
     return ok;
+}
+
+static bool anthropic_tool_emit_args_fragment(int fd, anthropic_stream *st,
+                                              const char *text, size_t len) {
+    return anthropic_sse_tool_delta_live(fd, st, text, len);
+}
+
+static bool anthropic_tool_emit_string_value(int fd, anthropic_stream *st,
+                                             const char *text, size_t len) {
+    if (len == 0) return true;
+    char *raw = xstrndup(text, len);
+    char *unescaped = dsml_unescape_text(raw);
+    buf frag = {0};
+    json_escape_fragment_n(&frag, unescaped, strlen(unescaped));
+    bool ok = anthropic_tool_emit_args_fragment(fd, st,
+                                                frag.ptr ? frag.ptr : "",
+                                                frag.len);
+    buf_free(&frag);
+    free(unescaped);
+    free(raw);
+    return ok;
+}
+
+static bool anthropic_tool_emit_param_prefix(int fd, anthropic_stream *st,
+                                             const char *name, bool is_string) {
+    anthropic_tool_stream *ts = &st->tool;
+    buf frag = {0};
+    if (ts->first_param) ts->first_param = false;
+    else buf_putc(&frag, ',');
+    json_escape(&frag, name ? name : "");
+    buf_putc(&frag, ':');
+    if (is_string) buf_putc(&frag, '"');
+    bool ok = anthropic_tool_emit_args_fragment(fd, st,
+                                                frag.ptr ? frag.ptr : "",
+                                                frag.len);
+    buf_free(&frag);
+    return ok;
+}
+
+/* The parser below mirrors the OpenAI tool-delta parser but keeps Anthropic's
+ * content-block lifecycle local.  A callback abstraction would save lines, but
+ * it would hide the different block/stop semantics that make this code easy to
+ * audit when a client reports a streaming regression. */
+static bool anthropic_tool_stream_init(anthropic_tool_stream *ts,
+                                       const char *raw, size_t raw_len,
+                                       size_t pos) {
+    anthropic_tool_stream_free(ts);
+    memset(ts, 0, sizeof(*ts));
+    ts->active = true;
+    ts->state = DSML_TOOL_BETWEEN_INVOKES;
+    for (size_t i = 0; i < sizeof(dsml_syntaxes) / sizeof(dsml_syntaxes[0]); i++) {
+        const dsml_syntax *syn = &dsml_syntaxes[i];
+        if (raw_full_lit(raw, raw_len, pos, syn->tool_calls_start)) {
+            ts->syn = syn;
+            ts->parse_pos = pos + strlen(syn->tool_calls_start);
+            return true;
+        }
+    }
+    ts->active = false;
+    ts->state = DSML_TOOL_ERROR;
+    return false;
+}
+
+static bool anthropic_tool_stream_fail(anthropic_tool_stream *ts) {
+    ts->active = false;
+    ts->state = DSML_TOOL_ERROR;
+    return true;
+}
+
+static bool anthropic_tool_start_invoke(int fd, server *s, anthropic_stream *st,
+                                        const char *raw, size_t raw_len) {
+    anthropic_tool_stream *ts = &st->tool;
+    const char *tag_end = memchr(raw + ts->parse_pos, '>', raw_len - ts->parse_pos);
+    if (!tag_end) return true;
+    char *tag = xstrndup(raw + ts->parse_pos,
+                         (size_t)(tag_end - (raw + ts->parse_pos) + 1));
+    char *name = dsml_attr(tag, "name");
+    free(tag);
+    if (!name) return anthropic_tool_stream_fail(ts);
+
+    /* This id is already visible to the client.  After final parsing,
+     * apply_anthropic_stream_tool_ids() copies it into the parsed tool_call
+     * before tool_memory_remember(), so the next tool_result can continue from
+     * the live KV state instead of re-rendering canonical JSON. */
+    const char *tool_id = anthropic_tool_stream_id(s, ts, ts->index);
+    bool ok = anthropic_sse_open_tool_block(fd, st, tool_id, name) &&
+              anthropic_tool_emit_args_fragment(fd, st, "{", 1);
+    free(name);
+    if (!ok) return false;
+
+    ts->emitted_any = true;
+    ts->args_open = true;
+    ts->first_param = true;
+    ts->parse_pos = (size_t)(tag_end - raw) + 1;
+    ts->state = DSML_TOOL_BETWEEN_PARAMS;
+    return true;
+}
+
+static bool anthropic_tool_start_param(int fd, anthropic_stream *st,
+                                       const char *raw, size_t raw_len) {
+    anthropic_tool_stream *ts = &st->tool;
+    const char *tag_end = memchr(raw + ts->parse_pos, '>', raw_len - ts->parse_pos);
+    if (!tag_end) return true;
+    char *tag = xstrndup(raw + ts->parse_pos,
+                         (size_t)(tag_end - (raw + ts->parse_pos) + 1));
+    char *name = dsml_attr(tag, "name");
+    char *is_string = dsml_attr(tag, "string");
+    free(tag);
+    if (!name || !is_string) {
+        free(name);
+        free(is_string);
+        return anthropic_tool_stream_fail(ts);
+    }
+    bool string_value = !strcmp(is_string, "true");
+    bool ok = anthropic_tool_emit_param_prefix(fd, st, name, string_value);
+    free(name);
+    free(is_string);
+    if (!ok) return false;
+
+    ts->param_is_string = string_value;
+    ts->parse_pos = (size_t)(tag_end - raw) + 1;
+    ts->state = DSML_TOOL_PARAM_VALUE;
+    return true;
+}
+
+static bool anthropic_tool_finish_param(int fd, anthropic_stream *st,
+                                        const char *raw, size_t value_end) {
+    anthropic_tool_stream *ts = &st->tool;
+    if (value_end > ts->parse_pos) {
+        bool ok = ts->param_is_string ?
+            anthropic_tool_emit_string_value(fd, st, raw + ts->parse_pos,
+                                             value_end - ts->parse_pos) :
+            anthropic_tool_emit_args_fragment(fd, st, raw + ts->parse_pos,
+                                              value_end - ts->parse_pos);
+        if (!ok) return false;
+    }
+    if (ts->param_is_string &&
+        !anthropic_tool_emit_args_fragment(fd, st, "\"", 1)) return false;
+    ts->parse_pos = value_end + strlen(ts->syn->param_end);
+    ts->state = DSML_TOOL_BETWEEN_PARAMS;
+    return true;
+}
+
+static bool anthropic_tool_stream_update(int fd, server *s, const char *id,
+                                         anthropic_stream *st,
+                                         const char *raw, size_t raw_len) {
+    anthropic_tool_stream *ts = &st->tool;
+    while (ts->active && ts->parse_pos < raw_len) {
+        if (ts->state == DSML_TOOL_BETWEEN_INVOKES) {
+            while (ts->parse_pos < raw_len && isspace((unsigned char)raw[ts->parse_pos])) ts->parse_pos++;
+            if (ts->parse_pos >= raw_len) return true;
+            if (raw_full_lit(raw, raw_len, ts->parse_pos, ts->syn->tool_calls_end)) {
+                ts->parse_pos += strlen(ts->syn->tool_calls_end);
+                ts->active = false;
+                ts->state = DSML_TOOL_DONE;
+                return true;
+            }
+            if (raw_partial_any(raw, raw_len, ts->parse_pos,
+                                ts->syn->tool_calls_end, ts->syn->invoke_start)) return true;
+            if (raw_full_lit(raw, raw_len, ts->parse_pos, ts->syn->invoke_start)) {
+                size_t before_pos = ts->parse_pos;
+                dsml_tool_stream_state before_state = ts->state;
+                if (!anthropic_tool_start_invoke(fd, s, st, raw, raw_len)) return false;
+                if (ts->parse_pos == before_pos && ts->state == before_state) return true;
+                continue;
+            }
+            return anthropic_tool_stream_fail(ts);
+        }
+
+        if (ts->state == DSML_TOOL_BETWEEN_PARAMS) {
+            while (ts->parse_pos < raw_len && isspace((unsigned char)raw[ts->parse_pos])) ts->parse_pos++;
+            if (ts->parse_pos >= raw_len) return true;
+            if (raw_full_lit(raw, raw_len, ts->parse_pos, ts->syn->invoke_end)) {
+                if (ts->args_open &&
+                    !anthropic_tool_emit_args_fragment(fd, st, "}", 1)) return false;
+                ts->args_open = false;
+                if (!anthropic_sse_close_block_live(fd, id, st)) return false;
+                ts->parse_pos += strlen(ts->syn->invoke_end);
+                ts->index++;
+                ts->state = DSML_TOOL_BETWEEN_INVOKES;
+                continue;
+            }
+            if (raw_partial_any(raw, raw_len, ts->parse_pos,
+                                ts->syn->invoke_end, ts->syn->param_start)) return true;
+            if (raw_full_lit(raw, raw_len, ts->parse_pos, ts->syn->param_start)) {
+                size_t before_pos = ts->parse_pos;
+                dsml_tool_stream_state before_state = ts->state;
+                if (!anthropic_tool_start_param(fd, st, raw, raw_len)) return false;
+                if (ts->parse_pos == before_pos && ts->state == before_state) return true;
+                continue;
+            }
+            return anthropic_tool_stream_fail(ts);
+        }
+
+        if (ts->state == DSML_TOOL_PARAM_VALUE) {
+            const char *end = find_lit_bounded(raw + ts->parse_pos,
+                                               raw_len - ts->parse_pos,
+                                               ts->syn->param_end);
+            if (end) {
+                if (!anthropic_tool_finish_param(fd, st, raw,
+                                                 (size_t)(end - raw))) return false;
+                continue;
+            }
+            size_t limit = tool_param_value_stream_safe_len(raw, ts->parse_pos,
+                                                            raw_len,
+                                                            ts->syn->param_end,
+                                                            ts->param_is_string);
+            if (limit > ts->parse_pos) {
+                bool ok = ts->param_is_string ?
+                    anthropic_tool_emit_string_value(fd, st, raw + ts->parse_pos,
+                                                     limit - ts->parse_pos) :
+                    anthropic_tool_emit_args_fragment(fd, st, raw + ts->parse_pos,
+                                                      limit - ts->parse_pos);
+                if (!ok) return false;
+                ts->parse_pos = limit;
+            }
+            return true;
+        }
+
+        return true;
+    }
+    return true;
 }
 
 static size_t text_stream_safe_limit(const char *raw, size_t start,
@@ -6809,7 +7144,7 @@ static size_t text_stream_safe_limit(const char *raw, size_t start,
     return utf8_stream_safe_len(raw, start, limit, final);
 }
 
-static bool anthropic_sse_stream_update(int fd, const request *r, const char *id,
+static bool anthropic_sse_stream_update(int fd, server *s, const request *r, const char *id,
                                         anthropic_stream *st,
                                         const char *raw, size_t raw_len,
                                         bool final) {
@@ -6880,11 +7215,25 @@ static bool anthropic_sse_stream_update(int fd, const request *r, const char *id
         if (tool) {
             if (!anthropic_sse_close_block_live(fd, id, st)) return false;
             st->emit_pos = (size_t)(tool - raw);
-            st->mode = ANTH_STREAM_SUPPRESS;
+            /* On normal token-by-token updates, switch from hidden text to a
+             * live tool_use projection as soon as the DSML block starts.  On
+             * final catch-up from plain text, leave the block for the existing
+             * final emitter so old non-incremental behavior stays unchanged. */
+            if (!final &&
+                anthropic_tool_stream_init(&st->tool, raw, raw_len, st->emit_pos)) {
+                st->mode = ANTH_STREAM_TOOL;
+            } else {
+                st->mode = ANTH_STREAM_SUPPRESS;
+            }
         } else if (final) {
             if (!anthropic_sse_close_block_live(fd, id, st)) return false;
             st->mode = ANTH_STREAM_SUPPRESS;
         }
+    }
+
+    if (st->mode == ANTH_STREAM_TOOL) {
+        if (!anthropic_tool_stream_update(fd, s, id, st, raw, raw_len)) return false;
+        if (!st->tool.active) st->mode = ANTH_STREAM_SUPPRESS;
     }
     return true;
 }
@@ -6896,7 +7245,13 @@ static bool anthropic_sse_tool_blocks_live(int fd, const request *r, const char 
     if (!calls) return true;
 
     buf b = {0};
-    for (int i = 0; i < calls->len; i++, st->next_index++) {
+    /* Tool calls completed by anthropic_tool_stream_update() have already
+     * produced start/delta/stop events.  Only emit the tail calls that were not
+     * seen by the live projection, for example if the first DSML bytes only
+     * become available during final flush. */
+    int already_streamed = st->tool.emitted_any ? st->tool.index : 0;
+    if (already_streamed > calls->len) already_streamed = calls->len;
+    for (int i = already_streamed; i < calls->len; i++, st->next_index++) {
         const tool_call *tc = &calls->v[i];
         char idbuf[128];
         snprintf(idbuf, sizeof(idbuf), "toolu_%s_%d", id, i);
@@ -6944,11 +7299,11 @@ static bool anthropic_sse_stop_live(int fd, const char *finish,
     return ok;
 }
 
-static bool anthropic_sse_finish_live(int fd, const request *r, const char *id,
+static bool anthropic_sse_finish_live(int fd, server *s, const request *r, const char *id,
                                       anthropic_stream *st, const char *raw,
                                       size_t raw_len, const tool_calls *calls,
                                       const char *finish, int completion_tokens) {
-    if (!anthropic_sse_stream_update(fd, r, id, st, raw, raw_len, true)) return false;
+    if (!anthropic_sse_stream_update(fd, s, r, id, st, raw, raw_len, true)) return false;
 
     if (st->sent_thinking && !st->sent_text && (!calls || calls->len == 0)) {
         if (!anthropic_sse_open_block(fd, st, ANTH_BLOCK_TEXT)) return false;
@@ -7600,6 +7955,20 @@ static void assign_tool_call_ids(server *s, tool_calls *calls, api_style api) {
 static void apply_openai_stream_tool_ids(tool_calls *calls,
                                          const openai_stream *st) {
     if (!calls || !st) return;
+    int n = calls->len < st->tool.ids_cap ? calls->len : st->tool.ids_cap;
+    for (int i = 0; i < n; i++) {
+        if (calls->v[i].id && calls->v[i].id[0]) continue;
+        if (st->tool.ids[i] && st->tool.ids[i][0]) calls->v[i].id = xstrdup(st->tool.ids[i]);
+    }
+}
+
+static void apply_anthropic_stream_tool_ids(tool_calls *calls,
+                                            const anthropic_stream *st) {
+    if (!calls || !st) return;
+    /* The SSE stream may have exposed tool ids before final DSML parsing.  The
+     * parsed calls must inherit those ids before assign_tool_call_ids() and
+     * tool_memory_remember(), otherwise the client returns a tool_result for an
+     * id that the continuation fast path does not know. */
     int n = calls->len < st->tool.ids_cap ? calls->len : st->tool.ids_cap;
     for (int i = 0; i < n; i++) {
         if (calls->v[i].id && calls->v[i].id[0]) continue;
@@ -10176,7 +10545,7 @@ static void generate_job(server *s, job *j) {
                 plain_stream_pos = stream_len;
             }
             if (j->req.stream && j->req.api == API_ANTHROPIC &&
-                !anthropic_sse_stream_update(j->fd, &j->req, id,
+                !anthropic_sse_stream_update(j->fd, s, &j->req, id,
                                              &anthropic_live, text.ptr, stream_len,
                                              false)) {
                 finish = "error";
@@ -10336,6 +10705,8 @@ static void generate_job(server *s, job *j) {
         }
         if (parsed_calls.len) {
             if (openai_live_chat) apply_openai_stream_tool_ids(&parsed_calls, &openai_live);
+            if (j->req.api == API_ANTHROPIC && j->req.stream)
+                apply_anthropic_stream_tool_ids(&parsed_calls, &anthropic_live);
             assign_tool_call_ids(s, &parsed_calls, j->req.api);
             tool_memory_remember(s, &parsed_calls);
             final_finish = "tool_calls";
@@ -10410,7 +10781,7 @@ static void generate_job(server *s, job *j) {
     if (j->req.stream) {
         bool response_ok = true;
         if (j->req.api == API_ANTHROPIC) {
-            response_ok = anthropic_sse_finish_live(j->fd, &j->req, id, &anthropic_live,
+            response_ok = anthropic_sse_finish_live(j->fd, s, &j->req, id, &anthropic_live,
                                                     text.ptr ? text.ptr : "", text.len,
                                                     &parsed_calls, final_finish, completion);
         } else if (openai_live_chat) {
@@ -10530,6 +10901,7 @@ static void generate_job(server *s, job *j) {
     free(parsed_content);
     free(parsed_reasoning);
     tool_calls_free(&parsed_calls);
+    anthropic_stream_free(&anthropic_live);
     openai_stream_free(&openai_live);
     responses_stream_free(&responses_live);
     buf_free(&text);
@@ -11602,17 +11974,17 @@ static void test_anthropic_live_stream_sends_incremental_blocks(void) {
     anthropic_stream st;
     TEST_ASSERT(anthropic_sse_start_live(sv[0], &r, "msg_test", 10, &st));
     const char *raw1 = "need a tool</think>Hello.\n\n";
-    TEST_ASSERT(anthropic_sse_stream_update(sv[0], &r, "msg_test", &st,
+    TEST_ASSERT(anthropic_sse_stream_update(sv[0], NULL, &r, "msg_test", &st,
                                             raw1, strlen(raw1), false));
 
     const char *raw =
         "need a tool</think>Hello.\n\n"
         DS4_TOOL_CALLS_START "\n";
-    TEST_ASSERT(anthropic_sse_stream_update(sv[0], &r, "msg_test", &st,
+    TEST_ASSERT(anthropic_sse_stream_update(sv[0], NULL, &r, "msg_test", &st,
                                             raw, strlen(raw), false));
 
     tool_calls calls = make_swapped_bash_call();
-    TEST_ASSERT(anthropic_sse_finish_live(sv[0], &r, "msg_test", &st,
+    TEST_ASSERT(anthropic_sse_finish_live(sv[0], NULL, &r, "msg_test", &st,
                                           raw, strlen(raw), &calls,
                                           "tool_calls", 8));
     shutdown(sv[0], SHUT_WR);
@@ -11639,6 +12011,92 @@ static void test_anthropic_live_stream_sends_incremental_blocks(void) {
 
     free(out);
     tool_calls_free(&calls);
+    anthropic_stream_free(&st);
+    request_free(&r);
+    close(sv[0]);
+    close(sv[1]);
+}
+
+static void test_anthropic_tool_stream_sends_live_tool_use(void) {
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) return;
+
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_ANTHROPIC;
+    r.stream = true;
+    r.think_mode = DS4_THINK_NONE;
+    r.has_tools = true;
+    r.tool_orders = make_bash_order();
+
+    anthropic_stream st;
+    TEST_ASSERT(anthropic_sse_start_live(sv[0], &r, "msg_tool", 7, &st));
+
+    const char *raw =
+        "Before.\n\n"
+        DS4_TOOL_CALLS_START "\n"
+        DS4_INVOKE_START " name=\"bash\">\n"
+        DS4_PARAM_START " name=\"command\" string=\"true\">echo partial";
+    TEST_ASSERT(anthropic_sse_stream_update(sv[0], NULL, &r, "msg_tool", &st,
+                                            raw, strlen(raw), false));
+
+    const char *raw_complete =
+        "Before.\n\n"
+        DS4_TOOL_CALLS_START "\n"
+        DS4_INVOKE_START " name=\"bash\">\n"
+        DS4_PARAM_START " name=\"command\" string=\"true\">echo partial done" DS4_PARAM_END "\n"
+        DS4_INVOKE_END "\n"
+        DS4_TOOL_CALLS_END;
+    TEST_ASSERT(anthropic_sse_stream_update(sv[0], NULL, &r, "msg_tool", &st,
+                                            raw_complete, strlen(raw_complete), false));
+
+    char *parsed_content = NULL;
+    char *parsed_reasoning = NULL;
+    tool_calls calls = {0};
+    TEST_ASSERT(parse_generated_message(raw_complete, &parsed_content,
+                                        &parsed_reasoning, &calls));
+    TEST_ASSERT(calls.len == 1);
+    apply_anthropic_stream_tool_ids(&calls, &st);
+    TEST_ASSERT(calls.v[0].id != NULL);
+    TEST_ASSERT(!strncmp(calls.v[0].id, "toolu_", 6));
+    TEST_ASSERT(anthropic_sse_finish_live(sv[0], NULL, &r, "msg_tool", &st,
+                                          raw_complete, strlen(raw_complete),
+                                          &calls, "tool_calls", 5));
+    shutdown(sv[0], SHUT_WR);
+    char *out = read_socket_text(sv[1]);
+
+    const char *text = strstr(out, "\"text\":\"Before.\"");
+    const char *tool = strstr(out, "\"type\":\"tool_use\"");
+    const char *key = strstr(out, "\\\"command\\\":\\\"");
+    const char *partial = strstr(out, "\"partial_json\":\"echo partial\"");
+    const char *rest = strstr(out, "\"partial_json\":\" done\"");
+    const char *stop = strstr(out, "event: message_stop");
+    int tool_use_count = 0;
+    for (const char *p = out; (p = strstr(p, "\"type\":\"tool_use\"")) != NULL; p++) {
+        tool_use_count++;
+    }
+    TEST_ASSERT(text != NULL);
+    TEST_ASSERT(tool != NULL);
+    TEST_ASSERT(key != NULL);
+    TEST_ASSERT(partial != NULL);
+    TEST_ASSERT(rest != NULL);
+    TEST_ASSERT(stop != NULL);
+    TEST_ASSERT(strstr(out, calls.v[0].id) != NULL);
+    TEST_ASSERT(text < tool);
+    TEST_ASSERT(tool < key);
+    TEST_ASSERT(key < partial);
+    TEST_ASSERT(partial < rest);
+    TEST_ASSERT(rest < stop);
+    TEST_ASSERT(tool_use_count == 1);
+    TEST_ASSERT(strstr(out, DS4_TOOL_CALLS_START) == NULL);
+    TEST_ASSERT(strstr(out, DS4_PARAM_START) == NULL);
+
+    free(out);
+    free(parsed_content);
+    free(parsed_reasoning);
+    tool_calls_free(&calls);
+    anthropic_stream_free(&st);
     request_free(&r);
     close(sv[0]);
     close(sv[1]);
@@ -11854,7 +12312,7 @@ static void test_openai_tool_stream_waits_for_incomplete_tool_tags(void) {
     TEST_ASSERT(openai_sse_stream_update(sv[0], NULL, &r, "chatcmpl_incomplete_tool", &st,
                                          raw_invoke, strlen(raw_invoke), false));
     TEST_ASSERT(st.mode == OPENAI_STREAM_TOOL);
-    TEST_ASSERT(st.tool.state == OPENAI_TOOL_BETWEEN_INVOKES);
+    TEST_ASSERT(st.tool.state == DSML_TOOL_BETWEEN_INVOKES);
 
     const char *raw_param =
         DS4_TOOL_CALLS_START "\n"
@@ -11863,7 +12321,7 @@ static void test_openai_tool_stream_waits_for_incomplete_tool_tags(void) {
     TEST_ASSERT(openai_sse_stream_update(sv[0], NULL, &r, "chatcmpl_incomplete_tool", &st,
                                          raw_param, strlen(raw_param), false));
     TEST_ASSERT(st.mode == OPENAI_STREAM_TOOL);
-    TEST_ASSERT(st.tool.state == OPENAI_TOOL_BETWEEN_PARAMS);
+    TEST_ASSERT(st.tool.state == DSML_TOOL_BETWEEN_PARAMS);
 
     shutdown(sv[0], SHUT_WR);
     char *out = read_socket_text(sv[1]);
@@ -13969,6 +14427,7 @@ static void ds4_server_unit_tests_run(void) {
     test_openai_tool_args_preserve_call_order();
     test_anthropic_thinking_and_tool_args_preserve_call_order();
     test_anthropic_live_stream_sends_incremental_blocks();
+    test_anthropic_tool_stream_sends_live_tool_use();
     test_openai_tool_stream_sends_incremental_text();
     test_openai_chat_stream_splits_reasoning_without_tools();
     test_openai_tool_stream_sends_partial_arguments();
