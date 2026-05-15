@@ -594,6 +594,8 @@ typedef struct {
     uint64_t seed;
     bool stream;
     bool stream_include_usage;
+    int cache_read_tokens;
+    int cache_write_tokens;
     ds4_think_mode think_mode;
     bool has_tools;
     bool prompt_preserves_reasoning;
@@ -4767,6 +4769,29 @@ static bool sse_chunk(int fd, const request *r, const char *id, const char *text
     return ok;
 }
 
+static int clamp_usage_tokens(int value, int max) {
+    if (value < 0) return 0;
+    if (max >= 0 && value > max) return max;
+    return value;
+}
+
+static void append_openai_usage_json(buf *b, const request *r,
+                                     int prompt_tokens, int completion_tokens) {
+    int cached_tokens = r ? r->cache_read_tokens : 0;
+    int cache_write_tokens = r ? r->cache_write_tokens : 0;
+    cached_tokens = clamp_usage_tokens(cached_tokens, prompt_tokens);
+    cache_write_tokens = clamp_usage_tokens(cache_write_tokens, prompt_tokens - cached_tokens);
+    /* Some OpenAI-compatible consumers normalize cache-write tokens by removing
+     * them from cached_tokens when both fields are present.  Include newly
+     * written tokens here so consumers can recover read and write counts. */
+    int reported_cached_tokens = clamp_usage_tokens(cached_tokens + cache_write_tokens, prompt_tokens);
+    buf_printf(b,
+               "{\"prompt_tokens\":%d,\"completion_tokens\":%d,\"total_tokens\":%d,"
+               "\"prompt_tokens_details\":{\"cached_tokens\":%d,\"cache_write_tokens\":%d}}",
+               prompt_tokens, completion_tokens, prompt_tokens + completion_tokens,
+               reported_cached_tokens, cache_write_tokens);
+}
+
 static bool sse_usage_chunk(int fd, const request *r, const char *id,
                             int prompt_tokens, int completion_tokens) {
     if (!r->stream_include_usage) return true;
@@ -4782,9 +4807,8 @@ static bool sse_usage_chunk(int fd, const request *r, const char *id,
         json_escape(&b, r->model);
         buf_puts(&b, ",\"choices\":[],\"usage\":");
     }
-    buf_printf(&b,
-               "{\"prompt_tokens\":%d,\"completion_tokens\":%d,\"total_tokens\":%d}}\n\n",
-               prompt_tokens, completion_tokens, prompt_tokens + completion_tokens);
+    append_openai_usage_json(&b, r, prompt_tokens, completion_tokens);
+    buf_puts(&b, "}\n\n");
 
     bool ok = send_all(fd, b.ptr, b.len);
     buf_free(&b);
@@ -6251,6 +6275,22 @@ static const char *responses_status_for_finish(const char *finish) {
     return "completed";
 }
 
+static void append_responses_usage_json(buf *b, const request *r,
+                                        int input_tokens, int output_tokens) {
+    int cached_tokens = r ? r->cache_read_tokens : 0;
+    int cache_write_tokens = r ? r->cache_write_tokens : 0;
+    cached_tokens = clamp_usage_tokens(cached_tokens, input_tokens);
+    cache_write_tokens = clamp_usage_tokens(cache_write_tokens, input_tokens - cached_tokens);
+    int reported_cached_tokens = clamp_usage_tokens(cached_tokens + cache_write_tokens,
+                                                    input_tokens);
+    buf_printf(b,
+        "{\"input_tokens\":%d,\"input_tokens_details\":{\"cached_tokens\":%d,\"cache_write_tokens\":%d},"
+        "\"output_tokens\":%d,\"output_tokens_details\":{\"reasoning_tokens\":0},"
+        "\"total_tokens\":%d}",
+        input_tokens, reported_cached_tokens, cache_write_tokens,
+        output_tokens, input_tokens + output_tokens);
+}
+
 static bool responses_sse_completed(int fd, const request *r,
                                     responses_stream *st,
                                     const tool_calls *calls,
@@ -6319,11 +6359,9 @@ static bool responses_sse_completed(int fd, const request *r,
         }
     }
     buf_putc(&b, ']');
-    buf_printf(&b,
-        ",\"usage\":{\"input_tokens\":%d,\"input_tokens_details\":{\"cached_tokens\":0},"
-        "\"output_tokens\":%d,\"output_tokens_details\":{\"reasoning_tokens\":0},"
-        "\"total_tokens\":%d}}}",
-        prompt_tokens, completion_tokens, prompt_tokens + completion_tokens);
+    buf_puts(&b, ",\"usage\":");
+    append_responses_usage_json(&b, r, prompt_tokens, completion_tokens);
+    buf_puts(&b, "}}");
     bool ok = responses_sse_emit_event(fd, st, b.ptr);
     buf_free(&b);
     return ok;
@@ -6573,11 +6611,9 @@ static bool responses_final_response(int fd, const request *r, const char *id,
         }
     }
     buf_putc(&b, ']');
-    buf_printf(&b,
-        ",\"usage\":{\"input_tokens\":%d,\"input_tokens_details\":{\"cached_tokens\":0},"
-        "\"output_tokens\":%d,\"output_tokens_details\":{\"reasoning_tokens\":0},"
-        "\"total_tokens\":%d}}",
-        prompt_tokens, completion_tokens, prompt_tokens + completion_tokens);
+    buf_puts(&b, ",\"usage\":");
+    append_responses_usage_json(&b, r, prompt_tokens, completion_tokens);
+    buf_putc(&b, '}');
     bool ok = http_response(fd, 200, "application/json", b.ptr);
     buf_free(&b);
     free(items);
@@ -6614,8 +6650,8 @@ static bool final_response(int fd, const request *r, const char *id, const char 
         json_escape(&b, finish);
         buf_puts(&b, "}],\"usage\":");
     }
-    buf_printf(&b, "{\"prompt_tokens\":%d,\"completion_tokens\":%d,\"total_tokens\":%d}}\n",
-               prompt_tokens, completion_tokens, prompt_tokens + completion_tokens);
+    append_openai_usage_json(&b, r, prompt_tokens, completion_tokens);
+    buf_puts(&b, "}\n");
     bool ok = http_response(fd, 200, "application/json", b.ptr);
     buf_free(&b);
     return ok;
@@ -6682,6 +6718,20 @@ static void append_anthropic_content(buf *b, const char *text, const char *reaso
     buf_putc(b, ']');
 }
 
+static void append_anthropic_usage_json(buf *b, const request *r,
+                                        int prompt_tokens, int completion_tokens) {
+    int cache_read_tokens = r ? r->cache_read_tokens : 0;
+    int cache_write_tokens = r ? r->cache_write_tokens : 0;
+    cache_read_tokens = clamp_usage_tokens(cache_read_tokens, prompt_tokens);
+    cache_write_tokens = clamp_usage_tokens(cache_write_tokens, prompt_tokens - cache_read_tokens);
+    int input_tokens = prompt_tokens - cache_read_tokens - cache_write_tokens;
+    if (input_tokens < 0) input_tokens = 0;
+    buf_printf(b,
+               "{\"input_tokens\":%d,\"output_tokens\":%d,"
+               "\"cache_read_input_tokens\":%d,\"cache_creation_input_tokens\":%d}",
+               input_tokens, completion_tokens, cache_read_tokens, cache_write_tokens);
+}
+
 static bool anthropic_final_response(int fd, const request *r, const char *id, const char *text,
                                      const char *reasoning, const tool_calls *calls, const char *finish,
                                      int prompt_tokens, int completion_tokens) {
@@ -6693,8 +6743,8 @@ static bool anthropic_final_response(int fd, const request *r, const char *id, c
     buf_puts(&b, ",\"stop_reason\":");
     json_escape(&b, anthropic_stop_reason(finish));
     buf_puts(&b, ",\"stop_sequence\":null,\"usage\":");
-    buf_printf(&b, "{\"input_tokens\":%d,\"output_tokens\":%d}}\n",
-               prompt_tokens, completion_tokens);
+    append_anthropic_usage_json(&b, r, prompt_tokens, completion_tokens);
+    buf_puts(&b, "}\n");
     bool ok = http_response(fd, 200, "application/json", b.ptr);
     buf_free(&b);
     return ok;
@@ -6765,8 +6815,10 @@ static bool anthropic_sse_start_live(int fd, const request *r, const char *id,
     buf_printf(&b,
         "{\"type\":\"message_start\",\"message\":{\"id\":\"%s\",\"type\":\"message\","
         "\"role\":\"assistant\",\"model\":%s,\"content\":[],\"stop_reason\":null,"
-        "\"stop_sequence\":null,\"usage\":{\"input_tokens\":%d,\"output_tokens\":0}}}",
-        id, model_json, prompt_tokens);
+        "\"stop_sequence\":null,\"usage\":",
+        id, model_json);
+    append_anthropic_usage_json(&b, r, prompt_tokens, 0);
+    buf_puts(&b, "}}");
     bool ok = sse_event(fd, "message_start", b.ptr);
     buf_free(&b);
     free(model_json);
@@ -10468,6 +10520,12 @@ static void generate_job(server *s, job *j) {
         j->req.responses_requires_live_reasoning &&
         !responses_reasoning_state_preserved;
     const int prompt_tokens = prompt_for_sync->len;
+    /* OpenAI usage details: the reusable prefix is a cache read, while the
+     * effective prompt suffix evaluated by ds4_session_sync() is written into
+     * the live KV cache and can be reused by the next request. */
+    j->req.cache_read_tokens = cached;
+    j->req.cache_write_tokens = prompt_tokens > cached ? prompt_tokens - cached : 0;
+
     const double t0 = now_sec();
     uint64_t trace_id = trace_begin(s, j, cached, prompt_tokens, &cache_diag,
                                     cache_source, disk_cached, disk_cache_path);
@@ -12398,6 +12456,56 @@ static void test_anthropic_tool_stream_sends_live_tool_use(void) {
     close(sv[1]);
 }
 
+static void test_anthropic_usage_reports_cache_details(void) {
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_ANTHROPIC;
+    r.cache_read_tokens = 7;
+    r.cache_write_tokens = 3;
+
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) {
+        request_free(&r);
+        return;
+    }
+
+    TEST_ASSERT(anthropic_final_response(sv[0], &r, "msg_usage", "OK", NULL, NULL, "stop", 10, 2));
+    shutdown(sv[0], SHUT_WR);
+    char *out = read_socket_text(sv[1]);
+
+    TEST_ASSERT(strstr(out, "\"usage\":{\"input_tokens\":0") != NULL);
+    TEST_ASSERT(strstr(out, "\"output_tokens\":2") != NULL);
+    TEST_ASSERT(strstr(out, "\"cache_read_input_tokens\":7") != NULL);
+    TEST_ASSERT(strstr(out, "\"cache_creation_input_tokens\":3") != NULL);
+
+    free(out);
+    close(sv[0]);
+    close(sv[1]);
+
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) {
+        request_free(&r);
+        return;
+    }
+
+    anthropic_stream st;
+    TEST_ASSERT(anthropic_sse_start_live(sv[0], &r, "msg_usage_stream", 10, &st));
+    shutdown(sv[0], SHUT_WR);
+    out = read_socket_text(sv[1]);
+
+    TEST_ASSERT(strstr(out, "event: message_start") != NULL);
+    TEST_ASSERT(strstr(out, "\"usage\":{\"input_tokens\":0") != NULL);
+    TEST_ASSERT(strstr(out, "\"output_tokens\":0") != NULL);
+    TEST_ASSERT(strstr(out, "\"cache_read_input_tokens\":7") != NULL);
+    TEST_ASSERT(strstr(out, "\"cache_creation_input_tokens\":3") != NULL);
+
+    free(out);
+    close(sv[0]);
+    close(sv[1]);
+    request_free(&r);
+}
+
 static void test_openai_tool_stream_sends_incremental_text(void) {
     int sv[2];
     TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
@@ -12454,6 +12562,95 @@ static void test_openai_tool_stream_sends_incremental_text(void) {
     request_free(&r);
     close(sv[0]);
     close(sv[1]);
+}
+
+static void test_openai_stream_usage_reports_cache_details(void) {
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) return;
+
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_OPENAI;
+    r.stream = true;
+    r.stream_include_usage = true;
+    r.cache_read_tokens = 7;
+    r.cache_write_tokens = 3;
+
+    TEST_ASSERT(sse_done(sv[0], &r, "chatcmpl_usage", 10, 2));
+    shutdown(sv[0], SHUT_WR);
+    char *out = read_socket_text(sv[1]);
+
+    TEST_ASSERT(strstr(out, "\"usage\":{\"prompt_tokens\":10") != NULL);
+    TEST_ASSERT(strstr(out, "\"completion_tokens\":2") != NULL);
+    TEST_ASSERT(strstr(out, "\"total_tokens\":12") != NULL);
+    TEST_ASSERT(strstr(out, "\"prompt_tokens_details\":{") != NULL);
+    TEST_ASSERT(strstr(out, "\"cached_tokens\":10") != NULL);
+    TEST_ASSERT(strstr(out, "\"cache_write_tokens\":3") != NULL);
+    TEST_ASSERT(strstr(out, "data: [DONE]") != NULL);
+
+    free(out);
+    request_free(&r);
+    close(sv[0]);
+    close(sv[1]);
+}
+
+static void test_responses_usage_reports_cache_details(void) {
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_RESPONSES;
+    r.cache_read_tokens = 7;
+    r.cache_write_tokens = 3;
+
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) {
+        request_free(&r);
+        return;
+    }
+
+    TEST_ASSERT(responses_final_response(sv[0], &r, "resp_usage", "OK", NULL, NULL,
+                                         "stop", 10, 2));
+    shutdown(sv[0], SHUT_WR);
+    char *out = read_socket_text(sv[1]);
+
+    TEST_ASSERT(strstr(out, "\"usage\":{\"input_tokens\":10") != NULL);
+    TEST_ASSERT(strstr(out, "\"input_tokens_details\":{") != NULL);
+    TEST_ASSERT(strstr(out, "\"cached_tokens\":10") != NULL);
+    TEST_ASSERT(strstr(out, "\"cache_write_tokens\":3") != NULL);
+    TEST_ASSERT(strstr(out, "\"output_tokens\":2") != NULL);
+    TEST_ASSERT(strstr(out, "\"total_tokens\":12") != NULL);
+
+    free(out);
+    close(sv[0]);
+    close(sv[1]);
+
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) {
+        request_free(&r);
+        return;
+    }
+
+    responses_stream st;
+    responses_stream_init(&r, &st);
+    TEST_ASSERT(responses_sse_completed(sv[0], &r, &st, NULL, NULL,
+                                        "stop", 10, 2, 1234));
+    shutdown(sv[0], SHUT_WR);
+    out = read_socket_text(sv[1]);
+
+    TEST_ASSERT(strstr(out, "\"type\":\"response.completed\"") != NULL);
+    TEST_ASSERT(strstr(out, "\"usage\":{\"input_tokens\":10") != NULL);
+    TEST_ASSERT(strstr(out, "\"input_tokens_details\":{") != NULL);
+    TEST_ASSERT(strstr(out, "\"cached_tokens\":10") != NULL);
+    TEST_ASSERT(strstr(out, "\"cache_write_tokens\":3") != NULL);
+    TEST_ASSERT(strstr(out, "\"output_tokens\":2") != NULL);
+    TEST_ASSERT(strstr(out, "\"total_tokens\":12") != NULL);
+
+    free(out);
+    responses_stream_free(&st);
+    close(sv[0]);
+    close(sv[1]);
+    request_free(&r);
 }
 
 static void test_openai_chat_stream_splits_reasoning_without_tools(void) {
@@ -14903,8 +15100,11 @@ static void ds4_server_unit_tests_run(void) {
     test_anthropic_thinking_and_tool_args_preserve_call_order();
     test_context_length_error_uses_protocol_standard_shape();
     test_anthropic_live_stream_sends_incremental_blocks();
+    test_anthropic_usage_reports_cache_details();
     test_anthropic_tool_stream_sends_live_tool_use();
     test_openai_tool_stream_sends_incremental_text();
+    test_openai_stream_usage_reports_cache_details();
+    test_responses_usage_reports_cache_details();
     test_openai_chat_stream_splits_reasoning_without_tools();
     test_openai_tool_stream_sends_partial_arguments();
     test_openai_tool_stream_waits_for_incomplete_tool_tags();
