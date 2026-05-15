@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <float.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <netinet/in.h>
@@ -8401,12 +8402,9 @@ static int tool_memory_count_dsml_in_text(server *s, const char *text) {
     return count;
 }
 
-static bool kv_tool_map_write(server *s, FILE *fp, const char *text,
-                              uint64_t *written_bytes) {
-    if (written_bytes) *written_bytes = 0;
-    if (!s || s->disable_exact_dsml_tool_replay || !fp || !text || !text[0]) return true;
-
-    pthread_mutex_lock(&s->tool_mu);
+static bool kv_tool_map_measure_locked(server *s, const char *text,
+                                       uint32_t *count_out,
+                                       uint64_t *bytes_out) {
     uint32_t count = 0;
     uint64_t bytes = KV_TOOL_MAP_HEADER;
     uint64_t scan = ++s->tool_mem.scan_clock;
@@ -8423,11 +8421,46 @@ static bool kv_tool_map_write(server *s, FILE *fp, const char *text,
                 size_t id_len = strlen(e->id);
                 size_t dsml_len = b->len;
                 if (id_len > UINT32_MAX || dsml_len > UINT32_MAX) continue;
+                if (count == UINT32_MAX) return false;
+                if (UINT64_MAX - bytes < 8u ||
+                    UINT64_MAX - bytes - 8u < (uint64_t)id_len ||
+                    UINT64_MAX - bytes - 8u - (uint64_t)id_len < (uint64_t)dsml_len)
+                    return false;
                 count++;
                 bytes += 8u + (uint64_t)id_len + (uint64_t)dsml_len;
             }
         }
         p = end;
+    }
+    if (count == 0) bytes = 0;
+    if (count_out) *count_out = count;
+    if (bytes_out) *bytes_out = bytes;
+    return true;
+}
+
+static bool kv_tool_map_serialized_size(server *s, const char *text,
+                                        uint64_t *bytes_out) {
+    if (bytes_out) *bytes_out = 0;
+    if (!s || s->disable_exact_dsml_tool_replay || !text || !text[0]) return true;
+
+    pthread_mutex_lock(&s->tool_mu);
+    bool ok = kv_tool_map_measure_locked(s, text, NULL, bytes_out);
+    pthread_mutex_unlock(&s->tool_mu);
+    return ok;
+}
+
+static bool kv_tool_map_write(server *s, FILE *fp, const char *text,
+                              uint64_t *written_bytes) {
+    if (written_bytes) *written_bytes = 0;
+    if (!s || s->disable_exact_dsml_tool_replay || !fp || !text || !text[0]) return true;
+
+    pthread_mutex_lock(&s->tool_mu);
+    uint32_t count = 0;
+    uint64_t bytes = 0;
+    bool ok = kv_tool_map_measure_locked(s, text, &count, &bytes);
+    if (!ok) {
+        pthread_mutex_unlock(&s->tool_mu);
+        return false;
     }
     if (count == 0) {
         pthread_mutex_unlock(&s->tool_mu);
@@ -8440,10 +8473,10 @@ static bool kv_tool_map_write(server *s, FILE *fp, const char *text,
     h[2] = KV_TOOL_MAP_MAGIC2;
     h[3] = KV_TOOL_MAP_VERSION;
     le_put32(h + 4, count);
-    bool ok = fwrite(h, 1, sizeof(h), fp) == sizeof(h);
+    ok = fwrite(h, 1, sizeof(h), fp) == sizeof(h);
 
-    scan = ++s->tool_mem.scan_clock;
-    p = text;
+    uint64_t scan = ++s->tool_mem.scan_clock;
+    const char *p = text;
     for (;;) {
         const char *end = NULL;
         const char *start = find_next_dsml_tool_block(p, &end);
@@ -8644,9 +8677,19 @@ static void kv_cache_restore_tool_memory_for_messages(server *s, const chat_msgs
     id_list_free(&wanted);
 }
 
-static double kv_entry_eviction_score(const kv_entry *e, const ds4_tokens *live) {
+static double kv_entry_eviction_score(const kv_entry *e, const ds4_tokens *live,
+                                      const char *protected_sha) {
     if (!e || e->file_size == 0) return 0.0;
     (void)live;
+    if (protected_sha && !strcmp(e->sha, protected_sha)) {
+        /* The store path calls eviction immediately after renaming the new
+         * checkpoint into place.  Without a protected score, a full cache can
+         * choose that brand-new zero-hit file as the cheapest single deletion,
+         * turning the save into pure I/O waste.  Treat it as maximally valuable
+         * for this eviction pass.  If it is the only remaining entry and the
+         * budget is still exceeded, the loop will still delete it below. */
+        return DBL_MAX;
+    }
     /*
      * Hits count successful disk reuses, but a fresh snapshot is still useful:
      * it may be the only copy of the session that is about to be evicted from
@@ -8658,16 +8701,30 @@ static double kv_entry_eviction_score(const kv_entry *e, const ds4_tokens *live)
     return ((double)e->hits + 1.0) * (double)e->tokens / (double)e->file_size;
 }
 
-static void kv_cache_evict(kv_disk_cache *kc, const ds4_tokens *live) {
+static void kv_cache_evict(kv_disk_cache *kc, const ds4_tokens *live,
+                           const char *protected_sha) {
     if (!kc->enabled || kc->budget_bytes == 0) return;
     kv_cache_refresh(kc);
     uint64_t total = 0;
     for (int i = 0; i < kc->len; i++) total += kc->entry[i].file_size;
+    if (protected_sha) {
+        uint64_t protected_size = 0;
+        for (int i = 0; i < kc->len; i++) {
+            if (!strcmp(kc->entry[i].sha, protected_sha)) {
+                protected_size = kc->entry[i].file_size;
+                break;
+            }
+        }
+        /* Do not preserve an entry that cannot fit in the budget by itself:
+         * protecting it would first delete every older checkpoint, then delete
+         * the new one anyway. */
+        if (protected_size > kc->budget_bytes) protected_sha = NULL;
+    }
     while (total > kc->budget_bytes && kc->len > 0) {
         int victim = 0;
-        double victim_score = kv_entry_eviction_score(&kc->entry[0], live);
+        double victim_score = kv_entry_eviction_score(&kc->entry[0], live, protected_sha);
         for (int i = 1; i < kc->len; i++) {
-            double score = kv_entry_eviction_score(&kc->entry[i], live);
+            double score = kv_entry_eviction_score(&kc->entry[i], live, protected_sha);
             if (score < victim_score ||
                 (score == victim_score && kc->entry[i].last_used < kc->entry[victim].last_used))
             {
@@ -8709,7 +8766,7 @@ static bool kv_cache_open(kv_disk_cache *kc, const char *dir, uint64_t budget_mb
     kc->budget_bytes = budget_mb * 1024ull * 1024ull;
     kc->reject_different_quant = reject_different_quant;
     kc->opt = opt;
-    kv_cache_evict(kc, NULL);
+    kv_cache_evict(kc, NULL, NULL);
     server_log(DS4_LOG_KVCACHE,
                "ds4-server: KV disk cache %s (budget=%llu MiB, cross-quant=%s, min=%d, cold_max=%d, continued=%d, trim=%d, align=%d)",
                kc->dir,
@@ -8849,6 +8906,50 @@ static bool kv_cache_file_text_matches(const char *path, const char sha[41],
     return ok;
 }
 
+static bool kv_cache_file_size_bytes(uint64_t text_bytes,
+                                     uint64_t payload_bytes,
+                                     uint64_t tool_map_bytes,
+                                     uint64_t *file_bytes) {
+    const uint64_t fixed = KV_CACHE_FIXED_HEADER + 4ull;
+    if (UINT64_MAX - fixed < text_bytes ||
+        UINT64_MAX - fixed - text_bytes < payload_bytes ||
+        UINT64_MAX - fixed - text_bytes - payload_bytes < tool_map_bytes)
+        return false;
+    if (file_bytes) *file_bytes = fixed + text_bytes + payload_bytes + tool_map_bytes;
+    return true;
+}
+
+static bool kv_cache_budget_required(uint64_t file_bytes,
+                                     uint64_t *required_bytes) {
+    /* The serialized size is deterministic for one snapshot, including the
+     * optional tool map.  We still reserve 1% headroom so filesystem/accounting
+     * surprises or a concurrently-added tool mapping cannot produce a file that
+     * is immediately removed by the cache budget pass. */
+    uint64_t slack = file_bytes / 100u;
+    if (file_bytes % 100u) slack++;
+    if (UINT64_MAX - file_bytes < slack) return false;
+    if (required_bytes) *required_bytes = file_bytes + slack;
+    return true;
+}
+
+static bool kv_cache_file_size_fits(const kv_disk_cache *kc,
+                                    uint64_t text_bytes,
+                                    uint64_t payload_bytes,
+                                    uint64_t tool_map_bytes,
+                                    uint64_t *file_bytes_out,
+                                    uint64_t *required_bytes_out) {
+    uint64_t file_bytes = 0;
+    if (!kv_cache_file_size_bytes(text_bytes, payload_bytes, tool_map_bytes,
+                                  &file_bytes))
+        return false;
+    if (file_bytes_out) *file_bytes_out = file_bytes;
+    if (!kc || kc->budget_bytes == 0) return true;
+    uint64_t required = 0;
+    if (!kv_cache_budget_required(file_bytes, &required)) return false;
+    if (required_bytes_out) *required_bytes_out = required;
+    return required <= kc->budget_bytes;
+}
+
 static bool kv_cache_existing_compatible(kv_disk_cache *kc, const char *path,
                                          const char sha[41],
                                          const char *text, size_t text_len,
@@ -8956,6 +9057,30 @@ static bool kv_cache_store_live_prefix_text(server *s, const ds4_tokens *tokens,
         ds4_tokens_free(&store_tokens);
         return false;
     }
+    uint64_t tool_map_est_bytes = 0;
+    if (!kv_tool_map_serialized_size(s, text, &tool_map_est_bytes)) {
+        server_log(DS4_LOG_KVCACHE,
+                   "ds4-server: kv cache skipped tokens=%d reason=%s because tool map size overflowed",
+                   store_tokens.len, reason);
+        free(text);
+        ds4_tokens_free(&store_tokens);
+        return false;
+    }
+    uint64_t est_file_bytes = 0, est_required_bytes = 0;
+    if (!kv_cache_file_size_fits(kc, (uint64_t)text_len, payload_bytes,
+                                 tool_map_est_bytes,
+                                 &est_file_bytes, &est_required_bytes)) {
+        server_log(DS4_LOG_KVCACHE,
+                   "ds4-server: kv cache skipped tokens=%d reason=%s because estimated file size %.2f MiB (%.2f MiB with safety) exceeds budget %.2f MiB",
+                   store_tokens.len,
+                   reason,
+                   (double)est_file_bytes / (1024.0 * 1024.0),
+                   (double)est_required_bytes / (1024.0 * 1024.0),
+                   (double)kc->budget_bytes / (1024.0 * 1024.0));
+        free(text);
+        ds4_tokens_free(&store_tokens);
+        return false;
+    }
 
     char sha[41];
     sha1_bytes_hex(text, text_len, sha);
@@ -8987,7 +9112,7 @@ static bool kv_cache_store_live_prefix_text(server *s, const ds4_tokens *tokens,
 
     const uint64_t now = (uint64_t)time(NULL);
     uint8_t h[KV_CACHE_FIXED_HEADER];
-    uint8_t ext_flags = tool_memory_count_dsml_in_text(s, text) > 0 ? KV_EXT_TOOL_MAP : 0;
+    uint8_t ext_flags = tool_map_est_bytes > 0 ? KV_EXT_TOOL_MAP : 0;
     if (text_override) ext_flags |= cache_text_ext;
     kv_fill_header(h, (uint8_t)quant_bits, kv_reason_code(reason), ext_flags,
                    (uint32_t)store_tokens.len, 0,
@@ -9007,16 +9132,36 @@ static bool kv_cache_store_live_prefix_text(server *s, const ds4_tokens *tokens,
         if (!saved_errno) saved_errno = errno;
         ok = false;
     }
+    uint64_t final_file_bytes = 0, final_required_bytes = 0;
+    bool final_size_over_budget = false;
+    if (ok && !kv_cache_file_size_fits(kc, (uint64_t)text_len, payload_bytes,
+                                       tool_map_bytes,
+                                       &final_file_bytes, &final_required_bytes))
+    {
+        final_size_over_budget = true;
+        ok = false;
+    }
     if (ok && rename(tmp, path) != 0) {
         saved_errno = errno;
         ok = false;
     }
     const double save_ms = (now_sec() - save_t0) * 1000.0;
     if (!ok) {
-        server_log(DS4_LOG_KVCACHE, "ds4-server: kv cache store failed (%s): %s save=%.1f ms",
-                   reason,
-                   saved_errno ? strerror(saved_errno) : (err[0] ? err : "unknown error"),
-                   save_ms);
+        if (final_size_over_budget) {
+            server_log(DS4_LOG_KVCACHE,
+                       "ds4-server: kv cache skipped tokens=%d reason=%s because final file size %.2f MiB (%.2f MiB with safety) exceeds budget %.2f MiB save=%.1f ms",
+                       store_tokens.len,
+                       reason,
+                       (double)final_file_bytes / (1024.0 * 1024.0),
+                       (double)final_required_bytes / (1024.0 * 1024.0),
+                       (double)kc->budget_bytes / (1024.0 * 1024.0),
+                       save_ms);
+        } else {
+            server_log(DS4_LOG_KVCACHE, "ds4-server: kv cache store failed (%s): %s save=%.1f ms",
+                       reason,
+                       saved_errno ? strerror(saved_errno) : (err[0] ? err : "unknown error"),
+                       save_ms);
+        }
         unlink(tmp);
     } else {
         server_log(DS4_LOG_KVCACHE,
@@ -9027,7 +9172,7 @@ static bool kv_cache_store_live_prefix_text(server *s, const ds4_tokens *tokens,
                    text_override ? (cache_text_key ? cache_text_key : "visible-transcript") : "token-text",
                    (double)(KV_CACHE_FIXED_HEADER + 4ull + text_len + payload_bytes + tool_map_bytes) / (1024.0 * 1024.0),
                    save_ms);
-        kv_cache_evict(kc, live_tokens);
+        kv_cache_evict(kc, live_tokens, sha);
     }
     free(tmp);
     free(text);
@@ -9086,6 +9231,21 @@ static void kv_cache_store_current(server *s, const char *reason) {
 static void kv_cache_note_store(kv_disk_cache *kc, int tokens) {
     if (tokens > kc->continued_last_store_tokens) {
         kc->continued_last_store_tokens = tokens;
+    }
+}
+
+static int kv_cache_suppress_continued_store(kv_disk_cache *kc, int tokens) {
+    if (kv_cache_continued_store_target(kc, tokens) != tokens) return -1;
+    int old = kc->continued_last_store_tokens;
+    kv_cache_note_store(kc, tokens);
+    return old;
+}
+
+static void kv_cache_restore_suppressed_continued(kv_disk_cache *kc,
+                                                  int old_tokens,
+                                                  int suppressed_tokens) {
+    if (old_tokens >= 0 && kc->continued_last_store_tokens == suppressed_tokens) {
+        kc->continued_last_store_tokens = old_tokens;
     }
 }
 
@@ -10370,6 +10530,17 @@ static void generate_job(server *s, job *j) {
     {
         cold_store_len = kv_cache_store_len(&s->kv, prompt_for_sync->len);
     }
+    int suppressed_continued_last = -1;
+    if (cold_store_len >= s->kv.opt.min_tokens) {
+        /* A cold checkpoint can land exactly on the continued-checkpoint
+         * frontier.  The prefill progress callback would then write the same
+         * prefix as "continued" while we are intentionally stopping there to
+         * write it as "cold".  Mark the frontier as already handled before the
+         * sync reaches it; if the cold write fails, restore the old schedule so
+         * a later continued write can still try. */
+        suppressed_continued_last =
+            kv_cache_suppress_continued_store(&s->kv, cold_store_len);
+    }
 
     if (s->kv.enabled &&
         cold_store_len >= s->kv.opt.min_tokens &&
@@ -10381,12 +10552,19 @@ static void generate_job(server *s, job *j) {
             ds4_tokens_free(&prefix);
             ds4_tokens_free(&effective_prompt);
             ds4_session_set_progress(s->session, NULL, NULL);
+            kv_cache_restore_suppressed_continued(&s->kv, suppressed_continued_last,
+                                                  cold_store_len);
             trace_event(s, trace_id, "prefill failed: %s", err);
             http_error(j->fd, 500, err);
             return;
         }
         if (kv_cache_store_live_prefix(s, prompt_for_sync, cold_store_len, "cold")) {
             kv_cache_note_store(&s->kv, cold_store_len);
+            suppressed_continued_last = -1;
+        } else {
+            kv_cache_restore_suppressed_continued(&s->kv, suppressed_continued_last,
+                                                  cold_store_len);
+            suppressed_continued_last = -1;
         }
         ds4_tokens_free(&prefix);
     }
@@ -10394,6 +10572,8 @@ static void generate_job(server *s, job *j) {
     if (ds4_session_sync(s->session, prompt_for_sync, err, sizeof(err)) != 0) {
         ds4_tokens_free(&effective_prompt);
         ds4_session_set_progress(s->session, NULL, NULL);
+        kv_cache_restore_suppressed_continued(&s->kv, suppressed_continued_last,
+                                              cold_store_len);
         trace_event(s, trace_id, "prefill failed: %s", err);
         http_error(j->fd, 500, err);
         return;
@@ -10415,6 +10595,10 @@ static void generate_job(server *s, job *j) {
     if (cold_store_len == prompt_for_sync->len) {
         if (kv_cache_store_live_prefix(s, prompt_for_sync, cold_store_len, "cold")) {
             kv_cache_note_store(&s->kv, cold_store_len);
+            suppressed_continued_last = -1;
+        } else {
+            kv_cache_restore_suppressed_continued(&s->kv, suppressed_continued_last,
+                                                  cold_store_len);
         }
     }
     char id[96];
@@ -13991,6 +14175,35 @@ static void test_kv_cache_continued_uses_aligned_frontiers(void) {
     TEST_ASSERT(kv_cache_continued_store_target(&kc, 30000) == 30000);
 }
 
+static void test_kv_cache_cold_store_suppresses_duplicate_continued_boundary(void) {
+    kv_disk_cache kc = {0};
+    kc.enabled = true;
+    kc.opt = kv_cache_default_options();
+
+    int old = kv_cache_suppress_continued_store(&kc, 10240);
+    TEST_ASSERT(old == 0);
+    TEST_ASSERT(kc.continued_last_store_tokens == 10240);
+    TEST_ASSERT(kv_cache_continued_store_target(&kc, 10240) == 0);
+
+    kv_cache_restore_suppressed_continued(&kc, old, 10240);
+    TEST_ASSERT(kc.continued_last_store_tokens == 0);
+    TEST_ASSERT(kv_cache_continued_store_target(&kc, 10240) == 10240);
+}
+
+static void test_kv_cache_file_size_must_fit_budget(void) {
+    kv_disk_cache kc = {0};
+    kc.budget_bytes = 1100;
+
+    TEST_ASSERT(kv_cache_file_size_fits(&kc, 100, 930, 0, NULL, NULL));
+    TEST_ASSERT(!kv_cache_file_size_fits(&kc, 100, 938, 0, NULL, NULL));
+    TEST_ASSERT(!kv_cache_file_size_fits(&kc, 100, 900, 40, NULL, NULL));
+    TEST_ASSERT(!kv_cache_file_size_fits(&kc, UINT64_MAX, 1, 0, NULL, NULL));
+
+    kc.budget_bytes = 0;
+    TEST_ASSERT(kv_cache_file_size_fits(&kc, 100, 900, 40, NULL, NULL));
+    TEST_ASSERT(!kv_cache_file_size_fits(&kc, UINT64_MAX, 1, 0, NULL, NULL));
+}
+
 static void test_sha1_bytes_hex_matches_known_vector(void) {
     char sha[41];
     sha1_bytes_hex("abc", 3, sha);
@@ -14112,9 +14325,12 @@ static void test_kv_tool_map_filters_by_dsml_text(void) {
 
     FILE *fp = tmpfile();
     TEST_ASSERT(fp != NULL);
+    uint64_t estimated_bytes = 0;
+    TEST_ASSERT(kv_tool_map_serialized_size(&src, dsml_keep, &estimated_bytes));
     uint64_t bytes = 0;
     TEST_ASSERT(kv_tool_map_write(&src, fp, dsml_keep, &bytes));
     TEST_ASSERT(bytes > 0);
+    TEST_ASSERT(estimated_bytes == bytes);
     rewind(fp);
     TEST_ASSERT(kv_tool_map_load_from_pos(&dst, fp, NULL) == 1);
 
@@ -14244,10 +14460,80 @@ static void test_kv_cache_eviction_values_fresh_snapshots(void) {
     kc.dir = xstrdup(dir);
     kc.opt = kv_cache_default_options();
     kc.budget_bytes = (KV_CACHE_FIXED_HEADER + 4u + 2048u) + 16u;
-    kv_cache_evict(&kc, NULL);
+    kv_cache_evict(&kc, NULL, NULL);
 
     TEST_ASSERT(access(old_path, F_OK) != 0);
     TEST_ASSERT(access(new_path, F_OK) == 0);
+
+    kv_cache_close(&kc);
+    unlink(old_path);
+    unlink(new_path);
+    free(old_path);
+    free(new_path);
+    rmdir(dir);
+}
+
+static void test_kv_cache_eviction_protects_current_store(void) {
+    char tmpl[] = "/tmp/ds4-kv-current-store-evict-test.XXXXXX";
+    char *dir = mkdtemp(tmpl);
+    TEST_ASSERT(dir != NULL);
+    if (!dir) return;
+
+    const char *old_sha = "1111111111111111111111111111111111111111";
+    const char *new_sha = "2222222222222222222222222222222222222222";
+    test_kv_stub_file(dir, old_sha, KV_REASON_COLD, 4096, 0, 100, 2048);
+    test_kv_stub_file(dir, new_sha, KV_REASON_CONTINUED, 2048, 0, 200, 4096);
+
+    char old_name[44], new_name[44];
+    snprintf(old_name, sizeof(old_name), "%.40s.kv", old_sha);
+    snprintf(new_name, sizeof(new_name), "%.40s.kv", new_sha);
+    char *old_path = path_join(dir, old_name);
+    char *new_path = path_join(dir, new_name);
+
+    kv_disk_cache kc = {0};
+    kc.enabled = true;
+    kc.dir = xstrdup(dir);
+    kc.opt = kv_cache_default_options();
+    kc.budget_bytes = (KV_CACHE_FIXED_HEADER + 4u + 4096u) + 16u;
+    kv_cache_evict(&kc, NULL, new_sha);
+
+    TEST_ASSERT(access(old_path, F_OK) != 0);
+    TEST_ASSERT(access(new_path, F_OK) == 0);
+
+    kv_cache_close(&kc);
+    unlink(old_path);
+    unlink(new_path);
+    free(old_path);
+    free(new_path);
+    rmdir(dir);
+}
+
+static void test_kv_cache_eviction_does_not_protect_oversize_current_store(void) {
+    char tmpl[] = "/tmp/ds4-kv-oversize-store-evict-test.XXXXXX";
+    char *dir = mkdtemp(tmpl);
+    TEST_ASSERT(dir != NULL);
+    if (!dir) return;
+
+    const char *old_sha = "1111111111111111111111111111111111111111";
+    const char *new_sha = "2222222222222222222222222222222222222222";
+    test_kv_stub_file(dir, old_sha, KV_REASON_COLD, 4096, 0, 100, 1024);
+    test_kv_stub_file(dir, new_sha, KV_REASON_CONTINUED, 4096, 0, 200, 4096);
+
+    char old_name[44], new_name[44];
+    snprintf(old_name, sizeof(old_name), "%.40s.kv", old_sha);
+    snprintf(new_name, sizeof(new_name), "%.40s.kv", new_sha);
+    char *old_path = path_join(dir, old_name);
+    char *new_path = path_join(dir, new_name);
+
+    kv_disk_cache kc = {0};
+    kc.enabled = true;
+    kc.dir = xstrdup(dir);
+    kc.opt = kv_cache_default_options();
+    kc.budget_bytes = (KV_CACHE_FIXED_HEADER + 4u + 1024u) + 16u;
+    kv_cache_evict(&kc, NULL, new_sha);
+
+    TEST_ASSERT(access(old_path, F_OK) == 0);
+    TEST_ASSERT(access(new_path, F_OK) != 0);
 
     kv_cache_close(&kc);
     unlink(old_path);
@@ -14279,7 +14565,7 @@ static void test_kv_cache_eviction_keeps_aligned_continued_frontiers(void) {
     kc.dir = xstrdup(dir);
     kc.opt = kv_cache_default_options();
     kc.budget_bytes = (KV_CACHE_FIXED_HEADER + 4u + 2048u) + 16u;
-    kv_cache_evict(&kc, NULL);
+    kv_cache_evict(&kc, NULL, NULL);
 
     TEST_ASSERT(access(cold_path, F_OK) != 0);
     TEST_ASSERT(access(continued_path, F_OK) == 0);
@@ -14625,9 +14911,13 @@ static void ds4_server_unit_tests_run(void) {
     test_canonical_rewrite_rebuilds_when_live_tail_changes();
     test_kv_cache_store_len_uses_configured_boundary();
     test_kv_cache_continued_uses_aligned_frontiers();
+    test_kv_cache_cold_store_suppresses_duplicate_continued_boundary();
+    test_kv_cache_file_size_must_fit_budget();
     test_sha1_bytes_hex_matches_known_vector();
     test_kv_cache_lookup_uses_longest_text_prefix();
     test_kv_cache_eviction_values_fresh_snapshots();
+    test_kv_cache_eviction_protects_current_store();
+    test_kv_cache_eviction_does_not_protect_oversize_current_store();
     test_kv_cache_eviction_keeps_aligned_continued_frontiers();
 }
 
