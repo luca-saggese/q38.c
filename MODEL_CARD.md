@@ -200,6 +200,10 @@ result as:
 <tool_result>...</tool_result>
 ```
 
+Tool-result bodies are rendered as raw text. Literal `<`, `>`, and `&` from
+file contents or shell output are preserved; only the exact closing sentinel
+`</tool_result>` is escaped so the wrapper cannot be terminated by data.
+
 When there are multiple tool results, the renderer sorts them to match the
 order of the preceding assistant tool calls.
 
