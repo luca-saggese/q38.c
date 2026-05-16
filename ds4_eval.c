@@ -12,10 +12,10 @@
  * AIME 2025, and COMPSEC.  The SuperGPQA slice is intentionally audited: rows
  * with wrong keys, missing figures, or underspecified prompts are replaced
  * instead of being locally re-keyed, because ds4-eval is a regression harness
- * and a bad target is worse than a merely hard target.  COMPSEC contains
- * reduced C/C++ single-function vulnerability-classification questions derived
- * from public CVE writeups; the CVE anchors and private rationales are not
- * rendered to the model, and the answer choices are deterministically shuffled.
+ * and a bad target is worse than a merely hard target.  COMPSEC contains a
+ * small audited subset of reduced C/C++ single-function vulnerability
+ * localization questions derived from public CVE writeups; the CVE anchors and
+ * private rationales are not rendered to the model.
  * GPQA is released under CC BY 4.0.  SuperGPQA is released under ODC-BY and
  * includes mostly original data plus a limited amount of transformed
  * third-party data.  The AIME 2025 mirror used here is MIT licensed.  Source
@@ -53,7 +53,7 @@
 #define ANSI_BOLD "\x1b[1m"
 
 #define EVAL_MAX_CHOICES 10
-#define EVAL_ANSWER_MAX 16
+#define EVAL_ANSWER_MAX 32
 #define EVAL_MAX_CONTEXT 1000000
 
 typedef enum {
@@ -1043,325 +1043,136 @@ static const eval_case eval_cases[] = {
         .id = "compsec-076",
         .domain = "FreeBSD / librpcsec_gss",
         .title = "rpcsec_gss_validate() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe function validates a per-request authentication blob before passing it to the GSS layer. Which assessment is most accurate?\n\nCode:\n```c\n#define AUTH_STACK_MAX 256\n\nstatic bool check_rpcsec_packet(const uint8_t *wire, size_t wire_left)\n{\n    if (wire_left < 4)\n        return false;\n\n    uint32_t body_len = get_be32(wire);      // attacker-controlled length field\n    const uint8_t *body = wire + 4;\n    uint8_t scratch[AUTH_STACK_MAX];\n\n    /* XDR opaque values are padded to 4-byte alignment on the wire. */\n    uint32_t pad = (4 - (body_len & 3)) & 3;\n    uint32_t encoded_len = body_len + pad;\n\n    /* This check only proves the source bytes exist in the packet. */\n    if (encoded_len > wire_left - 4)\n        return false;\n\n    memcpy(scratch, body, encoded_len);\n    return gss_verify_mic(scratch, body_len);\n}\n```",
-        .choice[0] = "No vulnerability: the alignment padding check proves the copy fits the stack buffer as well as the packet.",
-        .choice[1] = "Authentication bypass only: the padded bytes are verified instead of the unpadded body.",
-        .choice[2] = "Use-after-free: gss_verify_mic() stores scratch after the function returns.",
-        .choice[3] = "Integer underflow: wire_left - 4 can underflow before any length check is made.",
-        .choice[4] = "Stack out-of-bounds write: packet-remaining validation is confused with validation against the fixed local buffer.",
-        .answer = "E",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe function validates a per-request authentication blob before passing it to the GSS layer.\n\nCode:\n```c\n 1: #define AUTH_STACK_MAX 256\n 2: \n 3: static bool check_rpcsec_packet(const uint8_t *wire, size_t wire_left)\n 4: {\n 5:     if (wire_left < 4)\n 6:         return false;\n 7: \n 8:     uint32_t body_len = get_be32(wire);      // attacker-controlled length field\n 9:     const uint8_t *body = wire + 4;\n10:     uint8_t scratch[AUTH_STACK_MAX];\n11: \n12:     /* XDR opaque values are padded to 4-byte alignment on the wire. */\n13:     uint32_t pad = (4 - (body_len & 3)) & 3;\n14:     uint32_t encoded_len = body_len + pad;\n15: \n16:     /* This check only proves the source bytes exist in the packet. */\n17:     if (encoded_len > wire_left - 4)\n18:         return false;\n19: \n20:     memcpy(scratch, body, encoded_len);\n21:     return gss_verify_mic(scratch, body_len);\n22: }\n```",
+        .answer = "17-20",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-077",
         .domain = "GNU Inetutils telnetd",
         .title = "add_slc() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThis helper is called once for each Special Line Character option received in a TELNET LINEMODE negotiation. What is the bug, if any?\n\nCode:\n```c\n#define SLCBUF_SIZE 108\n#define SLC_NCHARS 18\n\nstruct slc_state {\n    unsigned char buf[SLCBUF_SIZE];\n    size_t used;\n};\n\nstatic void add_slc(struct slc_state *s,\n                    unsigned char func,\n                    unsigned char flags,\n                    unsigned char value)\n{\n    if (func <= SLC_NCHARS)\n        return;                    // ignore ordinary entries here\n\n    /* Store one SLC triplet for later reply construction. */\n    s->buf[s->used++] = func;\n    s->buf[s->used++] = flags;\n    s->buf[s->used++] = value;\n}\n```",
-        .choice[0] = "Out-of-bounds read: the value byte is read before func is validated.",
-        .choice[1] = "Logic bug only: extended functions are silently dropped, causing feature negotiation failure without memory corruption.",
-        .choice[2] = "One-byte off-by-one: func == SLC_NCHARS is mishandled, but only the first byte is affected.",
-        .choice[3] = "No vulnerability: the protocol has only 18 SLC functions, and the buffer can hold 36 three-byte entries.",
-        .choice[4] = "Out-of-bounds write: the helper ignores the number of accepted extended triplets accumulated across calls.",
-        .answer = "E",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThis helper is called once for each Special Line Character option received in a TELNET LINEMODE negotiation.\n\nCode:\n```c\n 1: #define SLCBUF_SIZE 108\n 2: #define SLC_NCHARS 18\n 3: \n 4: struct slc_state {\n 5:     unsigned char buf[SLCBUF_SIZE];\n 6:     size_t used;\n 7: };\n 8: \n 9: static void add_slc(struct slc_state *s,\n10:                     unsigned char func,\n11:                     unsigned char flags,\n12:                     unsigned char value)\n13: {\n14:     if (func <= SLC_NCHARS)\n15:         return;                    // ignore ordinary entries here\n16: \n17:     /* Store one SLC triplet for later reply construction. */\n18:     s->buf[s->used++] = func;\n19:     s->buf[s->used++] = flags;\n20:     s->buf[s->used++] = value;\n21: }\n```",
+        .answer = "18-20",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-078",
-        .domain = "Envoy",
-        .title = "JsonEscaper::escapeString() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe function precomputes exactly how many characters are needed for JSON escapes, resizes a std::string, then fills it. Which answer is correct?\n\nCode:\n```c\nstatic std::string escape_json(std::string_view in)\n{\n    size_t extra = 0;\n    for (unsigned char c : in)\n        if (c < 0x20)\n            extra += 5;            // \\u00XX is 6 chars instead of 1\n\n    std::string out;\n    out.resize(in.size() + extra);\n\n    size_t pos = 0;\n    for (unsigned char c : in) {\n        if (c < 0x20) {\n            out[pos++] = '\\\\';\n            std::sprintf(&out[pos], \"u%04x\", c);\n            pos += 5;\n        } else {\n            out[pos++] = (char)c;\n        }\n    }\n    return out;\n}\n```",
-        .choice[0] = "Use-after-free: resize() invalidates &out[pos] while sprintf() is running.",
-        .choice[1] = "Format-string vulnerability: c is attacker-controlled and reaches sprintf().",
-        .choice[2] = "Heap off-by-one write: sprintf() also writes a NUL byte that was not included in the std::string size calculation.",
-        .choice[3] = "Integer underflow: extra decreases when the input contains ordinary printable characters.",
-        .choice[4] = "No vulnerability: extra counts five additional bytes for every control character, which matches JSON escaping.",
-        .answer = "C",
+        .domain = "Botan",
+        .title = "sm2_decrypt_and_check_c3() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe function checks the SM2 C3 hash in a decoded ciphertext. Assume parse_sm2_ciphertext() may return a c3 field of any length.\n\nCode:\n```c\n 1: #define SM3_DIGEST_LEN 32\n 2: \n 3: static bool check_sm2_c3(const uint8_t *msg, size_t msg_len,\n 4:                          const struct sm2_ctext *ct)\n 5: {\n 6:     uint8_t expected[SM3_DIGEST_LEN];\n 7: \n 8:     sm3_c3_hash(expected, ct->x2, ct->x2_len, msg, msg_len, ct->y2, ct->y2_len);\n 9: \n10:     /* Constant-time comparison: returns 0 only if all bytes match. */\n11:     if (ct_memcmp(expected, ct->c3.data, SM3_DIGEST_LEN) != 0)\n12:         return false;\n13: \n14:     return true;\n15: }\n```",
+        .answer = "11",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-079",
         .domain = "Botan",
-        .title = "sm2_decrypt_and_check_c3() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe function checks the SM2 C3 hash in a decoded ciphertext. Assume parse_sm2_ciphertext() may return a c3 field of any length. Which assessment is right?\n\nCode:\n```c\n#define SM3_DIGEST_LEN 32\n\nstatic bool check_sm2_c3(const uint8_t *msg, size_t msg_len,\n                         const struct sm2_ctext *ct)\n{\n    uint8_t expected[SM3_DIGEST_LEN];\n\n    sm3_c3_hash(expected, ct->x2, ct->x2_len, msg, msg_len, ct->y2, ct->y2_len);\n\n    /* Constant-time comparison: returns 0 only if all bytes match. */\n    if (ct_memcmp(expected, ct->c3.data, SM3_DIGEST_LEN) != 0)\n        return false;\n\n    return true;\n}\n```",
-        .choice[0] = "Timing side channel: ct_memcmp necessarily exits at the first differing byte.",
-        .choice[1] = "Heap overflow: sm3_c3_hash() writes more than 32 bytes into expected when msg_len is attacker-controlled.",
-        .choice[2] = "Out-of-bounds read: the comparison reads 32 bytes from ct->c3.data without first checking ct->c3.len.",
-        .choice[3] = "Authentication bypass: any short C3 is accepted because only ct->c3.len bytes are compared.",
-        .choice[4] = "No vulnerability: a fixed-length digest comparison is the correct way to avoid accepting truncated tags.",
-        .answer = "C",
+        .title = "tls13_server_handle_record() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe server is configured to require TLS 1.3 client authentication. Inspect the reduced record handler.\n\nCode:\n```c\n 1: enum State { NeedClientCert, NeedCertVerify, NeedFinished, Established };\n 2: \n 3: static void handle_tls13_record(struct Conn *c, const Record& r)\n 4: {\n 5:     if (r.type == Alert)\n 6:         return close_conn(c);\n 7: \n 8:     if (r.type == Handshake) {\n 9:         if (r.msg == Certificate && c->state == NeedClientCert)\n10:             c->state = NeedCertVerify;\n11:         else if (r.msg == CertificateVerify && c->state == NeedCertVerify)\n12:             c->state = NeedFinished;\n13:         else if (r.msg == Finished && c->state == NeedFinished)\n14:             c->state = Established;\n15:         return;\n16:     }\n17: \n18:     if (r.type == ApplicationData) {\n19:         decrypt_and_dispatch_application_data(c, r);\n20:         return;\n21:     }\n22: }\n```",
+        .answer = "18-19",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-080",
         .domain = "Botan",
-        .title = "check_ocsp_status() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThis routine consumes a stapled OCSP response during certificate validation. Which answer best characterizes the flaw?\n\nCode:\n```c\nstatic CertStatus check_ocsp_status(const OcspResponse& r,\n                                    const Certificate& subject,\n                                    Time now)\n{\n    if (!r.basic_response_present())\n        return CertStatus::Unknown;\n\n    if (r.cert_id_hash() != subject.issuer_and_serial_hash())\n        return CertStatus::Unknown;\n\n    if (r.this_update() > now || r.next_update() < now)\n        return CertStatus::Unknown;\n\n    if (r.single_response_status() == OcspGood)\n        return CertStatus::Good;\n\n    if (r.single_response_status() == OcspRevoked)\n        return CertStatus::Revoked;\n\n    return CertStatus::Unknown;\n}\n```",
-        .choice[0] = "Use-after-free: subject is referenced after r is destroyed.",
-        .choice[1] = "Cryptographic authenticity failure: the response status is trusted without verifying the OCSP response signature and responder authority.",
-        .choice[2] = "Memory corruption: next_update() can underflow when the response has no nextUpdate field.",
-        .choice[3] = "No vulnerability: matching the certificate ID and the OCSP validity interval is sufficient for a stapled response.",
-        .choice[4] = "Only a denial of service: the worst case is that all responses become Unknown.",
-        .answer = "B",
+        .title = "validate_path_step() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe validator is walking a certificate chain. trust_store.contains_subject(x) returns true if any configured trust anchor has subject DN x.\n\nCode:\n```c\n 1: static ValidationResult validate_path_step(const Certificate& cert,\n 2:                                            const TrustStore& trust_store)\n 3: {\n 4:     /* Optimization: stop once we have reached a known trust anchor subject. */\n 5:     if (trust_store.contains_subject(cert.subject_dn()))\n 6:         return ValidationResult::Valid;\n 7: \n 8:     Certificate issuer = find_issuer_for(cert);\n 9:     if (!cert.verify_signature_with(issuer.public_key()))\n10:         return ValidationResult::BadSignature;\n11: \n12:     return validate_path_step(issuer, trust_store);\n13: }\n```",
+        .answer = "5-6",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-081",
-        .domain = "Botan",
-        .title = "tls13_server_handle_record() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe server is configured to require TLS 1.3 client authentication. Inspect the reduced record handler. Which answer is most accurate?\n\nCode:\n```c\nenum State { NeedClientCert, NeedCertVerify, NeedFinished, Established };\n\nstatic void handle_tls13_record(struct Conn *c, const Record& r)\n{\n    if (r.type == Alert)\n        return close_conn(c);\n\n    if (r.type == Handshake) {\n        if (r.msg == Certificate && c->state == NeedClientCert)\n            c->state = NeedCertVerify;\n        else if (r.msg == CertificateVerify && c->state == NeedCertVerify)\n            c->state = NeedFinished;\n        else if (r.msg == Finished && c->state == NeedFinished)\n            c->state = Established;\n        return;\n    }\n\n    if (r.type == ApplicationData) {\n        decrypt_and_dispatch_application_data(c, r);\n        return;\n    }\n}\n```",
-        .choice[0] = "Downgrade attack only: the server accidentally falls back to TLS 1.2 signature algorithms.",
-        .choice[1] = "Use-after-free: close_conn(c) frees c but the function continues to use it.",
-        .choice[2] = "Client-authentication bypass: the ApplicationData path is reachable before Certificate, CertificateVerify, and Finished have been completed.",
-        .choice[3] = "Out-of-bounds read: r.msg is read even when r.type is not Handshake.",
-        .choice[4] = "No vulnerability: application data is encrypted, so it necessarily follows a completed handshake.",
-        .answer = "C",
+        .domain = "uds-c",
+        .title = "send_diagnostic_request() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe diagnostic request builder has small protocol-defined fields.\n\nCode:\n```c\n 1: #define MAX_DIAG_PAYLOAD       6\n 2: #define MAX_REQUEST_PAYLOAD    7\n 3: \n 4: static int send_diagnostic_request(uint8_t sid,\n 5:                                    const uint8_t *pid, size_t pid_len,\n 6:                                    const uint8_t *payload, size_t payload_len)\n 7: {\n 8:     uint8_t req[MAX_DIAG_PAYLOAD];\n 9: \n10:     if (pid_len > 2 || payload_len > MAX_REQUEST_PAYLOAD)\n11:         return -1;\n12: \n13:     req[0] = sid;\n14:     memcpy(req + 1, pid, pid_len);\n15:     memcpy(req + 1 + pid_len, payload, payload_len);\n16: \n17:     return transport_send(req, 1 + pid_len + payload_len);\n18: }\n```",
+        .answer = "10-15",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-082",
-        .domain = "Botan",
-        .title = "validate_path_step() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe validator is walking a certificate chain. trust_store.contains_subject(x) returns true if any configured trust anchor has subject DN x. Which answer is correct?\n\nCode:\n```c\nstatic ValidationResult validate_path_step(const Certificate& cert,\n                                           const TrustStore& trust_store)\n{\n    /* Optimization: stop once we have reached a known trust anchor subject. */\n    if (trust_store.contains_subject(cert.subject_dn()))\n        return ValidationResult::Valid;\n\n    Certificate issuer = find_issuer_for(cert);\n    if (!cert.verify_signature_with(issuer.public_key()))\n        return ValidationResult::BadSignature;\n\n    return validate_path_step(issuer, trust_store);\n}\n```",
-        .choice[0] = "No vulnerability: a certificate subject DN is globally unique enough to identify a trust anchor.",
-        .choice[1] = "Revocation checking bug only: OCSP status is not consulted after the recursion stops.",
-        .choice[2] = "Only a path-building performance bug: the recursion may take longer when names collide.",
-        .choice[3] = "Trust validation bypass: an end-entity certificate whose subject collides with a trust-anchor DN can be accepted before signature/path validation.",
-        .choice[4] = "Out-of-bounds read: subject_dn() returns a pointer into a temporary string.",
-        .answer = "D",
+        .domain = "Firebird",
+        .title = "xdr_datum() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe decoder writes a cstring value into a slice selected by a descriptor. xdr_bytes_available() is accurate.\n\nCode:\n```c\n 1: static bool xdr_datum(struct Xdr *xdr, const struct SliceDesc *desc, char *base)\n 2: {\n 3:     uint32_t n = xdr_get_u32(xdr);       // declared cstring length\n 4:     char *dst = base + desc->offset;\n 5: \n 6:     if (n > xdr_bytes_available(xdr))\n 7:         return false;\n 8: \n 9:     xdr_read_bytes(xdr, dst, n);\n10:     dst[n] = '\\0';\n11:     return true;\n12: }\n```",
+        .answer = "9-10",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-083",
-        .domain = "uds-c",
-        .title = "send_diagnostic_request() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe diagnostic request builder has small protocol-defined fields. Which conclusion follows from the code?\n\nCode:\n```c\n#define MAX_DIAG_PAYLOAD       6\n#define MAX_REQUEST_PAYLOAD    7\n\nstatic int send_diagnostic_request(uint8_t sid,\n                                   const uint8_t *pid, size_t pid_len,\n                                   const uint8_t *payload, size_t payload_len)\n{\n    uint8_t req[MAX_DIAG_PAYLOAD];\n\n    if (pid_len > 2 || payload_len > MAX_REQUEST_PAYLOAD)\n        return -1;\n\n    req[0] = sid;\n    memcpy(req + 1, pid, pid_len);\n    memcpy(req + 1 + pid_len, payload, payload_len);\n\n    return transport_send(req, 1 + pid_len + payload_len);\n}\n```",
-        .choice[0] = "Authentication bypass: sid can be chosen to skip transport authorization.",
-        .choice[1] = "No vulnerability: pid_len and payload_len are both capped by protocol constants.",
-        .choice[2] = "Out-of-bounds read only: transport_send reads past payload but req remains in-bounds.",
-        .choice[3] = "Out-of-bounds write: the combined offset and payload length can exceed req even though each component passes its own limit.",
-        .choice[4] = "Integer overflow: 1 + pid_len + payload_len can wrap on 64-bit size_t.",
-        .answer = "D",
+        .domain = "Firebird",
+        .title = "decode_specific_data_segments() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe authentication decoder stores numbered CNCT_specific_data segments. Inputs are not guaranteed to arrive in ascending segment order.\n\nCode:\n```c\n 1: static bool read_segments(struct ConnAuth *a, struct Packet *p)\n 2: {\n 3:     int last = -1;\n 4: \n 5:     while (packet_has_segment(p)) {\n 6:         int segno = packet_get_segment_number(p);\n 7:         size_t len = packet_get_segment_length(p);\n 8: \n 9:         int missing = segno - last - 1;\n10:         a->segments.grow(a->segments.size() + missing);\n11:         a->segments[segno] = packet_read_bytes(p, len);\n12: \n13:         last = segno;\n14:     }\n15:     return true;\n16: }\n```",
+        .answer = "9-11",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-084",
-        .domain = "Firebird",
-        .title = "xdr_datum() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe decoder writes a cstring value into a slice selected by a descriptor. xdr_bytes_available() is accurate. What is the best answer?\n\nCode:\n```c\nstatic bool xdr_datum(struct Xdr *xdr, const struct SliceDesc *desc, char *base)\n{\n    uint32_t n = xdr_get_u32(xdr);       // declared cstring length\n    char *dst = base + desc->offset;\n\n    if (n > xdr_bytes_available(xdr))\n        return false;\n\n    xdr_read_bytes(xdr, dst, n);\n    dst[n] = '\\0';\n    return true;\n}\n```",
-        .choice[0] = "Use-after-free: xdr_read_bytes stores dst for later asynchronous decoding.",
-        .choice[1] = "Only a missing-NUL bug: dst[n] is safe because the cstring length excludes the terminator.",
-        .choice[2] = "Integer underflow: base + desc->offset subtracts when offset is positive.",
-        .choice[3] = "Heap/stack out-of-bounds write: n is checked against the encoded packet but not against the destination slice described by desc.",
-        .choice[4] = "No vulnerability: the XDR packet-length check is the only bound the decoder needs.",
-        .answer = "D",
+        .domain = "PHP",
+        .title = "php_url_decode() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nOn this target, plain char is signed, and the ctype implementation indexes a table for values other than EOF.\n\nCode:\n```c\n 1: static size_t decode_component(char *s, size_t len)\n 2: {\n 3:     size_t r = 0, w = 0;\n 4: \n 5:     while (r < len) {\n 6:         if (s[r] == '%' && r + 2 < len &&\n 7:             isxdigit(s[r + 1]) && isxdigit(s[r + 2])) {\n 8:             s[w++] = hexpair(s[r + 1], s[r + 2]);\n 9:             r += 3;\n10:         } else {\n11:             s[w++] = s[r++];\n12:         }\n13:     }\n14:     return w;\n15: }\n```",
+        .answer = "6-7",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-085",
-        .domain = "Firebird",
-        .title = "decode_specific_data_segments() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe authentication decoder stores numbered CNCT_specific_data segments. It was originally written assuming segment numbers arrive in ascending order. Which issue is present?\n\nCode:\n```c\nstatic bool read_segments(struct ConnAuth *a, struct Packet *p)\n{\n    int last = -1;\n\n    while (packet_has_segment(p)) {\n        int segno = packet_get_segment_number(p);\n        size_t len = packet_get_segment_length(p);\n\n        int missing = segno - last - 1;\n        a->segments.grow(a->segments.size() + missing);\n        a->segments[segno] = packet_read_bytes(p, len);\n\n        last = segno;\n    }\n    return true;\n}\n```",
-        .choice[0] = "Buffer overflow only when len itself exceeds the MTU; the ordering is irrelevant.",
-        .choice[1] = "Denial of service / memory-safety hazard: an out-of-order segment makes the signed missing count negative, then it is used in a size calculation/growth path.",
-        .choice[2] = "No vulnerability: missing is zero for in-order packets, and out-of-order packets simply overwrite older entries.",
-        .choice[3] = "Authentication bypass: duplicate segment numbers are interpreted as successful login.",
-        .choice[4] = "Use-after-free: packet_read_bytes returns a pointer into p, which is freed at the end of the loop.",
-        .answer = "B",
+        .domain = "PHP PDO Firebird",
+        .title = "pdo_firebird_quote_token() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe database driver receives a language string token as (ptr,len), where len may include embedded NUL bytes. The function reconstructs a quoted SQL token.\n\nCode:\n```c\n1: static void append_quoted_token(char *sql, size_t sql_cap,\n2:                                 const char *tok, size_t tok_len)\n3: {\n4:     strlcat(sql, \"'\", sql_cap);\n5:     strncat(sql, tok, tok_len);\n6:     strlcat(sql, \"'\", sql_cap);\n7: }\n```",
+        .answer = "5",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-086",
-        .domain = "PHP",
-        .title = "metaphone() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe implementation is normally used on small strings, but the language runtime can represent strings longer than INT_MAX bytes on some builds. What is the vulnerability?\n\nCode:\n```c\nstatic void metaphone_reduce(const char *in, size_t len, struct outbuf *out)\n{\n    int i = 0;\n\n    while ((size_t)i < len) {\n        char c = in[i];\n\n        if (is_vowel(c) && i + 1 < (int)len)\n            maybe_emit_pair(out, c, in[i + 1]);\n\n        i++;\n    }\n}\n```",
-        .choice[0] = "Stack overflow: maybe_emit_pair() recurses once for every vowel.",
-        .choice[1] = "Signed-integer-overflow-driven out-of-bounds access: the int index cannot represent all valid size_t positions for very large strings.",
-        .choice[2] = "Only a locale bug: is_vowel() misclassifies non-ASCII bytes but memory safety is unaffected.",
-        .choice[3] = "No vulnerability: i is cast to size_t in the loop condition, so it cannot become negative for bounds purposes.",
-        .choice[4] = "Use-after-free: outbuf reallocations invalidate in.",
-        .answer = "B",
+        .domain = "libexpat",
+        .title = "doContent() tag-buffer reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe parser grows a reusable tag buffer before copying the current element name and closing delimiters. Sizes are attacker-influenced through XML input.\n\nCode:\n```c\n 1: static bool ensure_tag_buffer(struct Parser *p, size_t prefix_len, size_t name_len)\n 2: {\n 3:     unsigned int need = (unsigned int)(prefix_len + name_len + 3);\n 4: \n 5:     if (need > p->tag_cap) {\n 6:         char *q = realloc(p->tag_buf, need);\n 7:         if (q == NULL)\n 8:             return false;\n 9:         p->tag_buf = q;\n10:         p->tag_cap = need;\n11:     }\n12: \n13:     memcpy(p->tag_buf, p->prefix, prefix_len);\n14:     memcpy(p->tag_buf + prefix_len, p->name, name_len);\n15:     memcpy(p->tag_buf + prefix_len + name_len, \"/>\\0\", 3);\n16:     return true;\n17: }\n```",
+        .answer = "3,13-15",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-087",
-        .domain = "PHP SOAP extension",
-        .title = "soap_decode_object_graph() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe decoder de-duplicates objects by XML id while building a temporary result table. zval_ptr_dtor() frees a value when its refcount reaches zero. What is the subtle bug?\n\nCode:\n```c\nstatic zval *remember_object(HashTable *by_id, HashTable *tmp,\n                             const char *id, zval *obj)\n{\n    zval *old = zend_hash_find(by_id, id);\n    if (old != NULL)\n        return old;\n\n    /* tmp owns one reference and destroys overwritten entries. */\n    zend_hash_update(tmp, id, obj);\n\n    /* by_id is intended to be a non-owning lookup cache. */\n    zend_hash_update_ptr(by_id, id, obj);\n\n    return obj;\n}\n```",
-        .choice[0] = "Stack overflow: remember_object recursively follows object references.",
-        .choice[1] = "Hash collision authentication bypass: two different ids can be treated as the same object.",
-        .choice[2] = "No vulnerability: by_id is non-owning, so it does not need to adjust refcounts.",
-        .choice[3] = "Out-of-bounds read: strlen(id) is called on a non-NUL-terminated XML id.",
-        .choice[4] = "Use-after-free: an overwrite/destructor path can free the only owned reference while by_id still contains the raw pointer.",
-        .answer = "E",
+        .domain = "Mbed TLS",
+        .title = "x509_inet_pton_ipv6() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThis helper parses an IPv6 address used in X.509 name constraints. It records where :: compression occurred, then shifts already parsed bytes.\n\nCode:\n```c\n 1: static int parse_ipv6_reduced(const char *src, uint8_t dst[16])\n 2: {\n 3:     uint8_t tmp[16];\n 4:     uint8_t *tp = tmp;\n 5:     uint8_t *colonp = NULL;\n 6: \n 7:     if (src[0] == ':' && src[1] == ':') {\n 8:         colonp = --tp;          // remember compression point at the beginning\n 9:         src += 2;\n10:     }\n11: \n12:     while (*src != '\\0') {\n13:         unsigned v = parse_hextet(&src);\n14:         *tp++ = (uint8_t)(v >> 8);\n15:         *tp++ = (uint8_t)v;\n16:         if (*src == ':') src++;\n17:     }\n18: \n19:     if (colonp != NULL) {\n20:         size_t n = (size_t)(tp - colonp);\n21:         memmove(colonp + (16 - (tp - tmp)), colonp, n);\n22:         memset(colonp, 0, 16 - (tp - tmp));\n23:     }\n24: \n25:     memcpy(dst, tmp, 16);\n26:     return 0;\n27: }\n```",
+        .answer = "8,20-22",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-088",
-        .domain = "PHP",
-        .title = "php_url_decode() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nOn this target, plain char is signed, and the ctype implementation indexes a table for values other than EOF. Which answer is right?\n\nCode:\n```c\nstatic size_t decode_component(char *s, size_t len)\n{\n    size_t r = 0, w = 0;\n\n    while (r < len) {\n        if (s[r] == '%' && r + 2 < len &&\n            isxdigit(s[r + 1]) && isxdigit(s[r + 2])) {\n            s[w++] = hexpair(s[r + 1], s[r + 2]);\n            r += 3;\n        } else {\n            s[w++] = s[r++];\n        }\n    }\n    return w;\n}\n```",
-        .choice[0] = "Double free: s[w++] and s[r++] can refer to the same buffer location.",
-        .choice[1] = "Only a semantic bug: non-ASCII hex digits are decoded differently under some locales.",
-        .choice[2] = "No vulnerability: isxdigit() accepts any char value because the argument type is int.",
-        .choice[3] = "Out-of-bounds read in the ctype implementation: high-bit bytes promoted from signed char can be negative values other than EOF.",
-        .choice[4] = "Heap overflow: percent decoding always expands the string.",
-        .answer = "D",
+        .domain = "Mbed TLS",
+        .title = "mbedtls_dhm_export_public() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe function exports a finite-field Diffie-Hellman public value into a fixed-width buffer for the group. The public MPI may be supplied by an application.\n\nCode:\n```c\n 1: static int export_ffdh_public(const struct DhmContext *ctx,\n 2:                               uint8_t *out, size_t out_len)\n 3: {\n 4:     size_t plen = mpi_size(&ctx->P);      // byte length of the group prime\n 5:     size_t ylen = mpi_size(&ctx->Y);      // byte length of public value\n 6: \n 7:     if (out_len < plen)\n 8:         return -1;\n 9: \n10:     memset(out, 0, plen);\n11:     return mpi_write_binary(&ctx->Y, out + (plen - ylen), ylen);\n12: }\n```",
+        .answer = "11",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-089",
-        .domain = "PHP PDO Firebird",
-        .title = "pdo_firebird_quote_token() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe database driver receives a language string token as (ptr,len), where len may include embedded NUL bytes. The function reconstructs a quoted SQL token. Which assessment is most accurate?\n\nCode:\n```c\nstatic void append_quoted_token(char *sql, size_t sql_cap,\n                                const char *tok, size_t tok_len)\n{\n    strlcat(sql, \"'\", sql_cap);\n    strncat(sql, tok, tok_len);\n    strlcat(sql, \"'\", sql_cap);\n}\n```",
-        .choice[0] = "SQL injection / query confusion: the length-aware token is reinterpreted through NUL-terminated string operations, changing what is quoted.",
-        .choice[1] = "Only a denial of service: embedded NUL bytes make the query fail closed in every case.",
-        .choice[2] = "No vulnerability: strncat() receives tok_len, so embedded NUL bytes are copied as ordinary data.",
-        .choice[3] = "Stack overflow: strlcat() never checks sql_cap.",
-        .choice[4] = "Use-after-free: tok is freed by strncat() when it encounters NUL.",
-        .answer = "A",
+        .domain = "Mbed TLS",
+        .title = "mbedtls_ccm_finish() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe public multipart CCM API lets the caller request a tag length.\n\nCode:\n```c\n 1: static int ccm_finish_reduced(struct CcmCtx *ctx, uint8_t *tag, size_t tag_len)\n 2: {\n 3:     uint8_t full_tag[16];\n 4: \n 5:     ccm_compute_full_tag(ctx, full_tag);\n 6: \n 7:     if (tag == NULL)\n 8:         return -1;\n 9: \n10:     memcpy(tag, full_tag, tag_len);\n11:     return 0;\n12: }\n```",
+        .answer = "10",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-090",
-        .domain = "libexpat",
-        .title = "doContent() tag-buffer reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe parser grows a reusable tag buffer before copying the current element name and closing delimiters. Sizes are attacker-influenced through XML input. Which answer is right?\n\nCode:\n```c\nstatic bool ensure_tag_buffer(struct Parser *p, size_t prefix_len, size_t name_len)\n{\n    unsigned int need = (unsigned int)(prefix_len + name_len + 3);\n\n    if (need > p->tag_cap) {\n        char *q = realloc(p->tag_buf, need);\n        if (q == NULL)\n            return false;\n        p->tag_buf = q;\n        p->tag_cap = need;\n    }\n\n    memcpy(p->tag_buf, p->prefix, prefix_len);\n    memcpy(p->tag_buf + prefix_len, p->name, name_len);\n    memcpy(p->tag_buf + prefix_len + name_len, \"/>\\0\", 3);\n    return true;\n}\n```",
-        .choice[0] = "Out-of-bounds write: the allocation-size computation can wrap/truncate before the later copies use the original wider lengths.",
-        .choice[1] = "Out-of-bounds read: the final memcpy reads three bytes from a two-byte string literal.",
-        .choice[2] = "XML entity expansion only: the buffer is large enough, but recursive entity references exhaust CPU.",
-        .choice[3] = "Use-after-free: realloc always frees p->tag_buf even when it fails.",
-        .choice[4] = "No vulnerability: need is compared against tag_cap before every copy.",
-        .answer = "A",
+        .domain = "Linux kernel",
+        .title = "handle_one_ule_extension() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe extension type is the low byte of a 16-bit protocol field. The mandatory-extension table has handlers for values 0 through 254.\n\nCode:\n```c\n 1: typedef int (*ule_handler)(struct skb *, const uint8_t *, size_t);\n 2: static ule_handler mandatory_handlers[255];\n 3: \n 4: static int handle_ule_ext(struct skb *skb, uint16_t type,\n 5:                           const uint8_t *p, size_t len)\n 6: {\n 7:     uint8_t htype = (uint8_t)(type & 0x00ff);\n 8: \n 9:     if (htype < 0x80)\n10:         return handle_optional_ext(skb, htype, p, len);\n11: \n12:     if (mandatory_handlers[htype] != NULL)\n13:         return mandatory_handlers[htype](skb, p, len);\n14: \n15:     return -EINVAL;\n16: }\n```",
+        .answer = "12-13",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-091",
-        .domain = "libexpat",
-        .title = "XML_ExternalEntityParserCreate() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe parent parser supports an application-provided unknown-encoding callback. This function creates a child parser for an external entity. What bug is present?\n\nCode:\n```c\nstatic struct Parser *create_external_entity_parser(struct Parser *parent)\n{\n    struct Parser *child = calloc(1, sizeof(*child));\n    if (child == NULL)\n        return NULL;\n\n    child->unknown_encoding_handler = parent->unknown_encoding_handler;\n    child->unknown_encoding_data = NULL;      // child starts with default context\n    child->handlers = parent->handlers;\n\n    return child;\n}\n\nstatic int call_unknown_encoding(struct Parser *p, const char *name)\n{\n    if (p->unknown_encoding_handler == NULL)\n        return XML_ERROR_UNKNOWN_ENCODING;\n    return p->unknown_encoding_handler(name, p->unknown_encoding_data);\n}\n```",
-        .choice[0] = "Heap overflow: calloc allocates too few bytes for struct Parser.",
-        .choice[1] = "Null-pointer/context confusion bug: the handler is copied but the application context it relies on is not propagated to the child parser.",
-        .choice[2] = "Double free: child->handlers and parent->handlers point to the same table.",
-        .choice[3] = "Authentication bypass: external entities are parsed without checking XML signatures.",
-        .choice[4] = "No vulnerability: callback functions never require user data to be non-NULL.",
-        .answer = "B",
+        .domain = "Linux kernel USB gadget storage",
+        .title = "check_command_size() reduction",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe SCSI command expresses transfer length in logical blocks. blkbits is the log2 block size.\n\nCode:\n```c\n 1: static int accept_transfer(struct lun *lun, uint32_t blocks, unsigned blkbits)\n 2: {\n 3:     uint32_t bytes = blocks << blkbits;\n 4: \n 5:     if (bytes > lun->backing_size)\n 6:         return -EINVAL;\n 7: \n 8:     lun->data_size_from_cmnd = bytes;\n 9:     return 0;\n10: }\n```",
+        .answer = "3",
     },
     {
         .source = "COMPSEC",
         .id = "compsec-092",
-        .domain = "Mbed TLS",
-        .title = "x509_inet_pton_ipv6() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThis helper parses an IPv6 address used in X.509 name constraints. It records where '::' compression occurred, then shifts already parsed bytes. What is the subtle issue?\n\nCode:\n```c\nstatic int parse_ipv6_reduced(const char *src, uint8_t dst[16])\n{\n    uint8_t tmp[16];\n    uint8_t *tp = tmp;\n    uint8_t *colonp = NULL;\n\n    if (src[0] == ':' && src[1] == ':') {\n        colonp = --tp;          // remember compression point at the beginning\n        src += 2;\n    }\n\n    while (*src != '\\0') {\n        unsigned v = parse_hextet(&src);\n        *tp++ = (uint8_t)(v >> 8);\n        *tp++ = (uint8_t)v;\n        if (*src == ':') src++;\n    }\n\n    if (colonp != NULL) {\n        size_t n = (size_t)(tp - colonp);\n        memmove(colonp + (16 - (tp - tmp)), colonp, n);\n        memset(colonp, 0, 16 - (tp - tmp));\n    }\n\n    memcpy(dst, tmp, 16);\n    return 0;\n}\n```",
-        .choice[0] = "Only an IPv6 normalization bug: addresses with leading compression produce the wrong textual form but stay in-bounds.",
-        .choice[1] = "Heap overflow: parse_hextet writes arbitrary-length strings into tmp.",
-        .choice[2] = "Use-after-free: dst aliases tmp after the function returns.",
-        .choice[3] = "No vulnerability: memmove is explicitly designed for overlapping source and destination regions.",
-        .choice[4] = "Buffer underflow / out-of-bounds read: a leading '::' stores colonp before tmp, and later memmove reads from that invalid pointer.",
-        .answer = "E",
-    },
-    {
-        .source = "COMPSEC",
-        .id = "compsec-093",
-        .domain = "Mbed TLS",
-        .title = "mbedtls_dhm_export_public() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe function exports a finite-field Diffie-Hellman public value into a fixed-width buffer for the group. The public MPI may be supplied by an application. Which answer is correct?\n\nCode:\n```c\nstatic int export_ffdh_public(const struct DhmContext *ctx,\n                              uint8_t *out, size_t out_len)\n{\n    size_t plen = mpi_size(&ctx->P);      // byte length of the group prime\n    size_t ylen = mpi_size(&ctx->Y);      // byte length of public value\n\n    if (out_len < plen)\n        return -1;\n\n    memset(out, 0, plen);\n    return mpi_write_binary(&ctx->Y, out + (plen - ylen), ylen);\n}\n```",
-        .choice[0] = "Buffer underflow/overflow: if Y is wider than the group, plen - ylen wraps and serialization starts outside the output buffer.",
-        .choice[1] = "Authentication bypass: any public value larger than P is automatically reduced modulo P.",
-        .choice[2] = "No vulnerability: out_len is checked against the group length before any write.",
-        .choice[3] = "Use-after-free: mpi_size() frees ctx->Y when it normalizes it.",
-        .choice[4] = "Timing side channel only: leading zero padding reveals ylen.",
-        .answer = "A",
-    },
-    {
-        .source = "COMPSEC",
-        .id = "compsec-094",
-        .domain = "Mbed TLS",
-        .title = "ssl_parse_server_key_exchange_signature() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe client has configured a restricted list of allowed signature algorithms, and it advertised only that list. Which flaw is present?\n\nCode:\n```c\nstatic int accept_server_signature(struct SslConfig *conf,\n                                   SigAlg server_alg,\n                                   const uint8_t *sig, size_t sig_len)\n{\n    if (!compiled_supports_signature_algorithm(server_alg))\n        return BAD_SIGNATURE_ALGORITHM;\n\n    if (!verify_handshake_signature(server_alg, sig, sig_len))\n        return BAD_SIGNATURE;\n\n    return OK;\n}\n```",
-        .choice[0] = "Use-after-free: conf is not referenced after the first line.",
-        .choice[1] = "Certificate-name confusion: the signature algorithm is compared to the subject DN.",
-        .choice[2] = "No vulnerability: if the library can verify an algorithm, accepting it is safe.",
-        .choice[3] = "Heap overflow: sig_len is not checked before verify_handshake_signature().",
-        .choice[4] = "Policy bypass/downgrade: the server-selected algorithm is checked against compiled support, not against the configured/advertised allowed list.",
-        .answer = "E",
-    },
-    {
-        .source = "COMPSEC",
-        .id = "compsec-095",
-        .domain = "Mbed TLS",
-        .title = "mbedtls_ccm_finish() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe public multipart CCM API lets the caller request a tag length. What vulnerability does this reduced finish routine contain?\n\nCode:\n```c\nstatic int ccm_finish_reduced(struct CcmCtx *ctx, uint8_t *tag, size_t tag_len)\n{\n    uint8_t full_tag[16];\n\n    ccm_compute_full_tag(ctx, full_tag);\n\n    if (tag == NULL)\n        return -1;\n\n    memcpy(tag, full_tag, tag_len);\n    return 0;\n}\n```",
-        .choice[0] = "Out-of-bounds read: tag_len is not limited to the 16 bytes available in full_tag.",
-        .choice[1] = "Cryptographic bypass only: a shorter tag is accepted without comparison.",
-        .choice[2] = "No vulnerability: CCM authentication tags are conceptually variable-length.",
-        .choice[3] = "Use-after-free: tag points to full_tag after return.",
-        .choice[4] = "Out-of-bounds write into full_tag: ccm_compute_full_tag writes tag_len bytes.",
-        .answer = "A",
-    },
-    {
-        .source = "COMPSEC",
-        .id = "compsec-096",
-        .domain = "Linux kernel",
-        .title = "handle_one_ule_extension() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe extension type is the low byte of a 16-bit protocol field. The mandatory-extension table has handlers for values 0 through 254. What happens for the boundary value?\n\nCode:\n```c\ntypedef int (*ule_handler)(struct skb *, const uint8_t *, size_t);\nstatic ule_handler mandatory_handlers[255];\n\nstatic int handle_ule_ext(struct skb *skb, uint16_t type,\n                          const uint8_t *p, size_t len)\n{\n    uint8_t htype = (uint8_t)(type & 0x00ff);\n\n    if (htype < 0x80)\n        return handle_optional_ext(skb, htype, p, len);\n\n    if (mandatory_handlers[htype] != NULL)\n        return mandatory_handlers[htype](skb, p, len);\n\n    return -EINVAL;\n}\n```",
-        .choice[0] = "Out-of-bounds read/call: htype can be 255, but a 255-element C array has valid indexes 0..254.",
-        .choice[1] = "No vulnerability: htype is an 8-bit value and the table is indexed by 8-bit values.",
-        .choice[2] = "Use-after-free: mandatory_handlers is freed when handle_optional_ext returns.",
-        .choice[3] = "Integer underflow: htype < 0x80 subtracts from htype when it is large.",
-        .choice[4] = "Only a logic bug: mandatory extensions above 127 are all ignored safely.",
-        .answer = "A",
-    },
-    {
-        .source = "COMPSEC",
-        .id = "compsec-097",
-        .domain = "Linux kernel USB gadget storage",
-        .title = "check_command_size() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe SCSI command expresses transfer length in logical blocks. blkbits is the log2 block size. Which answer is most accurate?\n\nCode:\n```c\nstatic int accept_transfer(struct lun *lun, uint32_t blocks, unsigned blkbits)\n{\n    uint32_t bytes = blocks << blkbits;\n\n    if (bytes > lun->backing_size)\n        return -EINVAL;\n\n    lun->data_size_from_cmnd = bytes;\n    return 0;\n}\n```",
-        .choice[0] = "Only a denial of service: overlarge blocks always make bytes larger than backing_size.",
-        .choice[1] = "No vulnerability: the computed byte count is checked against the backing-store size.",
-        .choice[2] = "Out-of-bounds transfer via integer wrap: the left shift can truncate a large block count to a small byte count before validation.",
-        .choice[3] = "Information leak only: blkbits reveals the device sector size.",
-        .choice[4] = "Use-after-free: lun is freed if the command is rejected.",
-        .answer = "C",
-    },
-    {
-        .source = "COMPSEC",
-        .id = "compsec-098",
         .domain = "Linux kernel AppArmor",
         .title = "verify_dfa() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe verifier checks a serialized DFA. Some states are encoded as differences from another state's default table. What bug is present?\n\nCode:\n```c\nstatic int verify_dfa_reduced(const struct dfa *d)\n{\n    for (uint32_t state = 0; state < d->state_count; state++) {\n        uint32_t j = state;\n\n        if (d->default_table[j] >= d->state_count)\n            return -EINVAL;\n\n        while (d->is_differential[j]) {\n            uint32_t parent = d->default_table[j];\n            j = parent;                    // parent not rechecked here\n        }\n\n        validate_accept_table(d->accept[j]);\n    }\n    return 0;\n}\n```",
-        .choice[0] = "Infinite loop only: every malformed DFA cycles forever but stays in-bounds.",
-        .choice[1] = "Out-of-bounds access: a later parent index reached through differential encoding is used without its own range check.",
-        .choice[2] = "Authentication bypass: validate_accept_table() accepts all states by default.",
-        .choice[3] = "No vulnerability: default_table[j] is checked before entering the while loop.",
-        .choice[4] = "Stack overflow: verify_dfa_reduced is recursive over parent states.",
-        .answer = "B",
-    },
-    {
-        .source = "COMPSEC",
-        .id = "compsec-099",
-        .domain = "Linux kernel memory management",
-        .title = "folio_unmap_invalidate() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe function removes a folio from its mapping, drops the mapping lock, and then calls the filesystem's free callback. Which issue is present?\n\nCode:\n```c\nstatic int unmap_and_free_folio(struct folio *f)\n{\n    struct address_space *mapping = f->mapping;\n\n    xa_lock(&mapping->i_pages);\n    remove_folio_from_mapping(mapping, f);   // may remove the final reference to mapping\n    xa_unlock(&mapping->i_pages);\n\n    if (mapping->a_ops->free_folio)\n        mapping->a_ops->free_folio(f);\n\n    return 0;\n}\n```",
-        .choice[0] = "Out-of-bounds read: a_ops is an array and free_folio uses an unchecked index.",
-        .choice[1] = "Integer overflow: xa_lock increments the page count past UINT_MAX.",
-        .choice[2] = "Use-after-free: removing the folio can allow mapping to be destroyed before mapping->a_ops is dereferenced after unlock.",
-        .choice[3] = "Double free of the folio: free_folio() is called twice in this function.",
-        .choice[4] = "No vulnerability: mapping was read before the folio was removed, so the pointer remains valid.",
-        .answer = "C",
-    },
-    {
-        .source = "COMPSEC",
-        .id = "compsec-100",
-        .domain = "Linux kernel GPIO virtuser",
-        .title = "config_item_release() reduction",
-        .question = "Analyze the reduced C/C++ function. Pick exactly one answer. The snippet is a defensive benchmark reduction, not an exploit proof of concept. Assume helper functions do what their names imply unless the code shown contradicts that.\n\nThe guard macro locks the mutex on declaration and automatically unlocks it at scope exit. What is wrong with this release function?\n\nCode:\n```c\n#define guard_mutex(m) __attribute__((cleanup(unlock_mutex))) mutex_t *guard = lock_mutex(m)\n\nstatic void virtuser_release(struct virtuser *u)\n{\n    struct device *dev = u->dev;\n    guard_mutex(&dev->lock);\n\n    list_del(&u->node);\n\n    if (list_empty(&dev->users)) {\n        mutex_destroy(&dev->lock);\n        kfree(dev);\n    }\n\n    kfree(u);\n}   /* guard cleanup runs here */\n```",
-        .choice[0] = "No vulnerability: the guard ensures the mutex is always released even on early returns.",
-        .choice[1] = "Memory leak only: dev is never freed when users remain.",
-        .choice[2] = "Out-of-bounds write: list_del writes past u->node when the list is empty.",
-        .choice[3] = "Use-after-free / invalid unlock: dev and dev->lock can be destroyed before the guard cleanup attempts to unlock the mutex at scope exit.",
-        .choice[4] = "Double free of u: list_del frees the node and kfree(u) frees it again.",
-        .answer = "D",
+        .question = "Analyze this reduced C/C++ function. It may or may not contain a vulnerability.\nReply with the single best line number where the primary bug is introduced. If the bug is only clear from a small group of adjacent lines, reply with the smallest comma-separated set of exact line numbers.\nReturn 0 if the function is safe under the stated assumptions.\n\nThe verifier checks a serialized DFA. Some states are encoded as differences from another state default table.\n\nCode:\n```c\n 1: static int verify_dfa_reduced(const struct dfa *d)\n 2: {\n 3:     for (uint32_t state = 0; state < d->state_count; state++) {\n 4:         uint32_t j = state;\n 5: \n 6:         if (d->default_table[j] >= d->state_count)\n 7:             return -EINVAL;\n 8: \n 9:         while (d->is_differential[j]) {\n10:             uint32_t parent = d->default_table[j];\n11:             j = parent;                    // parent not rechecked here\n12:         }\n13: \n14:         validate_accept_table(d->accept[j]);\n15:     }\n16:     return 0;\n17: }\n```",
+        .answer = "10-14",
     },
 };
 
@@ -1553,6 +1364,10 @@ static int eval_case_nchoices(const eval_case *tc) {
 
 static bool eval_case_is_multiple_choice(const eval_case *tc) {
     return eval_case_nchoices(tc) > 0;
+}
+
+static bool eval_case_is_compsec(const eval_case *tc) {
+    return tc->source && !strcmp(tc->source, "COMPSEC");
 }
 
 static void style_append(style_buf *b, unsigned char style, size_t n) {
@@ -2145,7 +1960,9 @@ static void tui_draw_left(eval_ui *ui) {
         printf("%-4s", status_name(ui->status[i]));
         fputs(ANSI_RESET, stdout);
 
-        int title_w = ui->left_w - 22;
+        const int answer_w = 18;
+        const int answer_col = ui->left_w - answer_w + 1;
+        int title_w = answer_col - 11;
         if (title_w > 0) {
             fputc(' ', stdout);
             char title[512];
@@ -2154,9 +1971,12 @@ static void tui_draw_left(eval_ui *ui) {
             print_trimmed(title, title_w);
         }
         if (ui->status[i] == EVAL_FAILED || ui->status[i] == EVAL_PASSED) {
-            term_move(screen_row, ui->left_w - 10);
-            printf(" %.3s/%.3s", ui->guess[i][0] ? ui->guess[i] : "?",
-                   ui->cases[i].answer);
+            char answers[64];
+            snprintf(answers, sizeof(answers), "%s/%s",
+                     ui->guess[i][0] ? ui->guess[i] : "?",
+                     ui->cases[i].answer);
+            term_move(screen_row, answer_col);
+            print_trimmed(answers, answer_w);
         }
         fputs(ANSI_RESET, stdout);
     }
@@ -2471,6 +2291,14 @@ static char *build_question_prompt(const eval_case *tc) {
             strlen("\nSolve the question. At the end, write exactly one final line in this "
                    "format and do not write anything after it:\n"
                    "Answer: <letter>"));
+    } else if (eval_case_is_compsec(tc)) {
+        buf_append(&b,
+            "\nAt the end, write exactly one final line in this format and do not "
+            "write anything after it:\n"
+            "Answer: <line number or comma-separated line numbers>",
+            strlen("\nAt the end, write exactly one final line in this format and do not "
+                   "write anything after it:\n"
+                   "Answer: <line number or comma-separated line numbers>"));
     } else {
         buf_append(&b,
             "\nSolve the problem. At the end, write exactly one final line in this "
@@ -2804,12 +2632,122 @@ static void find_integer_answer(const char *generated, char *dst, size_t dstlen)
     }
 }
 
+static void normalize_compsec_line_spec(const char *p, const char *end,
+                                        char *dst, size_t dstlen) {
+    if (dstlen == 0) return;
+    size_t n = 0;
+
+    /* The model is instructed to finish with:
+     *
+     *     Answer: <line number or comma-separated line numbers>
+     *
+     * We still accept harmless surface variants in that final line: "line 9",
+     * "9 and 15", "9, 15", or "20-22".  The hidden key decides what set of
+     * exact line numbers is acceptable; this routine only normalizes the model
+     * text into the same compact line-spec syntax.
+     */
+    for (; p < end && *p; p++) {
+        if (!isdigit((unsigned char)*p)) continue;
+
+        if (n > 0 && n + 1 < dstlen) dst[n++] = ',';
+        while (p < end && isdigit((unsigned char)*p)) {
+            if (n + 1 < dstlen) dst[n++] = *p;
+            p++;
+        }
+        while (p < end && isspace((unsigned char)*p)) p++;
+
+        if (p < end && *p == '-') {
+            if (n + 1 < dstlen) dst[n++] = '-';
+            p++;
+            while (p < end && isspace((unsigned char)*p)) p++;
+            while (p < end && isdigit((unsigned char)*p)) {
+                if (n + 1 < dstlen) dst[n++] = *p;
+                p++;
+            }
+        }
+        if (p >= end || !*p) break;
+    }
+    while (n > 0 && (dst[n - 1] == ',' || dst[n - 1] == '-')) n--;
+    dst[n] = '\0';
+    if (n == 0) snprintf(dst, dstlen, "?");
+}
+
+static void find_compsec_answer(const char *generated, char *dst, size_t dstlen) {
+    if (dstlen == 0) return;
+    snprintf(dst, dstlen, "?");
+    const char *visible = strstr(generated, "</think>");
+    visible = visible ? visible + 8 : generated;
+
+    char *answer = strcasestr_local(visible, "answer");
+    if (answer) {
+        const char *end = answer + strlen(answer);
+        if (strlen(answer) > 160) end = answer + 160;
+        const char *newline = memchr(answer, '\n', (size_t)(end - answer));
+        if (newline) end = newline;
+        normalize_compsec_line_spec(answer, end, dst, dstlen);
+        if (strcmp(dst, "?") != 0) return;
+    }
+    find_integer_answer(generated, dst, dstlen);
+}
+
+static bool parse_line_spec(const char *spec, bool *set, size_t setlen) {
+    bool any = false;
+    const char *p = spec;
+    while (p && *p) {
+        while (*p && !isdigit((unsigned char)*p)) p++;
+        if (!*p) break;
+        char *end = NULL;
+        long a = strtol(p, &end, 10);
+        long b = a;
+        p = end;
+        if (*p == '-') {
+            p++;
+            b = strtol(p, &end, 10);
+            p = end;
+        }
+        if (a > b) {
+            long tmp = a;
+            a = b;
+            b = tmp;
+        }
+        if (a < 0) a = 0;
+        if (b >= (long)setlen) b = (long)setlen - 1;
+        for (long i = a; i <= b; i++) {
+            set[i] = true;
+            any = true;
+        }
+    }
+    return any;
+}
+
+static bool compsec_answer_matches(const char *expected_spec, const char *got_spec) {
+    bool expected[256] = {0};
+    bool got[256] = {0};
+    if (!parse_line_spec(expected_spec, expected, sizeof(expected))) return false;
+    if (!parse_line_spec(got_spec, got, sizeof(got))) return false;
+
+    bool hit = false;
+    for (size_t i = 0; i < sizeof(got); i++) {
+        if (!got[i]) continue;
+        if (!expected[i]) return false;
+        hit = true;
+    }
+    /* The prompt asks the model for the single best line, or the smallest exact
+     * set when the bug cannot be localized to one line.  The hidden expected
+     * answer may be a small audited range when adjacent lines are equivalent
+     * locations for the same bug.  Any model-supplied line must be inside that
+     * accepted set, and at least one accepted line must be present. */
+    return hit;
+}
+
 static void find_case_answer(const eval_case *tc, const char *generated,
                              char *dst, size_t dstlen) {
     if (dstlen == 0) return;
     if (eval_case_is_multiple_choice(tc)) {
         dst[0] = find_answer_letter(generated, eval_case_nchoices(tc));
         if (dstlen > 1) dst[1] = '\0';
+    } else if (eval_case_is_compsec(tc)) {
+        find_compsec_answer(generated, dst, dstlen);
     } else {
         find_integer_answer(generated, dst, dstlen);
     }
@@ -2818,6 +2756,9 @@ static void find_case_answer(const eval_case *tc, const char *generated,
 static bool answer_matches(const eval_case *tc, const char *got) {
     if (eval_case_is_multiple_choice(tc)) {
         return got && got[0] && tc->answer && got[0] == tc->answer[0];
+    }
+    if (eval_case_is_compsec(tc)) {
+        return got && tc->answer && compsec_answer_matches(tc->answer, got);
     }
     char expected[EVAL_ANSWER_MAX];
     normalize_integer_answer(tc->answer, strlen(tc->answer), expected, sizeof(expected));
