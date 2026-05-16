@@ -9,10 +9,14 @@
  * a fixed two-pane layout.
  *
  * The embedded questions are small fixed subsets of GPQA Diamond, SuperGPQA,
- * and AIME 2025.  GPQA is released under CC BY 4.0.  SuperGPQA is released
- * under ODC-BY and includes mostly original data plus a limited amount of
- * transformed third-party data.  The AIME 2025 mirror used here is MIT
- * licensed.  Source mirrors used while preparing this file:
+ * and AIME 2025.  The SuperGPQA slice is intentionally audited: rows with
+ * wrong keys, missing figures, or underspecified prompts are replaced instead
+ * of being locally re-keyed, because ds4-eval is a regression harness and a
+ * bad target is worse than a merely hard target.  GPQA is released under
+ * CC BY 4.0.  SuperGPQA is released under ODC-BY and includes mostly original
+ * data plus a limited amount of transformed third-party data.  The AIME 2025
+ * mirror used here is MIT licensed.  Source mirrors used while preparing this
+ * file:
  * https://huggingface.co/datasets/Wanfq/gpqa
  * https://huggingface.co/datasets/m-a-p/SuperGPQA
  * https://huggingface.co/datasets/test-time-compute/aime_2025
@@ -322,24 +326,21 @@ static const eval_case eval_cases[] = {
     },
     {
         .source = "SuperGPQA",
-        .id = "c1433ac557eb4623ab3d6825901d439c",
-        .domain = "Science",
-        .title = "What was the first land plant to appear on Earth?",
-        .question = "What was the first land plant to appear on Earth?",
-        .choice[0] = "Prionophyta",
-        .choice[1] = "Protofungia",
-        .choice[2] = "Gymnospermia",
-        .choice[3] = "Bryophytema",
-        .choice[4] = "Pteridophyta",
-        .choice[5] = "Mouldosperma",
-        .choice[6] = "Gymnomossia",
-        .choice[7] = "Floridophyta",
-        .choice[8] = "Bryophytina",
-        .choice[9] = "Algalophyta",
-        /* SuperGPQA's upstream key says "Gymnospermia", but gymnosperms are
-         * seed plants. The earliest land plants were bryophyte-like; among
-         * these options Bryophytina is the closest valid answer. */
-        .answer = "I",
+        .id = "d44b94f7749345a39a65f6312bda8764",
+        .domain = "Engineering",
+        .title = "Given the system $H(s)=(s+k)/(s^2+2s+k)$ is",
+        .question = "Given the system $H(s)=\\frac{s+k}{s^2+2s+k}$ is a minimum phase system, then the range of $k$ is?",
+        .choice[0] = "$k<-1$",
+        .choice[1] = "$k \\geq 1$",
+        .choice[2] = "$k \\geq 0$",
+        .choice[3] = "$k<0$",
+        .choice[4] = "$k>0$",
+        .choice[5] = "$0<k<1$",
+        .choice[6] = "$k>1$",
+        .choice[7] = "$0 \\leq k < 1$",
+        .choice[8] = "$k \\geq -1$",
+        .choice[9] = "$k>-1$",
+        .answer = "E",
     },
     {
         .source = "AIME2025",
@@ -401,23 +402,21 @@ static const eval_case eval_cases[] = {
     },
     {
         .source = "SuperGPQA",
-        .id = "0380753927db4f9d8cc2a946cf068c09",
-        .domain = "Agronomy",
-        .title = "Insects have different types of mouthparts depending on their",
-        .question = "Insects have different types of mouthparts depending on their dietary habits. For example, the siphoning mouthparts of a butterfly feature a coiled proboscis, primarily specialized from which part of the mouthparts?",
-        .choice[0] = "Rostrum",
-        .choice[1] = "Labrum",
-        .choice[2] = "Palate",
-        .choice[3] = "Upper lip",
-        .choice[4] = "Mandible",
-        .choice[5] = "Hypopharynx",
-        .choice[6] = "Tongue",
-        .choice[7] = "Chelicera",
-        .choice[8] = "Lower lip",
-        .choice[9] = "Maxilla",
-        /* SuperGPQA's upstream key says "Mandible", but the butterfly
-         * siphoning proboscis is formed from maxillary galeae. */
-        .answer = "J",
+        .id = "31950dc80ded400a9181f50626d1f75c",
+        .domain = "Science",
+        .title = "Evaluate the definite integral of the absolute logarithm",
+        .question = "Evaluate the definite integral $\\int_{1/e}^{e} |\\ln x|\\,dx$.",
+        .choice[0] = "$1-2/e$",
+        .choice[1] = "$2$",
+        .choice[2] = "$2-2/e$",
+        .choice[3] = "$2-2/e^3$",
+        .choice[4] = "$2-1/e^3$",
+        .choice[5] = "$1-1/e$",
+        .choice[6] = "$2-1/e^2$",
+        .choice[7] = "$2-2/e^2$",
+        .choice[8] = "$2-1/e$",
+        .choice[9] = "$2/e$",
+        .answer = "C",
     },
     {
         .source = "AIME2025",
@@ -1327,7 +1326,7 @@ static void usage(FILE *fp) {
     fprintf(fp,
         "Usage: ds4-eval [options]\n"
         "\n"
-        "Runs a small built-in GPQA Diamond/SuperGPQA/AIME2025 integration test.\n"
+        "Runs a small built-in GPQA Diamond/audited SuperGPQA/AIME2025 integration test.\n"
         "The TTY UI keeps the question list on the left and streams sampled\n"
         "tokens live on the right; thinking text is dim grey until </think>.\n"
         "In the TTY UI, Up/Down selects a question, Enter runs it next,\n"

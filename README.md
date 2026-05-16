@@ -214,10 +214,12 @@ visible answer. Press `p` to pause, Up/Down to inspect or select another
 question, and Enter to run the selected question next. `--plain` disables the
 TUI.
 
-The 75 embedded questions are interleaved as 25 GPQA Diamond, 25 SuperGPQA, and
-25 AIME 2025 problems. The order is intentionally progressive: early questions
-are useful smoke tests, while later questions are hard enough that a strong
-reasoning model should still miss some of them.
+The 75 embedded questions are interleaved as 25 GPQA Diamond, 25 audited
+SuperGPQA, and 25 AIME 2025 problems. The order is intentionally progressive:
+early questions are useful smoke tests, while later questions are hard enough
+that a strong reasoning model should still miss some of them. The SuperGPQA
+slice is curated rather than blind: upstream rows with wrong keys, missing
+figures, or underspecified prompts are replaced with cleaner rows.
 
 For a model like DeepSeek V4 Flash, the set should be treated as a hard
 capability regression suite rather than a pass/fail unit test:
