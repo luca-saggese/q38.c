@@ -62650,46 +62650,6 @@ $$
 Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
 Answer: <letter><｜Assistant｜><think>
 
-===== DS4_IMATRIX_PROMPT eval_reasoning-b121c22f5aa6 eval_reasoning nothink SuperGPQA:20a40e5c0ca14934a0d59db6d9500487 =====
-<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Law / Which city does the 'Adachi Ward Anti-Anti-Social Organization
-
-Which city does the 'Adachi Ward Anti-Anti-Social Organization Regulation Ordinance' belong to?
-
-Choices:
-A. Adachi, Saitama, Japan
-B. Kyoto, Japan
-C. Adachi, Japan
-D. Yokohama, Japan
-E. Saitama, Japan
-F. Nagoya, Japan
-G. Adachi, Tokyo, Japan (metropolitan area)
-H. Adachi, Tokyo, Japan
-I. Osaka, Japan
-J. Tokyo, Japan
-
-Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
-Answer: <letter><｜Assistant｜></think>
-
-===== DS4_IMATRIX_PROMPT eval_reasoning-7b44b14eb3a2 eval_reasoning think SuperGPQA:20a40e5c0ca14934a0d59db6d9500487 =====
-<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Law / Which city does the 'Adachi Ward Anti-Anti-Social Organization
-
-Which city does the 'Adachi Ward Anti-Anti-Social Organization Regulation Ordinance' belong to?
-
-Choices:
-A. Adachi, Saitama, Japan
-B. Kyoto, Japan
-C. Adachi, Japan
-D. Yokohama, Japan
-E. Saitama, Japan
-F. Nagoya, Japan
-G. Adachi, Tokyo, Japan (metropolitan area)
-H. Adachi, Tokyo, Japan
-I. Osaka, Japan
-J. Tokyo, Japan
-
-Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
-Answer: <letter><｜Assistant｜><think>
-
 ===== DS4_IMATRIX_PROMPT eval_reasoning-de868e454d37 eval_reasoning nothink SuperGPQA:4a1d1780a93f4093b6fb7d3c314cbea8 =====
 <｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / What is the key factor in selecting a reasonable amount of
 
@@ -62770,6 +62730,46 @@ F. $$-727\dfrac{kcal}{mol}$$
 G. $$-229.6\dfrac{kcal}{mol}$$
 H. $$-245.3\dfrac{kcal}{mol}$$
 I. $$-244.3\dfrac{kcal}{mol}$$
+
+Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
+Answer: <letter><｜Assistant｜><think>
+
+===== DS4_IMATRIX_PROMPT eval_reasoning-b69c2732b214 eval_reasoning nothink SuperGPQA:6082513c8dba4ec68aa68f1bf5854d09 =====
+<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Law / What is the concept called that suggests crime can be reduced
+
+What is the concept called that suggests crime can be reduced by altering the physical features of an environment?
+
+Choices:
+A. Defensible space
+B. Zone of transition
+C. Sanitized zone
+D. Defended area
+E. Environmental design
+F. Environmental modification
+G. Defended space
+H. None of the other choices
+I. Environmental deterrence
+J. Environmental defense
+
+Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
+Answer: <letter><｜Assistant｜></think>
+
+===== DS4_IMATRIX_PROMPT eval_reasoning-dd05d641efa2 eval_reasoning think SuperGPQA:6082513c8dba4ec68aa68f1bf5854d09 =====
+<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Law / What is the concept called that suggests crime can be reduced
+
+What is the concept called that suggests crime can be reduced by altering the physical features of an environment?
+
+Choices:
+A. Defensible space
+B. Zone of transition
+C. Sanitized zone
+D. Defended area
+E. Environmental design
+F. Environmental modification
+G. Defended space
+H. None of the other choices
+I. Environmental deterrence
+J. Environmental defense
 
 Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
 Answer: <letter><｜Assistant｜><think>
@@ -62890,46 +62890,6 @@ H. 2,6-dinitrochlorobenzene
 Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
 Answer: <letter><｜Assistant｜><think>
 
-===== DS4_IMATRIX_PROMPT eval_reasoning-a17df3f795de eval_reasoning nothink SuperGPQA:9254e41181d1414b8dfdc927f6f85c96 =====
-<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / Water (with refractive index = $\frac{4}{3}$) in a tank is 18 cm
-
-Water (with refractive index = $\frac{4}{3}$) in a tank is 18 cm deep. Oil of refractive index $\frac{7}{4}$ lies on water making a convex surface of radius of curvature R = 6 cm as shown. Consider oil to act as a thin lens. An object S is placed 24 cm above water surface. The location of its image is at x cm above the bottom of the tank. Find the value of x.
-
-Choices:
-A. 2.1 cm
-B. 2.5 cm
-C. 1.9 cm
-D. 2.4 cm
-E. 1.5 cm
-F. 2.3 cm
-G. 2.2 cm
-H. 1 cm
-I. 2 cm
-J. 1.8 cm
-
-Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
-Answer: <letter><｜Assistant｜></think>
-
-===== DS4_IMATRIX_PROMPT eval_reasoning-2b962f8f1eb3 eval_reasoning think SuperGPQA:9254e41181d1414b8dfdc927f6f85c96 =====
-<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / Water (with refractive index = $\frac{4}{3}$) in a tank is 18 cm
-
-Water (with refractive index = $\frac{4}{3}$) in a tank is 18 cm deep. Oil of refractive index $\frac{7}{4}$ lies on water making a convex surface of radius of curvature R = 6 cm as shown. Consider oil to act as a thin lens. An object S is placed 24 cm above water surface. The location of its image is at x cm above the bottom of the tank. Find the value of x.
-
-Choices:
-A. 2.1 cm
-B. 2.5 cm
-C. 1.9 cm
-D. 2.4 cm
-E. 1.5 cm
-F. 2.3 cm
-G. 2.2 cm
-H. 1 cm
-I. 2 cm
-J. 1.8 cm
-
-Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
-Answer: <letter><｜Assistant｜><think>
-
 ===== DS4_IMATRIX_PROMPT eval_reasoning-528b220cb86c eval_reasoning nothink SuperGPQA:97ad69dda7b2462c98638b79e78aea0b =====
 <｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Medicine / The paranasal sinuses opening in the upper nasal canal are ().
 
@@ -62970,42 +62930,82 @@ J. Anterior and middle ethmoid sinus groups
 Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
 Answer: <letter><｜Assistant｜><think>
 
-===== DS4_IMATRIX_PROMPT eval_reasoning-dddb9db2f63b eval_reasoning nothink SuperGPQA:b02cdc130ac24dada45a461a8a1e0e11 =====
-<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / Which of the following statements about the necessary conditions
+===== DS4_IMATRIX_PROMPT eval_reasoning-6307dc4d4725 eval_reasoning nothink SuperGPQA:9f93aa2cfdb547b5b3a4623f80f7fff6 =====
+<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / A channel samples once every 1/8 second, and the transmission
 
-Which of the following statements about the necessary conditions for producing wheel peripheral traction is correct? (Choose the option that includes all the correct statements)
-I. The locomotive driving wheels receive torque transmitted from the power transmission device. II. The output shaft of the diesel engine can only rotate in one direction. III. Friction exists between the driving wheels and the steel rails. IV. The power of the diesel engine is proportional to n, and the diesel engine generally operates near the condition n = n_{\text{max}}.
+A channel samples once every 1/8 second, and the transmission signal has a total of 16 different states. The maximum data transmission rate is ().
 
 Choices:
-A. I, III, IV
-B. I, IV
-C. I, II, III, IV, V
-D. I, II, IV
-E. II, IV
-F. II, III, IV
-G. I, II, III, IV
-H. I,II
-I. I, III
+A. 48b/s
+B. 64b/s
+C. 96b/s
+D. 12b/s
+E. 4b/s
+F. 8b/s
+G. 128b/s
+H. 16b/s
+I. 32b/s
+J. 24b/s
 
 Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
 Answer: <letter><｜Assistant｜></think>
 
-===== DS4_IMATRIX_PROMPT eval_reasoning-794311d7b2d0 eval_reasoning think SuperGPQA:b02cdc130ac24dada45a461a8a1e0e11 =====
-<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / Which of the following statements about the necessary conditions
+===== DS4_IMATRIX_PROMPT eval_reasoning-fdeeafda19d1 eval_reasoning think SuperGPQA:9f93aa2cfdb547b5b3a4623f80f7fff6 =====
+<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / A channel samples once every 1/8 second, and the transmission
 
-Which of the following statements about the necessary conditions for producing wheel peripheral traction is correct? (Choose the option that includes all the correct statements)
-I. The locomotive driving wheels receive torque transmitted from the power transmission device. II. The output shaft of the diesel engine can only rotate in one direction. III. Friction exists between the driving wheels and the steel rails. IV. The power of the diesel engine is proportional to n, and the diesel engine generally operates near the condition n = n_{\text{max}}.
+A channel samples once every 1/8 second, and the transmission signal has a total of 16 different states. The maximum data transmission rate is ().
 
 Choices:
-A. I, III, IV
-B. I, IV
-C. I, II, III, IV, V
-D. I, II, IV
-E. II, IV
-F. II, III, IV
-G. I, II, III, IV
-H. I,II
-I. I, III
+A. 48b/s
+B. 64b/s
+C. 96b/s
+D. 12b/s
+E. 4b/s
+F. 8b/s
+G. 128b/s
+H. 16b/s
+I. 32b/s
+J. 24b/s
+
+Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
+Answer: <letter><｜Assistant｜><think>
+
+===== DS4_IMATRIX_PROMPT eval_reasoning-c2f85ea76ef9 eval_reasoning nothink SuperGPQA:ab430ac3f18e4e02a2cb3f35498c6b30 =====
+<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / Assuming the signal x(t)=(sin(50*pi*t)/(pi*t))^2
+
+Assuming the signal $x(t)=(\frac{\sin(50\pi t)}{\pi t})^2$ has a Fourier transform result of $X(j\omega)$, with a sampling frequency $\omega_s=150\pi$, the sampled signal is $g(t)$, and the Fourier transform of $g(t)$ is $G(j\omega)$. If $G(j\omega)$ is required to satisfy: $G(j\omega)=75X(j\omega) \quad for \quad |\omega|\leq\omega_0$, what is the maximum value of $\omega_0$?
+
+Choices:
+A. 50\pi
+B. 37.5\pi
+C. 150\pi
+D. 125\pi
+E. 43.75\pi
+F. 62.5\pi
+G. 75\pi
+H. 25\pi
+I. 87.5\pi
+J. 100\pi
+
+Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
+Answer: <letter><｜Assistant｜></think>
+
+===== DS4_IMATRIX_PROMPT eval_reasoning-c230741eeb8d eval_reasoning think SuperGPQA:ab430ac3f18e4e02a2cb3f35498c6b30 =====
+<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / Assuming the signal x(t)=(sin(50*pi*t)/(pi*t))^2
+
+Assuming the signal $x(t)=(\frac{\sin(50\pi t)}{\pi t})^2$ has a Fourier transform result of $X(j\omega)$, with a sampling frequency $\omega_s=150\pi$, the sampled signal is $g(t)$, and the Fourier transform of $g(t)$ is $G(j\omega)$. If $G(j\omega)$ is required to satisfy: $G(j\omega)=75X(j\omega) \quad for \quad |\omega|\leq\omega_0$, what is the maximum value of $\omega_0$?
+
+Choices:
+A. 50\pi
+B. 37.5\pi
+C. 150\pi
+D. 125\pi
+E. 43.75\pi
+F. 62.5\pi
+G. 75\pi
+H. 25\pi
+I. 87.5\pi
+J. 100\pi
 
 Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
 Answer: <letter><｜Assistant｜><think>
@@ -63170,48 +63170,6 @@ J. Algalophyta
 Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
 Answer: <letter><｜Assistant｜><think>
 
-===== DS4_IMATRIX_PROMPT eval_reasoning-ba9be761ff27 eval_reasoning nothink SuperGPQA:c824381a4064466682d88eddfce44a5b =====
-<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / Suppose that a tank containing a certain liquid has an outlet
-
-Suppose that a tank containing a certain liquid has an outlet near the bottom. Let $h(t)$ be the height of the liquid surface above the outlet at time $t$. Torricelli's principle states that the outflow velocity $v$ at the outlet is equal to the velocity of a particle falling freely (with no drag) from the height $h$.
-Consider a water tank in the form of a right circular cylinder that is $3 \mathrm{~m}$ high above the outlet. The radius of the tank is $1 \mathrm{~m}$ and the radius of the circular outlet is $0.1 \mathrm{~m}$. If the tank is initially full of water, determine how long it takes to drain the tank down to the level of the outlet.
-
-Choices:
-A. 110.36 s
-B. 130.41 s
-C. 175.55 s
-D. 200.62 s
-E. 85.30 s
-F. 120.25 s
-G. 160.48 s
-H. 150.20 s
-I. 105.67 s
-J. 98.75 s
-
-Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
-Answer: <letter><｜Assistant｜></think>
-
-===== DS4_IMATRIX_PROMPT eval_reasoning-316bc8c2a168 eval_reasoning think SuperGPQA:c824381a4064466682d88eddfce44a5b =====
-<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / Suppose that a tank containing a certain liquid has an outlet
-
-Suppose that a tank containing a certain liquid has an outlet near the bottom. Let $h(t)$ be the height of the liquid surface above the outlet at time $t$. Torricelli's principle states that the outflow velocity $v$ at the outlet is equal to the velocity of a particle falling freely (with no drag) from the height $h$.
-Consider a water tank in the form of a right circular cylinder that is $3 \mathrm{~m}$ high above the outlet. The radius of the tank is $1 \mathrm{~m}$ and the radius of the circular outlet is $0.1 \mathrm{~m}$. If the tank is initially full of water, determine how long it takes to drain the tank down to the level of the outlet.
-
-Choices:
-A. 110.36 s
-B. 130.41 s
-C. 175.55 s
-D. 200.62 s
-E. 85.30 s
-F. 120.25 s
-G. 160.48 s
-H. 150.20 s
-I. 105.67 s
-J. 98.75 s
-
-Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
-Answer: <letter><｜Assistant｜><think>
-
 ===== DS4_IMATRIX_PROMPT eval_reasoning-ba623d0c4d9a eval_reasoning nothink SuperGPQA:cef9bcc087434cc2b4e354a9baef55eb =====
 <｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / What is the diffusion coefficient for coper in aluminum at 600
 
@@ -63288,6 +63246,46 @@ $$
 J. $$
 4. 7 \times1 0^{-1 3} \mathrm{~ m^{2} / s}
 $$
+
+Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
+Answer: <letter><｜Assistant｜><think>
+
+===== DS4_IMATRIX_PROMPT eval_reasoning-23f6aa81bb86 eval_reasoning nothink SuperGPQA:e1825d70c5844c22933087eafa89e39c =====
+<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / The transfer function of the system is g(s)=(s^2+3s+2)
+
+The transfer function of the system is \(g(s)=\dfrac{s^2+3s+2}{s(s^2+7s+12)}\). Perform partial fraction decomposition on it, and the result is
+
+Choices:
+A. \(\dfrac{2/3}{s+3}+\dfrac{3/2}{s+4}\)
+B. \dfrac{1/6}{s}+\dfrac{2/3}{s+3}-\dfrac{3/2}{s-4}
+C. \(\dfrac{1/6}{s}+\dfrac{2/3}{s+3}-\dfrac{3/2}{s+4}\)
+D. \(\dfrac{1/6}{s}+\dfrac{2/3}{s-3}+\dfrac{3/2}{s-4}\)
+E. \(\dfrac{1/6}{s}+\dfrac{2/3}{s-3}-\dfrac{3/2}{s-4}\)
+F. \(\dfrac{1/6}{s}+\dfrac{2/3}{s-3}-\dfrac{3/2}{s+4}\)
+G. \(\dfrac{1/6}{s}-\dfrac{2/3}{s-3}+\dfrac{3/2}{s+4}\)
+H. \dfrac{1/6}{s}-\dfrac{2/3}{s-3}-\dfrac{3/2}{s-4}
+I. \(\dfrac{1/6}{s}-\dfrac{2/3}{s-3}-\dfrac{3/2}{s+4}\)
+J. \(\dfrac{1/6}{s}-\dfrac{2/3}{s+3}+\dfrac{3/2}{s+4}\)
+
+Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
+Answer: <letter><｜Assistant｜></think>
+
+===== DS4_IMATRIX_PROMPT eval_reasoning-7e19239c62be eval_reasoning think SuperGPQA:e1825d70c5844c22933087eafa89e39c =====
+<｜begin▁of▁sentence｜>You are solving a hard benchmark question. Reason carefully. The final answer must follow the requested format exactly.<｜User｜>SuperGPQA / Engineering / The transfer function of the system is g(s)=(s^2+3s+2)
+
+The transfer function of the system is \(g(s)=\dfrac{s^2+3s+2}{s(s^2+7s+12)}\). Perform partial fraction decomposition on it, and the result is
+
+Choices:
+A. \(\dfrac{2/3}{s+3}+\dfrac{3/2}{s+4}\)
+B. \dfrac{1/6}{s}+\dfrac{2/3}{s+3}-\dfrac{3/2}{s-4}
+C. \(\dfrac{1/6}{s}+\dfrac{2/3}{s+3}-\dfrac{3/2}{s+4}\)
+D. \(\dfrac{1/6}{s}+\dfrac{2/3}{s-3}+\dfrac{3/2}{s-4}\)
+E. \(\dfrac{1/6}{s}+\dfrac{2/3}{s-3}-\dfrac{3/2}{s-4}\)
+F. \(\dfrac{1/6}{s}+\dfrac{2/3}{s-3}-\dfrac{3/2}{s+4}\)
+G. \(\dfrac{1/6}{s}-\dfrac{2/3}{s-3}+\dfrac{3/2}{s+4}\)
+H. \dfrac{1/6}{s}-\dfrac{2/3}{s-3}-\dfrac{3/2}{s-4}
+I. \(\dfrac{1/6}{s}-\dfrac{2/3}{s-3}-\dfrac{3/2}{s+4}\)
+J. \(\dfrac{1/6}{s}-\dfrac{2/3}{s+3}+\dfrac{3/2}{s+4}\)
 
 Solve the question. At the end, write exactly one final line in this format and do not write anything after it:
 Answer: <letter><｜Assistant｜><think>
@@ -71220,7 +71218,7 @@ static bool parse_output_config_effort(const char **p, ds4_think_mode *effort) {
             if (!parse_reasoning_effort_value(p, effort)) {
                 free(key);<｜Assistant｜><think>
 
-===== DS4_IMATRIX_PROMPT long_context-83b1db7dba73 long_context nothink codebase:eval-imatrix =====
+===== DS4_IMATRIX_PROMPT long_context-5c517a051f7f long_context nothink codebase:eval-imatrix =====
 <｜begin▁of▁sentence｜>You are DeepSeek V4 Flash running locally. Answer accurately, preserve technical details, and use tools only when the prompt asks for tool use.<｜User｜>Use the following excerpts to explain how the evaluation harness and the imatrix dataset differ in purpose. Mention which parts affect model quality measurement and which parts affect quantization calibration.
 
 ### gguf-tools/imatrix/README.md chunk 0
@@ -71266,7 +71264,7 @@ It contains DS4-rendered chat prompts, separated by visible
 - `ds4-eval` GPQA Diamond, SuperGPQA, and AIME2025 benchmark prompts.
 - Both thinking and non-thinking assistant prefixes.
 
-The current tracked dataset has 4656 rendered prompts and roughly 2.87M tokens
+The current tracked dataset has 4682 rendered prompts and roughly 2.91M tokens
 by the coarse bytes/4 estimate.  Check
 `gguf-tools/imatrix/dataset/manifest.json` for the exact generated-file
 summary.
@@ -71364,8 +71362,9 @@ turns so the imatrix sees the same special-token patterns used by agent clients.
 The corpus is provider-neutral and also includes language/prose rewriting,
 summarization, copy-editing, extraction, multilingual translation, programming
 prompts, Bash scripting, algorithm recall, `ds4-eval` benchmark-reasoning
-prompts, long-context source excerpts, Metal/C code review tasks, and
-inference-specific debugging tasks.
+prompts, long-context code synthesis, agent transcript replay, log diagnosis,
+prose fact recovery, delayed-constraint and small needle tasks, Metal/C code
+review tasks, and inference-specific debugging tasks.
 
 For normal imatrix collection, use `rendered_prompts.txt` so calibration covers
 both thinking and non-thinking modes. Split files are provided for ablations.
@@ -71448,7 +71447,7 @@ make cpu              # CPU-only diagnostics build
 `./ds4flash.gguf` is the default model path used by both binaries. Pass `-m` to
 select another supported GGUF from `./gguf/`. Run `./ds4 --help` and<｜Assistant｜></think>
 
-===== DS4_IMATRIX_PROMPT long_context-0d89b1d1bfda long_context think codebase:eval-imatrix =====
+===== DS4_IMATRIX_PROMPT long_context-bca7431b9a0e long_context think codebase:eval-imatrix =====
 <｜begin▁of▁sentence｜>You are DeepSeek V4 Flash running locally. Answer accurately, preserve technical details, and use tools only when the prompt asks for tool use.<｜User｜>Use the following excerpts to explain how the evaluation harness and the imatrix dataset differ in purpose. Mention which parts affect model quality measurement and which parts affect quantization calibration.
 
 ### gguf-tools/imatrix/README.md chunk 0
@@ -71494,7 +71493,7 @@ It contains DS4-rendered chat prompts, separated by visible
 - `ds4-eval` GPQA Diamond, SuperGPQA, and AIME2025 benchmark prompts.
 - Both thinking and non-thinking assistant prefixes.
 
-The current tracked dataset has 4656 rendered prompts and roughly 2.87M tokens
+The current tracked dataset has 4682 rendered prompts and roughly 2.91M tokens
 by the coarse bytes/4 estimate.  Check
 `gguf-tools/imatrix/dataset/manifest.json` for the exact generated-file
 summary.
@@ -71592,8 +71591,9 @@ turns so the imatrix sees the same special-token patterns used by agent clients.
 The corpus is provider-neutral and also includes language/prose rewriting,
 summarization, copy-editing, extraction, multilingual translation, programming
 prompts, Bash scripting, algorithm recall, `ds4-eval` benchmark-reasoning
-prompts, long-context source excerpts, Metal/C code review tasks, and
-inference-specific debugging tasks.
+prompts, long-context code synthesis, agent transcript replay, log diagnosis,
+prose fact recovery, delayed-constraint and small needle tasks, Metal/C code
+review tasks, and inference-specific debugging tasks.
 
 For normal imatrix collection, use `rendered_prompts.txt` so calibration covers
 both thinking and non-thinking modes. Split files are provided for ablations.
@@ -74607,7 +74607,7 @@ It contains DS4-rendered chat prompts, separated by visible
 - `ds4-eval` GPQA Diamond, SuperGPQA, and AIME2025 benchmark prompts.
 - Both thinking and non-thinking assistant prefixes.
 
-The current tracked dataset has 4656 rendered prompts and roughly 2.87M tokens
+The current tracked dataset has 4682 rendered prompts and roughly 2.91M tokens
 by the coarse bytes/4 estimate.  Check
 `gguf-tools/imatrix/dataset/manifest.json` for the exact generated-file
 summary.
@@ -74926,7 +74926,7 @@ It contains DS4-rendered chat prompts, separated by visible
 - `ds4-eval` GPQA Diamond, SuperGPQA, and AIME2025 benchmark prompts.
 - Both thinking and non-thinking assistant prefixes.
 
-The current tracked dataset has 4656 rendered prompts and roughly 2.87M tokens
+The current tracked dataset has 4682 rendered prompts and roughly 2.91M tokens
 by the coarse bytes/4 estimate.  Check
 `gguf-tools/imatrix/dataset/manifest.json` for the exact generated-file
 summary.
@@ -75278,7 +75278,7 @@ It contains DS4-rendered chat prompts, separated by visible
 - `ds4-eval` GPQA Diamond, SuperGPQA, and AIME2025 benchmark prompts.
 - Both thinking and non-thinking assistant prefixes.
 
-The current tracked dataset has 4656 rendered prompts and roughly 2.87M tokens
+The current tracked dataset has 4682 rendered prompts and roughly 2.91M tokens
 by the coarse bytes/4 estimate.  Check
 `gguf-tools/imatrix/dataset/manifest.json` for the exact generated-file
 summary.
@@ -75746,7 +75746,7 @@ It contains DS4-rendered chat prompts, separated by visible
 - `ds4-eval` GPQA Diamond, SuperGPQA, and AIME2025 benchmark prompts.
 - Both thinking and non-thinking assistant prefixes.
 
-The current tracked dataset has 4656 rendered prompts and roughly 2.87M tokens
+The current tracked dataset has 4682 rendered prompts and roughly 2.91M tokens
 by the coarse bytes/4 estimate.  Check
 `gguf-tools/imatrix/dataset/manifest.json` for the exact generated-file
 summary.
@@ -76056,7 +76056,7 @@ static void buf_printf(buf *b, const char *fmt, ...) {
 static char *buf_take(buf *b) {
     if (!b->ptr) return xstrdup("");<｜Assistant｜><think>
 
-===== DS4_IMATRIX_PROMPT long_context-f4c754ac9a17 long_context nothink long:1 =====
+===== DS4_IMATRIX_PROMPT long_context-a77a08e7a01e long_context nothink long:1 =====
 <｜begin▁of▁sentence｜>You are DeepSeek V4 Flash running locally. Answer accurately, preserve technical details, and use tools only when the prompt asks for tool use.<｜User｜>Read the following repository excerpts as one long context. Identify the three most important invariants for correctness and the two most likely performance bottlenecks.
 
 ### gguf-tools/imatrix/dataset/README.md chunk 0
@@ -76091,8 +76091,9 @@ turns so the imatrix sees the same special-token patterns used by agent clients.
 The corpus is provider-neutral and also includes language/prose rewriting,
 summarization, copy-editing, extraction, multilingual translation, programming
 prompts, Bash scripting, algorithm recall, `ds4-eval` benchmark-reasoning
-prompts, long-context source excerpts, Metal/C code review tasks, and
-inference-specific debugging tasks.
+prompts, long-context code synthesis, agent transcript replay, log diagnosis,
+prose fact recovery, delayed-constraint and small needle tasks, Metal/C code
+review tasks, and inference-specific debugging tasks.
 
 For normal imatrix collection, use `rendered_prompts.txt` so calibration covers
 both thinking and non-thinking modes. Split files are provided for ablations.
@@ -76346,7 +76347,7 @@ kernel void kernel_dsv4_shared_gate_up_swiglu_q8_0(
     const short ix = tiisg / (NW / NQ);
     const short il = tiisg % (NW / NQ);<｜Assistant｜></think>
 
-===== DS4_IMATRIX_PROMPT long_context-7dc84eff8a96 long_context think long:1 =====
+===== DS4_IMATRIX_PROMPT long_context-dab8d7e58e5e long_context think long:1 =====
 <｜begin▁of▁sentence｜>You are DeepSeek V4 Flash running locally. Answer accurately, preserve technical details, and use tools only when the prompt asks for tool use.<｜User｜>Read the following repository excerpts as one long context. Identify the three most important invariants for correctness and the two most likely performance bottlenecks.
 
 ### gguf-tools/imatrix/dataset/README.md chunk 0
@@ -76381,8 +76382,9 @@ turns so the imatrix sees the same special-token patterns used by agent clients.
 The corpus is provider-neutral and also includes language/prose rewriting,
 summarization, copy-editing, extraction, multilingual translation, programming
 prompts, Bash scripting, algorithm recall, `ds4-eval` benchmark-reasoning
-prompts, long-context source excerpts, Metal/C code review tasks, and
-inference-specific debugging tasks.
+prompts, long-context code synthesis, agent transcript replay, log diagnosis,
+prose fact recovery, delayed-constraint and small needle tasks, Metal/C code
+review tasks, and inference-specific debugging tasks.
 
 For normal imatrix collection, use `rendered_prompts.txt` so calibration covers
 both thinking and non-thinking modes. Split files are provided for ablations.
@@ -204182,7 +204184,7 @@ gguf-tools/quality-testing/score_official MODEL.gguf gguf-tools/quality-testing/
 python3 gguf-tools/quality-testing/compare_scores.py /tmp/old.tsv /tmp/new.tsv
 ```<｜Assistant｜><think>
 
-===== DS4_IMATRIX_PROMPT source-3dd897292962 source nothink gguf-tools/imatrix/README.md:0 =====
+===== DS4_IMATRIX_PROMPT source-1d87f5836636 source nothink gguf-tools/imatrix/README.md:0 =====
 <｜begin▁of▁sentence｜>You are DeepSeek V4 Flash running locally. Answer accurately, preserve technical details, and use tools only when the prompt asks for tool use.<｜User｜>Review this excerpt for correctness risks, memory lifetime issues, and performance bottlenecks.
 
 Document: gguf-tools/imatrix/README.md
@@ -204229,7 +204231,7 @@ It contains DS4-rendered chat prompts, separated by visible
 - `ds4-eval` GPQA Diamond, SuperGPQA, and AIME2025 benchmark prompts.
 - Both thinking and non-thinking assistant prefixes.
 
-The current tracked dataset has 4656 rendered prompts and roughly 2.87M tokens
+The current tracked dataset has 4682 rendered prompts and roughly 2.91M tokens
 by the coarse bytes/4 estimate.  Check
 `gguf-tools/imatrix/dataset/manifest.json` for the exact generated-file
 summary.
@@ -204285,7 +204287,7 @@ Example Q4 routed-expert regeneration:
 gguf-tools/deepseek4-quantize \
   --hf ../deepseek-v4-quants/hf/DeepSeek-V4-Flash \<｜Assistant｜></think>
 
-===== DS4_IMATRIX_PROMPT source-0f7a9c101018 source think gguf-tools/imatrix/README.md:0 =====
+===== DS4_IMATRIX_PROMPT source-204af2fbc6fd source think gguf-tools/imatrix/README.md:0 =====
 <｜begin▁of▁sentence｜>You are DeepSeek V4 Flash running locally. Answer accurately, preserve technical details, and use tools only when the prompt asks for tool use.<｜User｜>Review this excerpt for correctness risks, memory lifetime issues, and performance bottlenecks.
 
 Document: gguf-tools/imatrix/README.md
@@ -204332,7 +204334,7 @@ It contains DS4-rendered chat prompts, separated by visible
 - `ds4-eval` GPQA Diamond, SuperGPQA, and AIME2025 benchmark prompts.
 - Both thinking and non-thinking assistant prefixes.
 
-The current tracked dataset has 4656 rendered prompts and roughly 2.87M tokens
+The current tracked dataset has 4682 rendered prompts and roughly 2.91M tokens
 by the coarse bytes/4 estimate.  Check
 `gguf-tools/imatrix/dataset/manifest.json` for the exact generated-file
 summary.
@@ -204536,7 +204538,7 @@ name mapping and per-expert slicing convention.  Without that DS4-specific
 mapping, a generic imatrix loader will see valid data but will not know how to
 apply the packed routed-expert vectors correctly.<｜Assistant｜><think>
 
-===== DS4_IMATRIX_PROMPT source-171ba9d34fed source nothink gguf-tools/imatrix/dataset/README.md:0 =====
+===== DS4_IMATRIX_PROMPT source-524ce87e6e01 source nothink gguf-tools/imatrix/dataset/README.md:0 =====
 <｜begin▁of▁sentence｜>You are DeepSeek V4 Flash running locally. Answer accurately, preserve technical details, and use tools only when the prompt asks for tool use.<｜User｜>Review this excerpt for correctness risks, memory lifetime issues, and performance bottlenecks.
 
 Document: gguf-tools/imatrix/dataset/README.md
@@ -204572,13 +204574,14 @@ turns so the imatrix sees the same special-token patterns used by agent clients.
 The corpus is provider-neutral and also includes language/prose rewriting,
 summarization, copy-editing, extraction, multilingual translation, programming
 prompts, Bash scripting, algorithm recall, `ds4-eval` benchmark-reasoning
-prompts, long-context source excerpts, Metal/C code review tasks, and
-inference-specific debugging tasks.
+prompts, long-context code synthesis, agent transcript replay, log diagnosis,
+prose fact recovery, delayed-constraint and small needle tasks, Metal/C code
+review tasks, and inference-specific debugging tasks.
 
 For normal imatrix collection, use `rendered_prompts.txt` so calibration covers
 both thinking and non-thinking modes. Split files are provided for ablations.<｜Assistant｜></think>
 
-===== DS4_IMATRIX_PROMPT source-b157833fdd7a source think gguf-tools/imatrix/dataset/README.md:0 =====
+===== DS4_IMATRIX_PROMPT source-c9fcdb3b9276 source think gguf-tools/imatrix/dataset/README.md:0 =====
 <｜begin▁of▁sentence｜>You are DeepSeek V4 Flash running locally. Answer accurately, preserve technical details, and use tools only when the prompt asks for tool use.<｜User｜>Review this excerpt for correctness risks, memory lifetime issues, and performance bottlenecks.
 
 Document: gguf-tools/imatrix/dataset/README.md
@@ -204614,8 +204617,9 @@ turns so the imatrix sees the same special-token patterns used by agent clients.
 The corpus is provider-neutral and also includes language/prose rewriting,
 summarization, copy-editing, extraction, multilingual translation, programming
 prompts, Bash scripting, algorithm recall, `ds4-eval` benchmark-reasoning
-prompts, long-context source excerpts, Metal/C code review tasks, and
-inference-specific debugging tasks.
+prompts, long-context code synthesis, agent transcript replay, log diagnosis,
+prose fact recovery, delayed-constraint and small needle tasks, Metal/C code
+review tasks, and inference-specific debugging tasks.
 
 For normal imatrix collection, use `rendered_prompts.txt` so calibration covers
 both thinking and non-thinking modes. Split files are provided for ablations.<｜Assistant｜><think>
