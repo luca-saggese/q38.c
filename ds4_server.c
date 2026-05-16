@@ -4653,30 +4653,45 @@ static void append_tool_call_deltas_json(buf *b, const tool_calls *calls, const 
     buf_putc(b, ']');
 }
 
-static bool http_response(int fd, int code, const char *type, const char *body) {
+static void append_cors_headers(buf *h) {
+    buf_puts(h,
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        "Access-Control-Allow-Headers: *\r\n");
+}
+
+static bool http_response(int fd, bool enable_cors, int code, const char *type, const char *body) {
     const char *reason = code == 200 ? "OK" :
+                         code == 204 ? "No Content" :
                          code == 400 ? "Bad Request" :
                          code == 404 ? "Not Found" :
                          code == 409 ? "Conflict" :
                          code == 500 ? "Internal Server Error" : "Error";
+    const size_t body_len = body ? strlen(body) : 0;
     buf h = {0};
     buf_printf(&h,
         "HTTP/1.1 %d %s\r\n"
-        "Content-Type: %s\r\n"
-        "Content-Length: %zu\r\n"
-        "Connection: close\r\n\r\n",
-        code, reason, type, strlen(body));
-    bool ok = send_all(fd, h.ptr, h.len) && send_all(fd, body, strlen(body));
+        "Content-Length: %zu\r\n",
+        code, reason, body_len);
+    if (type && type[0]) {
+        buf_puts(&h, "Content-Type: ");
+        buf_puts(&h, type);
+        buf_puts(&h, "\r\n");
+    }
+    if (enable_cors) append_cors_headers(&h);
+    buf_puts(&h, "Connection: close\r\n\r\n");
+    bool ok = send_all(fd, h.ptr, h.len);
+    if (ok && body_len) ok = send_all(fd, body, body_len);
     buf_free(&h);
     return ok;
 }
 
-static bool http_error(int fd, int code, const char *msg) {
+static bool http_error(int fd, bool enable_cors, int code, const char *msg) {
     buf b = {0};
     buf_puts(&b, "{\"error\":{\"message\":");
     json_escape(&b, msg);
     buf_puts(&b, ",\"type\":\"invalid_request_error\"}}\n");
-    bool ok = http_response(fd, code, "application/json", b.ptr);
+    bool ok = http_response(fd, enable_cors, code, "application/json", b.ptr);
     buf_free(&b);
     return ok;
 }
@@ -4694,7 +4709,8 @@ static bool request_exceeds_context(const request *r, int ctx_size) {
     return r && r->prompt.len >= ctx_size;
 }
 
-static bool http_error_context_length_exceeded(int fd, const request *r,
+static bool http_error_context_length_exceeded(int fd, bool enable_cors,
+                                               const request *r,
                                                int n_prompt_tokens,
                                                int ctx_size) {
     buf b = {0};
@@ -4722,7 +4738,7 @@ static bool http_error_context_length_exceeded(int fd, const request *r,
         buf_printf(&b, "%d", ctx_size);
         buf_puts(&b, "}}\n");
     }
-    bool ok = http_response(fd, 400, "application/json", b.ptr);
+    bool ok = http_response(fd, enable_cors, 400, "application/json", b.ptr);
     buf_free(&b);
     return ok;
 }
@@ -4730,13 +4746,17 @@ static bool http_error_context_length_exceeded(int fd, const request *r,
 /* Streaming is a translation state machine over the raw DS4 text.  The model
  * may produce <think> and DSML tool blocks; clients should receive those as
  * protocol-native reasoning/tool deltas, never as visible assistant text. */
-static bool sse_headers(int fd) {
-    const char *h =
+static bool sse_headers(int fd, bool enable_cors) {
+    buf h = {0};
+    buf_puts(&h,
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/event-stream\r\n"
-        "Cache-Control: no-cache\r\n"
-        "Connection: close\r\n\r\n";
-    return send_all(fd, h, strlen(h));
+        "Cache-Control: no-cache\r\n");
+    if (enable_cors) append_cors_headers(&h);
+    buf_puts(&h, "Connection: close\r\n\r\n");
+    bool ok = send_all(fd, h.ptr, h.len);
+    buf_free(&h);
+    return ok;
 }
 
 static bool sse_chunk(int fd, const request *r, const char *id, const char *text, const char *finish) {
@@ -6546,7 +6566,8 @@ static bool responses_sse_finish_live(int fd, const request *r,
     return ok;
 }
 
-static bool responses_final_response(int fd, const request *r, const char *id,
+static bool responses_final_response(int fd, bool enable_cors,
+                                     const request *r, const char *id,
                                      const char *text, const char *reasoning,
                                      const tool_calls *calls, const char *finish,
                                      int prompt_tokens, int completion_tokens) {
@@ -6613,13 +6634,14 @@ static bool responses_final_response(int fd, const request *r, const char *id,
     buf_puts(&b, ",\"usage\":");
     append_responses_usage_json(&b, r, prompt_tokens, completion_tokens);
     buf_putc(&b, '}');
-    bool ok = http_response(fd, 200, "application/json", b.ptr);
+    bool ok = http_response(fd, enable_cors, 200, "application/json", b.ptr);
     buf_free(&b);
     free(items);
     return ok;
 }
 
-static bool final_response(int fd, const request *r, const char *id, const char *text,
+static bool final_response(int fd, bool enable_cors,
+                           const request *r, const char *id, const char *text,
                            const char *reasoning, const tool_calls *calls, const char *finish,
                            int prompt_tokens, int completion_tokens) {
     buf b = {0};
@@ -6651,7 +6673,7 @@ static bool final_response(int fd, const request *r, const char *id, const char 
     }
     append_openai_usage_json(&b, r, prompt_tokens, completion_tokens);
     buf_puts(&b, "}\n");
-    bool ok = http_response(fd, 200, "application/json", b.ptr);
+    bool ok = http_response(fd, enable_cors, 200, "application/json", b.ptr);
     buf_free(&b);
     return ok;
 }
@@ -6731,7 +6753,8 @@ static void append_anthropic_usage_json(buf *b, const request *r,
                input_tokens, completion_tokens, cache_read_tokens, cache_write_tokens);
 }
 
-static bool anthropic_final_response(int fd, const request *r, const char *id, const char *text,
+static bool anthropic_final_response(int fd, bool enable_cors,
+                                     const request *r, const char *id, const char *text,
                                      const char *reasoning, const tool_calls *calls, const char *finish,
                                      int prompt_tokens, int completion_tokens) {
     buf b = {0};
@@ -6744,7 +6767,7 @@ static bool anthropic_final_response(int fd, const request *r, const char *id, c
     buf_puts(&b, ",\"stop_sequence\":null,\"usage\":");
     append_anthropic_usage_json(&b, r, prompt_tokens, completion_tokens);
     buf_puts(&b, "}\n");
-    bool ok = http_response(fd, 200, "application/json", b.ptr);
+    bool ok = http_response(fd, enable_cors, 200, "application/json", b.ptr);
     buf_free(&b);
     return ok;
 }
@@ -7584,6 +7607,7 @@ struct server {
     live_tool_state anthropic_live;
     visible_live_state thinking_live;
     bool disable_exact_dsml_tool_replay;
+    bool enable_cors;
     pthread_mutex_t tool_mu;
     pthread_mutex_t mu;
     pthread_cond_t cv;
@@ -10506,14 +10530,14 @@ static void generate_job(server *s, job *j) {
          * the prior assistant call, there is no stateless prefix to match and
          * no disk key to search by. */
         ds4_tokens_free(&effective_prompt);
-        http_error(j->fd, 409,
+        http_error(j->fd, s->enable_cors, 409,
                    "Responses continuation state is not available; retry by replaying the full input history");
         return;
     } else if (cached == 0 && j->req.api == API_ANTHROPIC &&
                j->req.anthropic_requires_live_tool_state)
     {
         ds4_tokens_free(&effective_prompt);
-        http_error(j->fd, 409,
+        http_error(j->fd, s->enable_cors, 409,
                    "Anthropic continuation state is not available; retry by replaying the full messages history");
         return;
     } else if (cached == 0) {
@@ -10684,7 +10708,7 @@ static void generate_job(server *s, job *j) {
             kv_cache_restore_suppressed_continued(&s->kv, suppressed_continued_last,
                                                   cold_store_len);
             trace_event(s, trace_id, "prefill failed: %s", err);
-            http_error(j->fd, 500, err);
+            http_error(j->fd, s->enable_cors, 500, err);
             return;
         }
         if (kv_cache_store_live_prefix(s, prompt_for_sync, cold_store_len, "cold")) {
@@ -10704,7 +10728,7 @@ static void generate_job(server *s, job *j) {
         kv_cache_restore_suppressed_continued(&s->kv, suppressed_continued_last,
                                               cold_store_len);
         trace_event(s, trace_id, "prefill failed: %s", err);
-        http_error(j->fd, 500, err);
+        http_error(j->fd, s->enable_cors, 500, err);
         return;
     }
     /* Once a non-live request wins, old protocol live bindings are stale. Keep
@@ -10743,7 +10767,7 @@ static void generate_job(server *s, job *j) {
     const bool responses_live_chat = request_uses_responses_live_stream(&j->req);
     long responses_created_at = (long)time(NULL);
     if (j->req.stream) {
-        if (!sse_headers(j->fd)) {
+        if (!sse_headers(j->fd, s->enable_cors)) {
             server_log(DS4_LOG_GENERATION,
                        "ds4-server: %s ctx=%s%s%s sse headers failed",
                        j->req.kind == REQ_CHAT ? "chat" : "completion",
@@ -11186,19 +11210,19 @@ static void generate_job(server *s, job *j) {
                        req_flags);
         }
     } else if (j->req.api == API_ANTHROPIC) {
-        anthropic_final_response(j->fd, &j->req, id,
+        anthropic_final_response(j->fd, s->enable_cors, &j->req, id,
                                  parsed_content ? parsed_content : (text.ptr ? text.ptr : ""),
                                  parsed_reasoning,
                                  &parsed_calls, final_finish,
                                  prompt_tokens, completion);
     } else if (j->req.api == API_RESPONSES) {
-        responses_final_response(j->fd, &j->req, id,
+        responses_final_response(j->fd, s->enable_cors, &j->req, id,
                                  parsed_content ? parsed_content : (text.ptr ? text.ptr : ""),
                                  parsed_reasoning,
                                  &parsed_calls, final_finish,
                                  prompt_tokens, completion);
     } else {
-        final_response(j->fd, &j->req, id,
+        final_response(j->fd, s->enable_cors, &j->req, id,
                        parsed_content ? parsed_content : (text.ptr ? text.ptr : ""),
                        parsed_reasoning,
                        &parsed_calls, final_finish,
@@ -11445,7 +11469,7 @@ static bool send_model(server *s, int fd) {
     buf b = {0};
     append_model_json(&b, s);
     buf_putc(&b, '\n');
-    bool ok = http_response(fd, 200, "application/json", b.ptr);
+    bool ok = http_response(fd, s->enable_cors, 200, "application/json", b.ptr);
     buf_free(&b);
     return ok;
 }
@@ -11455,7 +11479,7 @@ static bool send_models(server *s, int fd) {
     buf_puts(&b, "{\"object\":\"list\",\"data\":[");
     append_model_json(&b, s);
     buf_puts(&b, "]}\n");
-    bool ok = http_response(fd, 200, "application/json", b.ptr);
+    bool ok = http_response(fd, s->enable_cors, 200, "application/json", b.ptr);
     buf_free(&b);
     return ok;
 }
@@ -11477,7 +11501,13 @@ static void *client_main(void *arg) {
 
     http_request hr = {0};
     if (!read_http_request(fd, &hr)) {
-        http_error(fd, 400, "bad HTTP request");
+        http_error(fd, s->enable_cors, 400, "bad HTTP request");
+        goto done;
+    }
+
+    if (!strcmp(hr.method, "OPTIONS")) {
+        http_response(fd, s->enable_cors, 204, NULL, "");
+        http_request_free(&hr);
         goto done;
     }
 
@@ -11509,18 +11539,18 @@ static void *client_main(void *arg) {
         ok = parse_completion_request(s->engine, hr.body, s->default_tokens,
                                       ctx_size, &req, err, sizeof(err));
     } else {
-        http_error(fd, 404, "unknown endpoint");
+        http_error(fd, s->enable_cors, 404, "unknown endpoint");
         http_request_free(&hr);
         goto done;
     }
     if (ok) req.raw_body = xstrndup(hr.body, hr.body_len);
     http_request_free(&hr);
     if (!ok) {
-        http_error(fd, 400, err);
+        http_error(fd, s->enable_cors, 400, err);
         goto done;
     }
     if (request_exceeds_context(&req, ctx_size)) {
-        http_error_context_length_exceeded(fd, &req, req.prompt.len, ctx_size);
+        http_error_context_length_exceeded(fd, s->enable_cors, &req, req.prompt.len, ctx_size);
         request_free(&req);
         goto done;
     }
@@ -11536,7 +11566,7 @@ static void *client_main(void *arg) {
     pthread_mutex_lock(&j.mu);
     if (!enqueue(s, &j)) {
         pthread_mutex_unlock(&j.mu);
-        http_error(fd, 503, "server shutting down");
+        http_error(fd, s->enable_cors, 503, "server shutting down");
         pthread_cond_destroy(&j.cv);
         pthread_mutex_destroy(&j.mu);
         request_free(&j.req);
@@ -11610,6 +11640,7 @@ typedef struct {
     bool kv_cache_reject_different_quant;
     bool disable_exact_dsml_tool_replay;
     int tool_memory_max_ids;
+    bool enable_cors;
 } server_config;
 
 static int parse_int_arg(const char *s, const char *opt) {
@@ -11719,6 +11750,8 @@ static void usage(FILE *fp) {
         "      Bind address. Default: 127.0.0.1\n"
         "  --port N\n"
         "      Bind port. Default: 8000\n"
+        "  --cors\n"
+        "      Add Access-Control-Allow-* headers for browser JS clients. Does not change --host.\n"
         "  --trace FILE\n"
         "      Write a human-readable session trace: prompts, cache decisions, output, tool calls.\n"
         "\n"
@@ -11829,6 +11862,8 @@ static server_config parse_options(int argc, char **argv) {
             c.host = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--port")) {
             c.port = parse_int_arg(need_arg(&i, argc, argv, arg), arg);
+        } else if (!strcmp(arg, "--cors")) {
+            c.enable_cors = true;
         } else if (!strcmp(arg, "--trace")) {
             c.trace_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--kv-disk-dir")) {
@@ -11922,6 +11957,7 @@ int main(int argc, char **argv) {
     s.default_tokens = cfg.default_tokens;
     s.disable_exact_dsml_tool_replay = cfg.disable_exact_dsml_tool_replay;
     s.tool_mem.max_entries = cfg.tool_memory_max_ids;
+    s.enable_cors = cfg.enable_cors;
     if (cfg.kv_disk_dir) {
         kv_cache_open(&s.kv, cfg.kv_disk_dir, cfg.kv_disk_space_mb,
                       cfg.kv_cache_reject_different_quant, cfg.kv_cache);
@@ -12339,7 +12375,7 @@ static void test_context_length_error_uses_protocol_standard_shape(void) {
     int sv[2];
     TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
     if (sv[0] >= 0 && sv[1] >= 0) {
-        TEST_ASSERT(http_error_context_length_exceeded(sv[0], &r, 16, 16));
+        TEST_ASSERT(http_error_context_length_exceeded(sv[0], false, &r, 16, 16));
         shutdown(sv[0], SHUT_WR);
         char *out = read_socket_text(sv[1]);
         TEST_ASSERT(strstr(out, "HTTP/1.1 400") != NULL);
@@ -12360,7 +12396,7 @@ static void test_context_length_error_uses_protocol_standard_shape(void) {
 
     TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
     if (sv[0] >= 0 && sv[1] >= 0) {
-        TEST_ASSERT(http_error_context_length_exceeded(sv[0], &a, 20, 20));
+        TEST_ASSERT(http_error_context_length_exceeded(sv[0], false, &a, 20, 20));
         shutdown(sv[0], SHUT_WR);
         char *out = read_socket_text(sv[1]);
         TEST_ASSERT(strstr(out, "{\"type\":\"error\",\"error\"") != NULL);
@@ -12371,6 +12407,70 @@ static void test_context_length_error_uses_protocol_standard_shape(void) {
         close(sv[1]);
     }
     request_free(&a);
+}
+
+static void test_cors_headers_are_opt_in(void) {
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] >= 0 && sv[1] >= 0) {
+        TEST_ASSERT(http_response(sv[0], false, 200, "application/json", "{}"));
+        shutdown(sv[0], SHUT_WR);
+        char *out = read_socket_text(sv[1]);
+        TEST_ASSERT(strstr(out, "HTTP/1.1 200 OK") != NULL);
+        TEST_ASSERT(strstr(out, "Access-Control-Allow-Origin") == NULL);
+        free(out);
+        close(sv[0]);
+        close(sv[1]);
+    }
+
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] >= 0 && sv[1] >= 0) {
+        TEST_ASSERT(http_response(sv[0], true, 200, "application/json", "{}"));
+        shutdown(sv[0], SHUT_WR);
+        char *out = read_socket_text(sv[1]);
+        TEST_ASSERT(strstr(out, "HTTP/1.1 200 OK") != NULL);
+        TEST_ASSERT(strstr(out, "Access-Control-Allow-Origin: *") != NULL);
+        TEST_ASSERT(strstr(out, "Access-Control-Allow-Methods: GET, POST, OPTIONS") != NULL);
+        TEST_ASSERT(strstr(out, "Access-Control-Allow-Headers: *") != NULL);
+        free(out);
+        close(sv[0]);
+        close(sv[1]);
+    }
+}
+
+static void test_cors_preflight_response_is_no_content(void) {
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) return;
+
+    TEST_ASSERT(http_response(sv[0], true, 204, NULL, ""));
+    shutdown(sv[0], SHUT_WR);
+    char *out = read_socket_text(sv[1]);
+    TEST_ASSERT(strstr(out, "HTTP/1.1 204 No Content") != NULL);
+    TEST_ASSERT(strstr(out, "Content-Length: 0") != NULL);
+    TEST_ASSERT(strstr(out, "Content-Type:") == NULL);
+    TEST_ASSERT(strstr(out, "Access-Control-Allow-Origin: *") != NULL);
+
+    free(out);
+    close(sv[0]);
+    close(sv[1]);
+}
+
+static void test_cors_sse_headers(void) {
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) return;
+
+    TEST_ASSERT(sse_headers(sv[0], true));
+    shutdown(sv[0], SHUT_WR);
+    char *out = read_socket_text(sv[1]);
+    TEST_ASSERT(strstr(out, "HTTP/1.1 200 OK") != NULL);
+    TEST_ASSERT(strstr(out, "Content-Type: text/event-stream") != NULL);
+    TEST_ASSERT(strstr(out, "Access-Control-Allow-Origin: *") != NULL);
+
+    free(out);
+    close(sv[0]);
+    close(sv[1]);
 }
 
 static void test_anthropic_live_stream_sends_incremental_blocks(void) {
@@ -12531,7 +12631,7 @@ static void test_anthropic_usage_reports_cache_details(void) {
         return;
     }
 
-    TEST_ASSERT(anthropic_final_response(sv[0], &r, "msg_usage", "OK", NULL, NULL, "stop", 10, 2));
+    TEST_ASSERT(anthropic_final_response(sv[0], false, &r, "msg_usage", "OK", NULL, NULL, "stop", 10, 2));
     shutdown(sv[0], SHUT_WR);
     char *out = read_socket_text(sv[1]);
 
@@ -12670,7 +12770,7 @@ static void test_responses_usage_reports_cache_details(void) {
         return;
     }
 
-    TEST_ASSERT(responses_final_response(sv[0], &r, "resp_usage", "OK", NULL, NULL,
+    TEST_ASSERT(responses_final_response(sv[0], false, &r, "resp_usage", "OK", NULL, NULL,
                                          "stop", 10, 2));
     shutdown(sv[0], SHUT_WR);
     char *out = read_socket_text(sv[1]);
@@ -15280,6 +15380,9 @@ static void ds4_server_unit_tests_run(void) {
     test_openai_tool_args_preserve_call_order();
     test_anthropic_thinking_and_tool_args_preserve_call_order();
     test_context_length_error_uses_protocol_standard_shape();
+    test_cors_headers_are_opt_in();
+    test_cors_preflight_response_is_no_content();
+    test_cors_sse_headers();
     test_anthropic_live_stream_sends_incremental_blocks();
     test_anthropic_usage_reports_cache_details();
     test_anthropic_tool_stream_sends_live_tool_use();
