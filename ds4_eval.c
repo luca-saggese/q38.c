@@ -1199,6 +1199,7 @@ typedef struct {
     int question_limit;
     float temperature;
     float top_p;
+    float min_p;
     uint64_t seed;
     int pause_ms;
     int soft_limit_reply_budget;
@@ -1495,6 +1496,7 @@ static void usage(FILE *fp) {
         "  --questions N          Run only the first N embedded questions.\n"
         "  --temp F               Sampling temperature. Default: 0\n"
         "  --top-p F              Nucleus sampling probability. Default: 1\n"
+        "  --min-p F              Keep tokens scoring at least F times the top token. Default: 0.05\n"
         "  --seed N               Sampling seed. Default: time-based\n"
         "  --trace FILE           Write questions, outputs, and grading decisions.\n"
         "  --think                Enable thinking mode. Default\n"
@@ -1519,7 +1521,8 @@ static eval_config parse_options(int argc, char **argv) {
         .model_path = "ds4flash.gguf",
         .backend = default_backend(),
         .max_tokens = 16000,
-        .top_p = 1.0f,
+        .top_p = DS4_DEFAULT_TOP_P,
+        .min_p = DS4_DEFAULT_MIN_P,
         .pause_ms = 350,
         .soft_limit_reply_budget = 1024,
         .hard_limit_reply_budget = 512,
@@ -1544,6 +1547,8 @@ static eval_config parse_options(int argc, char **argv) {
             c.temperature = parse_float_arg(need_arg(&i, argc, argv, arg), arg, 0.0f, 100.0f);
         } else if (!strcmp(arg, "--top-p")) {
             c.top_p = parse_float_arg(need_arg(&i, argc, argv, arg), arg, 0.0f, 1.0f);
+        } else if (!strcmp(arg, "--min-p")) {
+            c.min_p = parse_float_arg(need_arg(&i, argc, argv, arg), arg, 0.0f, 1.0f);
         } else if (!strcmp(arg, "--seed")) {
             c.seed = parse_u64_arg(need_arg(&i, argc, argv, arg), arg);
         } else if (!strcmp(arg, "--trace")) {
@@ -2427,6 +2432,7 @@ static void trace_write_header(FILE *trace, const eval_config *cfg, int ncases, 
             "questions: %d\n"
             "temperature: %.6g\n"
             "top_p: %.6g\n"
+            "min_p: %.6g\n"
             "seed: %llu\n"
             "think_mode_requested: %s\n"
             "soft_limit_reply_budget: %d\n"
@@ -2442,6 +2448,7 @@ static void trace_write_header(FILE *trace, const eval_config *cfg, int ncases, 
             ncases,
             cfg->temperature,
             cfg->top_p,
+            cfg->min_p,
             (unsigned long long)cfg->seed,
             ds4_think_mode_name(cfg->think_mode),
             cfg->soft_limit_reply_budget,
@@ -2483,6 +2490,7 @@ static void trace_write_case(FILE *trace,
             "elapsed_sec: %.3f\n"
             "temperature: %.6g\n"
             "top_p: %.6g\n"
+            "min_p: %.6g\n"
             "think_mode_effective: %s\n",
             idx + 1, ncases, tc->source, tc->id,
             (long long)time(NULL),
@@ -2498,6 +2506,7 @@ static void trace_write_case(FILE *trace,
             elapsed_sec,
             cfg->temperature,
             cfg->top_p,
+            cfg->min_p,
             ds4_think_mode_name(effective_think_mode));
     if (think_close && think_close->kind != EVAL_THINK_CLOSE_NONE) {
         fprintf(trace,
@@ -3046,7 +3055,8 @@ static eval_run_result run_one_case(ds4_engine *engine, ds4_session *session,
             }
         }
         if (token < 0)
-            token = ds4_session_sample(session, cfg->temperature, 0, cfg->top_p, 0.0f, rng);
+            token = ds4_session_sample(session, cfg->temperature, 0,
+                                       cfg->top_p, cfg->min_p, rng);
         if (token == eos) break;
         if (close_kind != EVAL_THINK_CLOSE_NONE &&
             think_close.kind == EVAL_THINK_CLOSE_NONE) {

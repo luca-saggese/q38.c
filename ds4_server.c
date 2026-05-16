@@ -747,9 +747,9 @@ static void request_init(request *r, req_kind kind, int max_tokens) {
     r->model = xstrdup("deepseek-v4-flash");
     r->max_tokens = max_tokens;
     r->top_k = 0;
-    r->temperature = 1.0f;
-    r->top_p = 1.0f;
-    r->min_p = 0.0f;
+    r->temperature = DS4_DEFAULT_TEMPERATURE;
+    r->top_p = DS4_DEFAULT_TOP_P;
+    r->min_p = DS4_DEFAULT_MIN_P;
     r->think_mode = DS4_THINK_HIGH;
 }
 
@@ -10882,10 +10882,10 @@ static void generate_job(server *s, job *j) {
         float top_p = j->req.top_p;
         float min_p = j->req.min_p;
         if (ds4_think_mode_enabled(j->req.think_mode)) {
-            temperature = 1.0f;
+            temperature = DS4_DEFAULT_TEMPERATURE;
             top_k = 0;
-            top_p = 1.0f;
-            min_p = 0.0f;
+            top_p = DS4_DEFAULT_TOP_P;
+            min_p = DS4_DEFAULT_MIN_P;
         }
         if (in_tool_call && !dsml_decode_state_uses_payload_sampling(dsml_state)) {
             temperature = 0.0f;
@@ -11814,7 +11814,7 @@ static void usage(FILE *fp) {
         "  Only reasoning_effort=max or output_config.effort=max requests Think Max.\n"
         "  Think Max is applied only when --ctx is at least 393216 tokens; smaller contexts use high.\n"
         "  thinking={type:disabled}, think=false, or model=deepseek-chat selects non-thinking mode.\n"
-        "  API defaults are temperature=1, top_p=1, min_p=0, and no top-k cap.\n"
+        "  API defaults are temperature=1, top_p=1, min_p=0.05, and no top-k cap.\n"
         "  In thinking mode, client sampling knobs are ignored like the official API.\n"
         "\n"
         "Disk KV cache:\n"
@@ -13263,14 +13263,14 @@ static void test_streaming_holds_partial_utf8(void) {
     close(sv[1]);
 }
 
-static void test_request_defaults_match_deepseek_api(void) {
+static void test_request_defaults_use_min_p_filtering(void) {
     request r;
     request_init(&r, REQ_CHAT, 128);
     TEST_ASSERT(r.think_mode == DS4_THINK_HIGH);
-    TEST_ASSERT(r.temperature == 1.0f);
-    TEST_ASSERT(r.top_p == 1.0f);
+    TEST_ASSERT(r.temperature == DS4_DEFAULT_TEMPERATURE);
+    TEST_ASSERT(r.top_p == DS4_DEFAULT_TOP_P);
     TEST_ASSERT(r.top_k == 0);
-    TEST_ASSERT(r.min_p == 0.0f);
+    TEST_ASSERT(r.min_p == DS4_DEFAULT_MIN_P);
     request_free(&r);
 }
 
@@ -15463,7 +15463,7 @@ static void test_thinking_canonical_non_thinking_mode_noop(void) {
 }
 
 static void ds4_server_unit_tests_run(void) {
-    test_request_defaults_match_deepseek_api();
+    test_request_defaults_use_min_p_filtering();
     test_reasoning_effort_mapping();
     test_api_thinking_controls_parse();
     test_render_think_max_prompt_prefix();
