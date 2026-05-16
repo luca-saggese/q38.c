@@ -8937,6 +8937,36 @@ static int kv_cache_store_len(const kv_disk_cache *kc, int tokens) {
     return tokens;
 }
 
+static int kv_cache_chat_anchor_pos(const kv_disk_cache *kc,
+                                    const ds4_tokens *prompt,
+                                    int user_token_id,
+                                    int assistant_token_id) {
+    if (!prompt || user_token_id < 0 || assistant_token_id < 0) return -1;
+
+    /* Cold checkpoints are meant to maximize reuse across independent agent
+     * sessions.  The stable part of a rendered chat is everything before the
+     * user message that asks the model to do this specific task.  Some clients
+     * put stable user-role scaffolding first, for example Codex renders:
+     *
+     *   <｜User｜><environment_context>...</environment_context><｜User｜>task
+     *
+     * So use the last user marker before the first assistant marker, not the
+     * first one.  Stop at the first assistant marker so multi-turn histories do
+     * not turn old conversation content into low-value cold cache files; live
+     * and continued checkpoints cover same-session continuation instead.
+     *
+     * The returned value is a token prefix length and deliberately excludes the
+     * selected <｜User｜> token.  This is an exact special-token boundary, so the
+     * generic trim/align heuristic is not needed to avoid tokenizer merges. */
+    int last_user = -1;
+    for (int i = 0; i < prompt->len; i++) {
+        const int token = prompt->v[i];
+        if (token == assistant_token_id) break;
+        if (token == user_token_id) last_user = i;
+    }
+    return last_user >= kc->opt.min_tokens ? last_user : -1;
+}
+
 static int kv_cache_continued_step(const kv_disk_cache *kc) {
     if (!kc->enabled || kc->opt.continued_interval_tokens <= 0) return 0;
     int step = kc->opt.continued_interval_tokens;
@@ -10623,7 +10653,11 @@ static void generate_job(server *s, job *j) {
         s->kv.opt.cold_max_tokens > 0 &&
         prompt_for_sync->len <= s->kv.opt.cold_max_tokens)
     {
-        cold_store_len = kv_cache_store_len(&s->kv, prompt_for_sync->len);
+        const int anchor = kv_cache_chat_anchor_pos(&s->kv, prompt_for_sync,
+                                                    ds4_token_user(s->engine),
+                                                    ds4_token_assistant(s->engine));
+        cold_store_len = anchor >= s->kv.opt.min_tokens ?
+                         anchor : kv_cache_store_len(&s->kv, prompt_for_sync->len);
     }
     int suppressed_continued_last = -1;
     if (cold_store_len >= s->kv.opt.min_tokens) {
@@ -14415,6 +14449,65 @@ static void test_kv_cache_store_len_uses_configured_boundary(void) {
     TEST_ASSERT(kv_cache_store_len(&kc, 3500) == 3500);
 }
 
+static void test_kv_cache_chat_anchor_uses_last_user_before_assistant(void) {
+    const int user = 9001;
+    const int assistant = 9002;
+    kv_disk_cache kc = {0};
+    kc.opt = kv_cache_default_options();
+    kc.opt.min_tokens = 4;
+
+    ds4_tokens codex = {0};
+    ds4_tokens_push(&codex, 1);     /* BOS / system */
+    ds4_tokens_push(&codex, 2);
+    ds4_tokens_push(&codex, user);  /* environment_context item */
+    ds4_tokens_push(&codex, 3);
+    ds4_tokens_push(&codex, 4);
+    ds4_tokens_push(&codex, user);  /* actual task starts here */
+    ds4_tokens_push(&codex, 5);
+    ds4_tokens_push(&codex, assistant);
+    TEST_ASSERT(kv_cache_chat_anchor_pos(&kc, &codex, user, assistant) == 5);
+
+    ds4_tokens claude = {0};
+    ds4_tokens_push(&claude, 1);
+    ds4_tokens_push(&claude, 2);
+    ds4_tokens_push(&claude, 3);
+    ds4_tokens_push(&claude, 4);
+    ds4_tokens_push(&claude, user); /* system reminder and task share a turn */
+    ds4_tokens_push(&claude, 5);
+    ds4_tokens_push(&claude, assistant);
+    TEST_ASSERT(kv_cache_chat_anchor_pos(&kc, &claude, user, assistant) == 4);
+
+    ds4_tokens_free(&codex);
+    ds4_tokens_free(&claude);
+}
+
+static void test_kv_cache_chat_anchor_ignores_multiturn_tail(void) {
+    const int user = 9001;
+    const int assistant = 9002;
+    kv_disk_cache kc = {0};
+    kc.opt = kv_cache_default_options();
+    kc.opt.min_tokens = 2;
+
+    ds4_tokens prompt = {0};
+    ds4_tokens_push(&prompt, 1);
+    ds4_tokens_push(&prompt, 2);
+    ds4_tokens_push(&prompt, user);      /* first task */
+    ds4_tokens_push(&prompt, 3);
+    ds4_tokens_push(&prompt, assistant); /* stop scanning here */
+    ds4_tokens_push(&prompt, 4);
+    ds4_tokens_push(&prompt, user);      /* later turn: not a cold anchor */
+    ds4_tokens_push(&prompt, 5);
+    ds4_tokens_push(&prompt, assistant);
+    TEST_ASSERT(kv_cache_chat_anchor_pos(&kc, &prompt, user, assistant) == 2);
+
+    kc.opt.min_tokens = 3;
+    TEST_ASSERT(kv_cache_chat_anchor_pos(&kc, &prompt, user, assistant) == -1);
+    TEST_ASSERT(kv_cache_chat_anchor_pos(&kc, &prompt, -1, assistant) == -1);
+    TEST_ASSERT(kv_cache_chat_anchor_pos(&kc, &prompt, user, -1) == -1);
+
+    ds4_tokens_free(&prompt);
+}
+
 static void test_kv_cache_continued_uses_aligned_frontiers(void) {
     kv_disk_cache kc = {0};
     kc.enabled = true;
@@ -15239,6 +15332,8 @@ static void ds4_server_unit_tests_run(void) {
     test_tool_marker_state_ignores_orphan_end();
     test_canonical_rewrite_rebuilds_when_live_tail_changes();
     test_kv_cache_store_len_uses_configured_boundary();
+    test_kv_cache_chat_anchor_uses_last_user_before_assistant();
+    test_kv_cache_chat_anchor_ignores_multiturn_tail();
     test_kv_cache_continued_uses_aligned_frontiers();
     test_kv_cache_cold_store_suppresses_duplicate_continued_boundary();
     test_kv_cache_file_size_must_fit_budget();
