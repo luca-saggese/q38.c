@@ -4590,6 +4590,114 @@ static bool parse_generated_message_ex(const char *text, bool require_thinking_c
     }
 }
 
+/* Try to repair an unterminated DSML block by appending missing closing tags.
+ *
+ * DSML nesting order is: tool_calls > invoke > parameter
+ *
+ * Strategy: scan the text backwards from the end, looking for the last
+ * unclosed tag, then append the missing closing tags in reverse nesting order.
+ *
+ * Returns true if repair was attempted (appended closing tags), false if the
+ * text looks too broken to repair (e.g., no recognizable DSML start tag). */
+static bool try_repair_dsml(const char *text, size_t text_len, buf *repaired_out) {
+    if (!text || text_len == 0) return false;
+
+    /* Find which style is used by scanning for the first tool_calls start tag */
+    const char *tool_start = NULL;
+    const char *tool_end = NULL;
+    const char *invoke_start = NULL;
+    const char *invoke_end = NULL;
+    const char *param_start = NULL;
+    const char *param_end = NULL;
+
+    /* Check all three styles, pick the first one found */
+    if (strstr(text, DS4_TOOL_CALLS_START)) {
+        tool_start = DS4_TOOL_CALLS_START;
+        tool_end = DS4_TOOL_CALLS_END;
+        invoke_start = DS4_INVOKE_START;
+        invoke_end = DS4_INVOKE_END;
+        param_start = DS4_PARAM_START;
+        param_end = DS4_PARAM_END;
+    } else if (strstr(text, DS4_TOOL_CALLS_START_SHORT)) {
+        tool_start = DS4_TOOL_CALLS_START_SHORT;
+        tool_end = DS4_TOOL_CALLS_END_SHORT;
+        invoke_start = DS4_INVOKE_START_SHORT;
+        invoke_end = DS4_INVOKE_END_SHORT;
+        param_start = DS4_PARAM_START_SHORT;
+        param_end = DS4_PARAM_END_SHORT;
+    } else if (strstr(text, "<tool_calls>")) {
+        tool_start = "<tool_calls>";
+        tool_end = "</tool_calls>";
+        invoke_start = "<invoke";
+        invoke_end = "</invoke>";
+        param_start = "<parameter";
+        param_end = "</parameter>";
+    } else {
+        return false; /* No recognizable DSML start tag */
+    }
+
+    /* Count how many of each tag we've seen */
+    int tool_starts = 0, tool_ends = 0;
+    int invoke_starts = 0, invoke_ends = 0;
+    int param_starts = 0, param_ends = 0;
+    const char *p = text;
+
+    while ((p = strstr(p, tool_start)) != NULL) {
+        tool_starts++;
+        p += strlen(tool_start);
+    }
+    p = text;
+    while ((p = strstr(p, tool_end)) != NULL) {
+        tool_ends++;
+        p += strlen(tool_end);
+    }
+    p = text;
+    while ((p = strstr(p, invoke_start)) != NULL) {
+        invoke_starts++;
+        p += strlen(invoke_start);
+    }
+    p = text;
+    while ((p = strstr(p, invoke_end)) != NULL) {
+        invoke_ends++;
+        p += strlen(invoke_end);
+    }
+    p = text;
+    while ((p = strstr(p, param_start)) != NULL) {
+        param_starts++;
+        p += strlen(param_start);
+    }
+    p = text;
+    while ((p = strstr(p, param_end)) != NULL) {
+        param_ends++;
+        p += strlen(param_end);
+    }
+
+    /* If everything is balanced, no repair needed */
+    if (tool_starts == tool_ends && invoke_starts == invoke_ends && param_starts == param_ends) {
+        return false;
+    }
+
+    /* Repair: copy original text and append missing closing tags in reverse order */
+    buf_puts(repaired_out, text);
+
+    /* Append missing parameter closing tags */
+    for (int i = 0; i < param_starts - param_ends; i++) {
+        buf_puts(repaired_out, param_end);
+    }
+
+    /* Append missing invoke closing tags */
+    for (int i = 0; i < invoke_starts - invoke_ends; i++) {
+        buf_puts(repaired_out, invoke_end);
+    }
+
+    /* Append missing tool_calls closing tags */
+    for (int i = 0; i < tool_starts - tool_ends; i++) {
+        buf_puts(repaired_out, tool_end);
+    }
+
+    return true;
+}
+
 static const char *tool_parse_failure_recovery_finish(const char *finish) {
     /* Once DSML failed to parse there is no executable tool call to report.
      * Preserve a true length stop, because callers can distinguish truncation
@@ -11093,10 +11201,42 @@ static void generate_job(server *s, job *j) {
         saw_tool_start && !saw_tool_end && strcmp(finish, "error") != 0)
     {
         /* A partial streamed tool call cannot be retracted.  If the model ends
-         * before closing the DSML block, fail the turn instead of letting clients
-         * execute an incomplete `{}` or partially parsed argument object. */
-        finish = "error";
-        snprintf(err, sizeof(err), "unterminated tool call");
+         * before closing the DSML block, try to repair it by appending missing
+         * closing tags.  If repair succeeds, continue with normal parsing.
+         * Otherwise, fail the turn. */
+        buf repaired = {0};
+        if (try_repair_dsml(text.ptr, text.len, &repaired)) {
+            /* Parse repaired text to verify it produces valid tool calls */
+            tool_calls test_calls = {0};
+            char *test_content = NULL;
+            char *test_reasoning = NULL;
+            bool repair_ok = parse_generated_message(repaired.ptr, &test_content, &test_reasoning, &test_calls);
+            free(test_content);
+            free(test_reasoning);
+            if (repair_ok && test_calls.len > 0) {
+                /* Repair succeeded - replace text with repaired version */
+                free(text.ptr);
+                text.ptr = buf_take(&repaired);
+                text.len = strlen(text.ptr);
+                saw_tool_end = true;
+                server_log(DS4_LOG_WARNING,
+                           "ds4-server: chat ctx=%s%s%s repaired unterminated tool call (%d calls recovered)",
+                           ctx_span,
+                           req_flags[0] ? " " : "",
+                           req_flags,
+                           test_calls.len);
+                trace_event(s, trace_id, "repaired unterminated tool call (%d calls recovered)", test_calls.len);
+                tool_calls_free(&test_calls);
+            } else {
+                buf_free(&repaired);
+                finish = "error";
+                snprintf(err, sizeof(err), "unterminated tool call");
+            }
+        } else {
+            finish = "error";
+            snprintf(err, sizeof(err), "unterminated tool call");
+        }
+        buf_free(&repaired);
     }
 
     if (completion > last_decode_log_completion) {
@@ -13560,6 +13700,135 @@ static void test_dsml_parser_recovers_loose_nested_parameters(void) {
     tool_calls_free(&calls);
 }
 
+/* Verify that try_repair_dsml + parse_generated_message produces structurally
+   valid tool calls for all three DSML styles and multiple truncation scenarios.
+   This tests repair ACCURACY, not just that it doesn't crash. */
+static void test_dsml_repair_produces_parseable_calls(void) {
+    char *content = NULL;
+    char *reasoning = NULL;
+    tool_calls calls = {0};
+    buf repaired = {0};
+
+    /* === TEST 1: Full DSML - missing </tool_calls> === */
+    {
+        const char *broken =
+            "thinking done\n\n"
+            DS4_TOOL_CALLS_START "\n"
+            DS4_INVOKE_START " name=\"bash\">\n"
+            DS4_PARAM_START " name=\"command\" string=\"true\">ls -la" DS4_PARAM_END "\n"
+            DS4_INVOKE_END "\n";
+        /* Missing: DS4_TOOL_CALLS_END */
+
+        buf_free(&repaired);
+        TEST_ASSERT(try_repair_dsml(broken, strlen(broken), &repaired));
+        TEST_ASSERT(parse_generated_message(repaired.ptr, &content, &reasoning, &calls));
+        TEST_ASSERT(calls.len == 1);
+        TEST_ASSERT(calls.v[0].name && !strcmp(calls.v[0].name, "bash"));
+        TEST_ASSERT(strstr(calls.v[0].arguments, "\"command\": \"ls -la\"") != NULL);
+        free(content); free(reasoning); tool_calls_free(&calls);
+    }
+
+    /* === TEST 2: Full DSML - missing </invoke> and </tool_calls> === */
+    {
+        const char *broken =
+            "\n\n"
+            DS4_TOOL_CALLS_START "\n"
+            DS4_INVOKE_START " name=\"edit\">\n"
+            DS4_PARAM_START " name=\"path\" string=\"true\">/tmp/test.c" DS4_PARAM_END "\n";
+        /* Missing: DS4_INVOKE_END, DS4_TOOL_CALLS_END */
+
+        buf_free(&repaired);
+        TEST_ASSERT(try_repair_dsml(broken, strlen(broken), &repaired));
+        TEST_ASSERT(parse_generated_message(repaired.ptr, &content, &reasoning, &calls));
+        TEST_ASSERT(calls.len == 1);
+        TEST_ASSERT(calls.v[0].name && !strcmp(calls.v[0].name, "edit"));
+        TEST_ASSERT(strstr(calls.v[0].arguments, "\"path\": \"/tmp/test.c\"") != NULL);
+        free(content); free(reasoning); tool_calls_free(&calls);
+    }
+
+    /* === TEST 3: Full DSML - missing </parameter> === */
+    {
+        const char *broken =
+            "\n\n"
+            DS4_TOOL_CALLS_START "\n"
+            DS4_INVOKE_START " name=\"bash\">\n"
+            DS4_PARAM_START " name=\"command\" string=\"true\">echo hello";
+        /* Missing: DS4_PARAM_END, DS4_INVOKE_END, DS4_TOOL_CALLS_END */
+
+        buf_free(&repaired);
+        TEST_ASSERT(try_repair_dsml(broken, strlen(broken), &repaired));
+        TEST_ASSERT(parse_generated_message(repaired.ptr, &content, &reasoning, &calls));
+        TEST_ASSERT(calls.len == 1);
+        TEST_ASSERT(calls.v[0].name && !strcmp(calls.v[0].name, "bash"));
+        TEST_ASSERT(strstr(calls.v[0].arguments, "\"command\": \"echo hello\"") != NULL);
+        free(content); free(reasoning); tool_calls_free(&calls);
+    }
+
+    /* === TEST 4: Short DSML - missing closing tags === */
+    {
+        const char *broken =
+            "\n\n"
+            DS4_TOOL_CALLS_START_SHORT "\n"
+            DS4_INVOKE_START_SHORT " name=\"write_file\">\n"
+            DS4_PARAM_START_SHORT " name=\"path\" string=\"true\">/tmp/out.txt" DS4_PARAM_END_SHORT "\n"
+            DS4_PARAM_START_SHORT " name=\"content\" string=\"true\">hello world" DS4_PARAM_END_SHORT "\n"
+            DS4_INVOKE_END_SHORT "\n";
+        /* Missing: DS4_TOOL_CALLS_END_SHORT */
+
+        buf_free(&repaired);
+        TEST_ASSERT(try_repair_dsml(broken, strlen(broken), &repaired));
+        TEST_ASSERT(parse_generated_message(repaired.ptr, &content, &reasoning, &calls));
+        TEST_ASSERT(calls.len == 1);
+        TEST_ASSERT(calls.v[0].name && !strcmp(calls.v[0].name, "write_file"));
+        TEST_ASSERT(strstr(calls.v[0].arguments, "\"path\": \"/tmp/out.txt\"") != NULL);
+        TEST_ASSERT(strstr(calls.v[0].arguments, "\"content\": \"hello world\"") != NULL);
+        free(content); free(reasoning); tool_calls_free(&calls);
+    }
+
+    /* === TEST 5: Plain XML - missing closing tags === */
+    {
+        const char *broken =
+            "\n\n"
+            "<tool_calls>\n"
+            "<invoke name=\"execute_command\">\n"
+            "<parameter name=\"command\" string=\"true\">pwd</parameter>\n"
+            "</invoke>\n";
+        /* Missing: </tool_calls> */
+
+        buf_free(&repaired);
+        TEST_ASSERT(try_repair_dsml(broken, strlen(broken), &repaired));
+        TEST_ASSERT(parse_generated_message(repaired.ptr, &content, &reasoning, &calls));
+        TEST_ASSERT(calls.len == 1);
+        TEST_ASSERT(calls.v[0].name && !strcmp(calls.v[0].name, "execute_command"));
+        TEST_ASSERT(strstr(calls.v[0].arguments, "\"command\": \"pwd\"") != NULL);
+        free(content); free(reasoning); tool_calls_free(&calls);
+    }
+
+    /* === TEST 6: Balanced text should NOT be modified === */
+    {
+        const char *balanced =
+            "\n\n"
+            DS4_TOOL_CALLS_START "\n"
+            DS4_INVOKE_START " name=\"bash\">\n"
+            DS4_PARAM_START " name=\"command\" string=\"true\">ls" DS4_PARAM_END "\n"
+            DS4_INVOKE_END "\n"
+            DS4_TOOL_CALLS_END;
+
+        buf_free(&repaired);
+        TEST_ASSERT(!try_repair_dsml(balanced, strlen(balanced), &repaired));
+        /* No repair needed */
+    }
+
+    /* === TEST 7: No DSML tags should return false === */
+    {
+        const char *no_dsml = "just plain text, no tools";
+        buf_free(&repaired);
+        TEST_ASSERT(!try_repair_dsml(no_dsml, strlen(no_dsml), &repaired));
+    }
+
+    buf_free(&repaired);
+}
+
 static void test_tool_parse_failure_returns_recoverable_finish(void) {
     const char *generated =
         "trying a tool\n\n"
@@ -15503,6 +15772,7 @@ static void ds4_server_unit_tests_run(void) {
     test_streaming_holds_partial_utf8();
     test_parse_short_dsml_and_canonical_suffix();
     test_dsml_parser_recovers_loose_nested_parameters();
+    test_dsml_repair_produces_parseable_calls();
     test_tool_parse_failure_returns_recoverable_finish();
     test_thinking_dsml_is_not_executable_before_think_close();
     test_thinking_dsml_after_think_close_is_executable();
