@@ -4428,6 +4428,8 @@ static bool parse_generated_message_ex(const char *text, bool require_thinking_c
     if (require_thinking_closed) {
         const char *think_end = find_last_substr(text, "</think>");
         if (!think_end) {
+            /* Model did not close thinking, ignore any DSML in reasoning */
+            fprintf(stderr, "ds4-server: thinking not closed, ignoring DSML in reasoning\n");
             split_reasoning_content(text, strlen(text), content_out, reasoning_out);
             return true;
         }
