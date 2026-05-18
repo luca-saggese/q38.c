@@ -4607,17 +4607,25 @@ static bool parse_generated_message_ex(const char *text, bool require_thinking_c
 static bool try_repair_dsml(const char *s, size_t len, buf *out) {
     if (!s || !len) return false;
 
+    /* Only scan DSML tags after the last </thinking>.  DSML mentioned inside
+     * reasoning is not executable — it inflates tag counts and causes false
+     * positive repairs.  If no </thinking> is found, scan from the start
+     * (thinking mode is not active or thinking was never opened). */
+    const char *think_end = find_last_substr(s, " response");
+    const char *scan_start = think_end ? (think_end + 8) : s;
+    size_t scan_len = (size_t)((s + len) - scan_start);
+
     /* Detect style from first <tool_calls> tag */
     const char *ts, *te, *is, *ie, *ps, *pe;
-    if (strstr(s, DS4_TOOL_CALLS_START)) {
+    if (strstr(scan_start, DS4_TOOL_CALLS_START)) {
         ts = DS4_TOOL_CALLS_START;  te = DS4_TOOL_CALLS_END;
         is = DS4_INVOKE_START;      ie = DS4_INVOKE_END;
         ps = DS4_PARAM_START;       pe = DS4_PARAM_END;
-    } else if (strstr(s, DS4_TOOL_CALLS_START_SHORT)) {
+    } else if (strstr(scan_start, DS4_TOOL_CALLS_START_SHORT)) {
         ts = DS4_TOOL_CALLS_START_SHORT;  te = DS4_TOOL_CALLS_END_SHORT;
         is = DS4_INVOKE_START_SHORT;      ie = DS4_INVOKE_END_SHORT;
         ps = DS4_PARAM_START_SHORT;       pe = DS4_PARAM_END_SHORT;
-    } else if (strstr(s, "<tool_calls>")) {
+    } else if (strstr(scan_start, "<tool_calls>")) {
         ts = "<tool_calls>";   te = "</tool_calls>";
         is = "<invoke";        ie = "</invoke>";
         ps = "<parameter";     pe = "</parameter>";
@@ -4627,8 +4635,8 @@ static bool try_repair_dsml(const char *s, size_t len, buf *out) {
 
     /* Single-pass: count all 6 tag types in one scan */
     size_t tos = 0, toe = 0, ios = 0, ioe = 0, pos = 0, poe = 0;
-    const char *e = s + len;
-    for (const char *p = s; p < e; ) {
+    const char *e = scan_start + scan_len;
+    for (const char *p = scan_start; p < e; ) {
         size_t d;
         if ((d = strlen(ts)) && !strncmp(p, ts, d)) { tos++; p += d; }
         else if ((d = strlen(te)) && !strncmp(p, te, d)) { toe++; p += d; }
@@ -4646,11 +4654,16 @@ static bool try_repair_dsml(const char *s, size_t len, buf *out) {
          * the content as plain text. */
         if (tos > 0 && ios == 0) {
             size_t ts_len = strlen(ts), te_len = strlen(te);
-            const char *p = s;
-            while (p < e) {
+            /* Copy thinking section verbatim, then strip tags from scanned region */
+            if (think_end) {
+                buf_append(out, s, (size_t)(scan_start - s));
+            }
+            const char *p = scan_start;
+            const char *strip_end = scan_start + scan_len;
+            while (p < strip_end) {
                 const char *tag = strstr(p, ts);
-                if (!tag) {
-                    buf_append(out, p, (size_t)(e - p));
+                if (!tag || tag >= strip_end) {
+                    buf_append(out, p, (size_t)(strip_end - p));
                     break;
                 }
                 /* Copy text before this tag */
@@ -4659,13 +4672,13 @@ static bool try_repair_dsml(const char *s, size_t len, buf *out) {
                 p = tag + ts_len;
                 /* Find matching closing tag and skip it */
                 const char *closing = strstr(p, te);
-                if (closing) {
+                if (closing && closing < strip_end) {
                     /* Copy content between tags (but not the tags themselves) */
                     buf_append(out, p, (size_t)(closing - p));
                     p = closing + te_len;
                 } else {
                     /* No closing tag - keep the rest as-is */
-                    buf_append(out, p, (size_t)(e - p));
+                    buf_append(out, p, (size_t)(strip_end - p));
                     break;
                 }
             }
