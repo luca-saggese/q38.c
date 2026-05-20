@@ -576,20 +576,22 @@ static const char agent_tools_prompt_edit_tag[] =
 
 static const char agent_tools_prompt_edit_crc[] =
     "## Edit mode: crc\n\n"
-    "Read and search output use plain line numbers and an eight-hex-digit whole-file CRC32 called file_tag. The file_tag covers the "
-    "entire current file contents. When editing with line numbers, ranges, or old/new in this mode, include the "
-    "file_tag you saw in the latest read/search result so the edit tool can reject stale edits if the file changed. "
-    "Line output is rendered as `LINE text`, without per-line tags. Prefer line/range edits with file_tag for simple "
-    "changes, or old/new plus file_tag when the old text is unique. A range may be passed as range=\"10:20\" or as "
-    "start_line=10 end_line=20. Example:\n"
+    "Read and search output use plain line numbers and an eight-hex-digit whole-file CRC32 called file_cas_crc. "
+    "The file_cas_crc covers the entire current file contents. When editing by line numbers or ranges in this mode, "
+    "include the file_cas_crc you saw in the latest read/search result so the edit tool can reject stale edits if the file changed. Line output is "
+    "rendered as `LINE text`, without per-line tags. Use old/new without file_cas_crc when the old text is unique; "
+    "file_cas_crc is optional for old/new. Prefer line/range edits with file_cas_crc for simple changes. A range may be "
+    "passed as range=\"10:20\" or as start_line=10 end_line=20. Example:\n"
     "<｜DSML｜tool_calls>\n"
     "<｜DSML｜invoke name=\"edit\">\n"
     "<｜DSML｜parameter name=\"path\" string=\"true\">/tmp/example.c</｜DSML｜parameter>\n"
-    "<｜DSML｜parameter name=\"file_tag\" string=\"true\">9e3a41bf</｜DSML｜parameter>\n"
+    "<｜DSML｜parameter name=\"file_cas_crc\" string=\"true\">9e3a41bf</｜DSML｜parameter>\n"
     "<｜DSML｜parameter name=\"range\" string=\"true\">16:18</｜DSML｜parameter>\n"
     "<｜DSML｜parameter name=\"new\" string=\"true\">if (count > limit) {\n    return limit;\n}</｜DSML｜parameter>\n"
     "</｜DSML｜invoke>\n"
     "</｜DSML｜tool_calls>\n"
+    "After a successful edit, the tool result reports new_file_cas_crc. Use that value for the next line/range edit "
+    "on the same file instead of re-reading only to refresh the checksum.\n"
     "Use read raw=true only when you need undecorated file text.\n\n";
 
 static const char agent_tools_prompt_after_edit[] =
@@ -622,7 +624,7 @@ static const char agent_tools_prompt_after_edit[] =
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
     "\"line\":{\"type\":\"number\"},\"start_line\":{\"type\":\"number\"},\"end_line\":{\"type\":\"number\"},"
     "\"range\":{\"type\":\"string\"},\"tag\":{\"type\":\"string\"},\"lines\":{\"type\":\"string\"},"
-    "\"file_tag\":{\"type\":\"string\"},\"old\":{\"type\":\"string\"},\"new\":{\"type\":\"string\"}},"
+    "\"file_cas_crc\":{\"type\":\"string\"},\"old\":{\"type\":\"string\"},\"new\":{\"type\":\"string\"}},"
     "\"required\":[\"path\"]}}}\n"
     "{\"type\":\"function\",\"function\":{\"name\":\"search\",\"description\":\"Search files and return compact edit-friendly matches.\","
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},"
@@ -3239,7 +3241,7 @@ static void agent_line_tag(const char *s, size_t n, char out[5]) {
 }
 
 /* CRC edit mode uses a whole-file CRC32 as a compact stale-file guard.  It is a
- * user-visible compatibility checksum, not a cryptographic identity. */
+ * user-visible compare-and-swap checksum, not a cryptographic identity. */
 static uint32_t agent_crc32_bytes(const char *s, size_t n) {
     uint32_t crc = 0xffffffffu;
     for (size_t i = 0; i < n; i++) {
@@ -3250,11 +3252,11 @@ static uint32_t agent_crc32_bytes(const char *s, size_t n) {
     return crc ^ 0xffffffffu;
 }
 
-static void agent_file_tag(const char *s, size_t n, char out[9]) {
+static void agent_file_cas_crc(const char *s, size_t n, char out[9]) {
     snprintf(out, 9, "%08x", agent_crc32_bytes(s, n));
 }
 
-static bool agent_normalize_file_tag(const char *s, char out[9]) {
+static bool agent_normalize_file_cas_crc(const char *s, char out[9]) {
     if (!s) return false;
     while (*s == ' ' || *s == '\t') s++;
     if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
@@ -3268,17 +3270,18 @@ static bool agent_normalize_file_tag(const char *s, char out[9]) {
     return *s == '\0';
 }
 
-static bool agent_verify_file_tag_arg(const char *file_tag, const char *data,
-                                      size_t len, char *err, size_t err_len) {
+static bool agent_verify_file_cas_crc_arg(const char *file_cas_crc,
+                                          const char *data, size_t len,
+                                          char *err, size_t err_len) {
     char expected[9], actual[9];
-    if (!agent_normalize_file_tag(file_tag, expected)) {
-        snprintf(err, err_len, "invalid file_tag; expected 8 hex CRC32 digits");
+    if (!agent_normalize_file_cas_crc(file_cas_crc, expected)) {
+        snprintf(err, err_len, "invalid file_cas_crc; expected 8 hex CRC32 digits");
         return false;
     }
-    agent_file_tag(data, len, actual);
+    agent_file_cas_crc(data, len, actual);
     if (strcmp(expected, actual)) {
         snprintf(err, err_len,
-                 "file_tag mismatch; expected %s current %s. Re-read/search and retry",
+                 "file_cas_crc mismatch; expected %s current %s. Re-read/search and retry",
                  expected, actual);
         return false;
     }
@@ -3354,15 +3357,15 @@ static char *agent_read_range(agent_worker *w, const char *path, int start_line,
         }
     } else {
         char hdr[PATH_MAX + 160];
-        char file_tag[9];
+        char file_cas_crc[9];
         bool crc_mode = w->cfg->edit_mode == AGENT_EDIT_MODE_CRC;
-        if (crc_mode) agent_file_tag(data, len, file_tag);
+        if (crc_mode) agent_file_cas_crc(data, len, file_cas_crc);
         if (end_idx < spans.len) {
             if (crc_mode) {
                 snprintf(hdr, sizeof(hdr),
-                         "%s: file_tag=%s lines %d-%d of %d; continue_offset=%d; "
+                         "%s: file_cas_crc=%s lines %d-%d of %d; continue_offset=%d; "
                          "call the more tool with count=%d to read the next chunk\n",
-                         path, file_tag, spans.len ? start_idx + 1 : 0,
+                         path, file_cas_crc, spans.len ? start_idx + 1 : 0,
                          end_idx, spans.len, end_idx + 1,
                          max_lines > 0 ? max_lines : AGENT_READ_DEFAULT_LINES);
             } else {
@@ -3374,8 +3377,8 @@ static char *agent_read_range(agent_worker *w, const char *path, int start_line,
             }
         } else {
             if (crc_mode) {
-                snprintf(hdr, sizeof(hdr), "%s: file_tag=%s lines %d-%d of %d\n",
-                         path, file_tag, spans.len ? start_idx + 1 : 0,
+                snprintf(hdr, sizeof(hdr), "%s: file_cas_crc=%s lines %d-%d of %d\n",
+                         path, file_cas_crc, spans.len ? start_idx + 1 : 0,
                          end_idx, spans.len);
             } else {
                 snprintf(hdr, sizeof(hdr), "%s: lines %d-%d of %d\n",
@@ -3530,11 +3533,11 @@ static const char *agent_memmem_simple(const char *hay, size_t hay_len,
 
 /* Classic old/new editing path.  It is intentionally conservative: the old
  * text must occur exactly once, otherwise the model should read more context
- * or switch to line-guarded editing.  In crc edit mode, file_tag adds a stale
- * whole-file guard before the old/new replacement is attempted. */
+ * or switch to line-guarded editing.  A file_cas_crc is accepted as an optional
+ * stale-file guard, but old/new intentionally remains usable without one. */
 static char *agent_tool_edit_old_new(const char *path, const char *old,
                                      const char *new_text,
-                                     const char *file_tag) {
+                                     const char *file_cas_crc) {
     if (!old || !old[0]) return xstrdup("Tool error: edit old/new requires non-empty old text\n");
     if (!new_text) new_text = "";
     char err[256];
@@ -3547,8 +3550,8 @@ static char *agent_tool_edit_old_new(const char *path, const char *old,
         agent_buf_puts(&b, "\n");
         return agent_buf_take(&b);
     }
-    if (file_tag && file_tag[0] &&
-        !agent_verify_file_tag_arg(file_tag, data, len, err, sizeof(err)))
+    if (file_cas_crc && file_cas_crc[0] &&
+        !agent_verify_file_cas_crc_arg(file_cas_crc, data, len, err, sizeof(err)))
     {
         agent_buf b = {0};
         agent_buf_puts(&b, "Tool error: ");
@@ -3568,7 +3571,7 @@ static char *agent_tool_edit_old_new(const char *path, const char *old,
                                              old, old_len);
     if (second) {
         free(data);
-        return xstrdup("Tool error: old text is not unique; use line tags or file_tag plus line/range\n");
+        return xstrdup("Tool error: old text is not unique; use line tags or file_cas_crc plus line/range\n");
     }
     size_t new_len = strlen(new_text);
     size_t prefix = (size_t)(first - data);
@@ -3579,6 +3582,8 @@ static char *agent_tool_edit_old_new(const char *path, const char *old,
     memcpy(out + prefix + new_len, first + old_len, len - prefix - old_len);
     out[out_len] = '\0';
     int rc = agent_write_file_bytes(path, out, out_len, err, sizeof(err));
+    char new_file_cas_crc[9];
+    agent_file_cas_crc(out, out_len, new_file_cas_crc);
     free(data);
     free(out);
     if (rc != 0) {
@@ -3589,7 +3594,9 @@ static char *agent_tool_edit_old_new(const char *path, const char *old,
         return agent_buf_take(&b);
     }
     char msg[PATH_MAX + 96];
-    snprintf(msg, sizeof(msg), "Edited %s using old/new replacement\n", path);
+    snprintf(msg, sizeof(msg),
+             "Edited %s using old/new replacement; new_file_cas_crc=%s\n",
+             path, new_file_cas_crc);
     return xstrdup(msg);
 }
 
@@ -3655,6 +3662,8 @@ static char *agent_tool_edit_tagged(const char *path, int start_line,
     out[pos] = '\0';
 
     int rc = agent_write_file_bytes(path, out, out_len, err, sizeof(err));
+    char new_file_cas_crc[9];
+    agent_file_cas_crc(out, out_len, new_file_cas_crc);
     agent_line_spans_free(&spans);
     free(data);
     free(out);
@@ -3666,7 +3675,8 @@ static char *agent_tool_edit_tagged(const char *path, int start_line,
         return agent_buf_take(&b);
     }
     char msg[PATH_MAX + 128];
-    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d\n", path, start_line, end_line);
+    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d; new_file_cas_crc=%s\n",
+             path, start_line, end_line, new_file_cas_crc);
     return xstrdup(msg);
 }
 
@@ -3826,6 +3836,8 @@ static char *agent_tool_edit_bulk_lines(const char *path, const char *lines,
     out[pos] = '\0';
 
     int rc = agent_write_file_bytes(path, out, out_len, err, sizeof(err));
+    char new_file_cas_crc[9];
+    agent_file_cas_crc(out, out_len, new_file_cas_crc);
     agent_line_refs_free(&refs);
     agent_line_spans_free(&spans);
     free(data);
@@ -3838,7 +3850,8 @@ static char *agent_tool_edit_bulk_lines(const char *path, const char *lines,
         return agent_buf_take(&b);
     }
     char msg[PATH_MAX + 128];
-    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d\n", path, first_line, last_line);
+    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d; new_file_cas_crc=%s\n",
+             path, first_line, last_line, new_file_cas_crc);
     return xstrdup(msg);
 }
 
@@ -3913,6 +3926,8 @@ static char *agent_tool_edit_tagged_old_new(const char *path, int line,
     out[out_len] = '\0';
 
     int rc = agent_write_file_bytes(path, out, out_len, err, sizeof(err));
+    char new_file_cas_crc[9];
+    agent_file_cas_crc(out, out_len, new_file_cas_crc);
     agent_line_spans_free(&spans);
     free(data);
     free(out);
@@ -3924,8 +3939,9 @@ static char *agent_tool_edit_tagged_old_new(const char *path, int line,
         return agent_buf_take(&b);
     }
     char msg[PATH_MAX + 128];
-    snprintf(msg, sizeof(msg), "Edited %s line %d using tag-restricted old/new\n",
-             path, line);
+    snprintf(msg, sizeof(msg),
+             "Edited %s line %d using tag-restricted old/new; new_file_cas_crc=%s\n",
+             path, line, new_file_cas_crc);
     return xstrdup(msg);
 }
 
@@ -3949,16 +3965,16 @@ static bool agent_parse_line_range_arg(const char *s, int *start, int *end) {
 }
 
 /* CRC edit mode replaces one line or a contiguous range after verifying the
- * whole-file file_tag.  It trades per-line checks for a cheaper prompt shape:
+ * whole-file file_cas_crc.  It trades per-line checks for a cheaper prompt shape:
  * if any byte in the file changed since read/search, the edit is rejected. */
-static char *agent_tool_edit_crc_range(const char *path, const char *file_tag,
+static char *agent_tool_edit_crc_range(const char *path, const char *file_cas_crc,
                                        int start_line, int end_line,
                                        const char *new_text) {
     if (!new_text) new_text = "";
     if (start_line <= 0 || end_line <= 0 || end_line < start_line)
         return xstrdup("Tool error: invalid edit line range\n");
-    if (!file_tag || !file_tag[0])
-        return xstrdup("Tool error: crc edit requires file_tag from the latest read/search\n");
+    if (!file_cas_crc || !file_cas_crc[0])
+        return xstrdup("Tool error: crc edit requires file_cas_crc from the latest read/search\n");
 
     char err[256];
     char *data = NULL;
@@ -3970,7 +3986,7 @@ static char *agent_tool_edit_crc_range(const char *path, const char *file_tag,
         agent_buf_puts(&b, "\n");
         return agent_buf_take(&b);
     }
-    if (!agent_verify_file_tag_arg(file_tag, data, len, err, sizeof(err))) {
+    if (!agent_verify_file_cas_crc_arg(file_cas_crc, data, len, err, sizeof(err))) {
         agent_buf b = {0};
         agent_buf_puts(&b, "Tool error: ");
         agent_buf_puts(&b, err);
@@ -4005,6 +4021,8 @@ static char *agent_tool_edit_crc_range(const char *path, const char *file_tag,
     out[pos] = '\0';
 
     int rc = agent_write_file_bytes(path, out, out_len, err, sizeof(err));
+    char new_file_cas_crc[9];
+    agent_file_cas_crc(out, out_len, new_file_cas_crc);
     agent_line_spans_free(&spans);
     free(data);
     free(out);
@@ -4016,8 +4034,8 @@ static char *agent_tool_edit_crc_range(const char *path, const char *file_tag,
         return agent_buf_take(&b);
     }
     char msg[PATH_MAX + 160];
-    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d using file_tag\n",
-             path, start_line, end_line);
+    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d; new_file_cas_crc=%s\n",
+             path, start_line, end_line, new_file_cas_crc);
     return xstrdup(msg);
 }
 
@@ -4031,7 +4049,7 @@ static char *agent_tool_edit(agent_worker *w, const agent_tool_call *call) {
     const char *lines = agent_tool_arg_value(call, "lines");
     if (lines) return agent_tool_edit_bulk_lines(path, lines, new_text);
 
-    const char *file_tag = agent_tool_arg_value(call, "file_tag");
+    const char *file_cas_crc = agent_tool_arg_value(call, "file_cas_crc");
     int line = agent_parse_int_default(agent_tool_arg_value(call, "line"), 0, 0, INT_MAX);
     int range_start = 0, range_end = 0;
     const char *range = agent_tool_arg_value(call, "range");
@@ -4050,20 +4068,21 @@ static char *agent_tool_edit(agent_worker *w, const agent_tool_call *call) {
     const char *old = agent_tool_arg_value(call, "old");
     bool has_usable_line_tag = (line && tag && tag[0]) ||
         (start && end && start_tag && start_tag[0] && end_tag && end_tag[0]);
-    if (w->cfg->edit_mode == AGENT_EDIT_MODE_CRC &&
-        (!file_tag || !file_tag[0]) && !has_usable_line_tag && (old || start || end))
-    {
-        return xstrdup("Tool error: crc edit mode requires file_tag from the latest read/search\n");
-    }
-    if (file_tag && file_tag[0]) {
-        if (old) return agent_tool_edit_old_new(path, old, new_text, file_tag);
-        if (start && end)
-            return agent_tool_edit_crc_range(path, file_tag, start, end, new_text);
-        return xstrdup("Tool error: file_tag edit requires old/new or line/start_line/range plus new\n");
-    }
     if (old && line && tag)
         return agent_tool_edit_tagged_old_new(path, line, tag, old, new_text);
-    if (old) return agent_tool_edit_old_new(path, old, new_text, NULL);
+    if (old)
+        return agent_tool_edit_old_new(path, old, new_text,
+                                       file_cas_crc && file_cas_crc[0] ? file_cas_crc : NULL);
+    if (w->cfg->edit_mode == AGENT_EDIT_MODE_CRC &&
+        (!file_cas_crc || !file_cas_crc[0]) && !has_usable_line_tag && (start || end))
+    {
+        return xstrdup("Tool error: crc edit mode requires file_cas_crc from the latest read/search\n");
+    }
+    if (file_cas_crc && file_cas_crc[0]) {
+        if (start && end)
+            return agent_tool_edit_crc_range(path, file_cas_crc, start, end, new_text);
+        return xstrdup("Tool error: file_cas_crc edit requires line/start_line/range plus new, or old/new text\n");
+    }
     if (start && end && start != end)
         return xstrdup("Tool error: bulk tagged edit requires `lines` with one LINE:TAG entry for every line being replaced. Endpoint tags are not enough; re-read the range and retry with `lines` plus `new`.\n");
 
@@ -4160,10 +4179,11 @@ static void agent_search_file(agent_search_ctx *ctx, const char *path) {
             continue;
         if (!printed_file) {
             if (ctx->edit_mode == AGENT_EDIT_MODE_CRC) {
-                char tag[9];
+                char file_cas_crc[9];
                 char hdr[PATH_MAX + 64];
-                agent_file_tag(data, len, tag);
-                snprintf(hdr, sizeof(hdr), "%s file_tag=%s\n", path, tag);
+                agent_file_cas_crc(data, len, file_cas_crc);
+                snprintf(hdr, sizeof(hdr), "%s file_cas_crc=%s\n",
+                         path, file_cas_crc);
                 agent_buf_puts(&ctx->out, hdr);
             } else {
                 agent_buf_puts(&ctx->out, path);
