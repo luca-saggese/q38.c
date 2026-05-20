@@ -202,6 +202,8 @@ typedef enum {
     AGENT_TOOL_PARAM_BASH_COMMAND,
 } agent_tool_param_kind;
 
+#define AGENT_BASH_COMMAND_VIZ_MAX 16384
+
 typedef struct {
     bool active;
     bool tool_announced;
@@ -220,6 +222,10 @@ typedef struct {
     char read_start[32];
     char read_max[32];
     char read_whole[8];
+    char bash_command[AGENT_BASH_COMMAND_VIZ_MAX];
+    size_t bash_command_len;
+    size_t bash_command_total;
+    bool bash_command_truncated;
 } agent_tool_visualizer;
 
 typedef struct {
@@ -1446,6 +1452,40 @@ static void agent_tool_viz_append(char *dst, size_t cap, char c) {
     dst[len + 1] = '\0';
 }
 
+static void agent_tool_viz_bash_command_append(agent_tool_visualizer *v, char c) {
+    v->bash_command_total++;
+    if (v->bash_command_len < sizeof(v->bash_command)) {
+        v->bash_command[v->bash_command_len++] = c;
+    } else {
+        v->bash_command_truncated = true;
+    }
+}
+
+static void agent_tool_viz_render_bash_command(agent_stream_renderer *sr) {
+    agent_tool_visualizer *v = &sr->viz;
+    if (!v->bash_command_len && !v->bash_command_total) return;
+
+    /* Bash parameters are buffered for display and rendered once the DSML
+     * parameter is closed. The parser's argument buffer remains the execution
+     * source of truth; this only avoids terminal redraw/color escape
+     * interleaving corrupting the human-facing command projection. */
+    renderer_color(sr->renderer, agent_tool_param_color(AGENT_TOOL_PARAM_BASH_COMMAND));
+    agent_tool_viz_write(sr, v->bash_command, v->bash_command_len);
+    v->at_line_start = v->bash_command_len &&
+                       v->bash_command[v->bash_command_len - 1] == '\n';
+
+    if (v->bash_command_truncated) {
+        char msg[128];
+        size_t omitted = v->bash_command_total - v->bash_command_len;
+        renderer_color(sr->renderer, "\x1b[90m");
+        int n = snprintf(msg, sizeof(msg),
+                         "\n... bash command display truncated; %zu bytes omitted ...",
+                         omitted);
+        if (n > 0) agent_tool_viz_write(sr, msg, (size_t)n);
+        v->at_line_start = false;
+    }
+}
+
 static void agent_tool_viz_read_value_byte(agent_stream_renderer *sr, char c) {
     agent_tool_visualizer *v = &sr->viz;
     if (!strcmp(v->param_name, "path")) {
@@ -1541,12 +1581,19 @@ static void agent_tool_viz_param_begin(agent_stream_renderer *sr, const char *na
         renderer_color(sr->renderer, "\x1b[1;37m");
         agent_tool_viz_puts(sr, v->param_name);
         agent_tool_viz_puts(sr, "=");
+    } else {
+        v->bash_command_len = 0;
+        v->bash_command_total = 0;
+        v->bash_command_truncated = false;
+        return;
     }
     renderer_color(sr->renderer, agent_tool_param_color(v->param_kind));
 }
 
 static void agent_tool_viz_param_end(agent_stream_renderer *sr) {
     agent_tool_visualizer *v = &sr->viz;
+    if (v->param_kind == AGENT_TOOL_PARAM_BASH_COMMAND)
+        agent_tool_viz_render_bash_command(sr);
     v->param_end_len = 0;
     if (!v->read_style) renderer_color(sr->renderer, "\x1b[0m");
     v->param_active = false;
@@ -1557,6 +1604,10 @@ static void agent_tool_viz_param_raw_byte(agent_stream_renderer *sr, char c) {
     agent_tool_visualizer *v = &sr->viz;
     if (v->read_style) {
         agent_tool_viz_read_value_byte(sr, c);
+        return;
+    }
+    if (v->param_kind == AGENT_TOOL_PARAM_BASH_COMMAND) {
+        agent_tool_viz_bash_command_append(v, c);
         return;
     }
     if (v->param_kind == AGENT_TOOL_PARAM_DIFF_OLD ||
@@ -1573,7 +1624,8 @@ static void agent_tool_viz_param_raw_byte(agent_stream_renderer *sr, char c) {
 
 static void agent_tool_viz_restore_param_color(agent_stream_renderer *sr) {
     agent_tool_visualizer *v = &sr->viz;
-    if (!v->active || !v->param_active || v->read_style) return;
+    if (!v->active || !v->param_active || v->read_style ||
+        v->param_kind == AGENT_TOOL_PARAM_BASH_COMMAND) return;
     renderer_color(sr->renderer, agent_tool_param_color(v->param_kind));
 }
 
