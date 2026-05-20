@@ -548,8 +548,8 @@ static const char agent_tools_prompt_intro[] =
     "</｜DSML｜tool_calls>\n\n"
     "Tool calls are not allowed inside <think></think>; finish thinking before emitting DSML.\n\n"
     "String parameters use raw text and string=\"true\". Numbers and booleans use JSON text and string=\"false\". "
-    "For coding tasks, prefer a tool call over printing a complete source file inline. After tools run, summarize "
-    "the result briefly.\n\n"
+    "For coding tasks, prefer a tool call over printing a complete source file inline. Also in final replies avoid "
+    "replying to the user with large amount of code if not strictly needed. After tools run, summarize the result briefly.\n\n"
     "Read defaults to a bounded chunk: path alone returns the first 500 lines, not the whole file. "
     "If read says more lines are available, call the more tool with count=500 to read the next chunk. "
     "The read result also reports continue_offset=N, which is the next start_line if you need to jump manually. "
@@ -581,15 +581,9 @@ static const char agent_tools_prompt_edit_crc[] =
     "include the file_cas_crc you saw in the latest read/search result so the edit tool can reject stale edits if the file changed. Line output is "
     "rendered as `LINE text`, without per-line tags. Use old/new without file_cas_crc when the old text is unique; "
     "file_cas_crc is optional for old/new. Prefer line/range edits with file_cas_crc for simple changes. A range may be "
-    "passed as range=\"10:20\" or as start_line=10 end_line=20. Example:\n"
-    "<｜DSML｜tool_calls>\n"
-    "<｜DSML｜invoke name=\"edit\">\n"
-    "<｜DSML｜parameter name=\"path\" string=\"true\">/tmp/example.c</｜DSML｜parameter>\n"
-    "<｜DSML｜parameter name=\"file_cas_crc\" string=\"true\">9e3a41bf</｜DSML｜parameter>\n"
-    "<｜DSML｜parameter name=\"range\" string=\"true\">16:18</｜DSML｜parameter>\n"
-    "<｜DSML｜parameter name=\"new\" string=\"true\">if (count > limit) {\n    return limit;\n}</｜DSML｜parameter>\n"
-    "</｜DSML｜invoke>\n"
-    "</｜DSML｜tool_calls>\n"
+    "passed as range=\"10:20\", range=\"all\", or as start_line=10 end_line=20. Use range=\"all\" with file_cas_crc when replacing the whole file.\n"
+    "For range edits, use for example: edit path=\"/tmp/example.c\" file_cas_crc=\"9e3a41bf\" range=\"16:20\" new=\"... new text ...\" without the old parameter.\n"
+    "This also works for single-line edits, for example line=16 file_cas_crc=\"9e3a41bf\" new=\"... new line ...\", to avoid retyping the old line.\n"
     "After a successful write or edit, the tool result reports new_file_cas_crc. Use that value for the next line/range edit "
     "on the same file instead of re-reading only to refresh the checksum.\n"
     "Use read raw=true only when you need undecorated file text.\n\n";
@@ -1583,9 +1577,11 @@ static void agent_tool_viz_param_begin(agent_stream_renderer *sr, const char *na
 
     if (v->param_kind == AGENT_TOOL_PARAM_CONTENT) {
         if (!v->last_output_newline) agent_tool_viz_puts(sr, "\n");
-        renderer_color(sr->renderer, "\x1b[1;37m");
-        agent_tool_viz_puts(sr, v->param_name);
-        agent_tool_viz_puts(sr, ":\n");
+        if (strcmp(v->tool_name, "write")) {
+            renderer_color(sr->renderer, "\x1b[1;37m");
+            agent_tool_viz_puts(sr, v->param_name);
+            agent_tool_viz_puts(sr, ":\n");
+        }
         renderer_color(sr->renderer, "\x1b[34m");
         v->at_line_start = true;
         return;
@@ -3185,59 +3181,6 @@ static void agent_split_lines(const char *data, size_t len, agent_line_spans *sp
     }
 }
 
-#define AGENT_EDIT_PREVIEW_MAX_LINES 8
-#define AGENT_EDIT_PREVIEW_MAX_BYTES 1600
-
-/* Add a small before/after preview to range-edit tool results.  The edit tool
- * already applies exactly the requested line numbers; this preview makes a bad
- * range choice obvious to the model on the very next turn. */
-static void agent_edit_preview_text(agent_buf *b, const char *label,
-                                    const char *text, size_t len,
-                                    int first_line) {
-    agent_buf_puts(b, label);
-    agent_buf_puts(b, ":\n");
-    if (len == 0) {
-        agent_buf_puts(b, "(empty)\n");
-        return;
-    }
-
-    size_t pos = 0, bytes = 0;
-    int shown = 0;
-    while (pos < len && shown < AGENT_EDIT_PREVIEW_MAX_LINES &&
-           bytes < AGENT_EDIT_PREVIEW_MAX_BYTES)
-    {
-        size_t start = pos;
-        while (pos < len && text[pos] != '\n' && text[pos] != '\r') pos++;
-        size_t content_end = pos;
-        if (pos < len) {
-            if (text[pos] == '\r' && pos + 1 < len && text[pos + 1] == '\n')
-                pos += 2;
-            else
-                pos++;
-        }
-
-        char prefix[64];
-        snprintf(prefix, sizeof(prefix), "%d ", first_line + shown);
-        agent_buf_puts(b, prefix);
-        size_t n = content_end - start;
-        if (bytes + n > AGENT_EDIT_PREVIEW_MAX_BYTES)
-            n = AGENT_EDIT_PREVIEW_MAX_BYTES - bytes;
-        agent_buf_append(b, text + start, n);
-        agent_buf_puts(b, "\n");
-        bytes += n;
-        shown++;
-    }
-    if (pos < len) agent_buf_puts(b, "... preview truncated ...\n");
-}
-
-static void agent_edit_preview_range(agent_buf *b,
-                                     const char *old_text, size_t old_len,
-                                     const char *new_text, int first_line) {
-    agent_edit_preview_text(b, "replaced_old_lines", old_text, old_len, first_line);
-    agent_edit_preview_text(b, "replacement_new_lines", new_text ? new_text : "",
-                            new_text ? strlen(new_text) : 0, first_line);
-}
-
 static int agent_read_file_bytes(const char *path, char **data, size_t *len,
                                  char *err, size_t errlen) {
     FILE *fp = fopen(path, "rb");
@@ -4099,17 +4042,56 @@ static char *agent_tool_edit_crc_range(const char *path, const char *file_cas_cr
         free(out);
         return agent_buf_take(&b);
     }
-    agent_buf result = {0};
     char msg[PATH_MAX + 160];
     snprintf(msg, sizeof(msg), "Edited %s lines %d-%d; new_file_cas_crc=%s\n",
              path, start_line, end_line, new_file_cas_crc);
-    agent_buf_puts(&result, msg);
-    agent_edit_preview_range(&result, data + s.start, e.end - s.start,
-                             new_text, start_line);
     agent_line_spans_free(&spans);
     free(data);
     free(out);
-    return agent_buf_take(&result);
+    return xstrdup(msg);
+}
+
+static char *agent_tool_edit_crc_all(const char *path, const char *file_cas_crc,
+                                     const char *new_text) {
+    if (!new_text) new_text = "";
+    if (!file_cas_crc || !file_cas_crc[0])
+        return xstrdup("Tool error: crc edit requires file_cas_crc from the latest read/search\n");
+
+    char err[256];
+    char *data = NULL;
+    size_t len = 0;
+    if (agent_read_file_bytes(path, &data, &len, err, sizeof(err)) != 0) {
+        agent_buf b = {0};
+        agent_buf_puts(&b, "Tool error: ");
+        agent_buf_puts(&b, err);
+        agent_buf_puts(&b, "\n");
+        return agent_buf_take(&b);
+    }
+    if (!agent_verify_file_cas_crc_arg(file_cas_crc, data, len, err, sizeof(err))) {
+        agent_buf b = {0};
+        agent_buf_puts(&b, "Tool error: ");
+        agent_buf_puts(&b, err);
+        agent_buf_puts(&b, "\n");
+        free(data);
+        return agent_buf_take(&b);
+    }
+
+    size_t new_len = strlen(new_text);
+    int rc = agent_write_file_bytes(path, new_text, new_len, err, sizeof(err));
+    char new_file_cas_crc[9];
+    agent_file_cas_crc(new_text, new_len, new_file_cas_crc);
+    free(data);
+    if (rc != 0) {
+        agent_buf b = {0};
+        agent_buf_puts(&b, "Tool error: ");
+        agent_buf_puts(&b, err);
+        agent_buf_puts(&b, "\n");
+        return agent_buf_take(&b);
+    }
+    char msg[PATH_MAX + 160];
+    snprintf(msg, sizeof(msg), "Edited %s range=all; new_file_cas_crc=%s\n",
+             path, new_file_cas_crc);
+    return xstrdup(msg);
 }
 
 /* Pick the safest edit mode supported by the tool arguments.  The preferred
@@ -4126,8 +4108,9 @@ static char *agent_tool_edit(agent_worker *w, const agent_tool_call *call) {
     int line = agent_parse_int_default(agent_tool_arg_value(call, "line"), 0, 0, INT_MAX);
     int range_start = 0, range_end = 0;
     const char *range = agent_tool_arg_value(call, "range");
-    bool have_range = agent_parse_line_range_arg(range, &range_start, &range_end);
-    if (range && !have_range)
+    bool range_all = range && !strcmp(range, "all");
+    bool have_range = !range_all && agent_parse_line_range_arg(range, &range_start, &range_end);
+    if (range && !range_all && !have_range)
         return xstrdup("Tool error: invalid range; use START:END, for example 10:20\n");
     int start = have_range ? range_start : line ? line :
         agent_parse_int_default(agent_tool_arg_value(call, "start_line"),
@@ -4152,6 +4135,8 @@ static char *agent_tool_edit(agent_worker *w, const agent_tool_call *call) {
         return xstrdup("Tool error: crc edit mode requires file_cas_crc from the latest read/search\n");
     }
     if (file_cas_crc && file_cas_crc[0]) {
+        if (range_all)
+            return agent_tool_edit_crc_all(path, file_cas_crc, new_text);
         if (start && end)
             return agent_tool_edit_crc_range(path, file_cas_crc, start, end, new_text);
         return xstrdup("Tool error: file_cas_crc edit requires line/start_line/range plus new, or old/new text\n");
@@ -4365,7 +4350,7 @@ static char *agent_tool_search(agent_worker *w, const agent_tool_call *call) {
  * observation.
  */
 
-#define AGENT_BASH_HEAD_BYTES (64*1024)
+#define AGENT_BASH_HEAD_BYTES (8*1024)
 #define AGENT_BASH_HEAD_LINES 100
 #define AGENT_BASH_TAIL_BYTES (32*1024)
 #define AGENT_BASH_PROGRESS_TAIL_LINES 4
