@@ -5302,7 +5302,6 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         agent_set_error(w, compact_err[0] ? compact_err : "context compaction failed");
         return 1;
     }
-    int turn_start_len = w->transcript.len;
     agent_trace_text(w, "user", user_text ? user_text : "",
                      user_text ? strlen(user_text) : 0);
     ds4_chat_append_message(w->engine, &w->transcript, "user", user_text);
@@ -5332,8 +5331,6 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
             agent_set_error(w, compact_err[0] ? compact_err : "context compaction failed");
             return 1;
         }
-        int round_start_len = w->transcript.len;
-        int rollback_len = tool_round == 0 ? turn_start_len : round_start_len;
         ds4_chat_append_assistant_prefix(w->engine, &w->transcript, think_mode);
 
         const ds4_tokens *prompt_for_sync = &w->transcript;
@@ -5361,7 +5358,6 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         ds4_session_set_progress(w->session, worker_progress_cb, w);
         if (ds4_session_sync(w->session, prompt_for_sync, err, sizeof(err)) != 0) {
             ds4_session_set_progress(w->session, NULL, NULL);
-            w->transcript.len = rollback_len;
             agent_set_error(w, err);
             return 1;
         }
@@ -5444,29 +5440,6 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
                      "tool calling is not allowed inside <think></think>");
         }
 
-        if (generated == 0 && worker_should_interrupt(w)) {
-            agent_dsml_parser_free(&dsml);
-            /* Ctrl+C can arrive during a prefill that follows already completed
-             * tool work in the same user turn.  Only the current assistant
-             * prefix is speculative at that point; rolling back to the original
-             * user-turn start would erase real tool calls/results that the user
-             * already saw and may refer to in the next prompt. */
-            w->transcript.len = rollback_len;
-            ds4_session_invalidate(w->session);
-            agent_set_status(w, AGENT_WORKER_IDLE);
-            return 0;
-        }
-        if ((got_tool || malformed_tool) && worker_has_queued_user_pending(w)) {
-            agent_dsml_parser_free(&dsml);
-            /* A queued user message is a real interjection.  Do not execute a
-             * tool call that the user has not yet had a chance to override; roll
-             * back only this speculative assistant round and let the UI submit
-             * the queued text as the next turn. */
-            w->transcript.len = round_start_len;
-            ds4_session_invalidate(w->session);
-            agent_set_status(w, AGENT_WORKER_IDLE);
-            return 0;
-        }
         ds4_tokens_push(&w->transcript, ds4_token_eos(w->engine));
 
         if (!got_tool && !malformed_tool) {
@@ -5476,6 +5449,29 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         }
 
         char *tool_result;
+        if (worker_has_queued_user_pending(w)) {
+            /* The live KV is append-only: generated assistant text is already
+             * the current state, so user interjection must not rewind it.  Close
+             * the tool round with a synthetic tool result and let the queued
+             * user prompt append after this stable transcript point. */
+            if (malformed_tool) {
+                agent_buf b = {0};
+                agent_buf_puts(&b, "Tool error: invalid DSML tool call: ");
+                agent_buf_puts(&b, dsml.error[0] ? dsml.error : "parse error");
+                agent_buf_puts(&b, "\n");
+                agent_buf_puts(&b, "Tool execution stopped because a queued user prompt is pending.\n");
+                tool_result = agent_buf_take(&b);
+            } else {
+                tool_result = xstrdup(
+                    "Tool call not executed because a queued user prompt is pending.\n");
+            }
+            ds4_chat_append_message(w->engine, &w->transcript, "tool", tool_result);
+            free(tool_result);
+            agent_dsml_parser_free(&dsml);
+            agent_set_status(w, AGENT_WORKER_IDLE);
+            return 0;
+        }
+
         if (malformed_tool) {
             agent_buf b = {0};
             agent_buf_puts(&b, "Tool error: invalid DSML tool call: ");
@@ -5644,9 +5640,10 @@ static bool worker_is_idle(agent_worker *w) {
     return st.state == AGENT_WORKER_IDLE || st.state == AGENT_WORKER_ERROR;
 }
 
-/* The UI owns queued user text.  This flag only tells the worker that, if the
- * assistant is about to hand control to tools, a user interjection should get
- * the next turn first. */
+/* The UI owns queued user text.  This flag tells the worker to stop at the next
+ * stable append-only boundary: if the assistant emits a tool call, the worker
+ * records a synthetic "not executed" tool result instead of running the tool,
+ * then lets the queued user prompt append as the next turn. */
 static void worker_set_queued_user_pending(agent_worker *w, bool pending) {
     pthread_mutex_lock(&w->mu);
     w->queued_user_pending = pending;
