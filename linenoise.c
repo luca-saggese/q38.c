@@ -390,7 +390,6 @@ static int utf8CharWidth(uint32_t cp) {
          (cp >= 0x23E9 && cp <= 0x23F3) ||    /* Various symbols */
          (cp >= 0x23F8 && cp <= 0x23FA) ||    /* Various symbols */
          (cp >= 0x25AA && cp <= 0x25AB) ||    /* Small squares */
-         (cp >= 0x25B6 && cp <= 0x25C0) ||    /* Play/reverse buttons */
          (cp >= 0x25FB && cp <= 0x25FE) ||    /* Squares */
          (cp >= 0x2600 && cp <= 0x26FF) ||    /* Misc Symbols (sun, cloud, etc) */
          (cp >= 0x2700 && cp <= 0x27BF) ||    /* Dingbats (❤, ✂, etc) */
