@@ -880,6 +880,15 @@ static int linenoiseStatusActive(struct linenoiseState *l) {
     return l->status && l->status[0];
 }
 
+static int linenoiseStatusRows(struct linenoiseState *l) {
+    if (!linenoiseStatusActive(l)) return 0;
+    int rows = 1;
+    for (char *p = l->status; *p; p++) {
+        if (*p == '\n') rows++;
+    }
+    return rows;
+}
+
 /* Append at most maxcols terminal cells of UTF-8 text.  Status text is
  * expected to be plain text, with styling supplied separately by the caller,
  * but we still treat ANSI CSI escapes as zero-width so a caller can pass a
@@ -911,7 +920,8 @@ static size_t abAppendUtf8Clipped(struct abuf *ab, const char *s, size_t len,
     return width;
 }
 
-static void refreshStatusLine(struct abuf *ab, struct linenoiseState *l) {
+static void refreshStatusLinePart(struct abuf *ab, struct linenoiseState *l,
+                                  const char *s, size_t len) {
     size_t width = 0;
     size_t cols = l->cols ? l->cols : 80;
     abAppend(ab, "\r\n", 2);
@@ -922,13 +932,24 @@ static void refreshStatusLine(struct abuf *ab, struct linenoiseState *l) {
      * not move the cursor to the next row. */
     abAppend(ab, "\x1b[?7l", 5);
     if (l->status_start) abAppend(ab, l->status_start, (int)strlen(l->status_start));
-    width = abAppendUtf8Clipped(ab, l->status, strlen(l->status), cols);
+    width = abAppendUtf8Clipped(ab, s, len, cols);
     while (width < cols) {
         abAppend(ab, " ", 1);
         width++;
     }
     if (l->status_end) abAppend(ab, l->status_end, (int)strlen(l->status_end));
     abAppend(ab, "\x1b[?7h", 5);
+}
+
+static void refreshStatusLine(struct abuf *ab, struct linenoiseState *l) {
+    const char *p = l->status;
+    while (p && *p) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        refreshStatusLinePart(ab, l, p, len);
+        if (!nl) break;
+        p = nl + 1;
+    }
 }
 
 /* A fold is a display-only replacement for a range in l->buf. The edited
@@ -1431,7 +1452,7 @@ static void refreshMultiLine(struct linenoiseState *l, int flags) {
         abInit(&ab);
         layout_prompt_row =
             l->layout_callback(l, (size_t)rows,
-                               linenoiseStatusActive(l) ? 1 : 0,
+                               (size_t)linenoiseStatusRows(l),
                                l->layout_privdata);
     }
 
@@ -1488,7 +1509,7 @@ static void refreshMultiLine(struct linenoiseState *l, int flags) {
                      1 + col);
         } else {
             /* Go up till we reach the expected position. */
-            int rows_below_cursor = rows - rpos2 + (linenoiseStatusActive(l) ? 1 : 0);
+            int rows_below_cursor = rows - rpos2 + linenoiseStatusRows(l);
             if (rows_below_cursor > 0) {
                 lndebug("go-up %d", rows_below_cursor);
                 snprintf(seq,64,"\x1b[%dA", rows_below_cursor);
@@ -1508,7 +1529,7 @@ static void refreshMultiLine(struct linenoiseState *l, int flags) {
     l->oldpos = l->pos;
     if (flags & REFRESH_WRITE) {
         l->oldrows = rows;
-        l->oldstatusrows = linenoiseStatusActive(l) ? 1 : 0;
+        l->oldstatusrows = (size_t)linenoiseStatusRows(l);
         l->oldrpos = rpos2;
     } else if (flags & REFRESH_CLEAN) {
         l->oldrows = 0;
@@ -1681,10 +1702,10 @@ int linenoiseEditQueueInput(struct linenoiseState *l, const char *buf, size_t le
 }
 
 /* Set the optional status footer rendered by the multiplexed editor.  The
- * footer is owned by linenoise and redrawn as a single extra terminal row
- * below the editable prompt.  start_escape/end_escape are emitted around the
- * whole padded status row, so callers can pass "\x1b[7m" and "\x1b[0m" for
- * an inverted status bar without leaking attributes into the prompt. */
+ * footer is owned by linenoise and redrawn as one or more terminal rows below
+ * the editable prompt.  start_escape/end_escape are emitted around each padded
+ * status row, so callers can pass "\x1b[7m" and "\x1b[0m" for an inverted
+ * status bar without leaking attributes into the prompt. */
 int linenoiseEditSetStatus(struct linenoiseState *l, const char *status,
                            const char *start_escape, const char *end_escape) {
     char *ns = NULL, *nstart = NULL, *nend = NULL;

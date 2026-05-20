@@ -102,6 +102,7 @@ typedef struct {
     bool wake_pending;
     bool stop;
     bool interrupt;
+    bool queued_user_pending;
     int progress_base;
     char *cmd_text;
     agent_status status;
@@ -118,6 +119,14 @@ typedef struct {
 } agent_worker;
 
 static void agent_file_views_clear(agent_worker *w);
+
+typedef struct agent_tail_capture {
+    char *buf;
+    size_t cap;
+    size_t start;
+    size_t len;
+    size_t total;
+} agent_tail_capture;
 
 typedef enum {
     AGENT_MD_PENDING_NONE,
@@ -147,6 +156,7 @@ typedef struct {
     char utf8_pending[4];
     size_t utf8_pending_len;
     size_t utf8_pending_need;
+    agent_tail_capture *capture;
 } agent_token_renderer;
 
 typedef struct {
@@ -202,8 +212,6 @@ typedef enum {
     AGENT_TOOL_PARAM_BASH_COMMAND,
 } agent_tool_param_kind;
 
-#define AGENT_BASH_COMMAND_VIZ_MAX 16384
-
 typedef struct {
     bool active;
     bool tool_announced;
@@ -222,10 +230,6 @@ typedef struct {
     char read_start[32];
     char read_max[32];
     char read_whole[8];
-    char bash_command[AGENT_BASH_COMMAND_VIZ_MAX];
-    size_t bash_command_len;
-    size_t bash_command_total;
-    bool bash_command_truncated;
 } agent_tool_visualizer;
 
 typedef struct {
@@ -249,6 +253,8 @@ typedef struct {
 
 static volatile sig_atomic_t agent_sigint;
 static agent_worker *agent_completion_worker;
+
+static bool worker_has_queued_user_pending(agent_worker *w);
 
 /* ============================================================================
  * Small Utilities And Command-Line Parsing
@@ -1060,8 +1066,63 @@ static void agent_dsml_feed(agent_dsml_parser *p, const char *s, size_t n) {
  * decide whether they are formatting or literal text.
  */
 
+static void agent_tail_capture_append(agent_tail_capture *t,
+                                      const char *s, size_t n) {
+    if (!t || !n) return;
+    if (!t->cap) return;
+    if (!t->buf) t->buf = xmalloc(t->cap);
+    t->total += n;
+
+    if (n >= t->cap) {
+        memcpy(t->buf, s + n - t->cap, t->cap);
+        t->start = 0;
+        t->len = t->cap;
+        return;
+    }
+
+    if (t->len < t->cap) {
+        size_t free_tail = t->cap - t->len;
+        size_t first = n < free_tail ? n : free_tail;
+        size_t pos = (t->start + t->len) % t->cap;
+        size_t right = t->cap - pos;
+        size_t chunk = first < right ? first : right;
+        memcpy(t->buf + pos, s, chunk);
+        if (first > chunk) memcpy(t->buf, s + chunk, first - chunk);
+        t->len += first;
+        s += first;
+        n -= first;
+    }
+
+    while (n) {
+        size_t pos = (t->start + t->len) % t->cap;
+        size_t right = t->cap - pos;
+        size_t chunk = n < right ? n : right;
+        memcpy(t->buf + pos, s, chunk);
+        t->start = (t->start + chunk) % t->cap;
+        s += chunk;
+        n -= chunk;
+    }
+}
+
+static char *agent_tail_capture_take(agent_tail_capture *t, size_t *len) {
+    size_t n = t ? t->len : 0;
+    char *out = xmalloc(n + 1);
+    if (n) {
+        size_t right = t->cap - t->start;
+        size_t first = n < right ? n : right;
+        memcpy(out, t->buf + t->start, first);
+        if (n > first) memcpy(out + first, t->buf, n - first);
+    }
+    out[n] = '\0';
+    if (len) *len = n;
+    free(t->buf);
+    memset(t, 0, sizeof(*t));
+    return out;
+}
+
 static void renderer_write(agent_token_renderer *r, const char *s, size_t n) {
-    agent_publish(r->worker, s, n);
+    if (r->capture) agent_tail_capture_append(r->capture, s, n);
+    else agent_publish(r->worker, s, n);
 }
 
 static void renderer_set_grey(agent_token_renderer *r) {
@@ -1070,6 +1131,7 @@ static void renderer_set_grey(agent_token_renderer *r) {
 
 static void renderer_reset_color(agent_token_renderer *r) {
     if (r->use_color) renderer_write(r, "\x1b[0m", 4);
+    r->color_open = false;
 }
 
 static size_t renderer_utf8_need(unsigned char c) {
@@ -1103,9 +1165,13 @@ static void renderer_set_text_attrs(agent_token_renderer *r) {
 
 static void renderer_write_complete_char_raw(agent_token_renderer *r, const char *s, size_t n) {
     bool styled = r->use_color && renderer_has_text_attrs(r);
-    if (styled) renderer_set_text_attrs(r);
+    if (styled && !r->color_open) {
+        renderer_set_text_attrs(r);
+        r->color_open = true;
+    } else if (!styled && r->color_open) {
+        renderer_reset_color(r);
+    }
     renderer_write(r, s, n);
-    if (styled) renderer_reset_color(r);
     if (n) r->wrote_visible_output = true;
     r->last_output_newline = n == 1 && s[0] == '\n';
 }
@@ -1331,6 +1397,7 @@ static void renderer_color(agent_token_renderer *r, const char *seq) {
     renderer_markdown_emit_pending_literals(r);
     renderer_flush_utf8(r);
     if (r->use_color) renderer_write(r, seq, strlen(seq));
+    r->color_open = false;
 }
 
 static void renderer_plain(agent_token_renderer *r, const char *s, size_t n) {
@@ -1468,40 +1535,6 @@ static void agent_tool_viz_append(char *dst, size_t cap, char c) {
     dst[len + 1] = '\0';
 }
 
-static void agent_tool_viz_bash_command_append(agent_tool_visualizer *v, char c) {
-    v->bash_command_total++;
-    if (v->bash_command_len < sizeof(v->bash_command)) {
-        v->bash_command[v->bash_command_len++] = c;
-    } else {
-        v->bash_command_truncated = true;
-    }
-}
-
-static void agent_tool_viz_render_bash_command(agent_stream_renderer *sr) {
-    agent_tool_visualizer *v = &sr->viz;
-    if (!v->bash_command_len && !v->bash_command_total) return;
-
-    /* Bash parameters are buffered for display and rendered once the DSML
-     * parameter is closed. The parser's argument buffer remains the execution
-     * source of truth; this only avoids terminal redraw/color escape
-     * interleaving corrupting the human-facing command projection. */
-    renderer_color(sr->renderer, agent_tool_param_color(AGENT_TOOL_PARAM_BASH_COMMAND));
-    agent_tool_viz_write(sr, v->bash_command, v->bash_command_len);
-    v->at_line_start = v->bash_command_len &&
-                       v->bash_command[v->bash_command_len - 1] == '\n';
-
-    if (v->bash_command_truncated) {
-        char msg[128];
-        size_t omitted = v->bash_command_total - v->bash_command_len;
-        renderer_color(sr->renderer, "\x1b[90m");
-        int n = snprintf(msg, sizeof(msg),
-                         "\n... bash command display truncated; %zu bytes omitted ...",
-                         omitted);
-        if (n > 0) agent_tool_viz_write(sr, msg, (size_t)n);
-        v->at_line_start = false;
-    }
-}
-
 static void agent_tool_viz_read_value_byte(agent_stream_renderer *sr, char c) {
     agent_tool_visualizer *v = &sr->viz;
     if (!strcmp(v->param_name, "path")) {
@@ -1598,9 +1631,7 @@ static void agent_tool_viz_param_begin(agent_stream_renderer *sr, const char *na
         agent_tool_viz_puts(sr, v->param_name);
         agent_tool_viz_puts(sr, "=");
     } else {
-        v->bash_command_len = 0;
-        v->bash_command_total = 0;
-        v->bash_command_truncated = false;
+        renderer_color(sr->renderer, agent_tool_param_color(AGENT_TOOL_PARAM_BASH_COMMAND));
         return;
     }
     renderer_color(sr->renderer, agent_tool_param_color(v->param_kind));
@@ -1608,8 +1639,6 @@ static void agent_tool_viz_param_begin(agent_stream_renderer *sr, const char *na
 
 static void agent_tool_viz_param_end(agent_stream_renderer *sr) {
     agent_tool_visualizer *v = &sr->viz;
-    if (v->param_kind == AGENT_TOOL_PARAM_BASH_COMMAND)
-        agent_tool_viz_render_bash_command(sr);
     v->param_end_len = 0;
     if (!v->read_style) renderer_color(sr->renderer, "\x1b[0m");
     v->param_active = false;
@@ -1623,7 +1652,8 @@ static void agent_tool_viz_param_raw_byte(agent_stream_renderer *sr, char c) {
         return;
     }
     if (v->param_kind == AGENT_TOOL_PARAM_BASH_COMMAND) {
-        agent_tool_viz_bash_command_append(v, c);
+        agent_tool_viz_write(sr, &c, 1);
+        v->at_line_start = c == '\n';
         return;
     }
     if (v->param_kind == AGENT_TOOL_PARAM_DIFF_OLD ||
@@ -1640,8 +1670,7 @@ static void agent_tool_viz_param_raw_byte(agent_stream_renderer *sr, char c) {
 
 static void agent_tool_viz_restore_param_color(agent_stream_renderer *sr) {
     agent_tool_visualizer *v = &sr->viz;
-    if (!v->active || !v->param_active || v->read_style ||
-        v->param_kind == AGENT_TOOL_PARAM_BASH_COMMAND) return;
+    if (!v->active || !v->param_active || v->read_style) return;
     renderer_color(sr->renderer, agent_tool_param_color(v->param_kind));
 }
 
@@ -1679,6 +1708,16 @@ static void agent_tool_viz_param_value_byte(agent_stream_renderer *sr, char c) {
     agent_tool_visualizer *v = &sr->viz;
 
     if (v->param_end_len || c == '<') {
+        if (v->param_end_len == sizeof(v->param_end_tail)) {
+            size_t keep = v->param_end_len;
+            v->param_end_len = 0;
+            for (size_t i = 0; i < keep; i++)
+                agent_tool_viz_param_raw_byte(sr, v->param_end_tail[i]);
+            if (c != '<') {
+                agent_tool_viz_param_raw_byte(sr, c);
+                return;
+            }
+        }
         if (v->param_end_len < sizeof(v->param_end_tail))
             v->param_end_tail[v->param_end_len++] = c;
         bool complete = false;
@@ -1781,6 +1820,11 @@ static void agent_stream_feed_dsml_byte(agent_stream_renderer *sr, char c) {
     if (!sr->dsml_ignored) {
         agent_stream_tool_events(sr);
         if (was_param) agent_tool_viz_param_value_byte(sr, c);
+        if (was_param && sr->parser->state != AGENT_DSML_PARAM_VALUE &&
+            sr->viz.param_active)
+        {
+            agent_tool_viz_param_end(sr);
+        }
     }
     if (sr->parser->state == AGENT_DSML_DONE) {
         if (sr->dsml_ignored) {
@@ -2628,6 +2672,8 @@ static char *agent_session_title_from_file(const char *path) {
 
 #define AGENT_HISTORY_DEFAULT_TURNS 3
 #define AGENT_HISTORY_MAX_TURNS 200
+#define AGENT_HISTORY_ASSISTANT_MAX_LINES 80
+#define AGENT_HISTORY_ASSISTANT_MAX_BYTES 12000
 
 typedef enum {
     AGENT_HISTORY_MARK_NONE,
@@ -2744,44 +2790,70 @@ static const char *agent_history_start_for_turns(const char *text, size_t len,
     return start;
 }
 
+static const char *agent_history_skip_utf8_continuation(const char *p,
+                                                        const char *end) {
+    while (p < end && (((unsigned char)*p) & 0xc0) == 0x80) p++;
+    return p;
+}
+
+static const char *agent_history_tail_start(const char *p, const char *end,
+                                            int max_lines, size_t max_bytes,
+                                            bool *truncated) {
+    *truncated = false;
+    if (p >= end) return p;
+
+    const char *start = p;
+    size_t len = (size_t)(end - p);
+    if (max_bytes && len > max_bytes) {
+        start = end - max_bytes;
+        *truncated = true;
+    }
+
+    if (max_lines > 0) {
+        const char *scan = end;
+        if (scan > p && scan[-1] == '\n') scan--;
+        const char *line_start = p;
+        int lines = 0;
+        while (scan > p) {
+            scan--;
+            if (*scan == '\n' && ++lines == max_lines) {
+                line_start = scan + 1;
+                break;
+            }
+        }
+        if (line_start > p) *truncated = true;
+        if (line_start > start) start = line_start;
+    }
+
+    return agent_history_skip_utf8_continuation(start, end);
+}
+
 static void agent_history_publish_limited(agent_worker *w, const char *p,
                                           const char *end, int max_lines,
                                           size_t max_bytes) {
-    size_t bytes = 0;
-    int lines = 0;
-    const char *s = p;
     bool truncated = false;
-    while (s < end && bytes < max_bytes && lines < max_lines) {
-        const char *line = memchr(s, '\n', (size_t)(end - s));
-        const char *line_end = line ? line + 1 : end;
-        size_t n = (size_t)(line_end - s);
-        bool cut_line = false;
-        if (bytes + n > max_bytes) {
-            n = max_bytes - bytes;
-            cut_line = true;
-        }
-        agent_publish(w, s, n);
-        bytes += n;
-        if (cut_line) {
-            s += n;
-            truncated = true;
-            break;
-        }
-        if (line) lines++;
-        s = line_end;
-    }
-    if (s < end || truncated)
-        agent_publish(w, "\n... history output truncated ...\n",
-                      strlen("\n... history output truncated ...\n"));
-    else if (end > p && end[-1] != '\n')
-        agent_publish(w, "\n", 1);
+    const char *start = agent_history_tail_start(p, end, max_lines, max_bytes,
+                                                 &truncated);
+    if (truncated)
+        agent_publish(w, "\n... earlier history truncated; showing tail ...\n",
+                      strlen("\n... earlier history truncated; showing tail ...\n"));
+    agent_publish(w, start, (size_t)(end - start));
+    if (end > start && end[-1] != '\n') agent_publish(w, "\n", 1);
 }
 
 static void agent_history_render_assistant(agent_worker *w,
                                            const char *p, const char *end) {
     agent_history_trim(&p, &end);
     if (p >= end) return;
+    bool source_truncated = false;
+    (void)agent_history_tail_start(p, end,
+                                   AGENT_HISTORY_ASSISTANT_MAX_LINES,
+                                   AGENT_HISTORY_ASSISTANT_MAX_BYTES,
+                                   &source_truncated);
     bool use_color = isatty(STDOUT_FILENO) != 0;
+    agent_tail_capture tail = {
+        .cap = source_truncated ? AGENT_HISTORY_ASSISTANT_MAX_BYTES : 0,
+    };
     agent_token_renderer renderer = {
         .engine = w->engine,
         .worker = w,
@@ -2790,9 +2862,10 @@ static void agent_history_render_assistant(agent_worker *w,
          * switching back to a session, not reading a different transcript
          * format.  Tool calls are still dry-rendered below, so replay never
          * executes tools or mutates transcript state. */
-        .format_markdown = use_color,
-        .use_color = use_color,
+        .format_markdown = true,
+        .use_color = use_color && !source_truncated,
         .last_output_newline = true,
+        .capture = source_truncated ? &tail : NULL,
     };
     agent_dsml_parser dsml = {.state = AGENT_DSML_SEARCH};
     agent_stream_renderer stream = {
@@ -2807,6 +2880,27 @@ static void agent_history_render_assistant(agent_worker *w,
     agent_stream_text(&stream, p, (size_t)(end - p), true);
     renderer_finish(&renderer);
     agent_dsml_parser_free(&dsml);
+
+    if (source_truncated) {
+        size_t tail_len = 0;
+        char *tail_text = agent_tail_capture_take(&tail, &tail_len);
+        bool rendered_truncated = tail.total > tail_len;
+        bool line_truncated = false;
+        const char *tail_start =
+            agent_history_tail_start(tail_text, tail_text + tail_len,
+                                     AGENT_HISTORY_ASSISTANT_MAX_LINES,
+                                     AGENT_HISTORY_ASSISTANT_MAX_BYTES,
+                                     &line_truncated);
+        if (use_color) agent_publish(w, "\x1b[90m", 5);
+        agent_publish(w,
+                      "\n... earlier assistant history truncated; showing tail ...\n",
+                      strlen("\n... earlier assistant history truncated; showing tail ...\n"));
+        (void)rendered_truncated;
+        agent_publish(w, tail_start, (size_t)(tail_text + tail_len - tail_start));
+        if (tail_len && tail_text[tail_len - 1] != '\n') agent_publish(w, "\n", 1);
+        if (use_color) agent_publish(w, "\x1b[0m", 4);
+        free(tail_text);
+    }
 }
 
 /* Re-render saved transcript text for /history and /switch.  It intentionally
@@ -5262,6 +5356,17 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
             agent_set_status(w, AGENT_WORKER_IDLE);
             return 0;
         }
+        if ((got_tool || malformed_tool) && worker_has_queued_user_pending(w)) {
+            agent_dsml_parser_free(&dsml);
+            /* A queued user message is a real interjection.  Do not execute a
+             * tool call that the user has not yet had a chance to override; roll
+             * back only this speculative assistant round and let the UI submit
+             * the queued text as the next turn. */
+            w->transcript.len = round_start_len;
+            ds4_session_invalidate(w->session);
+            agent_set_status(w, AGENT_WORKER_IDLE);
+            return 0;
+        }
         ds4_tokens_push(&w->transcript, ds4_token_eos(w->engine));
 
         if (!got_tool && !malformed_tool) {
@@ -5439,17 +5544,46 @@ static bool worker_is_idle(agent_worker *w) {
     return st.state == AGENT_WORKER_IDLE || st.state == AGENT_WORKER_ERROR;
 }
 
+/* The UI owns queued user text.  This flag only tells the worker that, if the
+ * assistant is about to hand control to tools, a user interjection should get
+ * the next turn first. */
+static void worker_set_queued_user_pending(agent_worker *w, bool pending) {
+    pthread_mutex_lock(&w->mu);
+    w->queued_user_pending = pending;
+    agent_wake_locked(w);
+    pthread_mutex_unlock(&w->mu);
+}
+
+static bool worker_has_queued_user_pending(agent_worker *w) {
+    pthread_mutex_lock(&w->mu);
+    bool pending = w->queued_user_pending;
+    pthread_mutex_unlock(&w->mu);
+    return pending;
+}
+
 static bool stdout_is_tty(void) {
     return isatty(STDOUT_FILENO) != 0;
 }
 
-static void agent_echo_user_prompt(const char *text) {
+static char *agent_format_user_prompt_echo(const char *text) {
+    agent_buf b = {0};
     if (stdout_is_tty()) {
-        printf("\x1b[1;91m*\x1b[1;97m %s\x1b[0m\n\n", text);
+        agent_buf_puts(&b, "\x1b[1;91m*\x1b[1;97m ");
+        agent_buf_puts(&b, text);
+        agent_buf_puts(&b, "\x1b[0m\n\n");
     } else {
-        printf("* %s\n\n", text);
+        agent_buf_puts(&b, "* ");
+        agent_buf_puts(&b, text);
+        agent_buf_puts(&b, "\n\n");
     }
+    return agent_buf_take(&b);
+}
+
+static void agent_echo_user_prompt(const char *text) {
+    char *msg = agent_format_user_prompt_echo(text);
+    printf("%s", msg);
     fflush(stdout);
+    free(msg);
 }
 
 /* ============================================================================
@@ -5458,12 +5592,12 @@ static void agent_echo_user_prompt(const char *text) {
  */
 
 static void agent_format_ctx_size(int ctx_size, char *buf, size_t len);
-
 #define AGENT_INPUT_INITIAL_BUFLEN 4096
 #define AGENT_INPUT_MAX_BUFLEN (1024*1024)
 #define AGENT_STATUS_STYLE_START "\x1b[7;90m"
 #define AGENT_STATUS_STYLE_END "\x1b[0m"
 #define AGENT_STATUS_BAR_FILL "\x1b[1;95m"
+#define AGENT_QUEUE_STYLE "\x1b[1;36m"
 
 static void build_prompt_text(const agent_status *st, char *buf, size_t len) {
     (void)st;
@@ -5544,10 +5678,115 @@ static void build_status_text(const agent_status *st, char *buf, size_t len) {
 }
 
 typedef struct {
+    char **v;
+    size_t len;
+    size_t cap;
+} agent_prompt_queue;
+
+static void agent_prompt_queue_push(agent_prompt_queue *q, const char *text) {
+    if (q->len == q->cap) {
+        q->cap = q->cap ? q->cap * 2 : 4;
+        q->v = xrealloc(q->v, q->cap * sizeof(q->v[0]));
+    }
+    q->v[q->len++] = xstrdup(text ? text : "");
+}
+
+static char *agent_prompt_queue_pop(agent_prompt_queue *q) {
+    if (!q->len) return NULL;
+    char *text = q->v[0];
+    memmove(q->v, q->v + 1, (q->len - 1) * sizeof(q->v[0]));
+    q->len--;
+    return text;
+}
+
+static void agent_prompt_queue_push_front(agent_prompt_queue *q, char *text) {
+    if (q->len == q->cap) {
+        q->cap = q->cap ? q->cap * 2 : 4;
+        q->v = xrealloc(q->v, q->cap * sizeof(q->v[0]));
+    }
+    memmove(q->v + 1, q->v, q->len * sizeof(q->v[0]));
+    q->v[0] = text;
+    q->len++;
+}
+
+static const char *agent_prompt_queue_peek(const agent_prompt_queue *q) {
+    return q->len ? q->v[0] : NULL;
+}
+
+static void agent_prompt_queue_free(agent_prompt_queue *q) {
+    for (size_t i = 0; i < q->len; i++) free(q->v[i]);
+    free(q->v);
+    memset(q, 0, sizeof(*q));
+}
+
+static bool agent_footer_is_multiline(const char *status) {
+    return status && strchr(status, '\n');
+}
+
+/* Build the editable footer.  With queued prompts, the footer becomes multiple
+ * rows: a compact queue preview first, then the normal status row. */
+static void build_footer_text(const agent_status *st, const agent_prompt_queue *queue,
+                              int cols, char *buf, size_t len) {
+    char status[512];
+    build_status_text(st, status, sizeof(status));
+    if (!queue || !queue->len) {
+        snprintf(buf, len, "%s", status);
+        return;
+    }
+
+    const char *queued = agent_prompt_queue_peek(queue);
+    if (cols < 40) cols = 40;
+    int max_rows = 3;
+    size_t budget = (size_t)cols * (size_t)max_rows;
+    const char *plain_suffix = " (ctrl+x to edit, ESC to send ASAP)";
+    size_t queued_len = strlen(queued);
+    char more_suffix[160];
+    const char *suffix = plain_suffix;
+    size_t take = queued_len;
+    if (queued_len + strlen(plain_suffix) > budget) {
+        size_t reserve = 72;
+        take = budget > reserve ? budget - reserve : budget / 2;
+        snprintf(more_suffix, sizeof(more_suffix),
+                 "... %zu characters more ..., (ctrl+x to edit, ESC to send ASAP)",
+                 queued_len - take);
+        suffix = more_suffix;
+    }
+
+    agent_buf msg = {0};
+    agent_buf_puts(&msg, "queued: ");
+    for (size_t i = 0; i < take; i++) {
+        char c = queued[i];
+        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+        agent_buf_append(&msg, &c, 1);
+    }
+    agent_buf_puts(&msg, suffix);
+    char *preview = agent_buf_take(&msg);
+
+    agent_buf out = {0};
+    size_t pos = 0, preview_len = strlen(preview);
+    for (int row = 0; row < max_rows && pos < preview_len; row++) {
+        if (row) agent_buf_puts(&out, "\n");
+        if (stdout_is_tty()) agent_buf_puts(&out, AGENT_QUEUE_STYLE);
+        size_t part = preview_len - pos;
+        if (part > (size_t)cols) part = (size_t)cols;
+        agent_buf_append(&out, preview + pos, part);
+        if (stdout_is_tty()) agent_buf_puts(&out, "\x1b[0m");
+        pos += part;
+    }
+    agent_buf_puts(&out, "\n");
+    if (stdout_is_tty()) agent_buf_puts(&out, AGENT_STATUS_STYLE_START);
+    agent_buf_puts(&out, status);
+    if (stdout_is_tty()) agent_buf_puts(&out, AGENT_STATUS_STYLE_END);
+    snprintf(buf, len, "%s", out.ptr ? out.ptr : "");
+    free(preview);
+    free(out.ptr);
+}
+
+typedef struct {
     struct linenoiseState edit;
     char *input;
     char prompt[160];
-    char status[256];
+    char status[4096];
     int old_stdin_flags;
     bool active;
     bool hidden;
@@ -5572,6 +5811,7 @@ typedef struct {
 
 static void editor_queue_bytes(agent_editor *ed, const char *buf, size_t len);
 static void editor_hide(agent_editor *ed);
+static void editor_show(agent_editor *ed);
 
 typedef enum {
     CPR_INVALID,
@@ -5700,6 +5940,34 @@ static void editor_read_stdin(agent_editor *ed) {
         if (n < 0 && errno == EINTR) continue;
         break;
     }
+}
+
+static bool editor_take_queued_byte(agent_editor *ed, unsigned char byte) {
+    struct linenoiseState *l = &ed->edit;
+    for (size_t i = l->queued_input_pos; i < l->queued_input_len; i++) {
+        if ((unsigned char)l->queued_input[i] != byte) continue;
+        memmove(l->queued_input + i, l->queued_input + i + 1,
+                l->queued_input_len - i - 1);
+        l->queued_input_len--;
+        if (l->queued_input_pos > l->queued_input_len)
+            l->queued_input_pos = l->queued_input_len;
+        return true;
+    }
+    return false;
+}
+
+static bool editor_take_bare_escape(agent_editor *ed) {
+    if (ed->cpr_len == 1 && (unsigned char)ed->cpr_buf[0] == 0x1b) {
+        ed->cpr_len = 0;
+        return true;
+    }
+    return false;
+}
+
+static void editor_replace_input(agent_editor *ed, const char *text) {
+    if (ed->hidden) editor_show(ed);
+    linenoiseEditClear(&ed->edit);
+    if (text && text[0]) linenoiseEditInsert(&ed->edit, text, strlen(text));
 }
 
 /* Fallback cursor tracking for terminals that do not answer CPR quickly.  It is
@@ -6051,9 +6319,10 @@ static int editor_start(agent_editor *ed, const char *prompt,
         free(input);
         return -1;
     }
+    bool embedded_status = agent_footer_is_multiline(ed->status);
     linenoiseEditSetStatus(&ed->edit, ed->status,
-                           stdout_is_tty() ? AGENT_STATUS_STYLE_START : "",
-                           stdout_is_tty() ? AGENT_STATUS_STYLE_END : "");
+                           stdout_is_tty() && !embedded_status ? AGENT_STATUS_STYLE_START : "",
+                           stdout_is_tty() && !embedded_status ? AGENT_STATUS_STYLE_END : "");
     linenoiseEditSetLayoutCallback(&ed->edit, editor_linenoise_layout_changed, ed);
     if (isatty(ed->edit.ifd) || getenv("LINENOISE_ASSUME_TTY")) {
         linenoiseHide(&ed->edit);
@@ -6155,9 +6424,10 @@ static void editor_update_prompt(agent_editor *ed, const char *prompt) {
 
 static void editor_update_status(agent_editor *ed, const char *status) {
     snprintf(ed->status, sizeof(ed->status), "%s", status ? status : "");
+    bool embedded_status = agent_footer_is_multiline(ed->status);
     linenoiseEditSetStatus(&ed->edit, ed->status,
-                           stdout_is_tty() ? AGENT_STATUS_STYLE_START : "",
-                           stdout_is_tty() ? AGENT_STATUS_STYLE_END : "");
+                           stdout_is_tty() && !embedded_status ? AGENT_STATUS_STYLE_START : "",
+                           stdout_is_tty() && !embedded_status ? AGENT_STATUS_STYLE_END : "");
 }
 
 static void editor_set_prompt_status(agent_editor *ed, const char *prompt,
@@ -6241,6 +6511,9 @@ static void runtime_help(void) {
     puts("  /new         Start a fresh session from the system prompt.");
     puts("  /quit, /exit Exit.");
     puts("  Ctrl+C       Interrupt generation; clear edited text.");
+    puts("  Enter        Queue text while the agent is busy.");
+    puts("  Ctrl+X       Edit the first queued prompt.");
+    puts("  ESC          Interrupt and send queued prompt immediately.");
     puts("  Ctrl+D       Exit from an empty prompt.");
 }
 
@@ -6387,11 +6660,12 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
     agent_status st;
     worker_get_status(&worker, &st);
     char prompt[160];
-    char statusline[256];
+    char statusline[4096];
     build_prompt_text(&st, prompt, sizeof(prompt));
-    build_status_text(&st, statusline, sizeof(statusline));
+    build_footer_text(&st, NULL, 80, statusline, sizeof(statusline));
 
     agent_editor editor = {0};
+    agent_prompt_queue queue = {0};
     if (editor_start(&editor, prompt, statusline, NULL) != 0) {
         fprintf(stderr, "ds4-agent: failed to start line editor\n");
         agent_worker_free(&worker);
@@ -6431,7 +6705,8 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
         size_t out_len = 0;
         worker_consume(&worker, &out, &out_len, &st);
         build_prompt_text(&st, prompt, sizeof(prompt));
-        build_status_text(&st, statusline, sizeof(statusline));
+        int footer_cols = editor.edit.cols > 0 ? (int)editor.edit.cols : 80;
+        build_footer_text(&st, &queue, footer_cols, statusline, sizeof(statusline));
         if (out && out_len) {
             bool force_show = st.state == AGENT_WORKER_IDLE ||
                               st.state == AGENT_WORKER_ERROR ||
@@ -6458,12 +6733,46 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
 
         if (initial_pending && worker_is_idle(&worker)) {
             if (worker_submit(&worker, initial_pending)) {
+                worker_set_queued_user_pending(&worker, queue.len > 0);
                 free(initial_pending);
                 initial_pending = NULL;
             }
         }
 
+        if (!initial_pending && queue.len && worker_is_idle(&worker)) {
+            char *queued = agent_prompt_queue_pop(&queue);
+            worker_set_queued_user_pending(&worker, queue.len > 0);
+            if (worker_submit(&worker, queued)) {
+                linenoiseHistoryAdd(queued);
+                linenoiseHistorySave(hist);
+                char *echo = agent_format_user_prompt_echo(queued);
+                build_footer_text(&st, &queue, footer_cols, statusline, sizeof(statusline));
+                editor_write_async(&editor, echo, strlen(echo), prompt, statusline, true);
+                free(echo);
+            } else {
+                agent_prompt_queue_push_front(&queue, queued);
+                worker_set_queued_user_pending(&worker, true);
+                queued = NULL;
+            }
+            free(queued);
+        }
+
         if (rc > 0 && (pfd[0].revents & POLLIN)) editor_read_stdin(&editor);
+
+        if (queue.len && editor_take_queued_byte(&editor, 24)) { /* Ctrl+X */
+            char *queued = agent_prompt_queue_pop(&queue);
+            worker_set_queued_user_pending(&worker, queue.len > 0);
+            editor_replace_input(&editor, queued);
+            worker_get_status(&worker, &st);
+            build_prompt_text(&st, prompt, sizeof(prompt));
+            footer_cols = editor.edit.cols > 0 ? (int)editor.edit.cols : 80;
+            build_footer_text(&st, &queue, footer_cols, statusline, sizeof(statusline));
+            editor_set_prompt_status(&editor, prompt, statusline);
+            free(queued);
+        }
+        if (queue.len && !worker_is_idle(&worker) && editor_take_bare_escape(&editor)) {
+            worker_interrupt(&worker);
+        }
 
         if (!editor.paste_open && !editor.paste_start_pending &&
             linenoiseEditQueuedInput(&editor.edit) > 0)
@@ -6503,10 +6812,8 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                 if (!cmd[0]) {
                     /* Empty input: just reopen the editor. */
                 } else if (!worker_is_idle(&worker)) {
-                    /* The model is still busy.  For the MVP, keep the same
-                     * text editable instead of submitting it.  Later this is
-                     * where queued user messages should be implemented. */
-                    restore_line = xstrdup(cmd);
+                    agent_prompt_queue_push(&queue, cmd);
+                    worker_set_queued_user_pending(&worker, true);
                 } else if (!strcmp(cmd, "/quit") || !strcmp(cmd, "/exit")) {
                     editor_restore_terminal_layout(&editor);
                     if (agent_maybe_save_before_leaving_session(&worker)) {
@@ -6567,6 +6874,7 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                 } else {
                     linenoiseHistoryAdd(cmd);
                     linenoiseHistorySave(hist);
+                    worker_set_queued_user_pending(&worker, false);
                     if (worker_submit(&worker, cmd)) {
                         agent_echo_user_prompt(cmd);
                     } else {
@@ -6578,7 +6886,8 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                 if (running) {
                     worker_get_status(&worker, &st);
                     build_prompt_text(&st, prompt, sizeof(prompt));
-                    build_status_text(&st, statusline, sizeof(statusline));
+                    int restart_cols = editor.edit.cols > 0 ? (int)editor.edit.cols : 80;
+                    build_footer_text(&st, &queue, restart_cols, statusline, sizeof(statusline));
                     editor_start(&editor, prompt, statusline, restore_line);
                     if (!editor.scroll_region && was_below_output) {
                         editor.output_line_open = had_output_line_open;
@@ -6598,6 +6907,7 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
 
     free(initial_pending);
     free(restore_line);
+    agent_prompt_queue_free(&queue);
     editor_stop(&editor);
     editor_restore_terminal_layout(&editor);
     linenoiseSetCompletionCallback(NULL);

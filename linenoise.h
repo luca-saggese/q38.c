@@ -80,7 +80,7 @@ struct linenoiseState {
     int fold_count;    /* Number of folded ranges. */
     size_t fold_start[LINENOISE_MAX_FOLDS]; /* Folded range start offsets. */
     size_t fold_end[LINENOISE_MAX_FOLDS];   /* Folded range end offsets. */
-    char *status;       /* Optional one-line status rendered below the prompt. */
+    char *status;       /* Optional status/footer rendered below the prompt. */
     char *status_start; /* Optional escape sequence emitted before status. */
     char *status_end;   /* Optional escape sequence emitted after status. */
     linenoiseLayoutCallback *layout_callback; /* Called before refresh writes. */
