@@ -6779,6 +6779,25 @@ static bool agent_maybe_save_before_leaving_session(agent_worker *w) {
     return agent_prompt_yes_no("Continue anyway? (y/n) ");
 }
 
+typedef enum {
+    AGENT_EXIT_CANCEL,
+    AGENT_EXIT_CLEAN,
+    AGENT_EXIT_NOW,
+} agent_exit_save_result;
+
+/* Process exit is different from /new or /switch: once the terminal is already
+ * restored, declining the save can terminate immediately and let the OS reclaim
+ * model/Metal resources instead of waiting for orderly teardown. */
+static agent_exit_save_result agent_maybe_save_before_exiting(agent_worker *w) {
+    if (!agent_worker_needs_save(w)) return AGENT_EXIT_CLEAN;
+    if (!agent_prompt_yes_no("Save current session? (y/n) ")) return AGENT_EXIT_NOW;
+    char err[160] = {0};
+    if (agent_worker_save_session(w, err, sizeof(err))) return AGENT_EXIT_CLEAN;
+    printf("save failed: %s\n", err);
+    return agent_prompt_yes_no("Continue anyway? (y/n) ") ?
+        AGENT_EXIT_NOW : AGENT_EXIT_CANCEL;
+}
+
 /* ============================================================================
  * Interactive Runtime Loop
  * ============================================================================
@@ -6977,7 +6996,11 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                     printf("command requires the model to be idle: %s\n", cmd);
                 } else if (!strcmp(cmd, "/quit") || !strcmp(cmd, "/exit")) {
                     editor_restore_terminal_layout(&editor);
-                    if (agent_maybe_save_before_leaving_session(&worker)) {
+                    agent_exit_save_result exit_save =
+                        agent_maybe_save_before_exiting(&worker);
+                    if (exit_save == AGENT_EXIT_NOW) {
+                        exit(0);
+                    } else if (exit_save == AGENT_EXIT_CLEAN) {
                         exit_save_handled = true;
                         running = false;
                     }
@@ -7068,8 +7091,11 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
     editor_restore_terminal_layout(&editor);
     linenoiseSetCompletionCallback(NULL);
     agent_completion_worker = NULL;
-    if (!exit_save_handled)
-        (void)agent_maybe_save_before_leaving_session(&worker);
+    if (!exit_save_handled) {
+        agent_exit_save_result exit_save =
+            agent_maybe_save_before_exiting(&worker);
+        if (exit_save == AGENT_EXIT_NOW) exit(0);
+    }
     agent_worker_free(&worker);
     return 0;
 }
