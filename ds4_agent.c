@@ -3661,23 +3661,36 @@ static void agent_worker_update_view_after_old_new(agent_worker *w,
     agent_line_spans_free(&new_spans);
 }
 
-static char *agent_edit_old_new_result(const char *path, int start_line,
-                                       int end_line, int delta) {
+static void agent_edit_result_append_context(agent_worker *w, agent_buf *b,
+                                             const char *path,
+                                             const char *data, size_t len,
+                                             int anchor_start,
+                                             int anchor_end);
+
+static char *agent_edit_old_new_result(agent_worker *w, const char *path,
+                                       int start_line, int end_line, int delta,
+                                       const char *new_data, size_t new_len) {
     agent_buf b = {0};
     char msg[PATH_MAX + 180];
     snprintf(msg, sizeof(msg), "Edited %s using old/new replacement\n", path);
     agent_buf_puts(&b, msg);
     if (start_line > 0 && end_line >= start_line) {
         snprintf(msg, sizeof(msg),
-                 "Touched lines %d-%d; read them again before line/range editing them.\n",
+                 "Touched old lines %d-%d; current post-edit context follows.\n",
                  start_line, end_line);
         agent_buf_puts(&b, msg);
         if (delta != 0) {
             snprintf(msg, sizeof(msg),
-                     "Line shift: old lines after %d moved by %+d (old line %d is now line %d). Read again before editing shifted lines.\n",
+                     "Line shift: old lines after %d moved by %+d (old line %d is now line %d). Lines shown below are safe for immediate line/range editing; read again before editing other shifted lines.\n",
                      end_line, delta, end_line + 1, end_line + 1 + delta);
             agent_buf_puts(&b, msg);
         }
+    }
+    if (start_line > 0 && end_line >= start_line) {
+        int new_anchor_end = end_line + delta;
+        if (new_anchor_end < start_line) new_anchor_end = start_line;
+        agent_edit_result_append_context(w, &b, path, new_data, new_len,
+                                         start_line, new_anchor_end);
     }
     return agent_buf_take(&b);
 }
@@ -3920,8 +3933,79 @@ static int agent_edit_replacement_line_count(const char *text, bool add_newline)
     return lines ? lines : add_newline ? 1 : 0;
 }
 
-static char *agent_edit_line_result(const char *path, int start_line, int end_line,
-                                    int replacement_lines) {
+static void agent_edit_result_append_line(agent_buf *b, const char *data,
+                                          const agent_line_span *sp,
+                                          int line) {
+    char prefix[64];
+    snprintf(prefix, sizeof(prefix), "%d ", line);
+    agent_buf_puts(b, prefix);
+    agent_buf_append(b, data + sp->start, sp->content_end - sp->start);
+    agent_buf_puts(b, "\n");
+}
+
+/* Successful edits return the nearby post-edit file shape.  This spends cheap
+ * prefill tokens to save expensive model retries: the model immediately sees
+ * shifted line numbers, braces, semicolons, and accidental duplication. */
+static void agent_edit_result_append_context(agent_worker *w, agent_buf *b,
+                                             const char *path,
+                                             const char *data, size_t len,
+                                             int anchor_start,
+                                             int anchor_end) {
+    enum {
+        CONTEXT_BEFORE = 5,
+        CONTEXT_AFTER = 8,
+        EDITED_CONTEXT_HEAD = 18,
+        EDITED_CONTEXT_TAIL = 18
+    };
+
+    agent_line_spans spans = {0};
+    agent_split_lines(data, len, &spans);
+    if (spans.len <= 0) {
+        agent_line_spans_free(&spans);
+        return;
+    }
+
+    if (anchor_start < 1) anchor_start = 1;
+    if (anchor_start > spans.len) anchor_start = spans.len;
+    if (anchor_end < anchor_start) anchor_end = anchor_start;
+    if (anchor_end > spans.len) anchor_end = spans.len;
+
+    int ctx_start = anchor_start - CONTEXT_BEFORE;
+    if (ctx_start < 1) ctx_start = 1;
+    int ctx_end = anchor_end + CONTEXT_AFTER;
+    if (ctx_end > spans.len) ctx_end = spans.len;
+
+    char hdr[PATH_MAX + 160];
+    snprintf(hdr, sizeof(hdr),
+             "Current file around edit: %s lines %d-%d of %d\n",
+             path, ctx_start, ctx_end, spans.len);
+    agent_buf_puts(b, hdr);
+
+    int edited_lines = anchor_end - anchor_start + 1;
+    if (edited_lines <= EDITED_CONTEXT_HEAD + EDITED_CONTEXT_TAIL) {
+        for (int line = ctx_start; line <= ctx_end; line++)
+            agent_edit_result_append_line(b, data, &spans.v[line - 1], line);
+    } else {
+        int head_end = anchor_start + EDITED_CONTEXT_HEAD - 1;
+        int tail_start = anchor_end - EDITED_CONTEXT_TAIL + 1;
+        for (int line = ctx_start; line <= head_end; line++)
+            agent_edit_result_append_line(b, data, &spans.v[line - 1], line);
+        snprintf(hdr, sizeof(hdr),
+                 "... %d edited lines omitted ...\n",
+                 tail_start - head_end - 1);
+        agent_buf_puts(b, hdr);
+        for (int line = tail_start; line <= ctx_end; line++)
+            agent_edit_result_append_line(b, data, &spans.v[line - 1], line);
+    }
+
+    agent_worker_remember_range(w, path, data, &spans, ctx_start - 1, ctx_end);
+    agent_line_spans_free(&spans);
+}
+
+static char *agent_edit_line_result(agent_worker *w, const char *path,
+                                    int start_line, int end_line,
+                                    int replacement_lines,
+                                    const char *new_data, size_t new_len) {
     agent_buf b = {0};
     char msg[PATH_MAX + 160];
     snprintf(msg, sizeof(msg), "Edited %s lines %d-%d\n",
@@ -3932,10 +4016,14 @@ static char *agent_edit_line_result(const char *path, int start_line, int end_li
     int delta = replacement_lines - replaced_lines;
     if (delta != 0) {
         snprintf(msg, sizeof(msg),
-                 "Line shift: old lines after %d moved by %+d (old line %d is now line %d). Read again before editing shifted lines.\n",
+                 "Line shift: old lines after %d moved by %+d (old line %d is now line %d). Lines shown below are safe for immediate line/range editing; read again before editing other shifted lines.\n",
                  end_line, delta, end_line + 1, end_line + 1 + delta);
         agent_buf_puts(&b, msg);
     }
+    int new_anchor_end = replacement_lines > 0 ?
+        start_line + replacement_lines - 1 : start_line;
+    agent_edit_result_append_context(w, &b, path, new_data, new_len,
+                                     start_line, new_anchor_end);
     return agent_buf_take(&b);
 }
 
@@ -3997,16 +4085,20 @@ static char *agent_tool_edit_old_new(agent_worker *w, const char *path, const ch
         agent_worker_update_view_after_old_new(w, path, data, len, out, out_len,
                                                prefix, old_len);
     }
-    free(data);
-    free(out);
     if (rc != 0) {
+        free(data);
+        free(out);
         agent_buf b = {0};
         agent_buf_puts(&b, "Tool error: ");
         agent_buf_puts(&b, err);
         agent_buf_puts(&b, "\n");
         return agent_buf_take(&b);
     }
-    return agent_edit_old_new_result(path, start_line, end_line, delta);
+    char *result = agent_edit_old_new_result(w, path, start_line, end_line,
+                                             delta, out, out_len);
+    free(data);
+    free(out);
+    return result;
 }
 
 static bool agent_parse_line_range_arg(const char *s, int *start, int *end) {
@@ -4092,17 +4184,20 @@ static char *agent_tool_edit_line_range(agent_worker *w, const char *path,
                                             replacement_lines);
     }
     agent_line_spans_free(&spans);
-    free(data);
-    free(out);
     if (rc != 0) {
+        free(data);
+        free(out);
         agent_buf b = {0};
         agent_buf_puts(&b, "Tool error: ");
         agent_buf_puts(&b, err);
         agent_buf_puts(&b, "\n");
         return agent_buf_take(&b);
     }
-    return agent_edit_line_result(path, start_line, end_line,
-                                  replacement_lines);
+    char *result = agent_edit_line_result(w, path, start_line, end_line,
+                                          replacement_lines, out, out_len);
+    free(data);
+    free(out);
+    return result;
 }
 
 static char *agent_tool_edit_line_all(agent_worker *w, const char *path,
@@ -4120,12 +4215,17 @@ static char *agent_tool_edit_line_all(agent_worker *w, const char *path,
     }
     agent_line_spans spans = {0};
     agent_split_lines(new_text, len, &spans);
+    int total_lines = spans.len;
     agent_worker_remember_whole_file(w, path, new_text, &spans);
     agent_line_spans_free(&spans);
 
+    agent_buf b = {0};
     char msg[PATH_MAX + 80];
     snprintf(msg, sizeof(msg), "Edited %s range=all\n", path);
-    return xstrdup(msg);
+    agent_buf_puts(&b, msg);
+    agent_edit_result_append_context(w, &b, path, new_text, len,
+                                     1, total_lines > 0 ? total_lines : 1);
+    return agent_buf_take(&b);
 }
 
 /* Pick the safest edit mode supported by the tool arguments.  Line/range edits
