@@ -5745,6 +5745,13 @@ static void agent_format_ctx_size(int ctx_size, char *buf, size_t len);
 #define AGENT_QUEUE_STYLE "\x1b[38;5;87;1m"
 #define AGENT_STATUS_REDRAW_INTERVAL_SEC 0.20
 
+static void agent_progress_append(char *buf, size_t len, size_t *pos,
+                                  const char *s) {
+    if (*pos >= len) return;
+    int n = snprintf(buf + *pos, len - *pos, "%s", s);
+    if (n > 0) *pos += (size_t)n;
+}
+
 static void build_prompt_text(const agent_status *st, char *buf, size_t len) {
     (void)st;
     snprintf(buf, len, "ds4-agent> ");
@@ -5762,24 +5769,16 @@ static void agent_progress_bar(int done, int total, char *buf, size_t len,
     if (filled > width) filled = width;
     if (color && filled == 0 && done < total) filled = 1;
     size_t pos = 0;
-    int n = snprintf(buf + pos, pos < len ? len - pos : 0, "[");
-    if (n > 0) pos += (size_t)n;
-    if (color) {
-        n = snprintf(buf + pos, pos < len ? len - pos : 0, "%s", AGENT_STATUS_BAR_FILL);
-        if (n > 0) pos += (size_t)n;
-    }
+    agent_progress_append(buf, len, &pos, "[");
+    if (color) agent_progress_append(buf, len, &pos, AGENT_STATUS_BAR_FILL);
     for (int i = 0; i < width && pos + 1 < len; i++) {
         if (color && i == filled) {
-            n = snprintf(buf + pos, pos < len ? len - pos : 0, "%s", AGENT_STATUS_STYLE_START);
-            if (n > 0) pos += (size_t)n;
+            agent_progress_append(buf, len, &pos, AGENT_STATUS_STYLE_START);
         }
-        if (pos + 1 < len) buf[pos++] = i < filled ? '#' : '-';
+        agent_progress_append(buf, len, &pos, i < filled ? "▶" : "·");
     }
-    if (color) {
-        n = snprintf(buf + pos, pos < len ? len - pos : 0, "%s", AGENT_STATUS_STYLE_START);
-        if (n > 0) pos += (size_t)n;
-    }
-    if (pos + 1 < len) buf[pos++] = ']';
+    if (color) agent_progress_append(buf, len, &pos, AGENT_STATUS_STYLE_START);
+    agent_progress_append(buf, len, &pos, "]");
     buf[pos < len ? pos : len - 1] = '\0';
 }
 
