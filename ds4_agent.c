@@ -3528,6 +3528,48 @@ static int agent_write_file_bytes(const char *path, const char *data, size_t len
     return 0;
 }
 
+static int agent_count_text_lines(const char *text) {
+    if (!text || !text[0]) return 0;
+    int lines = 0;
+    size_t pos = 0, len = strlen(text);
+    while (pos < len) {
+        while (pos < len && text[pos] != '\n' && text[pos] != '\r') pos++;
+        if (pos < len) {
+            if (text[pos] == '\r' && pos + 1 < len && text[pos + 1] == '\n')
+                pos += 2;
+            else
+                pos++;
+        }
+        lines++;
+    }
+    return lines;
+}
+
+static int agent_edit_replacement_line_count(const char *text, bool add_newline) {
+    int lines = agent_count_text_lines(text);
+    return lines ? lines : add_newline ? 1 : 0;
+}
+
+static char *agent_edit_line_result(const char *path, int start_line, int end_line,
+                                    const char *new_file_cas_crc,
+                                    int replacement_lines) {
+    agent_buf b = {0};
+    char msg[PATH_MAX + 160];
+    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d; new_file_cas_crc=%s\n",
+             path, start_line, end_line, new_file_cas_crc);
+    agent_buf_puts(&b, msg);
+
+    int replaced_lines = end_line - start_line + 1;
+    int delta = replacement_lines - replaced_lines;
+    if (delta != 0) {
+        snprintf(msg, sizeof(msg),
+                 "Line shift: old lines after %d moved by %+d (old line %d is now line %d).\n",
+                 end_line, delta, end_line + 1, end_line + 1 + delta);
+        agent_buf_puts(&b, msg);
+    }
+    return agent_buf_take(&b);
+}
+
 static const char *agent_memmem_simple(const char *hay, size_t hay_len,
                                        const char *needle, size_t needle_len) {
     if (!needle_len) return hay;
@@ -3683,10 +3725,9 @@ static char *agent_tool_edit_tagged(const char *path, int start_line,
         agent_buf_puts(&b, "\n");
         return agent_buf_take(&b);
     }
-    char msg[PATH_MAX + 128];
-    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d; new_file_cas_crc=%s\n",
-             path, start_line, end_line, new_file_cas_crc);
-    return xstrdup(msg);
+    int replacement_lines = agent_edit_replacement_line_count(text, add_newline);
+    return agent_edit_line_result(path, start_line, end_line,
+                                  new_file_cas_crc, replacement_lines);
 }
 
 typedef struct {
@@ -3858,10 +3899,9 @@ static char *agent_tool_edit_bulk_lines(const char *path, const char *lines,
         agent_buf_puts(&b, "\n");
         return agent_buf_take(&b);
     }
-    char msg[PATH_MAX + 128];
-    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d; new_file_cas_crc=%s\n",
-             path, first_line, last_line, new_file_cas_crc);
-    return xstrdup(msg);
+    int replacement_lines = agent_edit_replacement_line_count(new_text, add_newline);
+    return agent_edit_line_result(path, first_line, last_line,
+                                  new_file_cas_crc, replacement_lines);
 }
 
 /* Hybrid edit path for "replace this substring on the tagged line".  It keeps
@@ -4042,13 +4082,12 @@ static char *agent_tool_edit_crc_range(const char *path, const char *file_cas_cr
         free(out);
         return agent_buf_take(&b);
     }
-    char msg[PATH_MAX + 160];
-    snprintf(msg, sizeof(msg), "Edited %s lines %d-%d; new_file_cas_crc=%s\n",
-             path, start_line, end_line, new_file_cas_crc);
     agent_line_spans_free(&spans);
     free(data);
     free(out);
-    return xstrdup(msg);
+    int replacement_lines = agent_edit_replacement_line_count(new_text, add_newline);
+    return agent_edit_line_result(path, start_line, end_line,
+                                  new_file_cas_crc, replacement_lines);
 }
 
 static char *agent_tool_edit_crc_all(const char *path, const char *file_cas_crc,
@@ -5961,6 +6000,22 @@ static void editor_clear_row(int row) {
     write_all(STDOUT_FILENO, "\r\x1b[0K", 5);
 }
 
+static void editor_clear_prompt_region(agent_editor *ed) {
+    if (!ed->scroll_region) return;
+    for (int row = ed->prompt_row; row <= ed->term_rows; row++)
+        editor_clear_row(row);
+
+    /* In scroll-region mode ds4-agent owns the absolute prompt/status rows.
+     * Clearing them directly is more reliable than asking linenoise to clean
+     * relative to whatever cursor position the last worker/status transition
+     * left behind.  Reset linenoise's render bookkeeping so the next show is a
+     * pure write into the reserved rows. */
+    ed->edit.oldrows = 0;
+    ed->edit.oldstatusrows = 0;
+    ed->edit.oldrpos = 1;
+    ed->edit.oldpos = ed->edit.pos;
+}
+
 static void editor_set_scroll_margin(int bottom) {
     char seq[96];
     int n = snprintf(seq, sizeof(seq), "\x1b[1;%dr", bottom);
@@ -6171,12 +6226,13 @@ static void editor_stop(agent_editor *ed) {
  * enough to append more model/tool bytes without touching the prompt rows. */
 static void editor_hide(agent_editor *ed) {
     if (!ed->active || ed->hidden) return;
-    linenoiseHide(&ed->edit);
     if (ed->scroll_region) {
+        editor_clear_prompt_region(ed);
         editor_restore_output_cursor(ed);
         ed->hidden = true;
         return;
     }
+    linenoiseHide(&ed->edit);
     if (ed->prompt_below_output) {
         editor_move_to_output_cursor(ed);
         ed->prompt_below_output = false;
