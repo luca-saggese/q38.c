@@ -6290,6 +6290,15 @@ static void editor_move_to_prompt_row(agent_editor *ed) {
     editor_csi_cursor(ed->prompt_row, 1);
 }
 
+static void editor_move_to_prompt_cursor(agent_editor *ed) {
+    if (!ed->scroll_region) return;
+    if (ed->edit.screen_cursor_row > 0 && ed->edit.screen_cursor_col > 0) {
+        editor_csi_cursor(ed->edit.screen_cursor_row, ed->edit.screen_cursor_col);
+    } else {
+        editor_move_to_prompt_row(ed);
+    }
+}
+
 static void editor_clear_row(int row) {
     editor_csi_cursor(row, 1);
     write_all(STDOUT_FILENO, "\r\x1b[0K", 5);
@@ -6594,12 +6603,51 @@ static void editor_set_prompt_status(agent_editor *ed, const char *prompt,
     editor_show(ed);
 }
 
+static void editor_redraw_visible_prompt(agent_editor *ed) {
+    if (!ed->active || !ed->scroll_region) return;
+    editor_clear_prompt_region(ed);
+    editor_move_to_prompt_row(ed);
+    write_all(STDOUT_FILENO, "\x1b[0m", 4);
+    linenoiseShow(&ed->edit);
+}
+
+static void editor_write_scroll_output_preserve_prompt(agent_editor *ed,
+                                                       const char *text,
+                                                       size_t len) {
+    static const char sync_start[] = "\x1b[?2026h";
+    static const char sync_end[] = "\x1b[?2026l";
+    if (!len) return;
+
+    write_all(STDOUT_FILENO, sync_start, sizeof(sync_start) - 1);
+    editor_restore_output_cursor(ed);
+    editor_write_terminal_text(text, len);
+    editor_save_output_cursor(ed);
+    write_all(STDOUT_FILENO, "\x1b[0m", 4);
+    editor_move_to_prompt_cursor(ed);
+    write_all(STDOUT_FILENO, sync_end, sizeof(sync_end) - 1);
+    ed->output_at_scroll_boundary = true;
+}
+
 /* Serialize async model/tool output with linenoise.  This is the central
- * terminal contract: hide prompt, write output, update output cursor state,
- * then redraw prompt/status if needed. */
+ * terminal contract.  In scroll-region mode the live prompt stays painted:
+ * output is appended in the upper scroll area, then the cursor is returned to
+ * linenoise's remembered prompt position.  The fallback path still hides and
+ * redraws because it has no protected prompt rows. */
 static void editor_write_async(agent_editor *ed, const char *text, size_t len,
                                const char *prompt, const char *status,
                                bool force_show) {
+    if (ed->scroll_region && ed->active && !ed->hidden && len) {
+        bool prompt_changed = strcmp(ed->prompt, prompt) != 0;
+        bool status_changed = strcmp(ed->status, status ? status : "") != 0;
+
+        editor_write_scroll_output_preserve_prompt(ed, text, len);
+        if (prompt_changed) editor_update_prompt(ed, prompt);
+        if (status_changed) editor_update_status(ed, status);
+        if (force_show && (prompt_changed || status_changed))
+            editor_redraw_visible_prompt(ed);
+        return;
+    }
+
     editor_hide(ed);
     if (len) {
         editor_write_terminal_text(text, len);

@@ -1518,9 +1518,13 @@ static void refreshMultiLine(struct linenoiseState *l, int flags) {
              * scroll-region can grow or shrink, relative movement may be based
              * on stale physical rows and leave the prompt floating above the
              * terminal bottom. */
+            l->screen_cursor_row = layout_prompt_row + rpos2 - 1;
+            l->screen_cursor_col = 1 + col;
             snprintf(seq,64,"\x1b[%d;%dH", layout_prompt_row + rpos2 - 1,
                      1 + col);
         } else {
+            l->screen_cursor_row = 0;
+            l->screen_cursor_col = 0;
             /* Go up till we reach the expected position. */
             int rows_below_cursor = rows - rpos2 + linenoiseStatusRows(l);
             if (rows_below_cursor > 0) {
@@ -1548,6 +1552,8 @@ static void refreshMultiLine(struct linenoiseState *l, int flags) {
         l->oldrows = 0;
         l->oldstatusrows = 0;
         l->oldrpos = 1;
+        l->screen_cursor_row = 0;
+        l->screen_cursor_col = 0;
     }
 
     if (write(fd,ab.b,ab.len) == -1) {} /* Can't recover from write error. */
@@ -1933,6 +1939,8 @@ int linenoiseEditStart(struct linenoiseState *l, int stdin_fd, int stdout_fd, ch
     l->status_end = NULL;
     l->layout_callback = NULL;
     l->layout_privdata = NULL;
+    l->screen_cursor_row = 0;
+    l->screen_cursor_col = 0;
     l->queued_input = NULL;
     l->queued_input_len = 0;
     l->queued_input_pos = 0;

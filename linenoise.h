@@ -85,6 +85,8 @@ struct linenoiseState {
     char *status_end;   /* Optional escape sequence emitted after status. */
     linenoiseLayoutCallback *layout_callback; /* Called before refresh writes. */
     void *layout_privdata;
+    int screen_cursor_row; /* Absolute terminal cursor row after last refresh. */
+    int screen_cursor_col; /* Absolute terminal cursor col after last refresh. */
     char *queued_input; /* Bytes already read by an outer event loop. */
     size_t queued_input_len;
     size_t queued_input_pos;
