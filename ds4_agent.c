@@ -1128,7 +1128,7 @@ static void renderer_write(agent_token_renderer *r, const char *s, size_t n) {
 }
 
 static void renderer_set_grey(agent_token_renderer *r) {
-    if (r->use_color) renderer_write(r, "\x1b[90m", 5);
+    if (r->use_color) renderer_write(r, "\x1b[38;5;245m", 11);
 }
 
 static void renderer_reset_color(agent_token_renderer *r) {
@@ -5138,7 +5138,7 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
     }
 
     agent_publishf(w,
-        "\n\x1b[1;95mCOMPACTING\x1b[0m %s: summarizing durable task state\n\x1b[90m",
+        "\n\x1b[1;95mCOMPACTING\x1b[0m %s: summarizing durable task state\n\x1b[38;5;245m",
         reason && reason[0] ? reason : "context");
 
     char *prompt_text = agent_compact_make_prompt(reason);
@@ -5739,10 +5739,10 @@ static void agent_echo_user_prompt(const char *text) {
 static void agent_format_ctx_size(int ctx_size, char *buf, size_t len);
 #define AGENT_INPUT_INITIAL_BUFLEN 4096
 #define AGENT_INPUT_MAX_BUFLEN (1024*1024)
-#define AGENT_STATUS_STYLE_START "\x1b[7;90m"
+#define AGENT_STATUS_STYLE_START "\x1b[48;5;238;38;5;252m"
 #define AGENT_STATUS_STYLE_END "\x1b[0m"
-#define AGENT_STATUS_BAR_FILL "\x1b[1;95m"
-#define AGENT_QUEUE_STYLE "\x1b[1;36m"
+#define AGENT_STATUS_BAR_FILL "\x1b[48;5;238;38;5;201;1m"
+#define AGENT_QUEUE_STYLE "\x1b[38;5;87;1m"
 #define AGENT_STATUS_REDRAW_INTERVAL_SEC 0.20
 
 static void build_prompt_text(const agent_status *st, char *buf, size_t len) {
