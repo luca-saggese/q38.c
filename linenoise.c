@@ -123,6 +123,9 @@
 #define LINENOISE_INITIAL_BUFLEN 4096
 #define PASTE_FOLD_THRESHOLD 200            // Min bytes to fold a single-line paste.
 #define PASTE_FOLD_CONTEXT 8                // Context chars kept around generic folds.
+#define HISTORY_FOLD_THRESHOLD 4096         // Min bytes to fold single-line history.
+#define HISTORY_FOLD_MULTILINE_LINES 16     // Min lines to fold shorter history.
+#define HISTORY_FOLD_CONTEXT 96             // Context chars kept around history folds.
 #define PASTE_MAX_BYTES LINENOISE_MAX_LINE
 static char *unsupported_term[] = {"dumb","cons25","emacs",NULL};
 static linenoiseCompletionCallback *completionCallback = NULL;
@@ -982,6 +985,16 @@ static int shouldFoldText(const char *buf, size_t len) {
     return memchr(buf, '\n', len) != NULL || len >= PASTE_FOLD_THRESHOLD;
 }
 
+/* History recall should not aggressively hide normal prompts.  A single-line
+ * entry is folded only when it is very large; multiline history is folded if
+ * it is large or spans many terminal rows. */
+static int shouldFoldHistoryText(const char *buf, size_t len) {
+    size_t lines = foldCountLines(buf,len);
+    if (lines <= 1) return len >= HISTORY_FOLD_THRESHOLD;
+    return len >= HISTORY_FOLD_THRESHOLD ||
+           lines >= HISTORY_FOLD_MULTILINE_LINES;
+}
+
 /* Fill f->display with the text shown instead of the folded range. */
 static void foldSetRenderedText(struct linenoiseFold *f, const char *buf) {
     size_t hidden = f->end - f->start;
@@ -1003,17 +1016,17 @@ static void foldSetRenderedText(struct linenoiseFold *f, const char *buf) {
 static int linenoiseBuildHistoryFold(struct linenoiseState *l, struct linenoiseFold *f) {
     f->start = f->end = f->displaylen = 0;
     if (l->len == 0 || maskmode) return 0;
-    if (!shouldFoldText(l->buf,l->len)) return 0;
+    if (!shouldFoldHistoryText(l->buf,l->len)) return 0;
 
     f->start = 0;
     f->end = l->len;
-    if (l->len > PASTE_FOLD_CONTEXT*2) {
+    if (l->len > HISTORY_FOLD_CONTEXT*2) {
         size_t pos = 0, chars = 0;
         int nl = 0;
 
         /* We leave (if possible) a few chars on
          * the start before the fold, to give context. */
-        while (pos < l->len && chars < PASTE_FOLD_CONTEXT) {
+        while (pos < l->len && chars < HISTORY_FOLD_CONTEXT) {
             size_t step = utf8NextCharLen(l->buf,pos,l->len);
             if (step == 0 || pos + step > l->len) break;
             if (l->buf[pos] == '\n') nl = 1;
@@ -1026,7 +1039,7 @@ static int linenoiseBuildHistoryFold(struct linenoiseState *l, struct linenoiseF
         pos = l->len;
         chars = 0;
         nl = 0;
-        while (pos > 0 && chars < PASTE_FOLD_CONTEXT) {
+        while (pos > 0 && chars < HISTORY_FOLD_CONTEXT) {
             size_t step = utf8PrevCharLen(l->buf,pos);
             if (step == 0 || step > pos) break;
             pos -= step;
