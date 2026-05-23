@@ -273,6 +273,7 @@ static volatile sig_atomic_t agent_sigint;
 static agent_worker *agent_completion_worker;
 
 static bool worker_has_queued_user_pending(agent_worker *w);
+static void worker_apply_pending_power(agent_worker *w);
 
 /* ============================================================================
  * Small Utilities And Command-Line Parsing
@@ -2987,6 +2988,7 @@ static void worker_progress_cb(void *ud, const char *event, int current, int tot
     agent_worker *w = ud;
     if (!w || !event) return;
     if (strcmp(event, "prefill_chunk") && strcmp(event, "prefill_display")) return;
+    worker_apply_pending_power(w);
     pthread_mutex_lock(&w->mu);
     int done = current - w->progress_base;
     if (done < 0) done = 0;
@@ -6049,6 +6051,7 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         pthread_mutex_unlock(&w->mu);
 
         while (generated < max_tokens && !worker_should_interrupt(w)) {
+            worker_apply_pending_power(w);
             int token = ds4_session_sample(w->session, cfg->gen.temperature, 0,
                                            cfg->gen.top_p, cfg->gen.min_p, &rng);
             if (token == ds4_token_eos(w->engine)) break;
@@ -6213,6 +6216,17 @@ static bool worker_take_power_requested(agent_worker *w, int *power) {
     return requested;
 }
 
+static void worker_apply_pending_power(agent_worker *w) {
+    int power = 0;
+    if (!worker_take_power_requested(w, &power)) return;
+    if (ds4_session_set_power(w->session, power) != 0) {
+        agent_publishf(w, "\npower change failed\n");
+        return;
+    }
+    w->cfg->engine.power_percent = power;
+    agent_publishf(w, "\npower set to %d%%\n", power);
+}
+
 static void worker_run_deferred_save(agent_worker *w) {
     if (!worker_take_save_requested(w)) return;
     agent_set_status(w, AGENT_WORKER_SAVING);
@@ -6224,17 +6238,6 @@ static void worker_run_deferred_save(agent_worker *w) {
     else
         agent_publishf(w, "\nsave failed: %s\n", err[0] ? err : "unknown error");
     agent_set_status(w, AGENT_WORKER_IDLE);
-}
-
-static void worker_run_deferred_power(agent_worker *w) {
-    int power = 0;
-    if (!worker_take_power_requested(w, &power)) return;
-    if (ds4_session_set_power(w->session, power) != 0) {
-        agent_publishf(w, "\npower change failed\n");
-        return;
-    }
-    w->cfg->engine.power_percent = power;
-    agent_publishf(w, "\npower set to %d%%\n", power);
 }
 
 /* Worker thread entry point.  The UI thread submits plain user text; this
@@ -6266,7 +6269,7 @@ static void *worker_main(void *arg) {
         }
         if (w->power_requested) {
             pthread_mutex_unlock(&w->mu);
-            worker_run_deferred_power(w);
+            worker_apply_pending_power(w);
             continue;
         }
         if (!w->cmd_text && w->save_requested) {
@@ -6280,7 +6283,7 @@ static void *worker_main(void *arg) {
 
         worker_run_turn(w, cmd);
         free(cmd);
-        worker_run_deferred_power(w);
+        worker_apply_pending_power(w);
         worker_run_deferred_save(w);
     }
 
@@ -7958,7 +7961,7 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                             printf("usage: /power <1..100>\n");
                         } else {
                             worker_request_power(&worker, power);
-                            if (busy) printf("power change scheduled: %d%%\n", power);
+                            if (busy) printf("power change requested: %d%%\n", power);
                         }
                     }
                 } else if (cmd[0] == '/' && busy) {
