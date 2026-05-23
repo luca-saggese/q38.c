@@ -8587,14 +8587,16 @@ static uint64_t metal_graph_context_bytes_for_kv_policy(
     if (min_ratio == UINT32_MAX) min_ratio = ctx_size ? ctx_size : 1u;
     uint64_t comp_cap = (uint64_t)(ctx_size / min_ratio + 2u);
     if (comp_cap < 2u) comp_cap = 2u;
-    uint64_t attn_stage_cap = (uint64_t)(prefill_cap / min_ratio + 2u);
-    if (attn_stage_cap < 2u) attn_stage_cap = 2u;
-
     const uint64_t kv_cache_bytes = metal_graph_kv_cache_bytes_for_context(ctx_size, raw_cap);
     if (kv_cache_bytes_out) *kv_cache_bytes_out = kv_cache_bytes;
-    return kv_cache_bytes +
-           2ull * comp_cap * prefill_cap * sizeof(float) +
-           attn_stage_cap * DS4_N_HEAD_DIM * sizeof(float);
+    uint64_t bytes = kv_cache_bytes +
+                     2ull * comp_cap * prefill_cap * sizeof(float);
+    if (DS4_GPU_ATTN_COMP_CACHE_F16) {
+        uint64_t attn_stage_cap = (uint64_t)(prefill_cap / min_ratio + 2u);
+        if (attn_stage_cap < 2u) attn_stage_cap = 2u;
+        bytes += attn_stage_cap * DS4_N_HEAD_DIM * sizeof(float);
+    }
+    return bytes;
 }
 
 static ds4_gpu_tensor *metal_graph_alloc_kv_cache_tensor(bool managed, uint64_t bytes) {
@@ -8745,8 +8747,10 @@ static bool metal_graph_alloc_raw_cap(
     if (min_ratio == UINT32_MAX) min_ratio = ctx_size ? ctx_size : 1u;
     g->comp_cap = ctx_size / min_ratio + 2u;
     if (g->comp_cap < 2u) g->comp_cap = 2u;
-    g->attn_comp_stage_cap = prefill_cap / min_ratio + 2u;
-    if (g->attn_comp_stage_cap < 2u) g->attn_comp_stage_cap = 2u;
+    if (DS4_GPU_ATTN_COMP_CACHE_F16) {
+        g->attn_comp_stage_cap = prefill_cap / min_ratio + 2u;
+        if (g->attn_comp_stage_cap < 2u) g->attn_comp_stage_cap = 2u;
+    }
     for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
         const uint32_t ratio = ds4_layer_compress_ratio(il);
         if (ratio == 0) {
@@ -8870,8 +8874,10 @@ static bool metal_graph_alloc_raw_cap(
     }
     g->comp_kv_cur = ds4_gpu_tensor_alloc(comp_width_max * sizeof(float));
     g->comp_sc_cur = ds4_gpu_tensor_alloc(comp_width_max * sizeof(float));
-    g->attn_comp_stage = ds4_gpu_tensor_alloc((uint64_t)g->attn_comp_stage_cap *
-                                              DS4_N_HEAD_DIM * sizeof(float));
+    if (DS4_GPU_ATTN_COMP_CACHE_F16) {
+        g->attn_comp_stage = ds4_gpu_tensor_alloc((uint64_t)g->attn_comp_stage_cap *
+                                                  DS4_N_HEAD_DIM * sizeof(float));
+    }
     g->indexer_q = ds4_gpu_tensor_alloc(indexer_q_dim * sizeof(float));
     g->indexer_weights = ds4_gpu_tensor_alloc((uint64_t)DS4_N_INDEXER_HEAD * sizeof(float));
     g->indexer_scores = ds4_gpu_tensor_alloc((uint64_t)g->comp_cap * pc * sizeof(float));
@@ -8996,7 +9002,8 @@ static bool metal_graph_alloc_raw_cap(
                     g->hc_pre && g->hc_post && g->hc_comb &&
                     g->attn_cur && g->attn_norm && g->qr && g->qr_norm &&
                     g->q && g->kv_raw && g->kv &&
-                    g->comp_kv_cur && g->comp_sc_cur && g->attn_comp_stage &&
+                    g->comp_kv_cur && g->comp_sc_cur &&
+                    (!DS4_GPU_ATTN_COMP_CACHE_F16 || g->attn_comp_stage) &&
                     g->indexer_q && g->indexer_weights && g->indexer_scores &&
                     g->comp_mask && g->comp_selected &&
                     g->heads && g->attn_low && g->attn_out &&
@@ -9288,6 +9295,57 @@ static bool metal_graph_store_attn_comp_stage(
                                count * sizeof(float)) != 0;
 }
 
+static ds4_gpu_tensor *metal_graph_attn_comp_update_target(
+        ds4_gpu_graph *g,
+        uint32_t       il) {
+    return DS4_GPU_ATTN_COMP_CACHE_F16
+        ? g->attn_comp_stage
+        : g->layer_attn_comp_cache[il];
+}
+
+static uint32_t metal_graph_attn_comp_update_row(uint32_t row) {
+    return DS4_GPU_ATTN_COMP_CACHE_F16 ? 0u : row;
+}
+
+static bool metal_graph_commit_attn_comp_stage(
+        ds4_gpu_graph *g,
+        uint32_t       il,
+        uint32_t       first_row,
+        uint32_t       rows) {
+    if (!DS4_GPU_ATTN_COMP_CACHE_F16) return true;
+    return metal_graph_store_attn_comp_stage(g, il, first_row, rows);
+}
+
+static ds4_gpu_tensor *metal_graph_attn_comp_row_view(
+        ds4_gpu_graph *g,
+        uint32_t       il,
+        uint32_t       row) {
+    if (DS4_GPU_ATTN_COMP_CACHE_F16) {
+        return ds4_gpu_tensor_view(g->attn_comp_stage,
+                                   0,
+                                   (uint64_t)DS4_N_HEAD_DIM * sizeof(float));
+    }
+    return ds4_gpu_tensor_view(g->layer_attn_comp_cache[il],
+                               (uint64_t)row * DS4_N_HEAD_DIM * sizeof(float),
+                               (uint64_t)DS4_N_HEAD_DIM * sizeof(float));
+}
+
+static ds4_gpu_tensor *metal_graph_attn_comp_prefill_target(
+        ds4_gpu_graph *g,
+        uint32_t       il,
+        uint32_t       first_row,
+        uint32_t       rows) {
+    if (DS4_GPU_ATTN_COMP_CACHE_F16) return g->attn_comp_stage;
+    const uint32_t view_rows = rows ? rows : 1u;
+    return ds4_gpu_tensor_view(g->layer_attn_comp_cache[il],
+                               (uint64_t)first_row * DS4_N_HEAD_DIM * sizeof(float),
+                               (uint64_t)view_rows * DS4_N_HEAD_DIM * sizeof(float));
+}
+
+static void metal_graph_attn_comp_prefill_target_free(ds4_gpu_tensor *t) {
+    if (!DS4_GPU_ATTN_COMP_CACHE_F16) ds4_gpu_tensor_free(t);
+}
+
 /* Encode one DS4 decode layer on Metal.  This is the release single-token
  * layer path; diagnostics reuse it so they compare exactly what generation
  * runs. */
@@ -9549,7 +9607,7 @@ static bool metal_graph_encode_decode_layer(
                                                         g->comp_sc_cur,
                                                         g->layer_attn_state_kv[il],
                                                         g->layer_attn_state_score[il],
-                                                        g->attn_comp_stage,
+                                                        metal_graph_attn_comp_update_target(g, il),
                                                         model->map,
                                                         model->size,
                                                         layer->attn_compressor_ape->abs_offset,
@@ -9559,7 +9617,7 @@ static bool metal_graph_encode_decode_layer(
                                                         DS4_N_HEAD_DIM,
                                                         ratio,
                                                         pos,
-                                                        0,
+                                                        metal_graph_attn_comp_update_row(comp_row),
                                                         DS4_N_ROT,
                                                         compressed ? (uint32_t)DS4_ROPE_ORIG_CTX : 0,
                                                         freq_base,
@@ -9570,10 +9628,7 @@ static bool metal_graph_encode_decode_layer(
                                                         DS4_ROPE_YARN_BETA_SLOW,
                                                         DS4_RMS_EPS) != 0;
         if (ok && emit) {
-            ds4_gpu_tensor *comp_row_view = ds4_gpu_tensor_view(
-                    g->attn_comp_stage,
-                    0,
-                    (uint64_t)DS4_N_HEAD_DIM * sizeof(float));
+            ds4_gpu_tensor *comp_row_view = metal_graph_attn_comp_row_view(g, il, comp_row);
             if (!comp_row_view) {
                 ok = false;
             } else {
@@ -9583,7 +9638,7 @@ static bool metal_graph_encode_decode_layer(
                 }
                 ds4_gpu_tensor_free(comp_row_view);
             }
-            if (ok) ok = metal_graph_store_attn_comp_stage(g, il, comp_row, 1);
+            if (ok) ok = metal_graph_commit_attn_comp_stage(g, il, comp_row, 1);
         }
         if (ok && emit) g->layer_n_comp[il]++;
 
@@ -11702,12 +11757,15 @@ static bool metal_graph_encode_layer_attention_batch(
                 fprintf(stderr, "ds4: Metal layer-major compressed KV cache capacity exceeded at layer %u\n", il);
                 ok = false;
             }
-            if (ok && n_comp > g->attn_comp_stage_cap) {
+            if (ok && DS4_GPU_ATTN_COMP_CACHE_F16 && n_comp > g->attn_comp_stage_cap) {
                 fprintf(stderr, "ds4: Metal graph compressed KV staging capacity exceeded at layer %u\n", il);
                 ok = false;
             }
+            ds4_gpu_tensor *attn_comp_target = NULL;
             if (ok) {
-                ok = ds4_gpu_compressor_prefill_tensor(g->attn_comp_stage,
+                attn_comp_target = metal_graph_attn_comp_prefill_target(g, il, 0, n_comp);
+                ok = attn_comp_target != NULL &&
+                     ds4_gpu_compressor_prefill_tensor(attn_comp_target,
                                                          g->layer_attn_state_kv[il],
                                                          g->layer_attn_state_score[il],
                                                          g->batch_comp_kv,
@@ -11733,7 +11791,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                          DS4_ROPE_YARN_BETA_SLOW,
                                                          DS4_RMS_EPS) != 0;
                 if (ok && n_comp != 0) {
-                    ok = metal_graph_store_attn_comp_stage(g, il, 0, n_comp);
+                    ok = metal_graph_commit_attn_comp_stage(g, il, 0, n_comp);
                 }
                 if (ok && ratio == 4) {
                     ok = metal_graph_refresh_ratio4_compressor_state(g,
@@ -11756,7 +11814,7 @@ static bool metal_graph_encode_layer_attention_batch(
                 }
                 if (n_comp != 0) {
                     metal_graph_debug_dump_tensor("KVcompress",
-                                                  g->attn_comp_stage,
+                                                  attn_comp_target,
                                                   (uint64_t)n_comp * DS4_N_HEAD_DIM,
                                                   il,
                                                   pos0);
@@ -11772,6 +11830,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                               il,
                                               pos0);
             }
+            metal_graph_attn_comp_prefill_target_free(attn_comp_target);
         } else {
             const bool aligned_chunk = (pos0 % ratio) == 0u && (n_tokens % ratio) == 0u;
             if (aligned_chunk) {
@@ -11781,13 +11840,16 @@ static bool metal_graph_encode_layer_attention_batch(
                     fprintf(stderr, "ds4: Metal graph compressed KV cache capacity exceeded at layer %u\n", il);
                     ok = false;
                 }
-                if (ok && comp_chunk > g->attn_comp_stage_cap) {
+                if (ok && DS4_GPU_ATTN_COMP_CACHE_F16 && comp_chunk > g->attn_comp_stage_cap) {
                     fprintf(stderr, "ds4: Metal graph compressed KV staging capacity exceeded at layer %u\n", il);
                     ok = false;
                 }
+                ds4_gpu_tensor *attn_comp_target =
+                    ok ? metal_graph_attn_comp_prefill_target(g, il, comp_before, comp_chunk) : NULL;
+                if (ok && !attn_comp_target) ok = false;
                 if (ok && ratio == 4) {
                     ok = ds4_gpu_compressor_prefill_ratio4_replay_tensor(
-                            g->attn_comp_stage,
+                            attn_comp_target,
                             g->layer_attn_state_kv[il],
                             g->layer_attn_state_score[il],
                             g->batch_comp_kv,
@@ -11813,7 +11875,7 @@ static bool metal_graph_encode_layer_attention_batch(
                             DS4_RMS_EPS) != 0;
                 } else if (ok) {
                     ok = ds4_gpu_compressor_prefill_tensor(
-                            g->attn_comp_stage,
+                            attn_comp_target,
                             g->layer_attn_state_kv[il],
                             g->layer_attn_state_score[il],
                             g->batch_comp_kv,
@@ -11840,7 +11902,7 @@ static bool metal_graph_encode_layer_attention_batch(
                             DS4_RMS_EPS) != 0;
                 }
                 if (ok && comp_chunk != 0) {
-                    ok = metal_graph_store_attn_comp_stage(g, il, comp_before, comp_chunk);
+                    ok = metal_graph_commit_attn_comp_stage(g, il, comp_before, comp_chunk);
                 }
                 if (ok && ratio == 4) {
                     ok = metal_graph_refresh_ratio4_compressor_state(g,
@@ -11863,7 +11925,7 @@ static bool metal_graph_encode_layer_attention_batch(
                         }
                     }
                     metal_graph_debug_dump_tensor("KVcompress",
-                                                  g->attn_comp_stage,
+                                                  attn_comp_target,
                                                   (uint64_t)comp_chunk * DS4_N_HEAD_DIM,
                                                   il,
                                                   pos0);
@@ -11878,6 +11940,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                   il,
                                                   pos0);
                 }
+                metal_graph_attn_comp_prefill_target_free(attn_comp_target);
             } else {
                 for (uint32_t t = 0; ok && t < n_tokens; t++) {
                     const uint32_t pos = pos0 + t;
@@ -11895,7 +11958,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                             sc_view,
                                                             g->layer_attn_state_kv[il],
                                                             g->layer_attn_state_score[il],
-                                                            g->attn_comp_stage,
+                                                            metal_graph_attn_comp_update_target(g, il),
                                                             model->map,
                                                             model->size,
                                                             layer->attn_compressor_ape->abs_offset,
@@ -11905,7 +11968,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                             DS4_N_HEAD_DIM,
                                                             ratio,
                                                             pos,
-                                                            0,
+                                                            metal_graph_attn_comp_update_row(comp_row),
                                                             DS4_N_ROT,
                                                             compressed ? (uint32_t)DS4_ROPE_ORIG_CTX : 0,
                                                             freq_base,
@@ -11916,10 +11979,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                             DS4_ROPE_YARN_BETA_SLOW,
                                                             DS4_RMS_EPS) != 0;
                     if (ok && emit) {
-                        ds4_gpu_tensor *comp_row_view = ds4_gpu_tensor_view(
-                                g->attn_comp_stage,
-                                0,
-                                (uint64_t)DS4_N_HEAD_DIM * sizeof(float));
+                        ds4_gpu_tensor *comp_row_view = metal_graph_attn_comp_row_view(g, il, comp_row);
                         ok = comp_row_view &&
                              ds4_gpu_dsv4_fp8_kv_quantize_tensor(comp_row_view,
                                                                    1,
@@ -11933,7 +11993,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                           pos);
                         }
                         ds4_gpu_tensor_free(comp_row_view);
-                        if (ok) ok = metal_graph_store_attn_comp_stage(g, il, comp_row, 1);
+                        if (ok) ok = metal_graph_commit_attn_comp_stage(g, il, comp_row, 1);
                     }
                     if (ok && emit) g->layer_n_comp[il]++;
                     if (comp_counts) comp_counts[t] = g->layer_n_comp[il];
