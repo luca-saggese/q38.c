@@ -1897,7 +1897,7 @@ static void tui_signal_restore(int sig) {
     }
     if (ui && ui->active) {
         const char restore[] = ANSI_RESET "\x1b[?25h\x1b[?1049l";
-        (void)write(STDOUT_FILENO, restore, sizeof(restore) - 1);
+        if (write(STDOUT_FILENO, restore, sizeof(restore) - 1) == -1) {}
         ui->active = false;
     }
     signal(sig, SIG_DFL);

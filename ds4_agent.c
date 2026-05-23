@@ -4810,7 +4810,7 @@ static char *agent_bash_observation(agent_bash_job *job, bool mark_observed) {
     double elapsed = now_sec() - job->start_time;
 
     agent_buf out = {0};
-    char line[512];
+    char line[PATH_MAX + 256];
     if (job->running) {
         snprintf(line, sizeof(line),
             "bash job=%d pid=%ld status=running elapsed_sec=%.1f timeout_sec=%.0f\n",
