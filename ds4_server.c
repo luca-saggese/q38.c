@@ -4608,11 +4608,11 @@ static bool parse_generated_message_ex(const char *text, bool require_thinking_c
 static bool try_repair_dsml(const char *s, size_t len, buf *out) {
     if (!s || !len) return false;
 
-    /* Only scan DSML tags after the last </thinking>.  DSML mentioned inside
+    /* Only scan DSML tags after the last </think>.  DSML mentioned inside
      * reasoning is not executable — it inflates tag counts and causes false
-     * positive repairs.  If no </thinking> is found, scan from the start
+     * positive repairs.  If no </think> is found, scan from the start
      * (thinking mode is not active or thinking was never opened). */
-    const char *think_end = find_last_substr(s, " response");
+    const char *think_end = find_last_substr(s, "</think>");
     const char *scan_start = think_end ? (think_end + 8) : s;
     size_t scan_len = (size_t)((s + len) - scan_start);
 
@@ -4685,6 +4685,11 @@ static bool try_repair_dsml(const char *s, size_t len, buf *out) {
             }
             return true;
         }
+        return false;
+    }
+    if (toe > tos || ioe > ios || poe > pos) {
+        /* Extra closing tags are not a truncation pattern.  Refuse repair so the
+         * unsigned differences below cannot wrap and append a huge suffix. */
         return false;
     }
     /* Repair: copy original text and append missing closing tags in reverse order */
@@ -13215,6 +13220,50 @@ static void test_dsml_repair_produces_parseable_calls(void) {
         TEST_ASSERT(strstr(repaired.ptr, "</tool_calls>") == NULL);
         TEST_ASSERT(parse_generated_message_ex(repaired.ptr, false, &content, &reasoning, &calls));
         TEST_ASSERT(calls.len == 0);
+        free(content); free(reasoning); tool_calls_free(&calls);
+    }
+
+    /* === TEST 11: DSML mentioned inside thinking is not repaired === */
+    {
+        const char *thinking_quote =
+            "<think>The protocol uses "
+            DS4_TOOL_CALLS_START
+            "some explanatory text"
+            DS4_TOOL_CALLS_END
+            ", but this is only a quote.</think>\nFinal answer.";
+        buf_free(&repaired);
+        TEST_ASSERT(!try_repair_dsml(thinking_quote, strlen(thinking_quote), &repaired));
+    }
+
+    /* === TEST 12: Extra closing tags are unrecoverable, not truncation === */
+    {
+        const char *orphan_close =
+            "done\n\n"
+            DS4_TOOL_CALLS_START
+            DS4_TOOL_CALLS_END
+            DS4_TOOL_CALLS_END;
+        buf_free(&repaired);
+        TEST_ASSERT(!try_repair_dsml(orphan_close, strlen(orphan_close), &repaired));
+    }
+
+    /* === TEST 13: Real DSML after thinking still repairs normally === */
+    {
+        const char *broken_after_think =
+            "<think>"
+            DS4_TOOL_CALLS_START
+            "quoted DSML, not executable"
+            DS4_TOOL_CALLS_END
+            "</think>\n\n"
+            DS4_TOOL_CALLS_START "\n"
+            DS4_INVOKE_START " name=\"bash\">\n"
+            DS4_PARAM_START " name=\"command\" string=\"true\">date" DS4_PARAM_END "\n"
+            DS4_INVOKE_END "\n";
+        buf_free(&repaired);
+        TEST_ASSERT(try_repair_dsml(broken_after_think, strlen(broken_after_think), &repaired));
+        TEST_ASSERT(parse_generated_message_ex(repaired.ptr, true, &content, &reasoning, &calls));
+        TEST_ASSERT(calls.len == 1);
+        TEST_ASSERT(calls.v[0].name && !strcmp(calls.v[0].name, "bash"));
+        TEST_ASSERT(strstr(calls.v[0].arguments, "\"command\": \"date\"") != NULL);
         free(content); free(reasoning); tool_calls_free(&calls);
     }
 
