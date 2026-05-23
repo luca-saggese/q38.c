@@ -69,6 +69,7 @@ typedef struct {
     const char *directional_steering_file;
     float directional_steering_attn;
     float directional_steering_ffn;
+    int power_percent;
     bool warm_weights;
     bool quality;
 } ds4_engine_options;
