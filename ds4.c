@@ -16481,7 +16481,10 @@ int ds4_session_load_payload(ds4_session *s, FILE *fp, uint64_t payload_bytes, c
             payload_set_err(err, errlen, "KV checkpoint was written for a different DS4 layout");
             return 1;
         }
-        if (saved_prefill_cap != s->prefill_cap || saved_raw_window != cpu_raw_cap) {
+        /* prefill_cap is scratch scheduling capacity, not durable KV layout.
+         * Old checkpoints remain valid as long as the raw KV window matches. */
+        (void)saved_prefill_cap;
+        if (saved_raw_window != cpu_raw_cap) {
             payload_set_err(err, errlen, "KV checkpoint graph chunk layout does not match current runtime");
             return 1;
         }
@@ -16617,7 +16620,10 @@ int ds4_session_load_payload(ds4_session *s, FILE *fp, uint64_t payload_bytes, c
         payload_set_err(err, errlen, "KV checkpoint was written for a different DS4 layout");
         return 1;
     }
-    if (saved_prefill_cap != s->prefill_cap || saved_raw_window != g->raw_window) {
+    /* prefill_cap is scratch scheduling capacity, not durable KV layout.
+     * Old checkpoints remain valid as long as the raw KV window matches. */
+    (void)saved_prefill_cap;
+    if (saved_raw_window != g->raw_window) {
         payload_set_err(err, errlen, "KV checkpoint graph chunk layout does not match current runtime");
         return 1;
     }
