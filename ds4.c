@@ -13481,6 +13481,21 @@ static bool metal_graph_reset_prefill_state(ds4_gpu_graph *g) {
 
 /* Execute Metal prefill in layer-major order so intermediate activations stay
  * on the GPU and cache state is built exactly once. */
+static void metal_graph_report_prefill_display_progress(
+        ds4_session_progress_fn display_progress,
+        void                   *display_progress_ud,
+        uint32_t                start,
+        uint32_t                n_tokens,
+        uint32_t                layer_done,
+        int                     total) {
+    if (!display_progress) return;
+    if (layer_done > (uint32_t)DS4_N_LAYER) layer_done = (uint32_t)DS4_N_LAYER;
+    uint64_t done = (uint64_t)n_tokens * layer_done / (uint32_t)DS4_N_LAYER;
+    if (layer_done == (uint32_t)DS4_N_LAYER) done = n_tokens;
+    display_progress(display_progress_ud, "prefill_display",
+                     (int)(start + (uint32_t)done), total);
+}
+
 static bool metal_graph_prefill_layer_major(
         ds4_gpu_graph *g,
         const ds4_model       *model,
@@ -13490,10 +13505,16 @@ static bool metal_graph_prefill_layer_major(
         uint32_t               n_tokens,
         float                 *logits,
         bool                   show_progress,
-        ds4_imatrix_collector *imatrix) {
+        ds4_imatrix_collector *imatrix,
+        ds4_session_progress_fn display_progress,
+        void                  *display_progress_ud) {
     if (n_tokens == 0 || n_tokens > g->prefill_cap) return false;
     if (start > (uint32_t)prompt->len) return false;
     if (n_tokens > (uint32_t)prompt->len - start) return false;
+
+    if (display_progress)
+        display_progress(display_progress_ud, "prefill_display", (int)start, prompt->len);
+
     bool ok = metal_graph_upload_prompt_tokens(g->prefill_tokens, prompt, start, n_tokens);
     if (!ok) return false;
 
@@ -13534,6 +13555,9 @@ static bool metal_graph_prefill_layer_major(
             }
         }
         if (show_progress) fputc('\n', stderr);
+        if (display_progress)
+            display_progress(display_progress_ud, "prefill_display",
+                             (int)(start + n_tokens), prompt->len);
 
         const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
         uint32_t output_row = (uint32_t)n_tokens - 1u;
@@ -13683,6 +13707,12 @@ static bool metal_graph_prefill_layer_major(
             }
             return false;
         }
+        metal_graph_report_prefill_display_progress(display_progress,
+                                                    display_progress_ud,
+                                                    start,
+                                                    n_tokens,
+                                                    il + 1,
+                                                    prompt->len);
         if (show_progress) {
             fprintf(stderr, "ds4: gpu prefill layer %u/%u\r", il + 1, (uint32_t)DS4_N_LAYER);
             fflush(stderr);
@@ -13754,7 +13784,9 @@ static bool metal_graph_prefill_raw_swa(
         const token_vec       *prompt,
         int                    n_tokens,
         float                 *logits,
-        bool                   show_progress) {
+        bool                   show_progress,
+        ds4_session_progress_fn display_progress,
+        void                  *display_progress_ud) {
     if (n_tokens <= 0 || n_tokens > prompt->len) return false;
     if ((uint32_t)n_tokens > g->prefill_cap) return false;
     return metal_graph_prefill_layer_major(g,
@@ -13765,7 +13797,9 @@ static bool metal_graph_prefill_raw_swa(
                                            (uint32_t)n_tokens,
                                            logits,
                                            show_progress,
-                                           NULL);
+                                           NULL,
+                                           display_progress,
+                                           display_progress_ud);
 }
 
 /* Prefill a contiguous token range in fixed-size chunks.
@@ -13787,6 +13821,8 @@ static bool metal_graph_prefill_chunked_range(
         bool                   show_progress,
         ds4_session_progress_fn progress,
         void                  *progress_ud,
+        ds4_session_progress_fn display_progress,
+        void                  *display_progress_ud,
         ds4_imatrix_collector *imatrix) {
     if (n_tokens == 0 || g->prefill_cap == 0) return false;
     if (start > (uint32_t)prompt->len) return false;
@@ -13802,6 +13838,9 @@ static bool metal_graph_prefill_chunked_range(
 
     if (progress) {
         progress(progress_ud, "prefill_chunk", (int)start, prompt->len);
+    }
+    if (display_progress) {
+        display_progress(display_progress_ud, "prefill_display", (int)start, prompt->len);
     }
 
     for (uint32_t pos0 = start; pos0 < end; ) {
@@ -13825,7 +13864,9 @@ static bool metal_graph_prefill_chunked_range(
                                                   chunk,
                                                   chunk_logits,
                                                   show_progress,
-                                                  imatrix);
+                                                  imatrix,
+                                                  display_progress,
+                                                  display_progress_ud);
         if (!ok) {
             if (ds4_gpu_synchronize() == 0) {
                 fprintf(stderr, "ds4: Metal synchronize after chunked prefill failure also failed\n");
@@ -13834,6 +13875,9 @@ static bool metal_graph_prefill_chunked_range(
         }
         if (progress) {
             progress(progress_ud, "prefill_chunk", (int)chunk_end, prompt->len);
+        }
+        if (display_progress) {
+            display_progress(display_progress_ud, "prefill_display", (int)chunk_end, prompt->len);
         }
         pos0 = chunk_end;
     }
@@ -13861,7 +13905,9 @@ static bool metal_graph_prefill_chunked(
         float                 *logits,
         bool                   show_progress,
         ds4_session_progress_fn progress,
-        void                  *progress_ud) {
+        void                  *progress_ud,
+        ds4_session_progress_fn display_progress,
+        void                  *display_progress_ud) {
     if (n_tokens <= 0) return false;
     return metal_graph_prefill_chunked_range(g,
                                              model,
@@ -13873,6 +13919,8 @@ static bool metal_graph_prefill_chunked(
                                              show_progress,
                                              progress,
                                              progress_ud,
+                                             display_progress,
+                                             display_progress_ud,
                                              NULL);
 }
 
@@ -14293,7 +14341,8 @@ static int metal_graph_prompt_logits_test(
                                   prompt->v[t],
                                   (uint32_t)t);
     }
-    ok = metal_graph_prefill_raw_swa(&g, model, weights, prompt, n_test, gpu_logits, true);
+    ok = metal_graph_prefill_raw_swa(&g, model, weights, prompt, n_test,
+                                     gpu_logits, true, NULL, NULL);
     if (memory_report) ds4_gpu_print_memory_report("after prompt graph");
 
     if (ok) {
@@ -15686,9 +15735,14 @@ static int generate_metal_graph_raw_swa(
 
     const double t_prefill0 = now_sec();
     if (prefill_cap < (uint32_t)prompt->len) {
-        ok = metal_graph_prefill_chunked(&g, model, weights, prompt, prompt->len, logits, false, progress, progress_ud);
+        ok = metal_graph_prefill_chunked(&g, model, weights, prompt,
+                                         prompt->len, logits, false,
+                                         progress, progress_ud,
+                                         progress, progress_ud);
     } else {
-        ok = metal_graph_prefill_raw_swa(&g, model, weights, prompt, prompt->len, logits, true);
+        ok = metal_graph_prefill_raw_swa(&g, model, weights, prompt,
+                                         prompt->len, logits, true,
+                                         progress, progress_ud);
     }
     const double t_prefill1 = now_sec();
     if (memory_report) ds4_gpu_print_memory_report("after prefill");
@@ -15911,6 +15965,8 @@ struct ds4_session {
     uint64_t mtp_probe_hit;
     ds4_session_progress_fn progress;
     void *progress_ud;
+    ds4_session_progress_fn display_progress;
+    void *display_progress_ud;
     uint32_t prefill_cap;
     int ctx_size;
     bool checkpoint_valid;
@@ -17185,13 +17241,15 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
                                                            (uint32_t)prompt.len,
                                                            NULL, false,
                                                            NULL, NULL,
+                                                           NULL, NULL,
                                                            &collector);
                 } else {
                     ok = metal_graph_prefill_layer_major(&g, model, weights,
                                                          &prompt, 0,
                                                          (uint32_t)prompt.len,
                                                          NULL, false,
-                                                         &collector);
+                                                         &collector,
+                                                         NULL, NULL);
                 }
                 if (!ok) {
                     fprintf(stderr, "ds4: imatrix prefill failed at prompt %d\n", prompts_done + 1);
@@ -17687,6 +17745,12 @@ void ds4_session_set_progress(ds4_session *s, ds4_session_progress_fn fn, void *
     s->progress_ud = ud;
 }
 
+void ds4_session_set_display_progress(ds4_session *s, ds4_session_progress_fn fn, void *ud) {
+    if (!s) return;
+    s->display_progress = fn;
+    s->display_progress_ud = ud;
+}
+
 #ifndef DS4_NO_GPU
 typedef struct {
     ds4_session *session;
@@ -17803,6 +17867,8 @@ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t
                                                         false,
                                                         progress_fn,
                                                         progress_fn ? &progress : NULL,
+                                                        s->display_progress,
+                                                        s->display_progress_ud,
                                                         NULL);
             if (!ok) {
                 snprintf(err, errlen, "%s resumed prefill failed while extending checkpoint", backend_name);
@@ -17847,10 +17913,14 @@ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t
             s->progress ? ds4_session_note_prefill_progress : NULL;
         ok = metal_graph_prefill_chunked(&s->graph, &e->model, &e->weights,
                                          prompt, prompt->len, s->logits, false,
-                                         progress_fn, progress_fn ? &progress : NULL);
+                                         progress_fn, progress_fn ? &progress : NULL,
+                                         s->display_progress,
+                                         s->display_progress_ud);
     } else {
         ok = metal_graph_prefill_raw_swa(&s->graph, &e->model, &e->weights,
-                                         prompt, prompt->len, s->logits, false);
+                                         prompt, prompt->len, s->logits, false,
+                                         s->display_progress,
+                                         s->display_progress_ud);
     }
     if (!ok) {
         snprintf(err, errlen, "%s prefill failed", backend_name);

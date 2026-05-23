@@ -2113,7 +2113,8 @@ static void agent_stream_text(agent_stream_renderer *sr, const char *text, size_
 static void worker_progress_cb(void *ud, const char *event, int current, int total) {
     (void)total;
     agent_worker *w = ud;
-    if (!w || !event || strcmp(event, "prefill_chunk")) return;
+    if (!w || !event) return;
+    if (strcmp(event, "prefill_chunk") && strcmp(event, "prefill_display")) return;
     pthread_mutex_lock(&w->mu);
     int done = current - w->progress_base;
     if (done < 0) done = 0;
@@ -2495,8 +2496,12 @@ static int agent_worker_sync_tokens(agent_worker *w, const ds4_tokens *tokens,
 
     ds4_session_set_progress(w->session, publish_progress ? worker_progress_cb : NULL,
                              publish_progress ? w : NULL);
+    ds4_session_set_display_progress(w->session,
+                                     publish_progress ? worker_progress_cb : NULL,
+                                     publish_progress ? w : NULL);
     int rc = ds4_session_sync(w->session, tokens, err, err_len);
     ds4_session_set_progress(w->session, NULL, NULL);
+    ds4_session_set_display_progress(w->session, NULL, NULL);
     return rc;
 }
 
@@ -5313,8 +5318,10 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
                       summary_room : AGENT_COMPACT_SUMMARY_MAX_TOKENS;
 
     ds4_session_set_progress(w->session, worker_progress_cb, w);
+    ds4_session_set_display_progress(w->session, worker_progress_cb, w);
     if (ds4_session_sync(w->session, &prompt, err, err_len) != 0) {
         ds4_session_set_progress(w->session, NULL, NULL);
+        ds4_session_set_display_progress(w->session, NULL, NULL);
         ds4_session_invalidate(w->session);
         ds4_tokens_free(&prompt);
         ds4_tokens_free(&sys);
@@ -5322,6 +5329,7 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
         return false;
     }
     ds4_session_set_progress(w->session, NULL, NULL);
+    ds4_session_set_display_progress(w->session, NULL, NULL);
 
     /* From here until the final rebuild, the live KV contains the internal
      * compaction prompt/summary, while w->transcript still contains the real
@@ -5512,12 +5520,15 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
 
         char err[160];
         ds4_session_set_progress(w->session, worker_progress_cb, w);
+        ds4_session_set_display_progress(w->session, worker_progress_cb, w);
         if (ds4_session_sync(w->session, prompt_for_sync, err, sizeof(err)) != 0) {
             ds4_session_set_progress(w->session, NULL, NULL);
+            ds4_session_set_display_progress(w->session, NULL, NULL);
             agent_set_error(w, err);
             return 1;
         }
         ds4_session_set_progress(w->session, NULL, NULL);
+        ds4_session_set_display_progress(w->session, NULL, NULL);
 
         int max_tokens = cfg->gen.n_predict;
         int room = ds4_session_ctx(w->session) - ds4_session_pos(w->session);
@@ -5929,7 +5940,7 @@ static void build_prompt_text(const agent_status *st, char *buf, size_t len) {
 
 static void agent_progress_bar(int done, int total, char *buf, size_t len,
                                bool color) {
-    const int width = 20;
+    const int width = 32;
     if (len == 0) return;
     if (total <= 0) total = 1;
     if (done < 0) done = 0;
