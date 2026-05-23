@@ -8742,10 +8742,12 @@ int ds4_gpu_attention_output_q8_batch_tensor(
 
         const bool use_direct_low =
             n_tokens < 32u && getenv("DS4_METAL_DISABLE_ATTN_OUT_LOW_DIRECT") == NULL;
-        /* The tensor tile store is only used on full token tiles; partial tails use the legacy path. */
+        /* The exported TensorOps attention-output kernel is a 64-token tile.
+         * Keep this on full tiles only; smaller multiples of 32 use the legacy
+         * path instead of relying on cooperative tensor partial RHS bounds. */
         const bool use_mpp_low =
             n_tokens >= 32u &&
-            (n_tokens % 32u) == 0 &&
+            (n_tokens % DS4_METAL_ATTN_OUT_MPP_TILE_N) == 0 &&
             ds4_gpu_use_mpp_attn_out_low_matmul();
         const NSUInteger ids_bytes = (NSUInteger)n_tokens * (NSUInteger)n_groups * sizeof(int32_t);
         id<MTLBuffer> group_ids_buffer = nil;
