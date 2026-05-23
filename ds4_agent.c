@@ -267,13 +267,22 @@ typedef struct {
     bool dsml_in_think;
     bool dsml_in_think_reported;
     bool post_think_gap;
+    bool tool_preflight_error;
+    char tool_preflight_error_msg[256];
 } agent_stream_renderer;
+
+typedef struct {
+    bool active;
+    bool done;
+} agent_edit_upto_forcer;
 
 static volatile sig_atomic_t agent_sigint;
 static agent_worker *agent_completion_worker;
 
 static bool worker_has_queued_user_pending(agent_worker *w);
 static void worker_apply_pending_power(agent_worker *w);
+static bool agent_preflight_edit_old(agent_worker *w, const agent_tool_call *call,
+                                     char *err, size_t err_len);
 
 /* ============================================================================
  * Small Utilities And Command-Line Parsing
@@ -624,15 +633,22 @@ static const char agent_tools_prompt_intro[] =
 static const char agent_tools_prompt_edit_line[] =
     "## Editing files\n\n"
     "Use edit with path, old, and new. The old text must match exactly once in the current file, so edits are safe.\n"
-    "For large replacements, prefer anchored old text: write the first lines, then [snip], then the final lines. "
+    "For large replacements, prefer anchored old text: write the first lines, then [upto], then the final lines. "
     "The tool replaces everything from the head through the tail. If the head or tail is ambiguous, the edit fails.\n"
+    "After [upto], always write unique final lines before closing old; never close old immediately after [upto].\n"
+    "Do not use a generic tail anchor like:\n"
+    "- BigNum bignum_add(BigNum *a, BigNum *b) {\n"
+    "- [upto]\n"
+    "- }\n"
+    "because the closing brace may match many functions. Instead include final lines that are unique near that function, "
+    "for example its last calculation and return line before the brace.\n"
     "Example anchored edit:\n"
     "<｜DSML｜tool_calls>\n"
     "<｜DSML｜invoke name=\"edit\">\n"
     "<｜DSML｜parameter name=\"path\" string=\"true\">/tmp/example.c</｜DSML｜parameter>\n"
     "<｜DSML｜parameter name=\"old\" string=\"true\">static int parse(void) {\n"
     "    int ok = 0;\n"
-    "[snip]\n"
+    "[upto]\n"
     "    return ok;\n"
     "}</｜DSML｜parameter>\n"
     "<｜DSML｜parameter name=\"new\" string=\"true\">static int parse(void) {\n"
@@ -674,7 +690,7 @@ static const char agent_tools_prompt_after_edit[] =
     "{\"type\":\"function\",\"function\":{\"name\":\"write\",\"description\":\"Create or overwrite a text file.\","
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
     "\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}}}\n"
-    "{\"type\":\"function\",\"function\":{\"name\":\"edit\",\"description\":\"Replace exactly one old text match; old may contain [snip] between unique head and tail anchors.\","
+    "{\"type\":\"function\",\"function\":{\"name\":\"edit\",\"description\":\"Replace exactly one old text match; old may contain [upto] between unique head and tail anchors.\","
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
     "\"old\":{\"type\":\"string\"},\"new\":{\"type\":\"string\"}},\"required\":[\"path\",\"old\",\"new\"]}}}\n"
     "{\"type\":\"function\",\"function\":{\"name\":\"insert\",\"description\":\"Insert text before or after exactly one anchor.\","
@@ -2726,6 +2742,29 @@ static void agent_stream_tool_events(agent_stream_renderer *sr) {
         agent_tool_viz_param_begin(sr, p->param_name);
 }
 
+static void agent_stream_preflight_closed_param(agent_stream_renderer *sr) {
+    if (!sr || sr->replay || sr->dsml_ignored || sr->tool_preflight_error)
+        return;
+    agent_dsml_parser *p = sr->parser;
+    agent_tool_visualizer *v = &sr->viz;
+    if (!p || !v->param_active || strcmp(v->param_name, "old") != 0)
+        return;
+    if (!p->current.name || strcmp(p->current.name, "edit") != 0)
+        return;
+
+    char err[256] = {0};
+    if (agent_preflight_edit_old(sr->renderer->worker, &p->current,
+                                 err, sizeof(err)))
+        return;
+
+    sr->tool_preflight_error = true;
+    snprintf(sr->tool_preflight_error_msg, sizeof(sr->tool_preflight_error_msg),
+             "edit old selector failed before new was generated: %s",
+             err[0] ? err : "old text is not a unique match");
+    agent_trace(sr->renderer->worker, "edit old preflight failed: %s",
+                sr->tool_preflight_error_msg);
+}
+
 static void agent_stream_feed_dsml_byte(agent_stream_renderer *sr, char c) {
     bool was_param = !sr->dsml_ignored && sr->viz.param_active;
     agent_dsml_feed(sr->parser, &c, 1);
@@ -2735,6 +2774,7 @@ static void agent_stream_feed_dsml_byte(agent_stream_renderer *sr, char c) {
         if (was_param && sr->parser->state != AGENT_DSML_PARAM_VALUE &&
             sr->viz.param_active)
         {
+            agent_stream_preflight_closed_param(sr);
             agent_tool_viz_param_end(sr);
         }
     }
@@ -2967,7 +3007,9 @@ static void agent_stream_text(agent_stream_renderer *sr, const char *text, size_
                 agent_stream_finish_ignored_dsml(
                     sr, "unfinished tool call inside <think></think>");
             } else {
-                agent_tool_viz_finish(sr, "[tool call interrupted]\n");
+                agent_tool_viz_finish(sr, sr->tool_preflight_error ?
+                                      "[tool call stopped: edit old selector failed]\n" :
+                                      "[tool call interrupted]\n");
                 sr->dsml_active = false;
             }
         }
@@ -4274,6 +4316,8 @@ static bool agent_parse_bool_default(const char *s, bool def) {
 #define AGENT_FILE_MAX_BYTES (16*1024*1024)
 #define AGENT_READ_DEFAULT_LINES 500
 #define AGENT_TOOL_RESULT_RESERVE_TOKENS 1024
+#define AGENT_EDIT_UPTO_MIN_PREFIX_BYTES 64
+#define AGENT_EDIT_UPTO_MIN_PREFIX_LINES 2
 #define AGENT_COMPACT_SOFT_PERCENT 85
 #define AGENT_COMPACT_MIN_FREE_TOKENS 8192
 #define AGENT_COMPACT_TAIL_DIVISOR 10
@@ -4751,14 +4795,115 @@ static bool agent_find_unique(const char *data, size_t len,
     return true;
 }
 
+static bool agent_edit_old_may_be_closing_tag(const char *text, size_t len) {
+    size_t i = 0;
+    while (i < len && (text[i] == ' ' || text[i] == '\t' ||
+                       text[i] == '\r' || text[i] == '\n'))
+        i++;
+    return i < len && text[i] == '<';
+}
+
+static bool agent_edit_old_is_only_space(const char *text, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] != ' ' && text[i] != '\t' &&
+            text[i] != '\r' && text[i] != '\n')
+            return false;
+    }
+    return true;
+}
+
+static bool agent_span_has_nonspace(const char *s, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (!isspace((unsigned char)s[i])) return true;
+    }
+    return false;
+}
+
+static bool agent_edit_old_prefix_mature_for_upto(const char *old, size_t old_len) {
+    if (old_len < AGENT_EDIT_UPTO_MIN_PREFIX_BYTES) return false;
+    int nonempty_lines = 0;
+    bool line_has_text = false;
+    for (size_t i = 0; i < old_len; i++) {
+        if (old[i] == '\n') {
+            if (line_has_text) nonempty_lines++;
+            line_has_text = false;
+        } else if (!isspace((unsigned char)old[i])) {
+            line_has_text = true;
+        }
+    }
+    return nonempty_lines >= AGENT_EDIT_UPTO_MIN_PREFIX_LINES;
+}
+
+static bool agent_edit_old_ready_for_upto(const char *old, size_t old_len) {
+    if (!old_len || strstr(old, "[upto]")) return false;
+    if (!agent_edit_old_prefix_mature_for_upto(old, old_len)) return false;
+    size_t end = old_len;
+    while (end > 0 && (old[end - 1] == ' ' || old[end - 1] == '\t' ||
+                       old[end - 1] == '\r'))
+        end--;
+    return end > 0 && old[end - 1] == '\n';
+}
+
+/* While the model streams an edit old=... argument, stop it from retyping a
+ * large exact old block once the emitted prefix is already a unique file
+ * anchor.  The next sampled token is inspected before eval: if it would keep
+ * writing old text rather than close the parameter, the caller evaluates a
+ * complete "[upto]" marker line instead. */
+static bool agent_edit_upto_forcer_should_replace(agent_edit_upto_forcer *forcer,
+                                                  agent_dsml_parser *p,
+                                                  const char *next_text,
+                                                  size_t next_len) {
+    if (!forcer || !p) return false;
+    bool in_edit_old = p->state == AGENT_DSML_PARAM_VALUE &&
+        p->current.name && strcmp(p->current.name, "edit") == 0 &&
+        p->param_name && strcmp(p->param_name, "old") == 0;
+    if (!in_edit_old) {
+        forcer->active = false;
+        forcer->done = false;
+        return false;
+    }
+    if (!forcer->active) {
+        forcer->active = true;
+        forcer->done = false;
+    }
+    if (forcer->done)
+        return false;
+    if (agent_edit_old_may_be_closing_tag(next_text, next_len) ||
+        agent_edit_old_is_only_space(next_text, next_len))
+        return false;
+
+    const char *path = agent_tool_arg_value(&p->current, "path");
+    if (!path || !path[0] || p->param_value_start > p->raw_len) return false;
+
+    const char *old = p->raw + p->param_value_start;
+    size_t old_len = p->raw_len - p->param_value_start;
+    if (!agent_edit_old_ready_for_upto(old, old_len)) return false;
+
+    char err[256];
+    char *data = NULL;
+    size_t len = 0;
+    if (agent_read_file_bytes(path, &data, &len, err, sizeof(err)) != 0)
+        return false;
+
+    const char *match = NULL;
+    bool unique = agent_find_unique(data, len, old, old_len, &match,
+                                    "old prefix", err, sizeof(err));
+    free(data);
+    if (unique) {
+        forcer->done = true;
+        return true;
+    }
+    return false;
+}
+
 static bool agent_edit_find_old_span(const char *data, size_t len,
                                      const char *old, const char **match,
                                      size_t *match_len, bool *anchored,
                                      char *err, size_t err_len) {
-    static const char marker[] = "[snip]";
+    static const char marker[] = "[upto]";
     size_t old_len = strlen(old);
-    const char *snip = strstr(old, marker);
-    if (!snip) {
+    const char *upto = strstr(old, marker);
+    if (!upto) {
         *anchored = false;
         if (!agent_find_unique(data, len, old, old_len, match, "old text",
                                err, err_len))
@@ -4766,13 +4911,18 @@ static bool agent_edit_find_old_span(const char *data, size_t len,
         *match_len = old_len;
         return true;
     }
-    if (strstr(snip + strlen(marker), marker)) {
-        snprintf(err, err_len, "old text contains more than one [snip] marker");
+    if (strstr(upto + strlen(marker), marker)) {
+        snprintf(err, err_len, "old text contains more than one [upto] marker");
         return false;
     }
-    size_t head_len = (size_t)(snip - old);
-    const char *tail = snip + strlen(marker);
+    size_t head_len = (size_t)(upto - old);
+    const char *tail = upto + strlen(marker);
     size_t tail_len = old_len - head_len - strlen(marker);
+    if (!agent_span_has_nonspace(tail, tail_len)) {
+        snprintf(err, err_len,
+                 "old text after [upto] must include a unique tail anchor");
+        return false;
+    }
     const char *head_pos = NULL;
     const char *tail_pos = NULL;
     if (!agent_find_unique(data, len, old, head_len, &head_pos, "old head",
@@ -4789,6 +4939,32 @@ static bool agent_edit_find_old_span(const char *data, size_t len,
     *match = head_pos;
     *match_len = (size_t)(tail_pos - head_pos) + tail_len;
     return true;
+}
+
+static bool agent_preflight_edit_old(agent_worker *w, const agent_tool_call *call,
+                                     char *err, size_t err_len) {
+    (void)w;
+    const char *path = agent_tool_arg_value(call, "path");
+    if (!path || !path[0]) return true; /* Cannot preflight until path is known. */
+
+    const char *old = agent_tool_arg_value(call, "old");
+    if (!old || !old[0]) {
+        snprintf(err, err_len, "edit requires non-empty old text");
+        return false;
+    }
+
+    char *data = NULL;
+    size_t len = 0;
+    if (agent_read_file_bytes(path, &data, &len, err, err_len) != 0)
+        return false;
+
+    const char *match = NULL;
+    size_t match_len = 0;
+    bool anchored = false;
+    bool ok = agent_edit_find_old_span(data, len, old, &match, &match_len,
+                                       &anchored, err, err_len);
+    free(data);
+    return ok;
 }
 
 static char *agent_apply_file_splice(const char *path,
@@ -4826,7 +5002,7 @@ static char *agent_apply_file_splice(const char *path,
 }
 
 /* Old/new editing is intentionally conservative: exact old text must be unique.
- * For large replacements, old may contain one [snip] marker; then both the head
+ * For large replacements, old may contain one [upto] marker; then both the head
  * and tail anchors must be independently unique before the whole span is
  * replaced. */
 static char *agent_tool_edit(agent_worker *w, const agent_tool_call *call) {
@@ -5937,6 +6113,60 @@ static bool agent_worker_compact_if_needed(agent_worker *w, const char *reason,
     return agent_worker_compact(w, reason, err, err_len);
 }
 
+static int worker_accept_generated_token(agent_worker *w,
+                                         int token,
+                                         int *generated,
+                                         double t0,
+                                         agent_stream_renderer *stream,
+                                         char *err,
+                                         size_t err_len) {
+    if (ds4_session_eval(w->session, token, err, err_len) != 0)
+        return 1;
+
+    ds4_tokens_push(&w->transcript, token);
+
+    size_t text_len = 0;
+    char *text = ds4_token_text(w->engine, token, &text_len);
+    agent_trace_token(w, token, text, text_len, *generated + 1);
+    agent_stream_text(stream, text, text_len, false);
+    free(text);
+    (*generated)++;
+
+    double dt = now_sec() - t0;
+    pthread_mutex_lock(&w->mu);
+    w->status.generated = *generated;
+    w->status.gen_tps = dt > 0.0 ? (double)*generated / dt : 0.0;
+    agent_wake_locked(w);
+    pthread_mutex_unlock(&w->mu);
+    return 0;
+}
+
+static int worker_force_generated_text(agent_worker *w,
+                                       const char *text,
+                                       int max_tokens,
+                                       int *generated,
+                                       double t0,
+                                       agent_stream_renderer *stream,
+                                       char *err,
+                                       size_t err_len) {
+    ds4_tokens tokens = {0};
+    ds4_tokenize_text(w->engine, text, &tokens);
+    if (tokens.len > max_tokens - *generated) {
+        snprintf(err, err_len, "not enough generation room to force %s", text);
+        ds4_tokens_free(&tokens);
+        return 1;
+    }
+    for (int i = 0; i < tokens.len && *generated < max_tokens; i++) {
+        if (worker_accept_generated_token(w, tokens.v[i], generated, t0,
+                                          stream, err, err_len) != 0) {
+            ds4_tokens_free(&tokens);
+            return 1;
+        }
+    }
+    ds4_tokens_free(&tokens);
+    return 0;
+}
+
 /* ============================================================================
  * Model Worker Thread
  * ============================================================================
@@ -6040,8 +6270,10 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
             .parser = &dsml,
             .in_think = ds4_think_mode_enabled(think_mode),
         };
+        agent_edit_upto_forcer upto_forcer = {0};
         bool got_tool = false;
         bool malformed_tool = false;
+        bool early_tool_error = false;
         int generated = 0;
         double t0 = now_sec();
 
@@ -6056,30 +6288,37 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
                                            cfg->gen.top_p, cfg->gen.min_p, &rng);
             if (token == ds4_token_eos(w->engine)) break;
 
-            if (ds4_session_eval(w->session, token, err, sizeof(err)) != 0) {
-                agent_dsml_parser_free(&dsml);
-                agent_set_error(w, err);
-                return 1;
-            }
-
-            ds4_tokens_push(&w->transcript, token);
-
             size_t text_len = 0;
             char *text = ds4_token_text(w->engine, token, &text_len);
-            agent_trace_token(w, token, text, text_len, generated + 1);
-            agent_stream_text(&stream, text, text_len, false);
-            free(text);
-            generated++;
-
-            double dt = now_sec() - t0;
-            pthread_mutex_lock(&w->mu);
-            w->status.generated = generated;
-            w->status.gen_tps = dt > 0.0 ? (double)generated / dt : 0.0;
-            agent_wake_locked(w);
-            pthread_mutex_unlock(&w->mu);
+            if (agent_edit_upto_forcer_should_replace(&upto_forcer, &dsml,
+                                                       text, text_len))
+            {
+                agent_trace(w, "edit old auto-upto replaced token=%d text=%.*s",
+                            token, (int)(text_len > 80 ? 80 : text_len), text);
+                free(text);
+                if (worker_force_generated_text(w, "[upto]\n", max_tokens,
+                                                &generated, t0, &stream,
+                                                err, sizeof(err)) != 0) {
+                    agent_dsml_parser_free(&dsml);
+                    agent_set_error(w, err);
+                    return 1;
+                }
+            } else {
+                free(text);
+                if (worker_accept_generated_token(w, token, &generated, t0,
+                                                  &stream, err, sizeof(err)) != 0) {
+                    agent_dsml_parser_free(&dsml);
+                    agent_set_error(w, err);
+                    return 1;
+                }
+            }
 
             if (dsml.state == AGENT_DSML_DONE) {
                 got_tool = true;
+                break;
+            }
+            if (stream.tool_preflight_error) {
+                early_tool_error = true;
                 break;
             }
             if (dsml.state == AGENT_DSML_ERROR) {
@@ -6093,13 +6332,14 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         if (stream.dsml_in_think) {
             got_tool = false;
             malformed_tool = true;
+            early_tool_error = false;
             snprintf(dsml.error, sizeof(dsml.error),
                      "tool calling is not allowed inside <think></think>");
         }
 
         ds4_tokens_push(&w->transcript, ds4_token_eos(w->engine));
 
-        if (!got_tool && !malformed_tool) {
+        if (!got_tool && !malformed_tool && !early_tool_error) {
             agent_dsml_parser_free(&dsml);
             agent_set_status(w, AGENT_WORKER_IDLE);
             return 0;
@@ -6118,6 +6358,15 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
                 agent_buf_puts(&b, "\n");
                 agent_buf_puts(&b, "Tool execution stopped because a queued user prompt is pending.\n");
                 tool_result = agent_buf_take(&b);
+            } else if (early_tool_error) {
+                agent_buf b = {0};
+                agent_buf_puts(&b, "Tool error: ");
+                agent_buf_puts(&b, stream.tool_preflight_error_msg[0] ?
+                               stream.tool_preflight_error_msg :
+                               "edit old selector failed before new was generated");
+                agent_buf_puts(&b, "\n");
+                agent_buf_puts(&b, "Tool execution stopped because a queued user prompt is pending.\n");
+                tool_result = agent_buf_take(&b);
             } else {
                 tool_result = xstrdup(
                     "Tool call not executed because a queued user prompt is pending.\n");
@@ -6129,7 +6378,15 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
             return 0;
         }
 
-        if (malformed_tool) {
+        if (early_tool_error) {
+            agent_buf b = {0};
+            agent_buf_puts(&b, "Tool error: ");
+            agent_buf_puts(&b, stream.tool_preflight_error_msg[0] ?
+                           stream.tool_preflight_error_msg :
+                           "edit old selector failed before new was generated");
+            agent_buf_puts(&b, "\n");
+            tool_result = agent_buf_take(&b);
+        } else if (malformed_tool) {
             agent_buf b = {0};
             agent_buf_puts(&b, "Tool error: invalid DSML tool call: ");
             agent_buf_puts(&b, dsml.error[0] ? dsml.error : "parse error");
