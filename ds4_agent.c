@@ -4795,6 +4795,45 @@ static bool agent_find_unique(const char *data, size_t len,
     return true;
 }
 
+/* Find an anchor only in the suffix after start.
+ *
+ * Anchored edits use "head [upto] tail": the head fixes the edit start, and
+ * the tail should delimit the first unique end point after that start. A tail
+ * may legitimately appear earlier in the file, so checking global uniqueness
+ * would reject valid edits.
+ */
+static bool agent_find_unique_after(const char *data, size_t len,
+                                    const char *start,
+                                    const char *needle, size_t needle_len,
+                                    const char **match, const char *label,
+                                    char *err, size_t err_len) {
+    if (!needle || needle_len == 0) {
+        snprintf(err, err_len, "%s anchor is empty", label);
+        return false;
+    }
+    if (start < data || start > data + len) {
+        snprintf(err, err_len, "%s search starts outside file", label);
+        return false;
+    }
+    size_t off = (size_t)(start - data);
+    const char *first = agent_memmem_simple(data + off, len - off,
+                                            needle, needle_len);
+    if (!first) {
+        snprintf(err, err_len, "%s anchor not found after old head", label);
+        return false;
+    }
+    size_t after_first = (size_t)(first - data) + 1;
+    const char *second = after_first <= len ?
+        agent_memmem_simple(data + after_first, len - after_first,
+                            needle, needle_len) : NULL;
+    if (second) {
+        snprintf(err, err_len, "%s anchor is not unique after old head", label);
+        return false;
+    }
+    *match = first;
+    return true;
+}
+
 static bool agent_edit_old_may_be_closing_tag(const char *text, size_t len) {
     size_t i = 0;
     while (i < len && (text[i] == ' ' || text[i] == '\t' ||
@@ -4928,13 +4967,10 @@ static bool agent_edit_find_old_span(const char *data, size_t len,
     if (!agent_find_unique(data, len, old, head_len, &head_pos, "old head",
                            err, err_len))
         return false;
-    if (!agent_find_unique(data, len, tail, tail_len, &tail_pos, "old tail",
-                           err, err_len))
+    if (!agent_find_unique_after(data, len, head_pos + head_len,
+                                 tail, tail_len, &tail_pos, "old tail",
+                                 err, err_len))
         return false;
-    if (tail_pos < head_pos + head_len) {
-        snprintf(err, err_len, "old tail appears before old head");
-        return false;
-    }
     *anchored = true;
     *match = head_pos;
     *match_len = (size_t)(tail_pos - head_pos) + tail_len;
