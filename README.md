@@ -186,6 +186,9 @@ few advantages:
 * Everything is tuned for this model.
 * Ability to switch session with `/list` and `/switch` without any prefill stage.
 
+Use `--chdir /path/to/ds4` when launching `ds4-agent` from another directory,
+so relative runtime files such as `metal/*.metal` resolve from the project tree.
+
 However while the system already works, there is a lot of work to do
 in order to make it ready for prime time. When finally the agent will reach
 the wanted shape, we will *likely* split the server and the client creating a stateful

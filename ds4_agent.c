@@ -60,6 +60,7 @@ typedef struct {
 typedef struct {
     ds4_engine_options engine;
     agent_generation_options gen;
+    const char *chdir_path;
     bool non_interactive;
 } agent_config;
 
@@ -430,6 +431,7 @@ static void usage(FILE *fp) {
         "  --backend NAME         metal, cuda, or cpu.\n"
         "  --metal, --cuda, --cpu Select backend explicitly.\n"
         "  -t, --threads N        CPU helper threads.\n"
+        "  --chdir DIR            Change working directory before loading runtime assets.\n"
         "  --quality              Prefer exact kernels where available.\n"
         "  --warm-weights         Touch mapped tensor pages before generation.\n"
         "  --dir-steering-file FILE\n"
@@ -524,6 +526,8 @@ static agent_config parse_options(int argc, char **argv) {
             c.engine.backend = DS4_BACKEND_CPU;
         } else if (!strcmp(arg, "-t") || !strcmp(arg, "--threads")) {
             c.engine.n_threads = parse_int(need_arg(&i, argc, argv, arg), arg);
+        } else if (!strcmp(arg, "--chdir")) {
+            c.chdir_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--quality")) {
             c.engine.quality = true;
         } else if (!strcmp(arg, "--warm-weights")) {
@@ -7537,6 +7541,11 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
 
 int main(int argc, char **argv) {
     agent_config cfg = parse_options(argc, argv);
+    if (cfg.chdir_path && chdir(cfg.chdir_path) != 0) {
+        fprintf(stderr, "ds4-agent: failed to chdir to %s: %s\n",
+                cfg.chdir_path, strerror(errno));
+        return 1;
+    }
     log_context_memory(cfg.engine.backend, cfg.gen.ctx_size);
 
     ds4_engine *engine = NULL;
