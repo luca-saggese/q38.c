@@ -700,7 +700,7 @@ static char *web_cdp_eval_string(cdp_ws *ws, const char *expr,
     web_buf params = {0};
     web_buf_puts(&params, "{\"expression\":");
     web_buf_puts(&params, qexpr);
-    web_buf_puts(&params, ",\"returnByValue\":true,\"awaitPromise\":true}");
+    web_buf_puts(&params, ",\"returnByValue\":true,\"awaitPromise\":true,\"includeCommandLineAPI\":true}");
     free(qexpr);
     char *params_s = web_buf_take(&params);
     char *resp = web_cdp_call(ws, "Runtime.evaluate", params_s, err, err_len);
@@ -831,19 +831,41 @@ static bool web_cdp_prepare_page(cdp_ws *ws, char *err, size_t err_len) {
 static void web_scroll_dynamic_page(cdp_ws *ws) {
     const char *expr =
         "(() => new Promise(resolve => {"
-        "let last=-1,same=0,steps=0;"
         "const root=()=>document.scrollingElement||document.documentElement||document.body;"
-        "const tick=()=>{"
-        "const text=((document.body&&document.body.innerText)||'').length;"
-        "if(text===last)same++;else same=0;last=text;"
+        "const blockSel='h1,h2,h3,h4,h5,h6,p,li,pre,blockquote,td,th,[id=\"content-text\"],[class*=\"comment-body\"],[class*=\"comment-content\"],[data-testid*=\"comment-text\"]';"
+        "const lazySel='[onscroll],[loading=\"lazy\"],[data-src],[data-lazy],[class*=\"lazy\"],[class*=\"infinite\"],[class*=\"virtual\"],[role=\"feed\"],[id*=\"comment\"],[class*=\"comment\"],[data-testid*=\"comment\"]';"
+        "const hookCount=()=>{let n=0;try{if(window.onscroll)n++;if(document.onscroll)n++;if(document.body&&document.body.onscroll)n++;}catch(e){}"
+        "try{if(typeof getEventListeners==='function'){for(const o of [window,document,document.body]){if(!o)continue;const ev=getEventListeners(o);if(ev&&ev.scroll)n+=ev.scroll.length;}}}catch(e){}"
+        "try{n+=document.querySelectorAll(lazySel).length;}catch(e){}return n;};"
+        "const metrics=()=>{const r=root();return {"
+        "height:r?r.scrollHeight:0,"
+        "view:innerHeight||900,"
+        "y:scrollY||(r&&r.scrollTop)||0,"
+        "text:((document.body&&document.body.innerText)||'').length,"
+        "links:document.links?document.links.length:0,"
+        "blocks:document.body?document.body.querySelectorAll(blockSel).length:0,"
+        "hooks:hookCount()};};"
+        "const sig=m=>[m.height,m.text,m.links,m.blocks].join('|');"
+        "const grew=(a,b)=>b.height>a.height+20||b.text>a.text+200||b.links>a.links+2||b.blocks>a.blocks+2;"
+        "const scrollOnce=()=>{const r=root();if(!r)return;"
         "const h=Math.max(700,Math.floor((innerHeight||900)*0.85));"
-        "const r=root();"
-        "window.scrollTo(0,Math.min(r.scrollHeight,steps*h));"
-        "steps++;"
-        "if(steps>=28||same>=6){resolve('scrolled '+steps+' text='+text);return;}"
-        "setTimeout(tick,750);"
-        "};"
-        "tick();"
+        "window.scrollTo(0,Math.min(r.scrollHeight,(scrollY||r.scrollTop||0)+h));};"
+        "let last=metrics(),lastSig=sig(last),same=0,steps=0;"
+        "const scrollable=last.height>last.view*1.35;"
+        "if(!scrollable||last.hooks===0){resolve('scroll skipped hooks='+last.hooks+' text='+last.text);return;}"
+        "const tick=()=>{"
+        "if(steps>=28){resolve('scrolled '+steps+' text='+last.text);return;}"
+        "const before=last;"
+        "scrollOnce();steps++;"
+        "setTimeout(()=>{const now=metrics(),nowSig=sig(now);"
+        "if(nowSig===lastSig)same++;else same=0;"
+        "const loaded=grew(before,now);"
+        "last=now;lastSig=nowSig;"
+        "if(steps===1&&!loaded){resolve('scroll probe unchanged text='+now.text);return;}"
+        "const atBottom=now.y+now.view+20>=now.height;"
+        "if(same>=4||(atBottom&&same>=1)){resolve('scrolled '+steps+' text='+now.text);return;}"
+        "tick();},900);"
+        "};tick();"
         "}))()";
     char err[160] = {0};
     char *res = web_cdp_eval_string(ws, expr, err, sizeof(err));
@@ -945,24 +967,24 @@ static bool web_spawn_chrome(ds4_web *web, char *err, size_t err_len) {
                    "--args", port_arg, "--remote-allow-origins=*",
                    profile_arg, "--no-first-run", "--no-default-browser-check",
                    "--disable-sync", "--use-mock-keychain", "--password-store=basic",
-                   "about:blank", (char *)NULL);
+                   "--mute-audio", "about:blank", (char *)NULL);
         } else {
             execlp(exe, exe, port_arg, "--remote-allow-origins=*",
                    profile_arg, "--no-first-run", "--no-default-browser-check",
                    "--disable-sync", "--use-mock-keychain", "--password-store=basic",
-                   "about:blank", (char *)NULL);
+                   "--mute-audio", "about:blank", (char *)NULL);
         }
 #else
         if (geteuid() == 0) {
             execlp(exe, exe, port_arg, "--remote-allow-origins=*",
                    profile_arg, "--no-first-run", "--no-default-browser-check",
                    "--disable-sync", "--password-store=basic", "--no-sandbox",
-                   "about:blank", (char *)NULL);
+                   "--mute-audio", "about:blank", (char *)NULL);
         } else {
             execlp(exe, exe, port_arg, "--remote-allow-origins=*",
                    profile_arg, "--no-first-run", "--no-default-browser-check",
                    "--disable-sync", "--password-store=basic",
-                   "about:blank", (char *)NULL);
+                   "--mute-audio", "about:blank", (char *)NULL);
         }
 #endif
         _exit(127);
