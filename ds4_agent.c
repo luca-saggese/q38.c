@@ -287,6 +287,9 @@ static bool worker_has_queued_user_pending(agent_worker *w);
 static void worker_apply_pending_power(agent_worker *w);
 static bool agent_preflight_edit_old(agent_worker *w, const agent_tool_call *call,
                                      char *err, size_t err_len);
+static int agent_worker_sync_tokens(agent_worker *w, const ds4_tokens *tokens,
+                                    bool publish_progress,
+                                    char *err, size_t err_len);
 
 /* ============================================================================
  * Small Utilities And Command-Line Parsing
@@ -407,6 +410,8 @@ static bool agent_slash_command_known(const char *cmd) {
            !strcmp(cmd, "/new") ||
            agent_slash_command_with_args(cmd, "/power") ||
            agent_slash_command_with_args(cmd, "/switch") ||
+           agent_slash_command_with_args(cmd, "/del") ||
+           agent_slash_command_with_args(cmd, "/strip") ||
            agent_slash_command_with_args(cmd, "/history");
 }
 
@@ -498,6 +503,8 @@ static void usage(FILE *fp) {
         "  /save                  Save the current agent session.\n"
         "  /list                  List saved sessions in ~/.ds4/kvcache.\n"
         "  /switch SHA            Load a saved session and show recent history.\n"
+        "  /del SHA               Delete a saved session.\n"
+        "  /strip SHA             Remove KV payload from a saved session.\n"
         "  /history [N]           Show N recent user turns from the current session.\n"
         "  /power N               Set GPU duty cycle percentage, 1..100.\n"
         "  /new                   Start a fresh session from the system prompt.\n"
@@ -3406,7 +3413,9 @@ static bool agent_kv_load_path(agent_worker *w, const char *path,
 
     char *text = NULL;
     if (ok) ok = agent_kv_read_text(fp, text_bytes, &text, err, err_len);
-    if (ok && hdr.quant_bits != (uint8_t)ds4_engine_routed_quant_bits(w->engine)) {
+    if (ok && hdr.payload_bytes != 0 &&
+        hdr.quant_bits != (uint8_t)ds4_engine_routed_quant_bits(w->engine))
+    {
         snprintf(err, err_len, "KV checkpoint was written for a different quantization");
         ok = false;
     }
@@ -3428,9 +3437,21 @@ static bool agent_kv_load_path(agent_worker *w, const char *path,
     }
 
     char load_err[160] = {0};
-    if (ok &&
-        ds4_session_load_payload(w->session, fp, hdr.payload_bytes,
-                                 load_err, sizeof(load_err)) != 0)
+    if (ok && hdr.payload_bytes == 0) {
+        ds4_tokens rebuilt = {0};
+        ds4_tokenize_rendered_chat(w->engine, text, &rebuilt);
+        if (rebuilt.len != (int)hdr.tokens) {
+            snprintf(err, err_len, "stripped session token count mismatch");
+            ok = false;
+        } else if (agent_worker_sync_tokens(w, &rebuilt, true,
+                                            err, err_len) != 0) {
+            ds4_session_invalidate(w->session);
+            ok = false;
+        }
+        ds4_tokens_free(&rebuilt);
+    } else if (ok &&
+               ds4_session_load_payload(w->session, fp, hdr.payload_bytes,
+                                        load_err, sizeof(load_err)) != 0)
     {
         snprintf(err, err_len, "%s", load_err[0] ? load_err : "failed to load KV payload");
         ds4_session_invalidate(w->session);
@@ -3815,9 +3836,12 @@ static void agent_format_age(uint64_t when, char *buf, size_t len) {
 
 /* Extract a human-readable /list title from the first user turn stored in the
  * rendered transcript.  The session file has no separate metadata by design. */
-static char *agent_session_title_from_text(const char *text, size_t text_len) {
+static char *agent_session_title_from_text(const char *text, size_t text_len,
+                                           size_t max_bytes) {
     static const char user_mark[] = "<｜User｜>";
     static const char assistant_mark[] = "<｜Assistant｜>";
+    if (max_bytes == 0) max_bytes = 70;
+    if (max_bytes < 4) max_bytes = 4;
     const char *p = text ? strstr(text, user_mark) : NULL;
     if (!p) return xstrdup("(no user prompt)");
     p += strlen(user_mark);
@@ -3833,18 +3857,17 @@ static char *agent_session_title_from_text(const char *text, size_t text_len) {
     agent_buf b = {0};
     bool space = false;
     bool truncated = false;
-    const size_t max_bytes = 70;
     for (const char *s = p; s < end; s++) {
         unsigned char c = (unsigned char)*s;
         if (isspace(c)) {
             space = b.len != 0;
             continue;
         }
-        if (space && b.len + 1 < max_bytes) {
+        if (space && b.len + 4 < max_bytes) {
             agent_buf_puts(&b, " ");
             space = false;
         }
-        if (b.len >= max_bytes) {
+        if (b.len + 4 > max_bytes) {
             truncated = true;
             break;
         }
@@ -3858,7 +3881,7 @@ static char *agent_session_title_from_text(const char *text, size_t text_len) {
     return agent_buf_take(&b);
 }
 
-static char *agent_session_title_from_file(const char *path) {
+static char *agent_session_title_from_file(const char *path, size_t max_bytes) {
     FILE *fp = fopen(path, "rb");
     if (!fp) return xstrdup("(unreadable session)");
     ds4_kvstore_entry hdr = {0};
@@ -3867,7 +3890,7 @@ static char *agent_session_title_from_file(const char *path) {
     bool ok = ds4_kvstore_read_header(fp, &hdr, &text_bytes) &&
               agent_kv_read_text(fp, text_bytes, &text, NULL, 0);
     fclose(fp);
-    char *title = ok ? agent_session_title_from_text(text, text_bytes) :
+    char *title = ok ? agent_session_title_from_text(text, text_bytes, max_bytes) :
                         xstrdup("(unreadable session)");
     free(text);
     return title;
@@ -4300,6 +4323,41 @@ static bool agent_worker_show_history(agent_worker *w, int user_turns,
     return true;
 }
 
+typedef struct {
+    ds4_kvstore_entry entry;
+    char *title;
+} agent_session_list_item;
+
+static int agent_session_list_cmp_recent(const void *a, const void *b) {
+    const agent_session_list_item *sa = a, *sb = b;
+    uint64_t ta = sa->entry.last_used ? sa->entry.last_used : sa->entry.created_at;
+    uint64_t tb = sb->entry.last_used ? sb->entry.last_used : sb->entry.created_at;
+    if (ta < tb) return 1;
+    if (ta > tb) return -1;
+    return strcmp(sa->entry.sha, sb->entry.sha);
+}
+
+static void agent_session_list_free(agent_session_list_item *v, int n) {
+    for (int i = 0; i < n; i++) {
+        ds4_kvstore_entry_free(&v[i].entry);
+        free(v[i].title);
+    }
+    free(v);
+}
+
+static void agent_session_list_push(agent_session_list_item **v, int *len,
+                                    int *cap, ds4_kvstore_entry entry,
+                                    char *title) {
+    if (*len == *cap) {
+        *cap = *cap ? *cap * 2 : 16;
+        *v = xrealloc(*v, (size_t)*cap * sizeof((*v)[0]));
+    }
+    (*v)[(*len)++] = (agent_session_list_item){
+        .entry = entry,
+        .title = title,
+    };
+}
+
 /* Print resumable sessions from ~/.ds4/kvcache.  sysprompt.kv is intentionally
  * ignored because it is an implementation cache, not a user session. */
 static void agent_worker_list_sessions(agent_worker *w) {
@@ -4308,8 +4366,13 @@ static void agent_worker_list_sessions(agent_worker *w) {
         printf("no sessions: %s\n", strerror(errno));
         return;
     }
-    printf("saved sessions in %s:\n", w->cache_dir);
-    int n = 0;
+
+    int cols = renderer_terminal_cols();
+    size_t title_budget = cols > 16 ? (size_t)(cols - 12) : 20;
+    if (title_budget > 160) title_budget = 160;
+
+    agent_session_list_item *sessions = NULL;
+    int sessions_len = 0, sessions_cap = 0;
     struct dirent *de;
     while ((de = readdir(d)) != NULL) {
         char sha[41];
@@ -4317,20 +4380,45 @@ static void agent_worker_list_sessions(agent_worker *w) {
         char *path = ds4_kvstore_path_join(w->cache_dir, de->d_name);
         ds4_kvstore_entry e = {0};
         if (ds4_kvstore_read_entry_file(path, sha, &e)) {
-            char age[32];
-            agent_format_age(e.last_used, age, sizeof(age));
-            char *title = agent_session_title_from_file(path);
-            printf("  %.8s (%s) %s  [%u tokens, %.1f MiB]\n",
-                   sha, age, title, e.tokens,
-                   (double)e.file_size / (1024.0 * 1024.0));
-            free(title);
-            n++;
-            ds4_kvstore_entry_free(&e);
+            char *title = agent_session_title_from_file(path, title_budget);
+            agent_session_list_push(&sessions, &sessions_len, &sessions_cap,
+                                    e, title);
         }
         free(path);
     }
     closedir(d);
-    if (!n) printf("  (none)\n");
+    if (!sessions_len) {
+        printf("no saved sessions\n");
+        return;
+    }
+
+    qsort(sessions, (size_t)sessions_len, sizeof(sessions[0]),
+          agent_session_list_cmp_recent);
+
+    bool color = isatty(STDOUT_FILENO) != 0;
+    const char *sha_on = color ? "\x1b[1;96m" : "";
+    const char *title_on = color ? "\x1b[1;97m" : "";
+    const char *dim = color ? "\x1b[90m" : "";
+    const char *reset = color ? "\x1b[0m" : "";
+
+    for (int i = 0; i < sessions_len; i++) {
+        ds4_kvstore_entry *e = &sessions[i].entry;
+        char age[32];
+        agent_format_age(e->last_used ? e->last_used : e->created_at,
+                         age, sizeof(age));
+        printf("%s%.8s%s %s>%s %s%s%s\n",
+               sha_on, e->sha, reset, dim, reset,
+               title_on, sessions[i].title, reset);
+        printf("         %s> %s, %u tokens, %.2f MB%s%s\n\n",
+               dim, age, e->tokens,
+               (double)e->file_size / (1024.0 * 1024.0),
+               e->payload_bytes == 0 ? ", stripped" : "",
+               reset);
+    }
+    printf("%suse /switch <sha> to select a session, /del <sha> to remove, "
+           "/strip <sha> to strip KV cache.%s\n",
+           dim, reset);
+    agent_session_list_free(sessions, sessions_len);
 }
 
 typedef struct {
@@ -4467,6 +4555,126 @@ static bool agent_worker_find_session(agent_worker *w, const char *prefix,
     return true;
 }
 
+static bool agent_worker_delete_session(agent_worker *w, const char *prefix,
+                                        char sha_out[41],
+                                        char *err, size_t err_len) {
+    char sha[41];
+    char *path = NULL;
+    if (!agent_worker_find_session(w, prefix, sha, &path, err, err_len))
+        return false;
+    if (unlink(path) != 0) {
+        snprintf(err, err_len, "%s", strerror(errno));
+        free(path);
+        return false;
+    }
+    if (sha_out) memcpy(sha_out, sha, 41);
+    free(path);
+    return true;
+}
+
+/* Strip the heavy backend payload from a saved session while preserving its
+ * rendered transcript. Loading such a file later tokenizes the text and
+ * rebuilds the live KV with a full prefill. */
+static bool agent_worker_strip_session(agent_worker *w, const char *prefix,
+                                       char sha_out[41],
+                                       uint32_t *tokens_out,
+                                       char *err, size_t err_len) {
+    if (err && err_len) err[0] = '\0';
+    char sha[41];
+    char *path = NULL;
+    if (!agent_worker_find_session(w, prefix, sha, &path, err, err_len))
+        return false;
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        snprintf(err, err_len, "%s", strerror(errno));
+        free(path);
+        return false;
+    }
+
+    ds4_kvstore_entry hdr = {0};
+    uint32_t text_bytes = 0;
+    char *text = NULL;
+    bool ok = ds4_kvstore_read_header(fp, &hdr, &text_bytes) &&
+              agent_kv_read_text(fp, text_bytes, &text, err, err_len);
+    fclose(fp);
+    if (!ok) {
+        if (!err[0]) snprintf(err, err_len, "failed to read session");
+        free(text);
+        free(path);
+        return false;
+    }
+
+    char actual_sha[41];
+    ds4_kvstore_sha1_bytes_hex(text, text_bytes, actual_sha);
+    if (strcmp(actual_sha, sha)) {
+        snprintf(err, err_len, "cached text hash does not match file name");
+        free(text);
+        free(path);
+        return false;
+    }
+
+    agent_buf tmpl = {0};
+    agent_buf_puts(&tmpl, path);
+    agent_buf_puts(&tmpl, ".tmp.XXXXXX");
+    char *tmp = agent_buf_take(&tmpl);
+    int fd = mkstemp(tmp);
+    if (fd < 0) {
+        snprintf(err, err_len, "%s", strerror(errno));
+        free(tmp);
+        free(text);
+        free(path);
+        return false;
+    }
+
+    fp = fdopen(fd, "wb");
+    if (!fp) {
+        snprintf(err, err_len, "%s", strerror(errno));
+        close(fd);
+        unlink(tmp);
+        free(tmp);
+        free(text);
+        free(path);
+        return false;
+    }
+
+    uint8_t h[DS4_KVSTORE_FIXED_HEADER];
+    uint64_t now = (uint64_t)time(NULL);
+    ds4_kvstore_fill_header(h, hdr.quant_bits, hdr.reason, hdr.ext_flags,
+                            hdr.tokens, hdr.hits, hdr.ctx_size,
+                            hdr.created_at, now, 0);
+    uint8_t tb[4];
+    ds4_kvstore_le_put32(tb, text_bytes);
+
+    errno = 0;
+    ok = fwrite(h, 1, sizeof(h), fp) == sizeof(h) &&
+         fwrite(tb, 1, sizeof(tb), fp) == sizeof(tb) &&
+         fwrite(text, 1, text_bytes, fp) == text_bytes &&
+         fflush(fp) == 0;
+    int saved_errno = errno;
+    if (fclose(fp) != 0) {
+        if (!saved_errno) saved_errno = errno;
+        ok = false;
+    }
+    if (ok && rename(tmp, path) != 0) {
+        saved_errno = errno;
+        ok = false;
+    }
+    if (!ok) {
+        snprintf(err, err_len, "%s",
+                 saved_errno ? strerror(saved_errno) : "failed to write stripped session");
+        unlink(tmp);
+    } else {
+        if (sha_out) memcpy(sha_out, sha, 41);
+        if (tokens_out) *tokens_out = hdr.tokens;
+    }
+
+    free(tmp);
+    free(text);
+    free(path);
+    return ok;
+}
+
 /* Load a saved session KV into the live transcript and optionally replay recent
  * history for the human. */
 static bool agent_worker_switch_session(agent_worker *w, const char *prefix,
@@ -4480,6 +4688,17 @@ static bool agent_worker_switch_session(agent_worker *w, const char *prefix,
     char *path = NULL;
     if (!agent_worker_find_session(w, prefix, sha, &path, err, err_len))
         return false;
+
+    bool stripped = false;
+    ds4_kvstore_entry entry = {0};
+    if (ds4_kvstore_read_entry_file(path, sha, &entry)) {
+        stripped = entry.payload_bytes == 0;
+        ds4_kvstore_entry_free(&entry);
+    }
+    if (stripped) {
+        printf("rebuilding stripped session %.8s from rendered text...\n", sha);
+        fflush(stdout);
+    }
 
     ds4_tokens loaded = {0};
     bool ok = agent_kv_load_path(w, path, sha, NULL, 0, &loaded, err, err_len);
@@ -4496,8 +4715,8 @@ static bool agent_worker_switch_session(agent_worker *w, const char *prefix,
         w->status.error[0] = '\0';
         agent_wake_locked(w);
         pthread_mutex_unlock(&w->mu);
-        printf("switched to session %.8s (%d tokens)\n",
-               sha, w->transcript.len);
+        printf("switched to session %.8s (%d tokens%s)\n",
+               sha, w->transcript.len, stripped ? ", rebuilt from text" : "");
         if (history_turns > 0)
             (void)agent_worker_show_history(w, history_turns, err, err_len);
     } else {
@@ -7943,6 +8162,8 @@ static void runtime_help(void) {
     puts("  /save        Save the current session.");
     puts("  /list        List saved sessions.");
     puts("  /switch SHA  Load a saved session and show recent history.");
+    puts("  /del SHA     Delete a saved session.");
+    puts("  /strip SHA   Strip KV payload; /switch rebuilds it by prefill.");
     puts("  /history [N] Show N recent user turns from the current session.");
     puts("  /power N     Set GPU duty cycle percentage, 1..100.");
     puts("  /new         Start a fresh session from the system prompt.");
@@ -8520,6 +8741,45 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                             else
                                 force_status_redraw_after_restart = true;
                         }
+                    }
+                } else if (!strncmp(cmd, "/del", 4) &&
+                           (cmd[4] == '\0' || cmd[4] == ' ' || cmd[4] == '\t')) {
+                    char *arg = cmd + 4;
+                    while (*arg == ' ' || *arg == '\t') arg++;
+                    if (!arg[0]) {
+                        printf("usage: /del <sha-prefix>\n");
+                    } else {
+                        char *sha_arg = arg;
+                        while (*arg && *arg != ' ' && *arg != '\t') arg++;
+                        if (*arg) *arg = '\0';
+                        char sha[41] = {0};
+                        char err[160] = {0};
+                        if (agent_worker_delete_session(&worker, sha_arg,
+                                                        sha, err, sizeof(err)))
+                            printf("deleted session %.8s\n", sha);
+                        else
+                            printf("delete failed: %s\n", err);
+                    }
+                } else if (!strncmp(cmd, "/strip", 6) &&
+                           (cmd[6] == '\0' || cmd[6] == ' ' || cmd[6] == '\t')) {
+                    char *arg = cmd + 6;
+                    while (*arg == ' ' || *arg == '\t') arg++;
+                    if (!arg[0]) {
+                        printf("usage: /strip <sha-prefix>\n");
+                    } else {
+                        char *sha_arg = arg;
+                        while (*arg && *arg != ' ' && *arg != '\t') arg++;
+                        if (*arg) *arg = '\0';
+                        char sha[41] = {0};
+                        uint32_t tokens = 0;
+                        char err[160] = {0};
+                        if (agent_worker_strip_session(&worker, sha_arg,
+                                                       sha, &tokens,
+                                                       err, sizeof(err)))
+                            printf("stripped session %.8s (%u tokens)\n",
+                                   sha, tokens);
+                        else
+                            printf("strip failed: %s\n", err);
                     }
                 } else if (!strncmp(cmd, "/history", 8) &&
                            (cmd[8] == '\0' || cmd[8] == ' ' || cmd[8] == '\t')) {
