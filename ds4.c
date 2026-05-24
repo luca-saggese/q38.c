@@ -1639,6 +1639,13 @@ static uint64_t accelerator_cuda_preload_span_bytes(void) {
 }
 
 static bool accelerator_cache_model_tensor_spans(const ds4_model *m, uint64_t *cached_out) {
+    /* Routed MoE expert weights (`*_exps.weight`) are ~65 GiB of the model on
+     * V4-Flash but only top-K of N=256 experts fire per token — pre-caching
+     * them in HBM wastes most of the budget on cold weights and starves the
+     * hot non-MoE tensors that every token reads.  Skip them at the span-
+     * build stage so the cap fills with attn / shared FFN / embedding /
+     * output head.  Cold MoE expert reads fall back to the UVA-mapped
+     * pointer. */
     accelerator_tensor_span *spans = xmalloc((size_t)m->n_tensors * sizeof(spans[0]));
     uint64_t nspan = 0;
     for (uint64_t i = 0; i < m->n_tensors; i++) {
@@ -1647,6 +1654,11 @@ static bool accelerator_cache_model_tensor_spans(const ds4_model *m, uint64_t *c
         if (t->abs_offset > m->size || t->bytes > m->size - t->abs_offset) {
             free(spans);
             return false;
+        }
+        /* Routed-expert weights are the only tensors with "_exps." in the
+         * name; memmem is safe on short names (returns NULL). */
+        if (memmem(t->name.ptr, t->name.len, "_exps.", 6) != NULL) {
+            continue;
         }
         spans[nspan++] = (accelerator_tensor_span){
             .off = t->abs_offset,
@@ -13532,11 +13544,9 @@ static bool metal_graph_eval_token_raw_swa_top(
     if (ok) ok = metal_graph_encode_token_raw_swa(g, model, weights,
                                                   token, pos, true, true);
     if (ok) {
-        ok = ds4_gpu_indexer_topk_tensor(g->comp_selected,
-                                           g->logits,
-                                           DS4_N_VOCAB,
-                                           1,
-                                           1) != 0;
+        ok = ds4_gpu_argmax_tensor(g->comp_selected,
+                                   g->logits,
+                                   DS4_N_VOCAB) != 0;
     }
     if (ok) ok = ds4_gpu_end_commands() != 0;
     if (ok) ok = ds4_gpu_tensor_read(g->comp_selected, 0, top_id, sizeof(*top_id)) != 0;
@@ -13643,11 +13653,9 @@ static bool metal_graph_eval_mtp_draft_from_hc(
                                                     mtp,
                                                     base_weights->output->dim[1]);
     if (ok && top_id) {
-        ok = ds4_gpu_indexer_topk_tensor(g->comp_selected,
-                                           g->logits,
-                                           DS4_N_VOCAB,
-                                           1,
-                                           1) != 0;
+        ok = ds4_gpu_argmax_tensor(g->comp_selected,
+                                   g->logits,
+                                   DS4_N_VOCAB) != 0;
     }
     if (ok) ok = ds4_gpu_end_commands() != 0;
     g->cur_hc = saved_cur;
@@ -14434,7 +14442,14 @@ static bool metal_graph_verify_suffix_tops(
                                                       n_tokens,
                                                       weights->output->dim[1]);
     if (ok) {
-        if (top_rows) {
+        if (top_rows == 1) {
+            /* Common K=2 verify case: top_k=1 over n_vocab → use the dedicated
+             * argmax kernel (single-block tree-reduce) instead of the legacy
+             * indexer_topk_kernel's single-thread O(n_vocab * top_k) fall-through. */
+            ok = ds4_gpu_argmax_tensor(g->comp_selected,
+                                       g->spec_logits,
+                                       DS4_N_VOCAB) != 0;
+        } else if (top_rows) {
             ok = ds4_gpu_indexer_topk_tensor(g->comp_selected,
                                                g->spec_logits,
                                                DS4_N_VOCAB,
@@ -14565,11 +14580,9 @@ static bool metal_graph_verify_decode2_exact(
         g->cur_hc = cur0;
         ok = ds4_gpu_begin_commands() != 0;
         if (ok) ok = metal_graph_encode_output_head(g, model, weights, weights->output->dim[1]);
-        if (ok) ok = ds4_gpu_indexer_topk_tensor(g->comp_selected,
-                                                   g->logits,
-                                                   DS4_N_VOCAB,
-                                                   1,
-                                                   1) != 0;
+        if (ok) ok = ds4_gpu_argmax_tensor(g->comp_selected,
+                                           g->logits,
+                                           DS4_N_VOCAB) != 0;
         if (ok) ok = ds4_gpu_end_commands() != 0;
         else (void)ds4_gpu_synchronize();
         g->cur_hc = saved_cur;
@@ -18090,8 +18103,20 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
             *out = NULL;
             return 1;
         }
-        if (!e->mtp_ready && !accelerator_cache_model_tensors(e->backend, &e->model)) {
+        if (!accelerator_cache_model_tensors(e->backend, &e->model)) {
             fprintf(stderr, "ds4: %s failed to prepare startup model cache\n",
+                    ds4_backend_name(e->backend));
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
+        /* Also populate the HBM cache for the MTP support model when loaded.
+         * Without this, MTP-block tensor reads at decode time hit the UVA-
+         * mapped pointer (slow) instead of cudaMalloc'd HBM copies (fast).
+         * The MoE expert filter in accelerator_cache_model_tensor_spans
+         * skips `mtp.0.ffn_*_exps.weight` automatically. */
+        if (e->mtp_ready && !accelerator_cache_model_tensors(e->backend, &e->mtp_model)) {
+            fprintf(stderr, "ds4: %s failed to prepare MTP startup model cache\n",
                     ds4_backend_name(e->backend));
             ds4_engine_close(e);
             *out = NULL;
