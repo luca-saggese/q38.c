@@ -128,6 +128,9 @@ typedef struct {
     bool web_approval_result;
     char web_approval_message[256];
     char web_approval_error[160];
+    bool queued_user_drain_pending;
+    bool queued_user_drain_answered;
+    char *queued_user_drain_text;
     bool datetime_context_injected;
     char more_path[PATH_MAX];
     int more_next_line;
@@ -3870,6 +3873,46 @@ static void worker_answer_web_approval(agent_worker *w, bool allow,
     pthread_mutex_unlock(&w->mu);
 }
 
+/* When a model turn finishes with a tool call, queued user messages should not
+ * preempt that tool.  The worker asks the UI thread for the queue contents only
+ * after the tool result is appended, so the next model input can contain both
+ * the tool observation and the user's pending correction. */
+static char *worker_request_queued_user_drain(agent_worker *w) {
+    pthread_mutex_lock(&w->mu);
+    w->queued_user_drain_pending = true;
+    w->queued_user_drain_answered = false;
+    free(w->queued_user_drain_text);
+    w->queued_user_drain_text = NULL;
+    agent_wake_locked(w);
+    pthread_cond_signal(&w->cond);
+    while (!w->stop && !w->queued_user_drain_answered)
+        pthread_cond_wait(&w->cond, &w->mu);
+    char *text = w->queued_user_drain_text;
+    w->queued_user_drain_text = NULL;
+    w->queued_user_drain_pending = false;
+    w->queued_user_drain_answered = false;
+    pthread_mutex_unlock(&w->mu);
+    return text;
+}
+
+static bool worker_take_queued_user_drain_request(agent_worker *w) {
+    pthread_mutex_lock(&w->mu);
+    bool pending = w->queued_user_drain_pending;
+    if (pending) w->queued_user_drain_pending = false;
+    pthread_mutex_unlock(&w->mu);
+    return pending;
+}
+
+static void worker_answer_queued_user_drain(agent_worker *w, char *text) {
+    pthread_mutex_lock(&w->mu);
+    free(w->queued_user_drain_text);
+    w->queued_user_drain_text = text;
+    w->queued_user_drain_answered = true;
+    pthread_cond_signal(&w->cond);
+    agent_wake_locked(w);
+    pthread_mutex_unlock(&w->mu);
+}
+
 /* Synchronize the live DS4 session to a transcript.  This is the agent's main
  * cache-saving operation: if the requested transcript extends the live session,
  * only the suffix is prefetched; otherwise the DS4 session rebuilds from the
@@ -7307,6 +7350,18 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         ds4_chat_append_message(w->engine, &w->transcript, "tool", tool_result);
         free(tool_result);
         agent_dsml_parser_free(&dsml);
+
+        char *queued_user = worker_request_queued_user_drain(w);
+        if (queued_user && queued_user[0]) {
+            agent_trace_text(w, "queued_user", queued_user, strlen(queued_user));
+            ds4_chat_append_message(w->engine, &w->transcript, "user", queued_user);
+            pthread_mutex_lock(&w->mu);
+            w->user_activity = true;
+            w->session_dirty = true;
+            agent_wake_locked(w);
+            pthread_mutex_unlock(&w->mu);
+        }
+        free(queued_user);
     }
 }
 
@@ -7750,6 +7805,34 @@ static void agent_prompt_queue_push_front(agent_prompt_queue *q, char *text) {
     memmove(q->v + 1, q->v, q->len * sizeof(q->v[0]));
     q->v[0] = text;
     q->len++;
+}
+
+static char *agent_prompt_queue_take_all(agent_prompt_queue *q) {
+    if (!q->len) return NULL;
+    if (q->len == 1) return agent_prompt_queue_pop(q);
+
+    agent_buf b = {0};
+    for (size_t i = 0; i < q->len; i++) {
+        char hdr[64];
+        if (i) agent_buf_puts(&b, "\n\n");
+        snprintf(hdr, sizeof(hdr), "Queued user message %zu:\n", i + 1);
+        agent_buf_puts(&b, hdr);
+        agent_buf_puts(&b, q->v[i]);
+        free(q->v[i]);
+    }
+    q->len = 0;
+    return agent_buf_take(&b);
+}
+
+static char *agent_prompt_queue_take_all_echo(agent_prompt_queue *q) {
+    if (!q->len) return NULL;
+    agent_buf b = {0};
+    for (size_t i = 0; i < q->len; i++) {
+        char *echo = agent_format_user_prompt_echo(q->v[i]);
+        agent_buf_puts(&b, echo);
+        free(echo);
+    }
+    return agent_buf_take(&b);
 }
 
 static const char *agent_prompt_queue_peek(const agent_prompt_queue *q) {
@@ -8733,6 +8816,7 @@ static void agent_worker_free(agent_worker *w) {
     free(w->sysprompt_path);
     free(w->session_title);
     free(w->legacy_session_path_to_delete);
+    free(w->queued_user_drain_text);
     if (w->wake_fd[0] >= 0) close(w->wake_fd[0]);
     if (w->wake_fd[1] >= 0) close(w->wake_fd[1]);
     if (w->trace) fclose(w->trace);
@@ -8914,7 +8998,7 @@ static int run_agent_non_interactive(ds4_engine *engine, agent_config *cfg) {
         }
 
         if (!one_shot && queue.len && idle) {
-            char *queued = agent_prompt_queue_pop(&queue);
+            char *queued = agent_prompt_queue_take_all(&queue);
             if (worker_submit(&worker, queued)) {
                 idle = false;
             } else {
@@ -8976,6 +9060,11 @@ static int run_agent_non_interactive(ds4_engine *engine, agent_config *cfg) {
             fflush(stdout);
         }
         free(out);
+
+        if (worker_take_queued_user_drain_request(&worker)) {
+            char *queued = agent_prompt_queue_take_all(&queue);
+            worker_answer_queued_user_drain(&worker, queued);
+        }
 
         if (st.state == AGENT_WORKER_ERROR) {
             fprintf(stderr, "ds4-agent: %s\n",
@@ -9121,6 +9210,18 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
         }
         free(out);
 
+        if (worker_take_queued_user_drain_request(&worker)) {
+            char *echo = agent_prompt_queue_take_all_echo(&queue);
+            char *queued = agent_prompt_queue_take_all(&queue);
+            if (echo) {
+                build_footer_text(&st, &queue, footer_cols, statusline, sizeof(statusline));
+                editor_write_async(&editor, echo, strlen(echo), prompt, statusline, true);
+                free(echo);
+            }
+            worker_answer_queued_user_drain(&worker, queued);
+            continue;
+        }
+
         char web_approval_msg[256];
         if (worker_take_web_approval_request(&worker, web_approval_msg,
                                              sizeof(web_approval_msg)))
@@ -9157,18 +9258,19 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
         }
 
         if (!initial_pending && queue.len && worker_is_idle(&worker)) {
-            char *queued = agent_prompt_queue_pop(&queue);
+            char *echo = agent_prompt_queue_take_all_echo(&queue);
+            char *queued = agent_prompt_queue_take_all(&queue);
             if (worker_submit(&worker, queued)) {
                 linenoiseHistoryAdd(queued);
                 linenoiseHistorySave(hist);
-                char *echo = agent_format_user_prompt_echo(queued);
                 build_footer_text(&st, &queue, footer_cols, statusline, sizeof(statusline));
-                editor_write_async(&editor, echo, strlen(echo), prompt, statusline, true);
-                free(echo);
+                if (echo)
+                    editor_write_async(&editor, echo, strlen(echo), prompt, statusline, true);
             } else {
                 agent_prompt_queue_push_front(&queue, queued);
                 queued = NULL;
             }
+            free(echo);
             free(queued);
         }
 
