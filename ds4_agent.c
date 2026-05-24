@@ -128,6 +128,7 @@ typedef struct {
     bool web_approval_result;
     char web_approval_message[256];
     char web_approval_error[160];
+    bool datetime_context_injected;
     char more_path[PATH_MAX];
     int more_next_line;
     bool more_bare;
@@ -296,6 +297,8 @@ static agent_worker *agent_completion_worker;
 
 static void worker_apply_pending_power(agent_worker *w);
 static void agent_trace(agent_worker *w, const char *fmt, ...);
+static void agent_trace_text(agent_worker *w, const char *label,
+                             const char *text, size_t len);
 static void agent_publish_system_status(agent_worker *w, const char *msg);
 static int agent_web_confirm(void *privdata, const char *message,
                              char *err, size_t err_len);
@@ -957,6 +960,26 @@ static void agent_append_system_prompt(ds4_engine *engine, ds4_tokens *tokens,
 
 static void agent_worker_note_system_prompt_seen(agent_worker *w) {
     w->last_system_prompt_reminder_at = w->transcript.len;
+}
+
+static void agent_worker_maybe_append_datetime_context(agent_worker *w) {
+    if (w->datetime_context_injected) return;
+
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+
+    char when[128];
+    if (strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S %Z", &tm) == 0)
+        snprintf(when, sizeof(when), "%lld", (long long)now);
+
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "Current local date and time at session start: %s. "
+             "Use this only when date or time matters.", when);
+    ds4_chat_append_message(w->engine, &w->transcript, "system", msg);
+    agent_trace_text(w, "datetime-context", msg, strlen(msg));
+    w->datetime_context_injected = true;
 }
 
 /* The full tool/system reminder is separate from DSML syntax errors: it is a
@@ -3958,6 +3981,7 @@ static bool agent_worker_reset_to_sysprompt(agent_worker *w, char *err, size_t e
     w->status.error[0] = '\0';
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
+    w->datetime_context_injected = false;
     agent_worker_clear_session_identity(w);
     free(text);
     ds4_tokens_free(&sys);
@@ -4989,6 +5013,7 @@ static bool agent_worker_switch_session(agent_worker *w, const char *prefix,
         free(w->legacy_session_path_to_delete);
         w->legacy_session_path_to_delete = meta.legacy_identity ? xstrdup(path) : NULL;
         agent_worker_note_system_prompt_seen(w);
+        w->datetime_context_injected = true;
         pthread_mutex_lock(&w->mu);
         w->user_activity = true;
         w->session_dirty = false;
@@ -7054,6 +7079,7 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         agent_set_error(w, compact_err[0] ? compact_err : "context compaction failed");
         return 1;
     }
+    agent_worker_maybe_append_datetime_context(w);
     agent_trace_text(w, "user", user_text ? user_text : "",
                      user_text ? strlen(user_text) : 0);
     if (!w->session_title) {
