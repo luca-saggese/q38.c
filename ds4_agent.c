@@ -3856,12 +3856,14 @@ static bool worker_take_web_approval_request(agent_worker *w,
     return pending;
 }
 
-static void worker_answer_web_approval(agent_worker *w, bool allow) {
+static void worker_answer_web_approval(agent_worker *w, bool allow,
+                                       const char *deny_error) {
     pthread_mutex_lock(&w->mu);
     w->web_approval_result = allow;
     w->web_approval_answered = true;
     if (!allow)
         snprintf(w->web_approval_error, sizeof(w->web_approval_error),
+                 "%s", deny_error && deny_error[0] ? deny_error :
                  "user denied Chrome browser start");
     pthread_cond_signal(&w->cond);
     agent_wake_locked(w);
@@ -8740,17 +8742,77 @@ static void agent_worker_free(agent_worker *w) {
     pthread_mutex_destroy(&w->mu);
 }
 
-static bool agent_prompt_yes_no(const char *prompt) {
+typedef enum {
+    AGENT_YES_NO_AUTO_NONE,
+    AGENT_YES_NO_AUTO_NO,
+    AGENT_YES_NO_AUTO_YES,
+} agent_yes_no_auto;
+
+typedef struct {
+    int timeout_sec;
+    agent_yes_no_auto timeout_answer;
+} agent_yes_no_options;
+
+static const char *agent_yes_no_auto_name(agent_yes_no_auto answer) {
+    switch (answer) {
+    case AGENT_YES_NO_AUTO_NO: return "no";
+    case AGENT_YES_NO_AUTO_YES: return "yes";
+    default: return "";
+    }
+}
+
+/* Shared y/n prompt.  By default it blocks forever like the historical helper;
+ * callers that cannot safely stall the agent can request an automatic answer
+ * after timeout_sec seconds. */
+static bool agent_prompt_yes_no_ex(const char *prompt,
+                                   const agent_yes_no_options *opts,
+                                   bool *timed_out) {
     char buf[32];
+    int timeout_sec = opts ? opts->timeout_sec : 0;
+    agent_yes_no_auto auto_answer = opts ?
+        opts->timeout_answer : AGENT_YES_NO_AUTO_NONE;
+    bool use_timeout = timeout_sec > 0 && auto_answer != AGENT_YES_NO_AUTO_NONE;
+    double deadline = use_timeout ? now_sec() + timeout_sec : 0.0;
+
+    if (timed_out) *timed_out = false;
     for (;;) {
         printf("%s", prompt);
+        if (use_timeout) {
+            int rem = (int)(deadline - now_sec() + 0.999);
+            if (rem < 0) rem = 0;
+            printf("[auto-%s in %ds] ", agent_yes_no_auto_name(auto_answer), rem);
+        }
         fflush(stdout);
+        if (use_timeout) {
+            double rem_sec = deadline - now_sec();
+            if (rem_sec <= 0.0) {
+                if (timed_out) *timed_out = true;
+                printf("\n");
+                return auto_answer == AGENT_YES_NO_AUTO_YES;
+            }
+            struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN};
+            int timeout_ms = (int)(rem_sec * 1000.0) + 1;
+            int rc;
+            do {
+                rc = poll(&pfd, 1, timeout_ms);
+            } while (rc < 0 && errno == EINTR);
+            if (rc == 0) {
+                if (timed_out) *timed_out = true;
+                printf("\n");
+                return auto_answer == AGENT_YES_NO_AUTO_YES;
+            }
+            if (rc < 0) return false;
+        }
         if (!fgets(buf, sizeof(buf), stdin)) return false;
         char *p = buf;
         while (*p == ' ' || *p == '\t') p++;
         if (*p == 'y' || *p == 'Y') return true;
         if (*p == 'n' || *p == 'N') return false;
     }
+}
+
+static bool agent_prompt_yes_no(const char *prompt) {
+    return agent_prompt_yes_no_ex(prompt, NULL, NULL);
 }
 
 /* Ask before discarding a dirty user session.  Fresh sessions that contain only
@@ -9068,8 +9130,16 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                 saved_input = xstrndup(editor.edit.buf, editor.edit.len);
             editor_stop(&editor);
             editor_restore_terminal_layout(&editor);
-            bool allow = agent_prompt_yes_no(web_approval_msg);
-            worker_answer_web_approval(&worker, allow);
+            agent_yes_no_options approval_opts = {
+                .timeout_sec = 30,
+                .timeout_answer = AGENT_YES_NO_AUTO_NO,
+            };
+            bool approval_timed_out = false;
+            bool allow = agent_prompt_yes_no_ex(web_approval_msg,
+                                                &approval_opts,
+                                                &approval_timed_out);
+            worker_answer_web_approval(&worker, allow,
+                approval_timed_out ? "Chrome browser start approval timed out" : NULL);
             worker_get_status(&worker, &st);
             build_prompt_text(&st, prompt, sizeof(prompt));
             int restart_cols = editor.edit.cols > 0 ? (int)editor.edit.cols : 80;
