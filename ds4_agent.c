@@ -95,6 +95,10 @@ typedef struct {
     ds4_tokens transcript;
     char *cache_dir;
     char *sysprompt_path;
+    char session_sha[41];
+    char *session_title;
+    uint64_t session_created_at;
+    char *legacy_session_path_to_delete;
     bool user_activity;
     bool session_dirty;
     pthread_t thread;
@@ -3361,10 +3365,54 @@ static char *agent_kv_path_for_sha(const char *dir, const char sha[41]) {
     return ds4_kvstore_path_join(dir, name);
 }
 
+static void agent_le_put64(uint8_t *p, uint64_t v) {
+    for (int i = 0; i < 8; i++) p[i] = (uint8_t)(v >> (8 * i));
+}
+
+/* Agent session IDs are intentionally independent from the rendered transcript:
+ * once a session has a title and creation time, resaving it keeps the same file
+ * name while the transcript and KV payload evolve. */
+static void agent_session_identity_sha(const char *title, uint64_t created_at,
+                                       char sha_out[41]) {
+    size_t title_len = title ? strlen(title) : 0;
+    agent_buf b = {0};
+    agent_buf_append(&b, title ? title : "", title_len);
+    uint8_t ts[8];
+    agent_le_put64(ts, created_at);
+    agent_buf_append(&b, (const char *)ts, sizeof(ts));
+    ds4_kvstore_sha1_bytes_hex(b.ptr ? b.ptr : "", b.len, sha_out);
+    free(b.ptr);
+}
+
+static void agent_worker_clear_session_identity(agent_worker *w) {
+    w->session_sha[0] = '\0';
+    free(w->session_title);
+    w->session_title = NULL;
+    w->session_created_at = 0;
+    free(w->legacy_session_path_to_delete);
+    w->legacy_session_path_to_delete = NULL;
+}
+
+typedef struct {
+    bool has_title_trailer;
+    bool legacy_identity;
+    char *title;
+    uint64_t created_at;
+    char sha[41];
+} agent_kv_session_meta;
+
+static void agent_kv_session_meta_free(agent_kv_session_meta *m) {
+    free(m->title);
+    memset(m, 0, sizeof(*m));
+}
+
 /* ============================================================================
  * Agent KV Store And Session Persistence
  * ============================================================================
  */
+
+static char *agent_session_title_from_text(const char *text, size_t text_len,
+                                           size_t max_bytes);
 
 /* Agent sessions deliberately use a different policy from ds4-server:
  *
@@ -3372,12 +3420,13 @@ static char *agent_kv_path_for_sha(const char *dir, const char sha[41]) {
  *   prompt.  Because its name is fixed, the current rendered text is compared
  *   with the text stored in the file before loading.  A mismatch simply rebuilds
  *   and overwrites the file.
- * - conversation sessions are explicit saves only.  Their file name is still
- *   SHA1(rendered transcript).kv, which keeps the existing KV file format and
- *   lets /list and /switch identify sessions by the first hex characters.
+ * - conversation sessions are explicit saves only.  Their stable file name is
+ *   SHA1(title || created_at_le64).kv, where title is the first user prompt and
+ *   created_at is preserved across future saves.  The title is stored in an
+ *   agent-only trailer after the KV payload.
  *
  * The DS4 payload stores the exact token sequence and graph state.  The rendered
- * text is only the stable external identity of that state. */
+ * text is retained for listing, history rendering, and stripped-session rebuilds. */
 static bool agent_kv_read_text(FILE *fp, uint32_t text_bytes,
                                char **text_out, char *err, size_t err_len) {
     char *text = xmalloc((size_t)text_bytes + 1);
@@ -3391,14 +3440,82 @@ static bool agent_kv_read_text(FILE *fp, uint32_t text_bytes,
     return true;
 }
 
-/* Load a KV file and optionally verify either its SHA identity or exact
+static bool agent_kv_write_title_trailer(FILE *fp, const char *title,
+                                         char *err, size_t err_len) {
+    size_t title_len = title ? strlen(title) : 0;
+    if (title_len > UINT32_MAX) {
+        snprintf(err, err_len, "agent session title is too large");
+        return false;
+    }
+    uint8_t tb[4];
+    ds4_kvstore_le_put32(tb, (uint32_t)title_len);
+    return fwrite(tb, 1, sizeof(tb), fp) == sizeof(tb) &&
+           fwrite(title ? title : "", 1, title_len, fp) == title_len;
+}
+
+/* Read the optional agent title trailer without disturbing the payload cursor.
+ * The caller is positioned just after rendered text, which is also the payload
+ * start expected by ds4_session_load_payload(). */
+static bool agent_kv_read_title_trailer(FILE *fp, const ds4_kvstore_entry *hdr,
+                                        char **title_out,
+                                        char *err, size_t err_len) {
+    off_t payload_pos = ftello(fp);
+    if (payload_pos < 0) {
+        if (err && err_len) snprintf(err, err_len, "%s", strerror(errno));
+        return false;
+    }
+    if (hdr->payload_bytes > (uint64_t)LLONG_MAX ||
+        fseeko(fp, (off_t)hdr->payload_bytes, SEEK_CUR) != 0)
+    {
+        if (err && err_len) snprintf(err, err_len, "%s", strerror(errno));
+        return false;
+    }
+
+    uint8_t tb[4];
+    if (fread(tb, 1, sizeof(tb), fp) != sizeof(tb)) {
+        if (err && err_len) snprintf(err, err_len, "missing agent session title trailer");
+        fseeko(fp, payload_pos, SEEK_SET);
+        return false;
+    }
+    uint32_t title_bytes = ds4_kvstore_le_get32(tb);
+    char *title = xmalloc((size_t)title_bytes + 1);
+    if (fread(title, 1, title_bytes, fp) != title_bytes) {
+        if (err && err_len) snprintf(err, err_len, "truncated agent session title trailer");
+        free(title);
+        fseeko(fp, payload_pos, SEEK_SET);
+        return false;
+    }
+    title[title_bytes] = '\0';
+    if (fseeko(fp, payload_pos, SEEK_SET) != 0) {
+        if (err && err_len) snprintf(err, err_len, "%s", strerror(errno));
+        free(title);
+        return false;
+    }
+    *title_out = title;
+    return true;
+}
+
+static void agent_kv_identity_sha(const ds4_kvstore_entry *hdr,
+                                  const char *text, uint32_t text_bytes,
+                                  const char *title,
+                                  char sha_out[41]) {
+    if (hdr->ext_flags & DS4_KVSTORE_EXT_SESSION_TITLE) {
+        agent_session_identity_sha(title ? title : "", hdr->created_at, sha_out);
+    } else {
+        ds4_kvstore_sha1_bytes_hex(text, text_bytes, sha_out);
+    }
+}
+
+/* Load a KV file and optionally verify either its session identity or exact
  * rendered text.  sysprompt.kv uses exact text because the file name is fixed;
- * saved sessions use the SHA because their file name already carries it. */
+ * saved sessions use their filename SHA: modern agent sessions hash the title
+ * trailer plus created_at, while legacy sessions still hash rendered text. */
 static bool agent_kv_load_path(agent_worker *w, const char *path,
                                const char *expected_sha,
                                const char *expected_text,
                                size_t expected_text_len,
                                ds4_tokens *loaded_tokens,
+                               agent_kv_session_meta *meta_out,
                                char *err, size_t err_len) {
     FILE *fp = fopen(path, "rb");
     if (!fp) {
@@ -3413,6 +3530,11 @@ static bool agent_kv_load_path(agent_worker *w, const char *path,
 
     char *text = NULL;
     if (ok) ok = agent_kv_read_text(fp, text_bytes, &text, err, err_len);
+    char *title = NULL;
+    bool has_title = ok && (hdr.ext_flags & DS4_KVSTORE_EXT_SESSION_TITLE);
+    if (has_title)
+        ok = agent_kv_read_title_trailer(fp, &hdr, &title, err, err_len);
+    uint32_t expected_tokens = hdr.tokens;
     if (ok && hdr.payload_bytes != 0 &&
         hdr.quant_bits != (uint8_t)ds4_engine_routed_quant_bits(w->engine))
     {
@@ -3429,9 +3551,9 @@ static bool agent_kv_load_path(agent_worker *w, const char *path,
     }
     if (ok && expected_sha) {
         char actual_sha[41];
-        ds4_kvstore_sha1_bytes_hex(text, text_bytes, actual_sha);
+        agent_kv_identity_sha(&hdr, text, text_bytes, title, actual_sha);
         if (strcmp(actual_sha, expected_sha)) {
-            snprintf(err, err_len, "cached text hash does not match file name");
+            snprintf(err, err_len, "cached session identity does not match file name");
             ok = false;
         }
     }
@@ -3440,11 +3562,8 @@ static bool agent_kv_load_path(agent_worker *w, const char *path,
     if (ok && hdr.payload_bytes == 0) {
         ds4_tokens rebuilt = {0};
         ds4_tokenize_rendered_chat(w->engine, text, &rebuilt);
-        if (rebuilt.len != (int)hdr.tokens) {
-            snprintf(err, err_len, "stripped session token count mismatch");
-            ok = false;
-        } else if (agent_worker_sync_tokens(w, &rebuilt, true,
-                                            err, err_len) != 0) {
+        expected_tokens = (uint32_t)rebuilt.len;
+        if (agent_worker_sync_tokens(w, &rebuilt, true, err, err_len) != 0) {
             ds4_session_invalidate(w->session);
             ok = false;
         }
@@ -3461,7 +3580,7 @@ static bool agent_kv_load_path(agent_worker *w, const char *path,
 
     if (ok) {
         const ds4_tokens *live = ds4_session_tokens(w->session);
-        if (!live || live->len != (int)hdr.tokens) {
+        if (!live || live->len != (int)expected_tokens) {
             snprintf(err, err_len, "KV payload token count mismatch");
             ds4_session_invalidate(w->session);
             ok = false;
@@ -3469,7 +3588,18 @@ static bool agent_kv_load_path(agent_worker *w, const char *path,
             ds4_tokens_free(loaded_tokens);
             ds4_tokens_copy(loaded_tokens, live);
         }
+        if (meta_out) {
+            agent_kv_session_meta_free(meta_out);
+            meta_out->has_title_trailer = has_title;
+            meta_out->legacy_identity = !has_title;
+            meta_out->created_at = hdr.created_at;
+            agent_kv_identity_sha(&hdr, text, text_bytes, title, meta_out->sha);
+            meta_out->title = has_title ?
+                xstrdup(title) :
+                agent_session_title_from_text(text, text_bytes, 0);
+        }
     }
+    free(title);
     free(text);
     return ok;
 }
@@ -3480,6 +3610,8 @@ static bool agent_kv_save_path(agent_worker *w, const char *path,
                                const ds4_tokens *tokens,
                                const char *reason,
                                char sha_out[41],
+                               const char *session_title,
+                               uint64_t session_created_at,
                                char *err, size_t err_len) {
     const ds4_tokens *live = ds4_session_tokens(w->session);
     if (!agent_tokens_equal(live, tokens)) {
@@ -3503,8 +3635,15 @@ static bool agent_kv_save_path(agent_worker *w, const char *path,
         free(text);
         return false;
     }
+    const bool session_identity = session_title != NULL;
+    uint64_t now = (uint64_t)time(NULL);
+    uint64_t created_at = session_identity && session_created_at ?
+        session_created_at : now;
     char sha[41];
-    ds4_kvstore_sha1_bytes_hex(text, text_len, sha);
+    if (session_identity)
+        agent_session_identity_sha(session_title, created_at, sha);
+    else
+        ds4_kvstore_sha1_bytes_hex(text, text_len, sha);
     if (sha_out) memcpy(sha_out, sha, sizeof(sha));
 
     uint64_t payload_bytes = ds4_session_payload_bytes(w->session);
@@ -3536,13 +3675,13 @@ static bool agent_kv_save_path(agent_worker *w, const char *path,
         return false;
     }
 
-    const uint64_t now = (uint64_t)time(NULL);
     uint8_t h[DS4_KVSTORE_FIXED_HEADER];
     ds4_kvstore_fill_header(h, (uint8_t)quant_bits,
                             ds4_kvstore_reason_code(reason),
-                            0, (uint32_t)tokens->len, 0,
+                            session_identity ? DS4_KVSTORE_EXT_SESSION_TITLE : 0,
+                            (uint32_t)tokens->len, 0,
                             (uint32_t)ds4_session_ctx(w->session),
-                            now, now, payload_bytes);
+                            created_at, now, payload_bytes);
     uint8_t tb[4];
     ds4_kvstore_le_put32(tb, (uint32_t)text_len);
 
@@ -3553,6 +3692,9 @@ static bool agent_kv_save_path(agent_worker *w, const char *path,
               fwrite(text, 1, text_len, fp) == text_len &&
               ds4_session_save_payload(w->session, fp,
                                        save_err, sizeof(save_err)) == 0 &&
+              (!session_identity ||
+               agent_kv_write_title_trailer(fp, session_title,
+                                            save_err, sizeof(save_err))) &&
               fflush(fp) == 0;
     int saved_errno = errno;
     if (fclose(fp) != 0) {
@@ -3573,45 +3715,6 @@ static bool agent_kv_save_path(agent_worker *w, const char *path,
     free(tmp);
     free(text);
     return ok;
-}
-
-/* Drop older session files that are an exact prefix of the session being saved.
- * Those files are just previous checkpoints of the same conversation and would
- * clutter /list without providing a distinct resumable branch. */
-static void agent_kv_delete_prefix_sessions(agent_worker *w,
-                                            const char *current_sha,
-                                            const char *current_text,
-                                            size_t current_text_len) {
-    DIR *d = opendir(w->cache_dir);
-    if (!d) return;
-    struct dirent *de;
-    while ((de = readdir(d)) != NULL) {
-        char sha[41];
-        if (!ds4_kvstore_sha_hex_name(de->d_name, sha)) continue;
-        if (current_sha && !strcmp(sha, current_sha)) continue;
-
-        char *path = ds4_kvstore_path_join(w->cache_dir, de->d_name);
-        FILE *fp = fopen(path, "rb");
-        if (!fp) {
-            free(path);
-            continue;
-        }
-        ds4_kvstore_entry hdr = {0};
-        uint32_t text_bytes = 0;
-        char *old_text = NULL;
-        bool ok = ds4_kvstore_read_header(fp, &hdr, &text_bytes) &&
-                  agent_kv_read_text(fp, text_bytes, &old_text, NULL, 0);
-        fclose(fp);
-        if (ok &&
-            text_bytes < current_text_len &&
-            memcmp(current_text, old_text, text_bytes) == 0)
-        {
-            unlink(path);
-        }
-        free(old_text);
-        free(path);
-    }
-    closedir(d);
 }
 
 static void agent_worker_build_system_tokens(agent_worker *w, ds4_tokens *out) {
@@ -3690,6 +3793,7 @@ static bool agent_worker_reset_to_sysprompt(agent_worker *w, char *err, size_t e
     if (w->sysprompt_path) {
         loaded = agent_kv_load_path(w, w->sysprompt_path, NULL,
                                     text, text_len, &w->transcript,
+                                    NULL,
                                     load_err, sizeof(load_err));
         if (loaded) {
             agent_trace(w, "sysprompt kv hit file=%s tokens=%d",
@@ -3712,6 +3816,7 @@ static bool agent_worker_reset_to_sysprompt(agent_worker *w, char *err, size_t e
             char ignored_sha[41];
             if (!agent_kv_save_path(w, w->sysprompt_path, &w->transcript,
                                     "agent-system", ignored_sha,
+                                    NULL, 0,
                                     save_err, sizeof(save_err)))
             {
                 if (w->cfg->non_interactive) {
@@ -3745,6 +3850,7 @@ static bool agent_worker_reset_to_sysprompt(agent_worker *w, char *err, size_t e
     w->status.error[0] = '\0';
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
+    agent_worker_clear_session_identity(w);
     free(text);
     ds4_tokens_free(&sys);
     return true;
@@ -3764,9 +3870,9 @@ static bool agent_worker_needs_save(agent_worker *w) {
     return yes;
 }
 
-/* Save the current session under its rendered-text SHA.  The worker owns the
- * live KV, so busy /save requests are deferred until a stable append-only point
- * and then executed by the worker thread. */
+/* Save the current session under its stable agent identity.  The worker owns
+ * the live KV, so busy /save requests are deferred until a stable append-only
+ * point and then executed by the worker thread. */
 static bool agent_worker_save_session_now(agent_worker *w, char sha_out[41],
                                           int *tokens_out,
                                           char *err, size_t err_len) {
@@ -3789,14 +3895,29 @@ static bool agent_worker_save_session_now(agent_worker *w, char sha_out[41],
         snprintf(err, err_len, "failed to render session text");
         return false;
     }
+    if (!w->session_title) {
+        w->session_title = agent_session_title_from_text(text, text_len, 0);
+    }
+    if (w->session_created_at == 0)
+        w->session_created_at = (uint64_t)time(NULL);
+
     char sha[41];
-    ds4_kvstore_sha1_bytes_hex(text, text_len, sha);
+    agent_session_identity_sha(w->session_title, w->session_created_at, sha);
     char *path = agent_kv_path_for_sha(w->cache_dir, sha);
 
     bool ok = agent_kv_save_path(w, path, &w->transcript,
-                                 "agent-session", sha_out, err, err_len);
+                                 "agent-session", sha_out,
+                                 w->session_title, w->session_created_at,
+                                 err, err_len);
     if (ok) {
-        agent_kv_delete_prefix_sessions(w, sha, text, text_len);
+        memcpy(w->session_sha, sha, sizeof(w->session_sha));
+        if (w->legacy_session_path_to_delete &&
+            strcmp(w->legacy_session_path_to_delete, path) != 0)
+        {
+            unlink(w->legacy_session_path_to_delete);
+        }
+        free(w->legacy_session_path_to_delete);
+        w->legacy_session_path_to_delete = NULL;
         pthread_mutex_lock(&w->mu);
         w->session_dirty = false;
         agent_wake_locked(w);
@@ -3834,23 +3955,11 @@ static void agent_format_age(uint64_t when, char *buf, size_t len) {
     else snprintf(buf, len, "%llud ago", (unsigned long long)(age / 86400));
 }
 
-/* Extract a human-readable /list title from the first user turn stored in the
- * rendered transcript.  The session file has no separate metadata by design. */
-static char *agent_session_title_from_text(const char *text, size_t text_len,
-                                           size_t max_bytes) {
-    static const char user_mark[] = "<｜User｜>";
-    static const char assistant_mark[] = "<｜Assistant｜>";
-    if (max_bytes == 0) max_bytes = 70;
-    if (max_bytes < 4) max_bytes = 4;
-    const char *p = text ? strstr(text, user_mark) : NULL;
-    if (!p) return xstrdup("(no user prompt)");
-    p += strlen(user_mark);
-    const char *end = text + text_len;
-    const char *assistant = strstr(p, assistant_mark);
-    const char *next_user = strstr(p, user_mark);
-    if (assistant && assistant < end) end = assistant;
-    if (next_user && next_user < end) end = next_user;
-
+static char *agent_session_title_from_span(const char *p, const char *end,
+                                           size_t max_bytes,
+                                           const char *empty_title) {
+    bool limited = max_bytes != 0;
+    if (limited && max_bytes < 4) max_bytes = 4;
     while (p < end && isspace((unsigned char)*p)) p++;
     while (end > p && isspace((unsigned char)end[-1])) end--;
 
@@ -3863,11 +3972,11 @@ static char *agent_session_title_from_text(const char *text, size_t text_len,
             space = b.len != 0;
             continue;
         }
-        if (space && b.len + 4 < max_bytes) {
+        if (space && (!limited || b.len + 4 < max_bytes)) {
             agent_buf_puts(&b, " ");
             space = false;
         }
-        if (b.len + 4 > max_bytes) {
+        if (limited && b.len + 4 > max_bytes) {
             truncated = true;
             break;
         }
@@ -3876,8 +3985,45 @@ static char *agent_session_title_from_text(const char *text, size_t text_len,
     if (truncated) agent_buf_puts(&b, "...");
     if (!b.ptr || !b.len) {
         free(b.ptr);
-        return xstrdup("(empty user prompt)");
+        return xstrdup(empty_title);
     }
+    return agent_buf_take(&b);
+}
+
+static char *agent_session_title_from_prompt(const char *prompt,
+                                             size_t max_bytes) {
+    const char *p = prompt ? prompt : "";
+    return agent_session_title_from_span(p, p + strlen(p), max_bytes,
+                                         "(empty user prompt)");
+}
+
+/* Extract a human-readable title from the first user turn stored in the
+ * rendered transcript.  max_bytes==0 means "full normalized title"; callers
+ * that render to the terminal pass an explicit display budget. */
+static char *agent_session_title_from_text(const char *text, size_t text_len,
+                                           size_t max_bytes) {
+    static const char user_mark[] = "<｜User｜>";
+    static const char assistant_mark[] = "<｜Assistant｜>";
+    const char *p = text ? strstr(text, user_mark) : NULL;
+    if (!p) return xstrdup("(no user prompt)");
+    p += strlen(user_mark);
+    const char *end = text + text_len;
+    const char *assistant = strstr(p, assistant_mark);
+    const char *next_user = strstr(p, user_mark);
+    if (assistant && assistant < end) end = assistant;
+    if (next_user && next_user < end) end = next_user;
+    return agent_session_title_from_span(p, end, max_bytes,
+                                         "(empty user prompt)");
+}
+
+static char *agent_session_title_clip(const char *title, size_t max_bytes) {
+    if (!title) return xstrdup("(no user prompt)");
+    size_t len = strlen(title);
+    if (max_bytes == 0 || len <= max_bytes) return xstrdup(title);
+    if (max_bytes < 4) max_bytes = 4;
+    agent_buf b = {0};
+    agent_buf_append(&b, title, max_bytes - 3);
+    agent_buf_puts(&b, "...");
     return agent_buf_take(&b);
 }
 
@@ -3887,11 +4033,18 @@ static char *agent_session_title_from_file(const char *path, size_t max_bytes) {
     ds4_kvstore_entry hdr = {0};
     uint32_t text_bytes = 0;
     char *text = NULL;
+    char *trailer_title = NULL;
     bool ok = ds4_kvstore_read_header(fp, &hdr, &text_bytes) &&
               agent_kv_read_text(fp, text_bytes, &text, NULL, 0);
+    if (ok && (hdr.ext_flags & DS4_KVSTORE_EXT_SESSION_TITLE))
+        ok = agent_kv_read_title_trailer(fp, &hdr, &trailer_title, NULL, 0);
     fclose(fp);
-    char *title = ok ? agent_session_title_from_text(text, text_bytes, max_bytes) :
-                        xstrdup("(unreadable session)");
+    char *title = ok ?
+        (trailer_title ?
+            agent_session_title_clip(trailer_title, max_bytes) :
+            agent_session_title_from_text(text, text_bytes, max_bytes)) :
+        xstrdup("(unreadable session)");
+    free(trailer_title);
     free(text);
     return title;
 }
@@ -4398,6 +4551,7 @@ static void agent_worker_list_sessions(agent_worker *w) {
     bool color = isatty(STDOUT_FILENO) != 0;
     const char *sha_on = color ? "\x1b[1;96m" : "";
     const char *title_on = color ? "\x1b[1;97m" : "";
+    const char *help_on = color ? "\x1b[97m" : "";
     const char *dim = color ? "\x1b[90m" : "";
     const char *reset = color ? "\x1b[0m" : "";
 
@@ -4415,9 +4569,9 @@ static void agent_worker_list_sessions(agent_worker *w) {
                e->payload_bytes == 0 ? ", stripped" : "",
                reset);
     }
-    printf("%suse /switch <sha> to select a session, /del <sha> to remove, "
-           "/strip <sha> to strip KV cache.%s\n",
-           dim, reset);
+    printf("%sUse /switch <id> to select a session, /del <id> to remove, "
+           "/strip <id> to strip KV cache.%s\n",
+           help_on, reset);
     agent_session_list_free(sessions, sessions_len);
 }
 
@@ -4595,24 +4749,34 @@ static bool agent_worker_strip_session(agent_worker *w, const char *prefix,
     ds4_kvstore_entry hdr = {0};
     uint32_t text_bytes = 0;
     char *text = NULL;
+    char *title = NULL;
     bool ok = ds4_kvstore_read_header(fp, &hdr, &text_bytes) &&
               agent_kv_read_text(fp, text_bytes, &text, err, err_len);
+    if (ok && (hdr.ext_flags & DS4_KVSTORE_EXT_SESSION_TITLE))
+        ok = agent_kv_read_title_trailer(fp, &hdr, &title, err, err_len);
     fclose(fp);
     if (!ok) {
         if (!err[0]) snprintf(err, err_len, "failed to read session");
+        free(title);
         free(text);
         free(path);
         return false;
     }
 
     char actual_sha[41];
-    ds4_kvstore_sha1_bytes_hex(text, text_bytes, actual_sha);
+    agent_kv_identity_sha(&hdr, text, text_bytes, title, actual_sha);
     if (strcmp(actual_sha, sha)) {
-        snprintf(err, err_len, "cached text hash does not match file name");
+        snprintf(err, err_len, "cached session identity does not match file name");
+        free(title);
         free(text);
         free(path);
         return false;
     }
+
+    ds4_tokens stripped_tokens = {0};
+    ds4_tokenize_rendered_chat(w->engine, text, &stripped_tokens);
+    uint32_t stripped_token_count = (uint32_t)stripped_tokens.len;
+    ds4_tokens_free(&stripped_tokens);
 
     agent_buf tmpl = {0};
     agent_buf_puts(&tmpl, path);
@@ -4641,7 +4805,7 @@ static bool agent_worker_strip_session(agent_worker *w, const char *prefix,
     uint8_t h[DS4_KVSTORE_FIXED_HEADER];
     uint64_t now = (uint64_t)time(NULL);
     ds4_kvstore_fill_header(h, hdr.quant_bits, hdr.reason, hdr.ext_flags,
-                            hdr.tokens, hdr.hits, hdr.ctx_size,
+                            stripped_token_count, hdr.hits, hdr.ctx_size,
                             hdr.created_at, now, 0);
     uint8_t tb[4];
     ds4_kvstore_le_put32(tb, text_bytes);
@@ -4650,6 +4814,8 @@ static bool agent_worker_strip_session(agent_worker *w, const char *prefix,
     ok = fwrite(h, 1, sizeof(h), fp) == sizeof(h) &&
          fwrite(tb, 1, sizeof(tb), fp) == sizeof(tb) &&
          fwrite(text, 1, text_bytes, fp) == text_bytes &&
+         (!(hdr.ext_flags & DS4_KVSTORE_EXT_SESSION_TITLE) ||
+          agent_kv_write_title_trailer(fp, title, err, err_len)) &&
          fflush(fp) == 0;
     int saved_errno = errno;
     if (fclose(fp) != 0) {
@@ -4666,10 +4832,11 @@ static bool agent_worker_strip_session(agent_worker *w, const char *prefix,
         unlink(tmp);
     } else {
         if (sha_out) memcpy(sha_out, sha, 41);
-        if (tokens_out) *tokens_out = hdr.tokens;
+        if (tokens_out) *tokens_out = stripped_token_count;
     }
 
     free(tmp);
+    free(title);
     free(text);
     free(path);
     return ok;
@@ -4701,10 +4868,18 @@ static bool agent_worker_switch_session(agent_worker *w, const char *prefix,
     }
 
     ds4_tokens loaded = {0};
-    bool ok = agent_kv_load_path(w, path, sha, NULL, 0, &loaded, err, err_len);
+    agent_kv_session_meta meta = {0};
+    bool ok = agent_kv_load_path(w, path, sha, NULL, 0, &loaded, &meta,
+                                 err, err_len);
     if (ok) {
         ds4_tokens_free(&w->transcript);
         w->transcript = loaded;
+        free(w->session_title);
+        w->session_title = meta.title ? xstrdup(meta.title) : xstrdup("(no user prompt)");
+        w->session_created_at = meta.created_at ? meta.created_at : (uint64_t)time(NULL);
+        memcpy(w->session_sha, sha, sizeof(w->session_sha));
+        free(w->legacy_session_path_to_delete);
+        w->legacy_session_path_to_delete = meta.legacy_identity ? xstrdup(path) : NULL;
         agent_worker_note_system_prompt_seen(w);
         pthread_mutex_lock(&w->mu);
         w->user_activity = true;
@@ -4722,6 +4897,7 @@ static bool agent_worker_switch_session(agent_worker *w, const char *prefix,
     } else {
         ds4_tokens_free(&loaded);
     }
+    agent_kv_session_meta_free(&meta);
     free(path);
     return ok;
 }
@@ -6626,6 +6802,12 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
     }
     agent_trace_text(w, "user", user_text ? user_text : "",
                      user_text ? strlen(user_text) : 0);
+    if (!w->session_title) {
+        w->session_title = agent_session_title_from_prompt(user_text, 0);
+        w->session_created_at = (uint64_t)time(NULL);
+        agent_session_identity_sha(w->session_title, w->session_created_at,
+                                   w->session_sha);
+    }
     ds4_chat_append_message(w->engine, &w->transcript, "user", user_text);
 
     uint64_t rng = cfg->gen.seed ? cfg->gen.seed :
@@ -8255,6 +8437,8 @@ static void agent_worker_free(agent_worker *w) {
     ds4_tokens_free(&w->transcript);
     free(w->cache_dir);
     free(w->sysprompt_path);
+    free(w->session_title);
+    free(w->legacy_session_path_to_delete);
     if (w->wake_fd[0] >= 0) close(w->wake_fd[0]);
     if (w->wake_fd[1] >= 0) close(w->wake_fd[1]);
     if (w->trace) fclose(w->trace);
