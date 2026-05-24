@@ -55,6 +55,11 @@ typedef struct {
     int next_id;
 } cdp_ws;
 
+typedef struct {
+    char *id;
+    char *ws_url;
+} web_tab;
+
 static void *web_xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
     if (!p) {
@@ -721,6 +726,88 @@ static bool web_wait_ready(cdp_ws *ws, char *err, size_t err_len) {
     return true;
 }
 
+static bool web_cdp_navigate(cdp_ws *ws, const char *url,
+                             char *err, size_t err_len) {
+    char *qurl = web_json_quote(url);
+    web_buf params = {0};
+    web_buf_puts(&params, "{\"url\":");
+    web_buf_puts(&params, qurl);
+    web_buf_puts(&params, "}");
+    free(qurl);
+    char *params_s = web_buf_take(&params);
+    char *resp = web_cdp_call(ws, "Page.navigate", params_s, err, err_len);
+    free(params_s);
+    if (!resp) return false;
+    free(resp);
+    return true;
+}
+
+static bool web_page_probe(cdp_ws *ws, char **href_out, char **ready_out,
+                           long *text_len_out, char *err, size_t err_len) {
+    const char *expr =
+        "location.href+'\\n'+document.readyState+'\\n'+"
+        "((document.body&&document.body.innerText)||'').length";
+    char *probe = web_cdp_eval_string(ws, expr, err, err_len);
+    if (!probe) return false;
+
+    char *nl1 = strchr(probe, '\n');
+    char *nl2 = nl1 ? strchr(nl1 + 1, '\n') : NULL;
+    if (!nl1 || !nl2) {
+        free(probe);
+        web_set_err(err, err_len, "page readiness probe returned malformed data");
+        return false;
+    }
+    *nl1 = '\0';
+    *nl2 = '\0';
+    if (href_out) *href_out = web_xstrdup(probe);
+    if (ready_out) *ready_out = web_xstrdup(nl1 + 1);
+    if (text_len_out) *text_len_out = strtol(nl2 + 1, NULL, 10);
+    free(probe);
+    return true;
+}
+
+static bool web_wait_navigated_ready(cdp_ws *ws, const char *url,
+                                     char *err, size_t err_len) {
+    (void)url;
+    long last_len = -1;
+    int stable = 0;
+    bool saw_real_url = false;
+
+    for (int i = 0; i < 100; i++) {
+        char *href = NULL;
+        char *ready = NULL;
+        long text_len = 0;
+        bool ok = web_page_probe(ws, &href, &ready, &text_len, err, err_len);
+        if (!ok) {
+            free(href);
+            free(ready);
+            usleep(250000);
+            continue;
+        }
+
+        bool real_url = href && href[0] &&
+                        strcmp(href, "about:blank") &&
+                        strncmp(href, "chrome://", 9);
+        bool ready_state = ready &&
+            (!strcmp(ready, "complete") || !strcmp(ready, "interactive"));
+        if (real_url) saw_real_url = true;
+        if (text_len > 0 && text_len == last_len) stable++;
+        else stable = 0;
+        last_len = text_len;
+
+        free(href);
+        free(ready);
+
+        if (saw_real_url && ready_state && text_len > 0 && stable >= 2) {
+            usleep(500000);
+            return true;
+        }
+        if (saw_real_url && ready_state && i >= 24) return true;
+        usleep(250000);
+    }
+    return true;
+}
+
 static bool web_cdp_prepare_page(cdp_ws *ws, char *err, size_t err_len) {
     char *resp = web_cdp_call(ws, "Page.enable", "{}", err, err_len);
     if (!resp) return false;
@@ -868,7 +955,17 @@ static bool web_ensure_browser(ds4_web *web, char *err, size_t err_len) {
     return web_spawn_chrome(web, err, err_len);
 }
 
-static char *web_open_tab(ds4_web *web, const char *url, char *err, size_t err_len) {
+static void web_tab_free(web_tab *tab) {
+    if (!tab) return;
+    free(tab->id);
+    free(tab->ws_url);
+    tab->id = NULL;
+    tab->ws_url = NULL;
+}
+
+static bool web_open_tab(ds4_web *web, const char *url, web_tab *tab,
+                         char *err, size_t err_len) {
+    memset(tab, 0, sizeof(*tab));
     char *enc = web_url_encode(url);
     web_buf path = {0};
     web_buf_puts(&path, "/json/new?");
@@ -877,11 +974,35 @@ static char *web_open_tab(ds4_web *web, const char *url, char *err, size_t err_l
     char *path_s = web_buf_take(&path);
     char *body = web_http_request("PUT", web->port, path_s, err, err_len);
     free(path_s);
-    if (!body) return NULL;
-    char *ws = web_json_get_string(body, "webSocketDebuggerUrl");
+    if (!body) return false;
+    tab->id = web_json_get_string(body, "id");
+    tab->ws_url = web_json_get_string(body, "webSocketDebuggerUrl");
     free(body);
-    if (!ws) web_set_err(err, err_len, "Chrome did not return a page WebSocket URL");
-    return ws;
+    if (!tab->ws_url) {
+        web_tab_free(tab);
+        web_set_err(err, err_len, "Chrome did not return a page WebSocket URL");
+        return false;
+    }
+    return true;
+}
+
+static void web_close_tab(ds4_web *web, const web_tab *tab) {
+    if (!web || !tab || !tab->id || !tab->id[0]) return;
+    char *enc = web_url_encode(tab->id);
+    web_buf path = {0};
+    web_buf_puts(&path, "/json/close/");
+    web_buf_puts(&path, enc);
+    free(enc);
+
+    char err[160] = {0};
+    char *path_s = web_buf_take(&path);
+    char *body = web_http_request("GET", web->port, path_s, err, sizeof(err));
+    free(path_s);
+    if (body) {
+        free(body);
+    } else if (err[0]) {
+        web_log(web, err);
+    }
 }
 
 static const char *web_click_google_consent_js =
@@ -941,26 +1062,39 @@ static const char *web_extract_page_js =
 static char *web_run_page_js(ds4_web *web, const char *url, const char *js,
                              char *err, size_t err_len) {
     if (!web_ensure_browser(web, err, err_len)) return NULL;
-    char *ws_url = web_open_tab(web, url, err, err_len);
-    if (!ws_url) return NULL;
+    web_tab tab = {0};
+    if (!web_open_tab(web, "about:blank", &tab, err, err_len)) return NULL;
     cdp_ws ws = {.fd = -1};
-    if (web_ws_connect(ws_url, &ws, err, err_len) != 0) {
-        free(ws_url);
+    if (web_ws_connect(tab.ws_url, &ws, err, err_len) != 0) {
+        web_close_tab(web, &tab);
+        web_tab_free(&tab);
         return NULL;
     }
-    free(ws_url);
     if (!web_cdp_prepare_page(&ws, err, err_len)) {
         web_ws_close(&ws);
+        web_close_tab(web, &tab);
+        web_tab_free(&tab);
+        return NULL;
+    }
+    if (!web_cdp_navigate(&ws, url, err, err_len) ||
+        !web_wait_navigated_ready(&ws, url, err, err_len))
+    {
+        web_ws_close(&ws);
+        web_close_tab(web, &tab);
+        web_tab_free(&tab);
         return NULL;
     }
     char *clicked = web_cdp_eval_string(&ws, web_click_google_consent_js, err, err_len);
     if (clicked && clicked[0]) {
         web_log(web, clicked);
         usleep(1500000);
+        (void)web_wait_navigated_ready(&ws, url, err, err_len);
     }
     free(clicked);
     char *out = web_cdp_eval_string(&ws, js, err, err_len);
     web_ws_close(&ws);
+    web_close_tab(web, &tab);
+    web_tab_free(&tab);
     return out;
 }
 
