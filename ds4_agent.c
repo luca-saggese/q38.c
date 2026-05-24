@@ -7541,7 +7541,6 @@ static void build_footer_text(const agent_status *st, const agent_prompt_queue *
     agent_buf_puts(&out, "\n");
     if (stdout_is_tty()) agent_buf_puts(&out, AGENT_STATUS_STYLE_START);
     agent_buf_puts(&out, status);
-    if (stdout_is_tty()) agent_buf_puts(&out, AGENT_STATUS_STYLE_END);
     snprintf(buf, len, "%s", out.ptr ? out.ptr : "");
     free(preview);
     free(out.ptr);
@@ -8103,9 +8102,12 @@ static int editor_start(agent_editor *ed, const char *prompt,
         return -1;
     }
     bool embedded_status = agent_footer_is_multiline(ed->status);
+    const char *status_start = stdout_is_tty() && !embedded_status ?
+        AGENT_STATUS_STYLE_START : "";
+    const char *status_end = stdout_is_tty() && ed->status[0] ?
+        AGENT_STATUS_STYLE_END : "";
     linenoiseEditSetStatus(&ed->edit, ed->status,
-                           stdout_is_tty() && !embedded_status ? AGENT_STATUS_STYLE_START : "",
-                           stdout_is_tty() && !embedded_status ? AGENT_STATUS_STYLE_END : "");
+                           status_start, status_end);
     linenoiseEditSetLayoutCallback(&ed->edit, editor_linenoise_layout_changed, ed);
     if (isatty(ed->edit.ifd) || getenv("LINENOISE_ASSUME_TTY")) {
         linenoiseHide(&ed->edit);
@@ -8208,9 +8210,12 @@ static void editor_update_prompt(agent_editor *ed, const char *prompt) {
 static void editor_update_status(agent_editor *ed, const char *status) {
     snprintf(ed->status, sizeof(ed->status), "%s", status ? status : "");
     bool embedded_status = agent_footer_is_multiline(ed->status);
+    const char *status_start = stdout_is_tty() && !embedded_status ?
+        AGENT_STATUS_STYLE_START : "";
+    const char *status_end = stdout_is_tty() && ed->status[0] ?
+        AGENT_STATUS_STYLE_END : "";
     linenoiseEditSetStatus(&ed->edit, ed->status,
-                           stdout_is_tty() && !embedded_status ? AGENT_STATUS_STYLE_START : "",
-                           stdout_is_tty() && !embedded_status ? AGENT_STATUS_STYLE_END : "");
+                           status_start, status_end);
 }
 
 static void editor_set_prompt_status(agent_editor *ed, const char *prompt,
