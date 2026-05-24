@@ -3319,7 +3319,7 @@ static void agent_stream_text(agent_stream_renderer *sr, const char *text, size_
         if (sr->dsml_active) {
             if (sr->dsml_ignored) {
                 agent_stream_finish_ignored_dsml(
-                    sr, "unfinished tool call inside <think></think>");
+                    sr, "tool calling is not allowed inside <think></think>");
             } else {
                 agent_tool_viz_finish(sr, sr->tool_preflight_error ?
                                       "[tool call stopped: edit old selector failed]\n" :
@@ -7269,6 +7269,10 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
                 break;
             }
             if (dsml.state == AGENT_DSML_ERROR) {
+                malformed_tool = true;
+                break;
+            }
+            if (stream.dsml_in_think) {
                 malformed_tool = true;
                 break;
             }
