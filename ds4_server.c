@@ -8496,7 +8496,7 @@ static void kv_fill_header(uint8_t h[KV_CACHE_FIXED_HEADER], uint8_t quant_bits,
                            uint32_t tokens, uint32_t hits, uint32_t ctx_size,
                            uint64_t created_at, uint64_t last_used,
                            uint64_t payload_bytes) {
-    ds4_kvstore_fill_header(h, quant_bits, reason, ext_flags, tokens, hits,
+    ds4_kvstore_fill_header(h, 0, quant_bits, reason, ext_flags, tokens, hits,
                             ctx_size, created_at, last_used, payload_bytes);
 }
 #endif
@@ -8513,6 +8513,10 @@ static void kv_cache_restore_tool_memory_for_messages(server *s, const chat_msgs
     stop_list wanted = {0};
     collect_tool_call_ids(msgs, &wanted);
     if (wanted.len == 0) return;
+    /* Tool replay payloads are stored next to KV checkpoints; keep them model
+     * scoped too, since token positions and graph state are not portable across
+     * Flash/Pro shapes even when the rendered chat text is identical. */
+    uint8_t model_id = s->engine ? (uint8_t)ds4_engine_model_id(s->engine) : 0;
 
     DIR *d = opendir(s->kv.dir);
     if (!d) {
@@ -8533,7 +8537,7 @@ static void kv_cache_restore_tool_memory_for_messages(server *s, const chat_msgs
         uint32_t text_bytes = 0;
         bool ok = kv_read_header(fp, &hdr, &text_bytes);
         uint64_t skip = (uint64_t)text_bytes + hdr.payload_bytes;
-        if (ok && (hdr.ext_flags & KV_EXT_TOOL_MAP) &&
+        if (ok && hdr.model_id == model_id && (hdr.ext_flags & KV_EXT_TOOL_MAP) &&
             skip <= (uint64_t)INT64_MAX &&
             fseeko(fp, (off_t)skip, SEEK_CUR) == 0)
         {
@@ -8757,7 +8761,7 @@ static void kv_cache_maybe_store_continued(server *s) {
 #ifdef DS4_SERVER_TEST
 static int kv_cache_find_text_prefix(kv_disk_cache *kc, const char *prompt_text,
                                      int quant_bits, int ctx_size) {
-    return ds4_kvstore_find_text_prefix(kc, prompt_text, quant_bits, ctx_size);
+    return ds4_kvstore_find_text_prefix(kc, prompt_text, 0, quant_bits, ctx_size);
 }
 #endif
 
@@ -14571,8 +14575,9 @@ static void test_kv_stub_file(const char *dir, const char *sha,
     free(path);
 }
 
-static void test_kv_text_stub_file(const char *dir, const char *text,
-                                   uint32_t tokens, uint64_t payload_bytes) {
+static void test_kv_text_stub_file_model(const char *dir, const char *text,
+                                         uint8_t model_id, uint32_t tokens,
+                                         uint64_t payload_bytes) {
     char sha[41];
     sha1_bytes_hex(text, strlen(text), sha);
     char name[44];
@@ -14586,7 +14591,8 @@ static void test_kv_text_stub_file(const char *dir, const char *text,
     }
 
     uint8_t h[KV_CACHE_FIXED_HEADER];
-    kv_fill_header(h, 2, KV_REASON_COLD, 0, tokens, 0, 32768, 100, 100, payload_bytes);
+    ds4_kvstore_fill_header(h, model_id, 2, KV_REASON_COLD, 0, tokens, 0,
+                            32768, 100, 100, payload_bytes);
     uint8_t text_len[4];
     le_put32(text_len, (uint32_t)strlen(text));
     TEST_ASSERT(fwrite(h, 1, sizeof(h), fp) == sizeof(h));
@@ -14597,6 +14603,11 @@ static void test_kv_text_stub_file(const char *dir, const char *text,
     }
     TEST_ASSERT(fclose(fp) == 0);
     free(path);
+}
+
+static void test_kv_text_stub_file(const char *dir, const char *text,
+                                   uint32_t tokens, uint64_t payload_bytes) {
+    test_kv_text_stub_file_model(dir, text, 0, tokens, payload_bytes);
 }
 
 static void test_kv_cache_lookup_uses_longest_text_prefix(void) {
@@ -14636,6 +14647,38 @@ static void test_kv_cache_lookup_uses_longest_text_prefix(void) {
     unlink(long_path);
     free(short_path);
     free(long_path);
+    rmdir(dir);
+}
+
+static void test_kv_cache_lookup_rejects_wrong_model(void) {
+    char tmpl[] = "/tmp/ds4-kv-model-id-test.XXXXXX";
+    char *dir = mkdtemp(tmpl);
+    TEST_ASSERT(dir != NULL);
+    if (!dir) return;
+
+    const char *text = "shared rendered prefix";
+    test_kv_text_stub_file_model(dir, text, 1, 512, 0);
+
+    kv_disk_cache kc = {0};
+    kc.enabled = true;
+    kc.dir = xstrdup(dir);
+    kc.opt = kv_cache_default_options();
+
+    TEST_ASSERT(ds4_kvstore_find_text_prefix(&kc, "shared rendered prefix and tail",
+                                             0, 2, 32768) < 0);
+    int idx = ds4_kvstore_find_text_prefix(&kc, "shared rendered prefix and tail",
+                                           1, 2, 32768);
+    TEST_ASSERT(idx >= 0);
+    TEST_ASSERT(idx >= 0 && kc.entry[idx].model_id == 1);
+
+    kv_cache_close(&kc);
+    char sha[41];
+    sha1_bytes_hex(text, strlen(text), sha);
+    char name[44];
+    snprintf(name, sizeof(name), "%.40s.kv", sha);
+    char *path = path_join(dir, name);
+    unlink(path);
+    free(path);
     rmdir(dir);
 }
 
@@ -15325,6 +15368,7 @@ static void ds4_server_unit_tests_run(void) {
     test_kv_cache_file_size_must_fit_budget();
     test_sha1_bytes_hex_matches_known_vector();
     test_kv_cache_lookup_uses_longest_text_prefix();
+    test_kv_cache_lookup_rejects_wrong_model();
     test_kv_cache_eviction_values_fresh_snapshots();
     test_kv_cache_eviction_protects_current_store();
     test_kv_cache_eviction_does_not_protect_oversize_current_store();

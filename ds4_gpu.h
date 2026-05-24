@@ -607,6 +607,9 @@ int ds4_gpu_router_select_tensor(
         uint64_t                hash_offset,
         uint32_t                hash_rows,
         uint32_t                token,
+        uint32_t                n_expert,
+        uint32_t                n_expert_used,
+        float                   expert_weight_scale,
         uint32_t                n_expert_groups,
         uint32_t                n_group_used,
         bool                    has_bias,
@@ -628,6 +631,9 @@ int ds4_gpu_router_select_batch_tensor(
         bool                    hash_mode,
         const ds4_gpu_tensor *logits,
         const ds4_gpu_tensor *tokens,
+        uint32_t                n_expert,
+        uint32_t                n_expert_used,
+        float                   expert_weight_scale,
         uint32_t                n_tokens);
 
 int ds4_gpu_routed_moe_one_tensor(
@@ -652,6 +658,7 @@ int ds4_gpu_routed_moe_one_tensor(
         uint32_t                out_dim,
         const ds4_gpu_tensor *selected,
         const ds4_gpu_tensor *weights,
+        uint32_t                n_total_expert,
         uint32_t                n_expert,
         float                   clamp,
         const ds4_gpu_tensor *x);
@@ -678,6 +685,7 @@ int ds4_gpu_routed_moe_batch_tensor(
         uint32_t                out_dim,
         const ds4_gpu_tensor *selected,
         const ds4_gpu_tensor *weights,
+        uint32_t                n_total_expert,
         uint32_t                n_expert,
         float                   clamp,
         const ds4_gpu_tensor *x,
