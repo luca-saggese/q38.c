@@ -82,6 +82,7 @@ typedef struct {
     double gen_tps;
     int ctx_used;
     int ctx_size;
+    int power_percent;
     char error[256];
 } agent_status;
 
@@ -165,6 +166,7 @@ typedef struct {
     size_t md_fence_lang_len;
     const char *md_code_line_prefix;
     const char *md_code_line_prefix_color;
+    bool md_code_highlight_upto;
     char *md_code_line;
     size_t md_code_line_len;
     size_t md_code_line_cap;
@@ -387,6 +389,24 @@ static bool parse_power_percent(const char *arg, int *out) {
     if (!arg[0] || *end != '\0' || v < 1 || v > 100) return false;
     *out = (int)v;
     return true;
+}
+
+static bool agent_slash_command_with_args(const char *cmd, const char *name) {
+    size_t len = strlen(name);
+    return !strncmp(cmd, name, len) &&
+           (cmd[len] == '\0' || isspace((unsigned char)cmd[len]));
+}
+
+static bool agent_slash_command_known(const char *cmd) {
+    return !strcmp(cmd, "/help") ||
+           !strcmp(cmd, "/save") ||
+           !strcmp(cmd, "/list") ||
+           !strcmp(cmd, "/quit") ||
+           !strcmp(cmd, "/exit") ||
+           !strcmp(cmd, "/new") ||
+           agent_slash_command_with_args(cmd, "/power") ||
+           agent_slash_command_with_args(cmd, "/switch") ||
+           agent_slash_command_with_args(cmd, "/history");
 }
 
 static uint64_t parse_u64(const char *s, const char *opt) {
@@ -1273,6 +1293,11 @@ static void renderer_set_text_attrs(agent_token_renderer *r) {
     if (r->md_italic) renderer_write(r, "\x1b[3m", 4);
 }
 
+static void renderer_restore_text_attrs(agent_token_renderer *r) {
+    if (!r->use_color || !r->color_open || !renderer_has_text_attrs(r)) return;
+    renderer_set_text_attrs(r);
+}
+
 static void renderer_write_complete_char_raw(agent_token_renderer *r, const char *s, size_t n) {
     bool styled = r->use_color && renderer_has_text_attrs(r);
     if (styled && !r->color_open) {
@@ -1680,6 +1705,23 @@ static void renderer_syntax_write(agent_token_renderer *r, int hl,
     r->last_output_newline = false;
 }
 
+static void renderer_syntax_write_upto_marker(agent_token_renderer *r) {
+    static const char marker[] = "[upto]";
+    r->md_syntax_has_highlight = true;
+    if (r->md_syntax_silent) return;
+    if (r->use_color) {
+        renderer_write(r, "\x1b[38;5;244m[", strlen("\x1b[38;5;244m["));
+        renderer_write(r, "\x1b[1;38;5;177mupto",
+                       strlen("\x1b[1;38;5;177mupto"));
+        renderer_write(r, "\x1b[38;5;244m]\x1b[0m",
+                       strlen("\x1b[38;5;244m]\x1b[0m"));
+    } else {
+        renderer_write(r, marker, sizeof(marker) - 1);
+    }
+    r->wrote_visible_output = true;
+    r->last_output_newline = false;
+}
+
 static size_t agent_syntax_keyword_len(const char *kw, bool *secondary) {
     size_t len = strlen(kw);
     *secondary = len && kw[len - 1] == '|';
@@ -1736,6 +1778,17 @@ static void renderer_syntax_emit_line(agent_token_renderer *r,
     int in_string = 0;
 
     while (p < end) {
+        if (r->md_code_highlight_upto &&
+            (size_t)(end - p) >= strlen("[upto]") &&
+            !strncmp(p, "[upto]", strlen("[upto]")))
+        {
+            renderer_syntax_write_upto_marker(r);
+            p += strlen("[upto]");
+            prev_sep = true;
+            prev_hl = AGENT_HL_NORMAL;
+            continue;
+        }
+
         if (r->md_code_in_ml_comment) {
             const char *mce = syn->multiline_end;
             if (mce && *mce) {
@@ -1972,6 +2025,7 @@ static void renderer_code_begin(agent_token_renderer *r) {
     r->md_fence_lang[0] = '\0';
     r->md_code_line_prefix = NULL;
     r->md_code_line_prefix_color = NULL;
+    r->md_code_highlight_upto = false;
     r->md_code_line_len = 0;
 }
 
@@ -1988,6 +2042,7 @@ static void renderer_code_stream_begin(agent_token_renderer *r,
     r->md_fence_lang[0] = '\0';
     r->md_code_line_prefix = NULL;
     r->md_code_line_prefix_color = NULL;
+    r->md_code_highlight_upto = false;
     r->md_code_line_len = 0;
 }
 
@@ -1996,6 +2051,11 @@ static void renderer_code_stream_set_prefix(agent_token_renderer *r,
                                             const char *color) {
     r->md_code_line_prefix = prefix;
     r->md_code_line_prefix_color = color;
+}
+
+static void renderer_code_stream_set_upto_marker(agent_token_renderer *r,
+                                                 bool enabled) {
+    r->md_code_highlight_upto = enabled;
 }
 
 static void renderer_code_end(agent_token_renderer *r) {
@@ -2167,6 +2227,7 @@ static void renderer_markdown_finish(agent_token_renderer *r) {
     r->md_fence_lang[0] = '\0';
     r->md_code_line_prefix = NULL;
     r->md_code_line_prefix_color = NULL;
+    r->md_code_highlight_upto = false;
     free(r->md_code_line);
     r->md_code_line = NULL;
     r->md_code_line_len = 0;
@@ -2483,6 +2544,9 @@ static void agent_tool_viz_code_begin(agent_stream_renderer *sr) {
     agent_tool_visualizer *v = &sr->viz;
     const agent_syntax *syntax = agent_syntax_for_path(v->tool_path);
     renderer_code_stream_begin(sr->renderer, syntax);
+    renderer_code_stream_set_upto_marker(sr->renderer,
+        !strcmp(v->tool_name, "edit") &&
+        v->param_kind == AGENT_TOOL_PARAM_DIFF_OLD);
     v->code_param_active = true;
     if (v->param_kind == AGENT_TOOL_PARAM_DIFF_OLD ||
         v->param_kind == AGENT_TOOL_PARAM_DIFF_NEW)
@@ -2951,6 +3015,7 @@ static void agent_stream_text(agent_stream_renderer *sr, const char *text, size_
      * color before visible bytes are projected.  This keeps the prompt normal
      * without sacrificing long write/edit content coloring. */
     if (len) agent_tool_viz_restore_param_color(sr);
+    if (len && !sr->dsml_active) renderer_restore_text_attrs(sr->renderer);
 
     size_t i = 0;
     while (i < total) {
@@ -6489,6 +6554,7 @@ static void worker_request_power(agent_worker *w, int power) {
     pthread_mutex_lock(&w->mu);
     w->requested_power = power;
     w->power_requested = true;
+    w->status.power_percent = power;
     pthread_cond_signal(&w->cond);
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
@@ -6520,8 +6586,11 @@ static void worker_apply_pending_power(agent_worker *w) {
         agent_publishf(w, "\npower change failed\n");
         return;
     }
+    pthread_mutex_lock(&w->mu);
     w->cfg->engine.power_percent = power;
-    agent_publishf(w, "\npower set to %d%%\n", power);
+    w->status.power_percent = power;
+    agent_wake_locked(w);
+    pthread_mutex_unlock(&w->mu);
 }
 
 static void worker_run_deferred_save(agent_worker *w) {
@@ -6633,6 +6702,12 @@ static bool worker_submit(agent_worker *w, const char *text) {
     return ok;
 }
 
+static int worker_status_power_locked(agent_worker *w) {
+    if (w->power_requested) return w->requested_power;
+    int power = w->cfg->engine.power_percent;
+    return power > 0 ? power : 100;
+}
+
 /* Request interruption at the next model/tool polling point. */
 static void worker_interrupt(agent_worker *w) {
     pthread_mutex_lock(&w->mu);
@@ -6661,6 +6736,7 @@ static void worker_consume(agent_worker *w, char **out, size_t *out_len, agent_s
     }
     w->status.ctx_used = w->transcript.len;
     w->status.ctx_size = w->cfg->gen.ctx_size;
+    w->status.power_percent = worker_status_power_locked(w);
     if (status) *status = w->status;
     w->wake_pending = false;
     pthread_mutex_unlock(&w->mu);
@@ -6670,6 +6746,7 @@ static void worker_get_status(agent_worker *w, agent_status *status) {
     pthread_mutex_lock(&w->mu);
     w->status.ctx_used = w->transcript.len;
     w->status.ctx_size = w->cfg->gen.ctx_size;
+    w->status.power_percent = worker_status_power_locked(w);
     *status = w->status;
     pthread_mutex_unlock(&w->mu);
 }
@@ -6687,6 +6764,7 @@ static bool worker_is_initialized(agent_worker *w, agent_status *status) {
     pthread_mutex_lock(&w->mu);
     w->status.ctx_used = w->transcript.len;
     w->status.ctx_size = w->cfg->gen.ctx_size;
+    w->status.power_percent = worker_status_power_locked(w);
     if (status) *status = w->status;
     bool initialized = w->initialized;
     pthread_mutex_unlock(&w->mu);
@@ -6791,12 +6869,23 @@ static void agent_progress_bar(int done, int total, char *buf, size_t len,
     buf[pos < len ? pos : len - 1] = '\0';
 }
 
+static void agent_power_status_suffix(const agent_status *st,
+                                      char *buf, size_t len) {
+    if (len == 0) return;
+    if (st->power_percent > 0 && st->power_percent < 100)
+        snprintf(buf, len, " | ⚡ %d%%", st->power_percent);
+    else
+        buf[0] = '\0';
+}
+
 /* Build the one-line footer shown below the prompt.  It is intentionally compact
  * because linenoise redraws it on every progress update. */
 static void build_status_text(const agent_status *st, char *buf, size_t len) {
     char used[32], total_ctx[32];
+    char power[32];
     agent_format_ctx_size(st->ctx_used, used, sizeof(used));
     agent_format_ctx_size(st->ctx_size, total_ctx, sizeof(total_ctx));
+    agent_power_status_suffix(st, power, sizeof(power));
 
     switch (st->state) {
     case AGENT_WORKER_PREFILL: {
@@ -6806,30 +6895,30 @@ static void build_status_text(const agent_status *st, char *buf, size_t len) {
         double pct = 100.0 * (double)done / (double)total;
         char bar[AGENT_PROGRESS_BAR_MAX_BYTES];
         agent_progress_bar(done, total, bar, sizeof(bar), stdout_is_tty());
-        snprintf(buf, len, "ctx %s/%s | prefill %s %d/%d %.1f%%",
-                 used, total_ctx, bar, done, total, pct);
+        snprintf(buf, len, "ctx %s/%s | prefill %s %d/%d %.1f%%%s",
+                 used, total_ctx, bar, done, total, pct, power);
         break;
     }
     case AGENT_WORKER_GENERATING:
-        snprintf(buf, len, "ctx %s/%s | generation %d tokens %.1f t/s",
-                 used, total_ctx, st->generated, st->gen_tps);
+        snprintf(buf, len, "ctx %s/%s | generation %d tokens %.1f t/s%s",
+                 used, total_ctx, st->generated, st->gen_tps, power);
         break;
     case AGENT_WORKER_COMPACTING:
-        snprintf(buf, len, "ctx %s/%s | COMPACTING summary %d tokens %.1f t/s",
-                 used, total_ctx, st->generated, st->gen_tps);
+        snprintf(buf, len, "ctx %s/%s | COMPACTING summary %d tokens %.1f t/s%s",
+                 used, total_ctx, st->generated, st->gen_tps, power);
         break;
     case AGENT_WORKER_SAVING:
-        snprintf(buf, len, "ctx %s/%s | saving session", used, total_ctx);
+        snprintf(buf, len, "ctx %s/%s | saving session%s", used, total_ctx, power);
         break;
     case AGENT_WORKER_ERROR:
-        snprintf(buf, len, "ctx %s/%s | error: %s", used, total_ctx,
-                 st->error[0] ? st->error : "unknown error");
+        snprintf(buf, len, "ctx %s/%s | error: %s%s", used, total_ctx,
+                 st->error[0] ? st->error : "unknown error", power);
         break;
     case AGENT_WORKER_STOPPED:
-        snprintf(buf, len, "ctx %s/%s | interrupted", used, total_ctx);
+        snprintf(buf, len, "ctx %s/%s | interrupted%s", used, total_ctx, power);
         break;
     default:
-        snprintf(buf, len, "ctx %s/%s | idle", used, total_ctx);
+        snprintf(buf, len, "ctx %s/%s | idle%s", used, total_ctx, power);
         break;
     }
 }
@@ -7377,7 +7466,7 @@ static bool editor_set_scroll_layout(agent_editor *ed, int reserved_rows,
      * simply grows downward and the prompt/status block remains bottom
      * anchored. */
     bool scrolled_output = false;
-    if (scroll_on_grow && ed->output_at_scroll_boundary &&
+    if (scroll_on_grow &&
         ed->term_rows == rows && ed->term_cols == cols &&
         ed->output_bottom > 0 && output_bottom < ed->output_bottom)
     {
@@ -7398,7 +7487,15 @@ static bool editor_set_scroll_layout(agent_editor *ed, int reserved_rows,
 
     for (int row = prompt_row; row <= rows; row++)
         editor_clear_row(row);
-    editor_csi_cursor(output_bottom, 1);
+
+    /* If the prompt grew while generated output was in the middle of a line,
+     * the scroll above moved that partial line up with its column intact.
+     * Preserve that column when saving the new output cursor; otherwise the
+     * next token resumes at column 1 and overwrites the line it was extending. */
+    int output_col = ed->output_line_open ? ed->output_col + 1 : 1;
+    if (output_col < 1) output_col = 1;
+    if (output_col > cols) output_col = cols;
+    editor_csi_cursor(output_bottom, output_col);
     editor_save_output_cursor(ed);
     editor_move_to_prompt_row(ed);
     return true;
@@ -7642,6 +7739,7 @@ static void editor_write_scroll_output_preserve_prompt(agent_editor *ed,
     write_all(STDOUT_FILENO, sync_start, sizeof(sync_start) - 1);
     editor_restore_output_cursor(ed);
     editor_write_terminal_text(text, len);
+    editor_note_output(ed, text, len);
     editor_save_output_cursor(ed);
     write_all(STDOUT_FILENO, "\x1b[0m", 4);
     editor_move_to_prompt_cursor(ed);
@@ -8250,17 +8348,18 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                     char *arg = cmd + 6;
                     while (*arg == ' ' || *arg == '\t') arg++;
                     if (!arg[0]) {
-                        printf("power: %d%%\n", cfg->engine.power_percent > 0 ?
-                               cfg->engine.power_percent : ds4_engine_power(engine));
+                        printf("usage: /power <1..100>\n");
                     } else {
                         int power = 0;
                         if (!parse_power_percent(arg, &power)) {
                             printf("usage: /power <1..100>\n");
                         } else {
                             worker_request_power(&worker, power);
-                            if (busy) printf("power change requested: %d%%\n", power);
                         }
                     }
+                } else if (cmd[0] == '/' && !agent_slash_command_known(cmd)) {
+                    write(STDOUT_FILENO, "\a", 1);
+                    restore_line = xstrdup(cmd);
                 } else if (cmd[0] == '/' && busy) {
                     printf("command requires the model to be idle: %s\n", cmd);
                 } else if (!strcmp(cmd, "/quit") || !strcmp(cmd, "/exit")) {
@@ -8316,8 +8415,6 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                     if (!agent_worker_show_history(&worker, history_turns,
                                                    err, sizeof(err)))
                         printf("history failed: %s\n", err);
-                } else if (cmd[0] == '/') {
-                    printf("unknown command: %s\n", cmd);
                 } else if (busy) {
                     agent_prompt_queue_push(&queue, cmd);
                     worker_set_queued_user_pending(&worker, true);
