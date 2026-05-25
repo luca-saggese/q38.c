@@ -1193,6 +1193,7 @@ typedef struct {
     const char *mtp_path;
     const char *trace_path;
     const char *regrade_trace_path;
+    const char *case_sequence;
     ds4_backend backend;
     int threads;
     int ctx_size;
@@ -1499,6 +1500,7 @@ static void usage(FILE *fp) {
         "Evaluation:\n"
         "  -n, --tokens N         Max generated tokens per question. Default: 16000\n"
         "  --questions N          Run only the first N embedded questions.\n"
+        "  --case-sequence LIST   Run 1-based case numbers in this comma-separated order.\n"
         "  --temp F               Sampling temperature. Default: 0\n"
         "  --top-p F              Nucleus sampling probability. Default: 1\n"
         "  --min-p F              Keep tokens scoring at least F times the top token. Default: 0.05\n"
@@ -1553,6 +1555,8 @@ static eval_config parse_options(int argc, char **argv) {
             c.max_tokens = parse_int_arg(need_arg(&i, argc, argv, arg), arg);
         } else if (!strcmp(arg, "--questions")) {
             c.question_limit = parse_int_arg(need_arg(&i, argc, argv, arg), arg);
+        } else if (!strcmp(arg, "--case-sequence")) {
+            c.case_sequence = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--temp")) {
             c.temperature = parse_float_arg(need_arg(&i, argc, argv, arg), arg, 0.0f, 100.0f);
         } else if (!strcmp(arg, "--top-p")) {
@@ -3681,6 +3685,63 @@ static int next_pending_case(eval_ui *ui, int start) {
     return -1;
 }
 
+static int parse_case_sequence(const char *arg, int ncases, int **seq_out, int *len_out) {
+    int cap = 8;
+    int len = 0;
+    int *seq = malloc((size_t)cap * sizeof(*seq));
+    if (!seq) {
+        fprintf(stderr, "ds4-eval: out of memory while parsing --case-sequence\n");
+        return -1;
+    }
+
+    const char *p = arg;
+    while (p && *p) {
+        while (isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        errno = 0;
+        char *end = NULL;
+        long v = strtol(p, &end, 10);
+        if (end == p || errno != 0 || v < 1 || v > ncases) {
+            fprintf(stderr,
+                    "ds4-eval: invalid --case-sequence entry near '%s' "
+                    "(valid range: 1..%d)\n",
+                    p, ncases);
+            free(seq);
+            return -1;
+        }
+        if (len == cap) {
+            cap *= 2;
+            int *new_seq = realloc(seq, (size_t)cap * sizeof(*seq));
+            if (!new_seq) {
+                fprintf(stderr, "ds4-eval: out of memory while parsing --case-sequence\n");
+                free(seq);
+                return -1;
+            }
+            seq = new_seq;
+        }
+        seq[len++] = (int)v - 1;
+        p = end;
+        while (isspace((unsigned char)*p)) p++;
+        if (*p == ',') {
+            p++;
+            continue;
+        }
+        if (*p) {
+            fprintf(stderr, "ds4-eval: expected comma in --case-sequence near '%s'\n", p);
+            free(seq);
+            return -1;
+        }
+    }
+    if (len == 0) {
+        fprintf(stderr, "ds4-eval: --case-sequence cannot be empty\n");
+        free(seq);
+        return -1;
+    }
+    *seq_out = seq;
+    *len_out = len;
+    return 0;
+}
+
 static void log_context_memory(ds4_backend backend, int ctx_size) {
     ds4_context_memory m = ds4_context_memory_estimate(backend, ctx_size);
     fprintf(stderr,
@@ -3745,6 +3806,12 @@ int main(int argc, char **argv) {
                 sizeof(eval_cases) / sizeof(eval_cases[0]));
         return 2;
     }
+    int *case_sequence = NULL;
+    int case_sequence_len = 0;
+    if (cfg.case_sequence &&
+        parse_case_sequence(cfg.case_sequence, ncases, &case_sequence, &case_sequence_len) != 0) {
+        return 2;
+    }
     if (!cfg.seed) {
         cfg.seed = (uint64_t)time(NULL) ^
                    ((uint64_t)getpid() << 32) ^
@@ -3757,6 +3824,7 @@ int main(int argc, char **argv) {
         if (!trace) {
             fprintf(stderr, "ds4-eval: cannot open trace '%s': %s\n",
                     cfg.trace_path, strerror(errno));
+            free(case_sequence);
             return 2;
         }
     }
@@ -3776,6 +3844,7 @@ int main(int argc, char **argv) {
     ds4_engine *engine = NULL;
     if (ds4_engine_open(&engine, &opt) != 0) {
         if (trace) fclose(trace);
+        free(case_sequence);
         return 1;
     }
 
@@ -3808,6 +3877,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ds4-eval: failed to create session\n");
         if (trace) fclose(trace);
         ds4_engine_close(engine);
+        free(case_sequence);
         return 1;
     }
 
@@ -3818,11 +3888,18 @@ int main(int argc, char **argv) {
     uint64_t rng = cfg.seed;
     int rc = 0;
     int next = 0;
+    int sequence_pos = 0;
     while (next >= 0) {
+        if (case_sequence_len > 0) {
+            if (sequence_pos >= case_sequence_len) break;
+            next = case_sequence[sequence_pos++];
+            ui.selected_case = next;
+            ui.selection_active = false;
+        }
         tui_consume_input(&ui);
         tui_wait_if_paused(&ui, "idle");
         if (ui.quit_requested) break;
-        if (ui.requested_case >= 0) {
+        if (case_sequence_len == 0 && ui.requested_case >= 0) {
             next = ui.requested_case;
             ui.requested_case = -1;
             ui.selection_active = false;
@@ -3840,6 +3917,7 @@ int main(int argc, char **argv) {
          * returns EVAL_RUN_QUIT from run_one_case() or is consumed at the top of
          * the next idle iteration. */
         ui.quit_requested = false;
+        if (case_sequence_len > 0) continue;
         if (ui.requested_case >= 0) {
             next = ui.requested_case;
             ui.requested_case = -1;
@@ -3877,5 +3955,6 @@ int main(int argc, char **argv) {
     ds4_session_free(session);
     ds4_engine_close(engine);
     if (trace) fclose(trace);
+    free(case_sequence);
     return rc || failed ? 1 : 0;
 }
