@@ -596,11 +596,26 @@ static void ds4_die(const char *msg) {
     exit(1);
 }
 
-/* Attention compression is read from GGUF metadata during model validation.
- * Flash leaves the first two layers dense; Pro compresses them too. */
+/* Attention compression is read from GGUF metadata after validating that it
+ * matches the exact layout expected for the loaded model shape. */
 static uint32_t ds4_layer_compress_ratio(uint32_t il) {
     if (il >= DS4_N_LAYER) ds4_die("DeepSeek4 layer index is outside the loaded model layout");
     return g_ds4_compress_ratios[il];
+}
+
+static uint32_t ds4_expected_layer_compress_ratio(uint32_t il) {
+    if (il >= DS4_N_LAYER) ds4_die("DeepSeek4 layer index is outside the loaded model layout");
+
+    switch (DS4_MODEL_VARIANT) {
+    case DS4_VARIANT_FLASH:
+        if (il < 2) return 0;
+        return (il & 1u) == 0 ? 4u : 128u;
+    case DS4_VARIANT_PRO:
+        if (il < 2) return 128u;
+        return (il & 1u) == 0 ? 4u : 128u;
+    default:
+        ds4_die("unsupported DeepSeek4 model variant");
+    }
 }
 
 static void ds4_die_errno(const char *what, const char *path) {
@@ -2809,10 +2824,11 @@ static void validate_compress_ratio_metadata(const ds4_model *m) {
             got = (uint32_t)v;
         }
 
-        if (got != 0 && got != 4 && got != 128) {
+        const uint32_t expected = ds4_expected_layer_compress_ratio(il);
+        if (got != expected) {
             fprintf(stderr,
-                    "ds4: unsupported DeepSeek4 compression ratio at layer %u: %u\n",
-                    il, got);
+                    "ds4: unexpected DeepSeek4 compression ratio at layer %u for %s: got %u, expected %u\n",
+                    il, DS4_MODEL_SHAPE_NAME, got, expected);
             exit(1);
         }
         g_ds4_compress_ratios[il] = got;
