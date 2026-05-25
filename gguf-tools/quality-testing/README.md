@@ -1,7 +1,7 @@
 # Official-Continuation Quality Testing
 
 This directory contains the 100 prompts and scripts used to compare local GGUF
-variants against official DeepSeek V4 Flash continuations.
+variants against official DeepSeek V4 continuations.
 
 The metric is target-token negative log likelihood: collect a deterministic
 official continuation, then ask each local GGUF how much probability it assigns
@@ -18,6 +18,9 @@ python3 gguf-tools/quality-testing/collect_official.py \
   --count 100 \
   --max-tokens 24
 ```
+
+Use `--model deepseek-v4-pro --out gguf-tools/quality-testing/data/pro`
+to collect the same prompt set from PRO.  The default remains Flash.
 
 The script writes:
 
