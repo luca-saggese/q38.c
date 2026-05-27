@@ -12659,10 +12659,6 @@ static id<MTLComputePipelineState> ds4_gpu_routed_mm_pipeline_for_tile(uint32_t 
     }
 }
 
-static id<MTLComputePipelineState> ds4_gpu_routed_mm_pipeline(uint32_t type) {
-    return ds4_gpu_routed_mm_pipeline_for_tile(type, 32u);
-}
-
 static uint32_t ds4_gpu_moe_mm_tile_n(uint32_t gate_type, uint32_t n_tokens) {
     const uint32_t tile_max = ds4_gpu_env_u32("DS4_METAL_MOE_TILE_MAX", 128u);
     if (tile_max <= 32u) {
@@ -12711,10 +12707,6 @@ static id<MTLComputePipelineState> ds4_gpu_routed_mm_f16_rhs_pipeline_for_tile(u
     default:
         return nil;
     }
-}
-
-static id<MTLComputePipelineState> ds4_gpu_routed_mm_f16_rhs_pipeline(uint32_t type) {
-    return ds4_gpu_routed_mm_f16_rhs_pipeline_for_tile(type, 32u);
 }
 
 static int ds4_gpu_encode_mul_mv_id(
@@ -13025,9 +13017,13 @@ static int ds4_gpu_encode_mul_mm_id_mapped_tile(
         mm_args->ne20 <= 0 || mm_args->ne21 <= 0 || mm_args->ne02 <= 0) {
         return 0;
     }
-    const NSUInteger tile_n = token_tile_n != 0u ? (NSUInteger)token_tile_n :
-        (((NSUInteger)mm_args->ne21 % 64u) == 0u && (NSUInteger)mm_args->ne21 >= 64u) ?
-        64u : 32u;
+    /*
+     * token_tile_n is a contract with the selected kernel. Legacy callers use
+     * the unsuffixed kernels, which are NR1=32, so a zero/default tile must
+     * remain 32. Wide MoE paths pass 64/128 only after selecting the matching
+     * _n64/_n128 pipeline.
+     */
+    const NSUInteger tile_n = token_tile_n != 0u ? (NSUInteger)token_tile_n : 32u;
 
     const NSUInteger tpe_bytes = (NSUInteger)mm_args->ne02 * sizeof(int32_t);
     const NSUInteger hids_bytes = (NSUInteger)mm_args->ne02 * (NSUInteger)mm_args->ne21 * sizeof(int32_t);
