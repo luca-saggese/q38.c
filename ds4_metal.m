@@ -12701,6 +12701,12 @@ static id<MTLComputePipelineState> ds4_gpu_routed_mm_f16_rhs_pipeline_for_tile(u
         }
         return ds4_gpu_get_mul_mm_id_pipeline("kernel_mul_mm_id_q2_K_f16", false);
     case DS4_METAL_TENSOR_Q4_K:
+        if (tile_n == 128u) {
+            return ds4_gpu_get_mul_mm_id_pipeline("kernel_mul_mm_id_q4_K_f16_n128", false);
+        }
+        if (tile_n == 64u) {
+            return ds4_gpu_get_mul_mm_id_pipeline("kernel_mul_mm_id_q4_K_f16_n64", false);
+        }
         return ds4_gpu_get_mul_mm_id_pipeline("kernel_mul_mm_id_q4_K_f16", false);
     default:
         return nil;
