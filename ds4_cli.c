@@ -96,6 +96,37 @@ static void cli_dist_busy_set(const cli_config *cfg, bool busy) {
     if (!busy) cli_dist_notice_printed = 0;
 }
 
+static int cli_wait_distributed_route(const cli_config *cfg, ds4_session *session) {
+    if (!cli_distributed_coordinator(cfg)) return 0;
+
+    char err[256] = {0};
+    char last[256] = {0};
+    unsigned ticks = 0;
+    const struct timespec delay = {0, 250000000L};
+
+    for (;;) {
+        int ready = ds4_session_distributed_route_ready(session, err, sizeof(err));
+        if (ready > 0) {
+            if (ticks) fprintf(stderr, "ds4: distributed route ready\n");
+            return 0;
+        }
+        if (ready < 0) {
+            fprintf(stderr,
+                    "ds4: distributed route readiness failed: %s\n",
+                    err[0] ? err : "unknown error");
+            return 1;
+        }
+
+        const char *why = err[0] ? err : "route incomplete";
+        if (strcmp(last, why) != 0 || (ticks % 20u) == 0) {
+            fprintf(stderr, "ds4: waiting for distributed route: %s\n", why);
+            snprintf(last, sizeof(last), "%s", why);
+        }
+        nanosleep(&delay, NULL);
+        ticks++;
+    }
+}
+
 static void usage(FILE *fp) {
     fprintf(fp,
         "Usage: ds4 [(-p PROMPT | --prompt-file FILE)] [options]\n"
@@ -511,6 +542,10 @@ static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, con
         fprintf(stderr, "ds4: sampled CLI generation requires a session backend\n");
         return 1;
     }
+    if (cli_wait_distributed_route(cfg, session) != 0) {
+        ds4_session_free(session);
+        return 1;
+    }
 
     char err[160];
     ds4_think_mode think_mode = cli_effective_think_mode(&cfg->gen);
@@ -698,6 +733,10 @@ static int run_logits_dump(ds4_engine *engine, const cli_config *cfg, const ds4_
         fprintf(stderr, "ds4: --dump-logits requires a graph session backend\n");
         return 1;
     }
+    if (cli_wait_distributed_route(cfg, session) != 0) {
+        ds4_session_free(session);
+        return 1;
+    }
 
     char err[160];
     cli_prefill_progress progress = {
@@ -780,6 +819,10 @@ static int run_logprob_dump(ds4_engine *engine, const cli_config *cfg, const ds4
     ds4_session *session = NULL;
     if (ds4_session_create(&session, engine, cfg->gen.ctx_size) != 0) {
         fprintf(stderr, "ds4: --dump-logprobs requires a graph session backend\n");
+        return 1;
+    }
+    if (cli_wait_distributed_route(cfg, session) != 0) {
+        ds4_session_free(session);
         return 1;
     }
 
@@ -889,6 +932,11 @@ static int run_perplexity_file(ds4_engine *engine, const cli_config *cfg) {
     ds4_session *session = NULL;
     if (ds4_session_create(&session, engine, cfg->gen.ctx_size) != 0) {
         fprintf(stderr, "ds4: --perplexity-file requires a graph session backend\n");
+        ds4_tokens_free(&tokens);
+        return 1;
+    }
+    if (cli_wait_distributed_route(cfg, session) != 0) {
+        ds4_session_free(session);
         ds4_tokens_free(&tokens);
         return 1;
     }
