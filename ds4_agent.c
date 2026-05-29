@@ -1,4 +1,5 @@
 #include "ds4.h"
+#include "ds4_distributed.h"
 #include "ds4_kvstore.h"
 #include "ds4_web.h"
 #include "linenoise.h"
@@ -70,6 +71,7 @@ typedef enum {
     AGENT_WORKER_PREFILL,
     AGENT_WORKER_GENERATING,
     AGENT_WORKER_COMPACTING,
+    AGENT_WORKER_DRAINING,
     AGENT_WORKER_SAVING,
     AGENT_WORKER_ERROR,
     AGENT_WORKER_STOPPED,
@@ -521,6 +523,11 @@ static void usage(FILE *fp) {
         "  --dir-steering-file FILE\n"
         "  --dir-steering-ffn F\n"
         "  --dir-steering-attn F\n"
+        "\n"
+        "Distributed:\n");
+    ds4_dist_usage(fp);
+    fprintf(fp,
+        "\n"
         "  -h, --help             Show this help.\n"
         "\n"
         "Commands:\n"
@@ -570,7 +577,25 @@ static agent_config parse_options(int argc, char **argv) {
         if (!strcmp(arg, "-h") || !strcmp(arg, "--help")) {
             usage(stdout);
             exit(0);
-        } else if (!strcmp(arg, "-p") || !strcmp(arg, "--prompt")) {
+        }
+        char dist_parse_err[256] = {0};
+        ds4_dist_cli_parse_result dist_parse =
+            ds4_dist_parse_cli_arg(arg,
+                                   &i,
+                                   argc,
+                                   argv,
+                                   &c.engine.distributed,
+                                   dist_parse_err,
+                                   sizeof(dist_parse_err));
+        if (dist_parse == DS4_DIST_CLI_ERROR) {
+            fprintf(stderr,
+                    "ds4-agent: %s\n",
+                    dist_parse_err[0] ? dist_parse_err : "invalid distributed option");
+            exit(2);
+        }
+        if (dist_parse == DS4_DIST_CLI_MATCHED) continue;
+
+        if (!strcmp(arg, "-p") || !strcmp(arg, "--prompt")) {
             c.gen.prompt = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--non-interactive")) {
             c.non_interactive = true;
@@ -643,6 +668,18 @@ static agent_config parse_options(int argc, char **argv) {
 
     if (c.engine.directional_steering_file && !steering_scale_set)
         c.engine.directional_steering_ffn = 1.0f;
+    char dist_err[256];
+    if (ds4_dist_prepare_engine_options(&c.engine.distributed,
+                                        &c.engine,
+                                        dist_err,
+                                        sizeof(dist_err)) != 0) {
+        fprintf(stderr, "ds4-agent: %s\n", dist_err);
+        exit(2);
+    }
+    if (c.engine.distributed.role == DS4_DISTRIBUTED_WORKER) {
+        fprintf(stderr, "ds4-agent: --role worker is a serving mode; start workers with ./ds4\n");
+        exit(2);
+    }
     return c;
 }
 
@@ -7628,6 +7665,15 @@ static int worker_status_power_locked(agent_worker *w) {
 static void worker_interrupt(agent_worker *w) {
     pthread_mutex_lock(&w->mu);
     w->interrupt = true;
+    if (w->cfg &&
+        w->cfg->engine.distributed.role == DS4_DISTRIBUTED_COORDINATOR &&
+        (w->status.state == AGENT_WORKER_PREFILL ||
+         w->status.state == AGENT_WORKER_GENERATING ||
+         w->status.state == AGENT_WORKER_COMPACTING))
+    {
+        w->status.state = AGENT_WORKER_DRAINING;
+        agent_wake_locked(w);
+    }
     pthread_mutex_unlock(&w->mu);
 }
 
@@ -7825,6 +7871,10 @@ static void build_status_text(const agent_status *st, char *buf, size_t len) {
     case AGENT_WORKER_COMPACTING:
         snprintf(buf, len, "ctx %s/%s | COMPACTING summary %d tokens %.1f t/s%s",
                  used, total_ctx, st->generated, st->gen_tps, power);
+        break;
+    case AGENT_WORKER_DRAINING:
+        snprintf(buf, len, "ctx %s/%s | stopping after distributed cluster drains%s",
+                 used, total_ctx, power);
         break;
     case AGENT_WORKER_SAVING:
         snprintf(buf, len, "ctx %s/%s | saving session%s", used, total_ctx, power);
