@@ -15852,6 +15852,24 @@ void ds4_chat_append_max_effort_prefix(ds4_engine *e, ds4_tokens *tokens) {
     bpe_tokenize_text(&e->vocab, DS4_REASONING_EFFORT_MAX_PREFIX, tokens);
 }
 
+static void bpe_tokenize_tool_result_text(ds4_vocab *vocab, const char *content, token_vec *out) {
+    const char *end = "</tool_result>";
+    const size_t endlen = strlen(end);
+    const char *span = content ? content : "";
+    const char *p = span;
+    while (*p) {
+        if (!strncmp(p, end, endlen)) {
+            tokenize_span(vocab, span, (size_t)(p - span), out);
+            bpe_tokenize_text(vocab, "&lt;", out);
+            p++;
+            span = p;
+        } else {
+            p++;
+        }
+    }
+    tokenize_span(vocab, span, (size_t)(p - span), out);
+}
+
 void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role, const char *content) {
     ds4_vocab *vocab = &e->vocab;
     if (!role) role = "user";
@@ -15865,11 +15883,13 @@ void ds4_chat_append_message(ds4_engine *e, ds4_tokens *tokens, const char *role
             token_vec_push(tokens, vocab->think_end_id);
         }
         bpe_tokenize_text(vocab, content, tokens);
+    } else if (!strcmp(role, "tool") || !strcmp(role, "function")) {
+        token_vec_push(tokens, vocab->user_id);
+        bpe_tokenize_text(vocab, "<tool_result>", tokens);
+        bpe_tokenize_tool_result_text(vocab, content, tokens);
+        bpe_tokenize_text(vocab, "</tool_result>", tokens);
     } else {
         token_vec_push(tokens, vocab->user_id);
-        if (!strcmp(role, "tool") || !strcmp(role, "function")) {
-            bpe_tokenize_text(vocab, "Tool: ", tokens);
-        }
         bpe_tokenize_text(vocab, content, tokens);
     }
 }
