@@ -87,8 +87,8 @@ Then the default commands work:
 After downloading mtp, enable it explicitly, for example:
   ./ds4 --mtp <download directory>/$MTP_FILE --mtp-draft 2
 
-PRO files may be too large to download via Curl, if you run
-into problems get them using the official "hf" program.
+PRO files are downloaded with the official Hugging Face downloader because
+they are too large for the curl path used by the smaller GGUF files.
 EOF
 }
 
@@ -148,12 +148,80 @@ if [ -z "$TOKEN" ] && [ -s "$HOME/.cache/huggingface/token" ]; then
     TOKEN=$(cat "$HOME/.cache/huggingface/token")
 fi
 
+needs_hf_download() {
+    case "$1" in
+        "$PRO_Q2_IMATRIX_FILE"|"$PRO_Q4_LAYERS00_30_FILE"|"$PRO_Q4_LAYERS31_OUTPUT_FILE")
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+find_hf_command() {
+    if command -v hf >/dev/null 2>&1; then
+        printf '%s\n' hf
+        return 0
+    fi
+    return 1
+}
+
+download_one_hf() {
+    file=$1
+    out="$OUT_DIR/$file"
+    part="$out.part"
+
+    mkdir -p "$OUT_DIR"
+
+    if [ -s "$out" ]; then
+        echo "Already downloaded: $out"
+        return
+    fi
+
+    if [ -e "$part" ]; then
+        echo "Found curl partial download: $part" >&2
+        echo "The Hugging Face downloader cannot resume curl .part files." >&2
+        echo "Move or remove that partial download before retrying this PRO target." >&2
+        exit 1
+    fi
+
+    HF_CMD=$(find_hf_command || true)
+    if [ -z "$HF_CMD" ]; then
+        echo "PRO downloads require the official Hugging Face CLI." >&2
+        echo "Install it with:" >&2
+        echo "  python3 -m pip install -U huggingface_hub hf_xet" >&2
+        exit 1
+    fi
+
+    echo "Downloading $file"
+    echo "from https://huggingface.co/$REPO"
+    echo "using $HF_CMD download"
+    echo "If the download stops, run the same command again to resume it."
+
+    if [ -n "$TOKEN" ]; then
+        "$HF_CMD" download "$REPO" "$file" --repo-type model --local-dir "$OUT_DIR" --token "$TOKEN"
+    else
+        "$HF_CMD" download "$REPO" "$file" --repo-type model --local-dir "$OUT_DIR"
+    fi
+
+    if [ ! -s "$out" ]; then
+        echo "Hugging Face download finished but expected file is missing: $out" >&2
+        exit 1
+    fi
+}
+
 download_one() {
     file=$1
     out="$OUT_DIR/$file"
     part="$out.part"
     aria2_part="$out.aria2"
     url="https://huggingface.co/$REPO/resolve/main/$file"
+
+    if needs_hf_download "$file"; then
+        download_one_hf "$file"
+        return
+    fi
 
     mkdir -p "$OUT_DIR"
 
