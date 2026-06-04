@@ -199,6 +199,150 @@ Q4 requires the larger-memory machine class, so M3 Max Q4 numbers are `N/A`.
 ![M3 Max t/s](speed-bench/m3_max_ts.svg)
 ![PRO model M3 Ultra t/s](speed-bench/pro_model_m3_ultra_ts.svg)
 
+## Running models larger than RAM
+
+The normal Metal path tries to make the model resident in GPU-addressable
+memory. This is the fastest path and should remain your default when the model
+fits. When it does not fit, DS4 also has an **SSD streaming** path for Metal:
+the non-routed parts of the model are mapped normally, while routed MoE experts
+are kept in an explicit in-memory cache and loaded from the GGUF file when the
+router selects an expert that is not resident. Streaming is only about those
+routed expert weights: the KV cache, shared experts, projections, embeddings,
+routers, output head, graph scratch, and other non-routed model parts still
+need memory.
+
+This is not magic, and it is not as fast as fitting the whole model in RAM. It
+is a capacity mode that becomes useful because modern MacBook SSDs are fast and
+because the routed experts dominate the model size. Long prefills can still be
+quite fast, because DS4 processes many tokens per layer. Generation is harder:
+every new token routes to a few experts in every layer, and cache misses have
+to touch the SSD. For interactive use, the size and quality of the expert cache
+matter more than anything else.
+
+Enable it with:
+
+```sh
+./ds4 -m ./ds4flash.gguf --ssd-streaming
+```
+
+In streaming mode DS4 prints the routed expert cache budget at startup. You can
+leave the budget automatic, or set it explicitly in GiB:
+
+```sh
+./ds4 -m ./ds4flash.gguf --ssd-streaming --ssd-streaming-cache-experts 32GB
+```
+
+The `32GB` value is not a generic byte cache. DS4 computes how many full routed
+experts fit in that much memory for the current GGUF, counting gate, up, and
+down together. For example, with the Flash IQ2/Q2 GGUF, `32GB` is about 4854
+routed experts.
+
+By default DS4 also preloads a popularity-based hot expert seed. Do not disable
+this for normal use. `--ssd-streaming-cold` is useful for measuring worst-case
+cold behavior, but it gives a worse first interaction. Auto hot preload is
+capped at 4096 experts by default to avoid spending too long at startup; use
+`--ssd-streaming-preload-experts N` only when you explicitly want to test a
+larger upfront preload.
+
+### Flash on 64GB MacBooks
+
+The practical 64GB target is the 2-bit Flash GGUF:
+
+```sh
+./download_model.sh q2-imatrix
+
+./ds4 \
+  -m ./ds4flash.gguf \
+  --ssd-streaming \
+  --ssd-streaming-cache-experts 32GB \
+  --ctx 32768 \
+  --nothink
+```
+
+This is the configuration to try first on 64GB MacBooks. On a 128GB MacBook
+with 64GB artificially locked away, the same command mapped the `32GB` cache to
+4854 routed experts. With `README.md` as a 14318-token prompt it measured about
+300 t/s prefill. Short prompts are much slower because fixed per-layer work
+dominates, but the default streaming prefill dispatcher now uses three paths to
+keep them usable: token-by-token decode-style prefill for tiny prompts,
+selected-expert batched prefill for medium prompts, and full layer-major
+prefill for long prompts.
+
+For a server:
+
+```sh
+./ds4-server \
+  -m ./ds4flash.gguf \
+  --ssd-streaming \
+  --ssd-streaming-cache-experts 32GB \
+  --ctx 100000 \
+  --kv-disk-dir /tmp/ds4-kv \
+  --kv-disk-space-mb 8192
+```
+
+Use a context that leaves room for the OS, the expert cache, activations, the
+non-routed weights, and the compressed KV cache. If the startup warning says
+the expert cache is too large to lock, reduce it, for example to `24GB` or
+`16GB`.
+
+### PRO on 128GB MacBooks
+
+PRO q2 streaming is an experimental capacity mode. It lets you inspect and use
+the PRO model on a 128GB MacBook, but it is naturally much slower than running
+PRO on a 512GB Mac Studio where the model fits. Use it when you want PRO's
+quality and accept a few tokens per second generation, not when you need a
+fast everyday assistant.
+
+Download the PRO q2 imatrix GGUF:
+
+```sh
+./download_model.sh pro-q2-imatrix
+```
+
+Then start with the automatic cache budget:
+
+```sh
+./ds4 \
+  -m gguf/DeepSeek-V4-Pro-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-Instruct-imatrix.gguf \
+  --ssd-streaming \
+  --ctx 32768 \
+  --nothink
+```
+
+If startup reports that the requested expert cache is too large, set it
+manually. On 128GB systems, useful values to try are usually in the `32GB` to
+`64GB` range:
+
+```sh
+./ds4 \
+  -m gguf/DeepSeek-V4-Pro-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-Instruct-imatrix.gguf \
+  --ssd-streaming \
+  --ssd-streaming-cache-experts 48GB \
+  --ctx 32768 \
+  --nothink
+```
+
+For first tests, use `--nothink`: PRO with thinking enabled can spend a long
+time thinking, and streaming makes every generated token more expensive. Once
+you know the machine is stable, re-enable normal thinking with a conservative
+generation limit:
+
+```sh
+./ds4 \
+  -m gguf/DeepSeek-V4-Pro-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-Instruct-imatrix.gguf \
+  --ssd-streaming \
+  --ssd-streaming-cache-experts 48GB \
+  --ctx 32768 \
+  --think \
+  --tokens 1500
+```
+
+The important startup line is the cache report. If the cache is too small,
+generation will miss too often and will feel dominated by SSD reads. If the
+cache is too large, macOS may refuse to lock it or the system may become
+unresponsive. Start conservative, then increase the cache if the machine has
+headroom.
+
 ## Distributed Inference
 
 Distributed inference lets DS4 **run a model that is too large for one machine** by
@@ -283,7 +427,7 @@ measured 11.47 t/s generation after startup. Per-token telemetry was balanced:
 local layers were around 39-43 ms, remote layers around 44-49 ms, for total
 token times around 84-92 ms. Expect a slow startup while each side maps and
 makes its half of the model resident. Long-context PRO Q4 prefill and decode
-slope still need separate benchmarking.
+performance still needs separate benchmarking.
 
 The measurements above use a Thunderbolt 5 cable. The implementation is plain
 TCP and also works over slower links, including WiFi, but fast Ethernet or
