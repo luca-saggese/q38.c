@@ -1796,6 +1796,10 @@ extern "C" uint32_t ds4_gpu_stream_expert_cache_configured_count(void) {
     return 0;
 }
 
+extern "C" uint32_t ds4_gpu_stream_expert_cache_current_count(void) {
+    return 0;
+}
+
 extern "C" uint32_t ds4_gpu_stream_expert_cache_budget_for_expert_size(
         uint64_t gate_expert_bytes,
         uint64_t down_expert_bytes) {
@@ -1805,6 +1809,32 @@ extern "C" uint32_t ds4_gpu_stream_expert_cache_budget_for_expert_size(
 }
 
 extern "C" int ds4_gpu_stream_expert_cache_seed_selected(
+        const void    *model_map,
+        uint64_t       model_size,
+        uint32_t       layer,
+        const int32_t *selected_ids,
+        uint32_t       n_total_expert,
+        uint32_t       n_selected,
+        uint64_t       gate_offset,
+        uint64_t       up_offset,
+        uint64_t       down_offset,
+        uint64_t       gate_expert_bytes,
+        uint64_t       down_expert_bytes) {
+    (void)model_map;
+    (void)model_size;
+    (void)layer;
+    (void)selected_ids;
+    (void)n_total_expert;
+    (void)n_selected;
+    (void)gate_offset;
+    (void)up_offset;
+    (void)down_offset;
+    (void)gate_expert_bytes;
+    (void)down_expert_bytes;
+    return 1;
+}
+
+extern "C" int ds4_gpu_stream_expert_cache_begin_selected_load(
         const void    *model_map,
         uint64_t       model_size,
         uint32_t       layer,
