@@ -797,6 +797,7 @@ static int ds4_gpu_add_model_view_range(
         uint64_t    map_offset,
         uint64_t    map_size,
         uint64_t    max_tensor_bytes,
+        bool        use_default_view_cap,
         uint64_t   *mapped_model_size_out) {
     const uint64_t page = (uint64_t)getpagesize();
     const uintptr_t model_addr = (uintptr_t)model_map;
@@ -870,12 +871,13 @@ static int ds4_gpu_add_model_view_range(
             env_limit &= ~(page - 1);
             if (env_limit > 0) view_limit = env_limit;
         }
-    } else if (mapped_model_size > max_buffer) {
+    } else if (use_default_view_cap && mapped_model_size > max_buffer) {
         /*
          * Very large no-copy buffers can make Metal's VM validation dominate
          * startup or the first graph command on multi-hundred-GiB slices. Keep
-         * normal Flash-sized mappings unchanged, but when a range already has
-         * to be split, use smaller overlapping views.
+         * ordinary contiguous model mappings unchanged, but let distributed
+         * span maps use smaller overlapping views when a range already has to
+         * be split.
          */
         const uint64_t default_limit = 128ull * 1024ull * 1024ull * 1024ull;
         if (view_limit > default_limit) view_limit = default_limit;
@@ -991,6 +993,7 @@ static int ds4_gpu_map_model_views(
                                       map_offset,
                                       map_size,
                                       max_tensor_bytes,
+                                      false,
                                       &mapped_model_size)) {
         return 0;
     }
@@ -5857,6 +5860,7 @@ int ds4_gpu_set_model_map_spans(
                                               offsets[i],
                                               sizes[i],
                                               effective_max,
+                                              true,
                                               &mapped_total)) {
                 ds4_gpu_model_residency_clear();
                 ds4_gpu_model_views_clear();
