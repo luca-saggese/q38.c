@@ -3525,6 +3525,24 @@ static bool worker_should_interrupt(agent_worker *w) {
     return interrupt;
 }
 
+/* Ctrl+C is a latched request consumed by the worker.  Once an interrupted
+ * operation has reached a stable append-only boundary and is about to publish
+ * IDLE, the request must be acknowledged; otherwise the editor can observe an
+ * idle worker with a stale interrupt still pending. */
+static void worker_clear_interrupt(agent_worker *w) {
+    pthread_mutex_lock(&w->mu);
+    w->interrupt = false;
+    pthread_mutex_unlock(&w->mu);
+}
+
+static bool agent_err_is_interrupted(const char *err) {
+    return err && !strcmp(err, "interrupted");
+}
+
+static bool worker_cancel_session_cb(void *ud) {
+    return worker_should_interrupt(ud);
+}
+
 typedef struct {
     char *ptr;
     size_t len;
@@ -4026,9 +4044,15 @@ static int agent_web_confirm(void *privdata, const char *message,
     snprintf(w->web_approval_message, sizeof(w->web_approval_message),
              "%s", message ? message : "Start visible Chrome browser? (y/n) ");
     agent_wake_locked(w);
-    while (!w->stop && !w->web_approval_answered)
+    while (!w->stop && !w->interrupt && !w->web_approval_answered)
         pthread_cond_wait(&w->cond, &w->mu);
     bool ok = w->web_approval_result;
+    if (!w->web_approval_answered && (w->stop || w->interrupt)) {
+        ok = false;
+        w->web_approval_pending = false;
+        snprintf(w->web_approval_error, sizeof(w->web_approval_error),
+                 "interrupted");
+    }
     if (!ok) {
         snprintf(err, err_len, "%s",
                  w->web_approval_error[0] ? w->web_approval_error :
@@ -4042,6 +4066,10 @@ static void agent_web_log(void *privdata, const char *message) {
     agent_worker *w = privdata;
     if (!w || !message || !message[0]) return;
     agent_trace(w, "web: %s", message);
+}
+
+static bool agent_web_cancel(void *privdata) {
+    return worker_should_interrupt(privdata);
 }
 
 static bool worker_take_web_approval_request(agent_worker *w,
@@ -4145,7 +4173,9 @@ static int agent_worker_sync_tokens(agent_worker *w, const ds4_tokens *tokens,
     ds4_session_set_display_progress(w->session,
                                      publish_progress ? worker_progress_cb : NULL,
                                      publish_progress ? w : NULL);
+    ds4_session_set_cancel(w->session, worker_cancel_session_cb, w);
     int rc = ds4_session_sync(w->session, tokens, err, err_len);
+    ds4_session_set_cancel(w->session, NULL, NULL);
     ds4_session_set_progress(w->session, NULL, NULL);
     ds4_session_set_display_progress(w->session, NULL, NULL);
     return rc;
@@ -7237,17 +7267,29 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
 
     ds4_session_set_progress(w->session, worker_progress_cb, w);
     ds4_session_set_display_progress(w->session, worker_progress_cb, w);
-    if (ds4_session_sync(w->session, &prompt, err, err_len) != 0) {
-        ds4_session_set_progress(w->session, NULL, NULL);
-        ds4_session_set_display_progress(w->session, NULL, NULL);
+    ds4_session_set_cancel(w->session, worker_cancel_session_cb, w);
+    int sync_rc = ds4_session_sync(w->session, &prompt, err, err_len);
+    ds4_session_set_cancel(w->session, NULL, NULL);
+    ds4_session_set_progress(w->session, NULL, NULL);
+    ds4_session_set_display_progress(w->session, NULL, NULL);
+    if (sync_rc == DS4_SESSION_SYNC_INTERRUPTED) {
+        ds4_session_invalidate(w->session);
+        snprintf(err, err_len, "interrupted");
+        agent_publish_system_status(
+            w, "Compaction interrupted; keeping the previous conversation state.");
+        ds4_tokens_free(&prompt);
+        ds4_tokens_free(&sys);
+        agent_publish(w, "\x1b[0m\n", 5);
+        worker_clear_interrupt(w);
+        return false;
+    }
+    if (sync_rc != 0) {
         ds4_session_invalidate(w->session);
         ds4_tokens_free(&prompt);
         ds4_tokens_free(&sys);
         agent_publish(w, "\x1b[0m\n", 5);
         return false;
     }
-    ds4_session_set_progress(w->session, NULL, NULL);
-    ds4_session_set_display_progress(w->session, NULL, NULL);
 
     /* From here until the final rebuild, the live KV contains the internal
      * compaction prompt/summary, while w->transcript still contains the real
@@ -7260,12 +7302,15 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
     double t0 = now_sec();
     for (int i = 0; i < summary_max; i++) {
         if (worker_should_interrupt(w)) {
-            snprintf(err, err_len, "compaction interrupted");
+            snprintf(err, err_len, "interrupted");
             ds4_session_invalidate(w->session);
             ds4_tokens_free(&prompt);
             ds4_tokens_free(&sys);
             free(summary.ptr);
             agent_publish(w, "\x1b[0m\n", 5);
+            agent_publish_system_status(
+                w, "Compaction interrupted; keeping the previous conversation state.");
+            worker_clear_interrupt(w);
             return false;
         }
         int token = ds4_session_argmax(w->session);
@@ -7483,10 +7528,21 @@ static void worker_set_greedy_sampling(agent_worker *w, bool greedy) {
 static int worker_run_turn(agent_worker *w, const char *user_text) {
     agent_config *cfg = w->cfg;
     ds4_think_mode think_mode = effective_think_mode(cfg);
+    pthread_mutex_lock(&w->mu);
+    w->interrupt = false;
+    w->status.error[0] = '\0';
+    agent_wake_locked(w);
+    pthread_mutex_unlock(&w->mu);
+
     char compact_err[160] = {0};
     if (!agent_worker_compact_if_needed(w, "soft limit before user turn",
                                         compact_err, sizeof(compact_err)))
     {
+        if (agent_err_is_interrupted(compact_err)) {
+            worker_clear_interrupt(w);
+            agent_set_status(w, AGENT_WORKER_IDLE);
+            return 0;
+        }
         agent_set_error(w, compact_err[0] ? compact_err : "context compaction failed");
         return 1;
     }
@@ -7504,10 +7560,8 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
     uint64_t rng = cfg->gen.seed ? cfg->gen.seed :
         ((uint64_t)time(NULL) ^ ((uint64_t)getpid() << 32) ^ (uint64_t)clock());
     pthread_mutex_lock(&w->mu);
-    w->interrupt = false;
     w->user_activity = true;
     w->session_dirty = true;
-    w->status.error[0] = '\0';
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
 
@@ -7523,6 +7577,11 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
             !agent_worker_compact_if_needed(w, "soft limit before tool continuation",
                                             compact_err, sizeof(compact_err)))
         {
+            if (agent_err_is_interrupted(compact_err)) {
+                worker_clear_interrupt(w);
+                agent_set_status(w, AGENT_WORKER_IDLE);
+                return 0;
+            }
             agent_set_error(w, compact_err[0] ? compact_err : "context compaction failed");
             return 1;
         }
@@ -7559,14 +7618,23 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         char err[160];
         ds4_session_set_progress(w->session, worker_progress_cb, w);
         ds4_session_set_display_progress(w->session, worker_progress_cb, w);
-        if (ds4_session_sync(w->session, prompt_for_sync, err, sizeof(err)) != 0) {
-            ds4_session_set_progress(w->session, NULL, NULL);
-            ds4_session_set_display_progress(w->session, NULL, NULL);
+        ds4_session_set_cancel(w->session, worker_cancel_session_cb, w);
+        int sync_rc = ds4_session_sync(w->session, prompt_for_sync, err, sizeof(err));
+        ds4_session_set_cancel(w->session, NULL, NULL);
+        ds4_session_set_progress(w->session, NULL, NULL);
+        ds4_session_set_display_progress(w->session, NULL, NULL);
+        if (sync_rc == DS4_SESSION_SYNC_INTERRUPTED) {
+            agent_publish_system_status(
+                w, "Model reading interrupted; the model may only be aware of the prefix processed so far.");
+            ds4_tokens_push(&w->transcript, ds4_token_eos(w->engine));
+            worker_clear_interrupt(w);
+            agent_set_status(w, AGENT_WORKER_IDLE);
+            return 0;
+        }
+        if (sync_rc != 0) {
             agent_set_error(w, err);
             return 1;
         }
-        ds4_session_set_progress(w->session, NULL, NULL);
-        ds4_session_set_display_progress(w->session, NULL, NULL);
 
         int max_tokens = cfg->gen.n_predict;
         int room = ds4_session_ctx(w->session) - ds4_session_pos(w->session);
@@ -7667,6 +7735,14 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         agent_stream_text(&stream, NULL, 0, true);
         renderer_finish(&renderer);
         worker_set_greedy_sampling(w, false);
+        if (interrupted) {
+            ds4_tokens_push(&w->transcript, ds4_token_eos(w->engine));
+            agent_dsml_parser_free(&dsml);
+            agent_publish_system_status(w, "Stopped by user");
+            worker_clear_interrupt(w);
+            agent_set_status(w, AGENT_WORKER_IDLE);
+            return 0;
+        }
         if (stream.dsml_in_think) {
             got_tool = false;
             malformed_tool = true;
@@ -7722,6 +7798,11 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
             {
                 free(tool_result);
                 agent_dsml_parser_free(&dsml);
+                if (agent_err_is_interrupted(compact_err)) {
+                    worker_clear_interrupt(w);
+                    agent_set_status(w, AGENT_WORKER_IDLE);
+                    return 0;
+                }
                 agent_set_error(w, compact_err[0] ? compact_err : "context compaction failed");
                 return 1;
             }
@@ -7866,6 +7947,11 @@ static void worker_run_deferred_compact(agent_worker *w) {
         }
         agent_set_status(w, AGENT_WORKER_IDLE);
     } else {
+        if (agent_err_is_interrupted(err)) {
+            worker_clear_interrupt(w);
+            agent_set_status(w, AGENT_WORKER_IDLE);
+            return;
+        }
         agent_set_error(w, err[0] ? err : "context compaction failed");
     }
 }
@@ -9242,6 +9328,8 @@ static int agent_worker_init(agent_worker *w, ds4_engine *engine, agent_config *
         .confirm_privdata = w,
         .log = agent_web_log,
         .log_privdata = w,
+        .cancel = agent_web_cancel,
+        .cancel_privdata = w,
     };
     w->web = ds4_web_create(&web_cfg);
     w->sysprompt_path = ds4_kvstore_path_join(w->cache_dir, "sysprompt.kv");
@@ -9632,6 +9720,20 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
             }
         }
 
+        if (rc > 0 && (pfd[0].revents & POLLIN)) editor_read_stdin(&editor);
+
+        /* Linenoise runs the terminal in raw mode, so Ctrl+C normally arrives
+         * as byte 3 instead of SIGINT.  Handle it before worker output is
+         * drained and repainted; otherwise a busy decoding stream can leave the
+         * interrupt waiting behind a large terminal-output backlog. */
+        if (editor_take_queued_byte(&editor, 3)) { /* Ctrl+C */
+            if (!worker_is_idle(&worker)) {
+                worker_interrupt(&worker);
+            } else {
+                editor_cancel_input_with_hint(&editor, prompt, statusline);
+            }
+        }
+
         if (rc > 0 && (pfd[1].revents & POLLIN)) drain_wake_fd(worker.wake_fd[0]);
 
         char *out = NULL;
@@ -9729,8 +9831,6 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
             free(echo);
             free(queued);
         }
-
-        if (rc > 0 && (pfd[0].revents & POLLIN)) editor_read_stdin(&editor);
 
         if (queue.len && editor_take_queued_byte(&editor, 24)) { /* Ctrl+X */
             char *queued = agent_prompt_queue_pop(&queue);
