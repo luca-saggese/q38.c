@@ -21566,8 +21566,9 @@ int ds4_gpu_routed_moe_one_tensor(
             n_expert == 6 &&
             n_tokens == 1 &&
             n_total_expert >= 128 &&
-            gate_tensor_bytes >= q4_selected_min_tensor_bytes &&
-            down_tensor_bytes >= q4_selected_min_tensor_bytes &&
+            (g_ssd_streaming_mode ||
+             (gate_tensor_bytes >= q4_selected_min_tensor_bytes &&
+              down_tensor_bytes >= q4_selected_min_tensor_bytes)) &&
             fuse_pair_swiglu &&
             direct_down_sum &&
             ds4_gpu_q4_selected_paths_allowed() &&
@@ -21920,7 +21921,7 @@ int ds4_gpu_routed_moe_one_tensor(
                 g_moe_mul_mv_addr_q2_k_sum6_pipeline != nil;
             const bool use_stream_expert_cache =
                 !use_iq2_full_expert_addr_table &&
-                use_iq2_selected_slots &&
+                (use_iq2_selected_slots || use_q4_selected_slots) &&
                 stream_expert_cache_size_known &&
                 ds4_gpu_stream_expert_cache_effective_cap(layer_index,
                                                           n_total_expert,
@@ -21930,6 +21931,7 @@ int ds4_gpu_routed_moe_one_tensor(
                 ds4_gpu_stream_expert_split_ready();
             const bool use_stream_compact_addr =
                 use_stream_expert_cache &&
+                use_iq2_selected_slots &&
                 ds4_gpu_stream_compact_addr_requested() &&
                 !stream_split_ready &&
                 !ds4_gpu_stream_expert_masked_addr_requested() &&
@@ -21937,12 +21939,14 @@ int ds4_gpu_routed_moe_one_tensor(
                 g_moe_mul_mv_addr_q2_k_sum6_pipeline != nil;
             use_stream_expert_split_candidate =
                 use_stream_expert_cache &&
+                use_iq2_selected_slots &&
                 !use_stream_compact_addr &&
                 stream_split_ready &&
                 g_moe_mul_mv_addr_iq2_xxs_pair_swiglu_masked_pipeline != nil &&
                 g_moe_mul_mv_addr_q2_k_sum6_masked_pipeline != nil;
             const bool use_stream_hit_validator =
                 use_stream_expert_cache &&
+                use_iq2_selected_slots &&
                 ds4_gpu_stream_expert_hit_validator_requested() &&
                 g_moe_stream_expert_cache_validate_pipeline != nil &&
                 g_moe_mul_mv_addr_iq2_xxs_pair_swiglu_pipeline != nil &&
@@ -22169,6 +22173,7 @@ int ds4_gpu_routed_moe_one_tensor(
             }
             if (use_stream_expert_cache) {
                 use_stream_expert_addr_table =
+                    use_iq2_selected_slots &&
                     ds4_gpu_stream_expert_addr_table_kernel_requested() &&
                     g_moe_mul_mv_addr_iq2_xxs_pair_swiglu_pipeline != nil &&
                     g_moe_mul_mv_addr_q2_k_sum6_pipeline != nil &&
