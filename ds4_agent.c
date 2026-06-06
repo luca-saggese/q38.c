@@ -83,6 +83,7 @@ typedef struct {
     int prefill_done;
     int prefill_total;
     unsigned prefill_label;
+    double prefill_tps;
     int generated;
     double gen_tps;
     bool greedy_sampling;
@@ -121,6 +122,7 @@ typedef struct {
     bool power_requested;
     int requested_power;
     int progress_base;
+    double progress_started_at;
     int last_system_prompt_reminder_at;
     char *cmd_text;
     agent_status status;
@@ -1115,6 +1117,8 @@ static bool worker_is_idle(agent_worker *w);
 static void agent_set_status(agent_worker *w, agent_worker_state state) {
     pthread_mutex_lock(&w->mu);
     w->status.state = state;
+    if (state != AGENT_WORKER_PREFILL)
+        w->status.prefill_tps = 0.0;
     if (state != AGENT_WORKER_GENERATING)
         w->status.greedy_sampling = false;
     agent_wake_locked(w);
@@ -1124,6 +1128,7 @@ static void agent_set_status(agent_worker *w, agent_worker_state state) {
 static void agent_set_error(agent_worker *w, const char *msg) {
     pthread_mutex_lock(&w->mu);
     w->status.state = AGENT_WORKER_ERROR;
+    w->status.prefill_tps = 0.0;
     w->status.greedy_sampling = false;
     snprintf(w->status.error, sizeof(w->status.error), "%s", msg ? msg : "unknown error");
     agent_wake_locked(w);
@@ -3506,6 +3511,9 @@ static void worker_progress_cb(void *ud, const char *event, int current, int tot
     if (done < 0) done = 0;
     if (done > w->status.prefill_total) done = w->status.prefill_total;
     w->status.prefill_done = done;
+    double elapsed = now_sec() - w->progress_started_at;
+    w->status.prefill_tps =
+        done > 0 && elapsed > 0.0 ? (double)done / elapsed : 0.0;
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
 }
@@ -4101,9 +4109,11 @@ static int agent_worker_sync_tokens(agent_worker *w, const ds4_tokens *tokens,
             w->status.prefill_label : agent_next_prefill_label();
         w->status.state = AGENT_WORKER_PREFILL;
         w->progress_base = cached;
+        w->progress_started_at = now_sec();
         w->status.prefill_done = 0;
         w->status.prefill_total = suffix;
         w->status.prefill_label = prefill_label;
+        w->status.prefill_tps = 0.0;
         w->status.generated = 0;
         w->status.gen_tps = 0.0;
         agent_wake_locked(w);
@@ -4195,6 +4205,7 @@ static bool agent_worker_reset_to_sysprompt(agent_worker *w, char *err, size_t e
     w->status.state = AGENT_WORKER_IDLE;
     w->status.prefill_done = 0;
     w->status.prefill_total = 0;
+    w->status.prefill_tps = 0.0;
     w->status.generated = 0;
     w->status.gen_tps = 0.0;
     w->status.greedy_sampling = false;
@@ -5341,6 +5352,7 @@ static bool agent_worker_switch_session(agent_worker *w, const char *prefix,
         w->status.state = AGENT_WORKER_IDLE;
         w->status.ctx_used = w->transcript.len;
         w->status.ctx_size = w->cfg->gen.ctx_size;
+        w->status.prefill_tps = 0.0;
         w->status.greedy_sampling = false;
         w->status.error[0] = '\0';
         agent_wake_locked(w);
@@ -7180,8 +7192,10 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
 
     pthread_mutex_lock(&w->mu);
     w->status.state = AGENT_WORKER_COMPACTING;
+    w->progress_started_at = now_sec();
     w->status.prefill_done = 0;
     w->status.prefill_total = 0;
+    w->status.prefill_tps = 0.0;
     w->status.generated = 0;
     w->status.gen_tps = 0.0;
     w->status.greedy_sampling = false;
@@ -7509,9 +7523,11 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
             w->status.prefill_label : agent_next_prefill_label();
         w->status.state = AGENT_WORKER_PREFILL;
         w->progress_base = cached;
+        w->progress_started_at = now_sec();
         w->status.prefill_done = 0;
         w->status.prefill_total = suffix;
         w->status.prefill_label = prefill_label;
+        w->status.prefill_tps = 0.0;
         w->status.generated = 0;
         w->status.gen_tps = 0.0;
         w->status.greedy_sampling = false;
@@ -7560,6 +7576,7 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
 
         pthread_mutex_lock(&w->mu);
         w->status.state = AGENT_WORKER_GENERATING;
+        w->status.prefill_tps = 0.0;
         w->status.greedy_sampling = false;
         agent_wake_locked(w);
         pthread_mutex_unlock(&w->mu);
@@ -7928,6 +7945,7 @@ static bool worker_submit(agent_worker *w, const char *text) {
         w->status.prefill_done = 0;
         w->status.prefill_total = 0;
         w->status.prefill_label = agent_next_prefill_label();
+        w->status.prefill_tps = 0.0;
         w->status.generated = 0;
         w->status.gen_tps = 0.0;
         w->status.greedy_sampling = false;
@@ -7954,6 +7972,7 @@ static void worker_interrupt(agent_worker *w) {
          w->status.state == AGENT_WORKER_COMPACTING))
     {
         w->status.state = AGENT_WORKER_DRAINING;
+        w->status.prefill_tps = 0.0;
         w->status.greedy_sampling = false;
         agent_wake_locked(w);
     }
@@ -8072,8 +8091,8 @@ static void build_prompt_text(const agent_status *st, char *buf, size_t len) {
     snprintf(buf, len, "ds4-agent> ");
 }
 
-static void agent_progress_bar(int done, int total, char *buf, size_t len,
-                               bool color) {
+static void agent_progress_bar(int done, int total, double tps,
+                               char *buf, size_t len, bool color) {
     if (len == 0) return;
     if (total <= 0) total = 1;
     if (done < 0) done = 0;
@@ -8082,6 +8101,12 @@ static void agent_progress_bar(int done, int total, char *buf, size_t len,
     if (filled < 0) filled = 0;
     if (filled > AGENT_PROGRESS_BAR_WIDTH) filled = AGENT_PROGRESS_BAR_WIDTH;
     if (color && filled == 0 && done < total) filled = 1;
+    char rate[32] = {0};
+    size_t rate_len = 0;
+    if (tps > 0.0 && filled < AGENT_PROGRESS_BAR_WIDTH) {
+        snprintf(rate, sizeof(rate), " %.0ft/s", tps);
+        rate_len = strlen(rate);
+    }
     size_t pos = 0;
     agent_progress_append(buf, len, &pos, "[");
     if (color) agent_progress_append(buf, len, &pos, AGENT_STATUS_BAR_FILL);
@@ -8089,7 +8114,12 @@ static void agent_progress_bar(int done, int total, char *buf, size_t len,
         if (color && i == filled) {
             agent_progress_append(buf, len, &pos, AGENT_STATUS_STYLE_START);
         }
-        agent_progress_append(buf, len, &pos, i < filled ? "▶" : "·");
+        if (i >= filled && rate_len > 0 && (size_t)(i - filled) < rate_len) {
+            char ch[2] = {rate[i - filled], '\0'};
+            agent_progress_append(buf, len, &pos, ch);
+        } else {
+            agent_progress_append(buf, len, &pos, i < filled ? "▶" : "·");
+        }
     }
     if (color) agent_progress_append(buf, len, &pos, AGENT_STATUS_STYLE_START);
     agent_progress_append(buf, len, &pos, "]");
@@ -8141,7 +8171,8 @@ static void build_status_text(const agent_status *st, char *buf, size_t len) {
         if (done > total) done = total;
         double pct = 100.0 * (double)done / (double)total;
         char bar[AGENT_PROGRESS_BAR_MAX_BYTES];
-        agent_progress_bar(done, total, bar, sizeof(bar), stdout_is_tty());
+        agent_progress_bar(done, total, st->prefill_tps, bar, sizeof(bar),
+                           stdout_is_tty());
         snprintf(buf, len, "ctx %s/%s | %s %s %d/%d %.1f%%%s",
                  used, total_ctx, agent_prefill_label(st), bar,
                  done, total, pct, power);
@@ -9606,6 +9637,7 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                                prompt, statusline, true);
             pthread_mutex_lock(&worker.mu);
             worker.status.state = AGENT_WORKER_IDLE;
+            worker.status.prefill_tps = 0.0;
             worker.status.greedy_sampling = false;
             worker.status.error[0] = '\0';
             pthread_mutex_unlock(&worker.mu);
