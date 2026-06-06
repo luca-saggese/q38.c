@@ -3998,10 +3998,12 @@ static void agent_worker_build_system_tokens(agent_worker *w, ds4_tokens *out) {
 static void agent_publish_system_status(agent_worker *w, const char *msg) {
     if (w->cfg->non_interactive) return;
     if (isatty(STDOUT_FILENO)) {
-        agent_publish(w, "\x1b[1;33m", strlen("\x1b[1;33m"));
+        static const char marker[] = "\x1b[33m✦ \x1b[38;5;218m";
+        agent_publish(w, marker, sizeof(marker) - 1);
         agent_publish(w, msg, strlen(msg));
         agent_publish(w, "\x1b[0m\n", strlen("\x1b[0m\n"));
     } else {
+        agent_publish(w, "✦ ", strlen("✦ "));
         agent_publish(w, msg, strlen(msg));
         agent_publish(w, "\n", 1);
     }
