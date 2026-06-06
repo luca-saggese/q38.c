@@ -3989,6 +3989,26 @@ static void agent_publish_system_status(agent_worker *w, const char *msg) {
     }
 }
 
+static void agent_publishf_system_status(agent_worker *w, const char *fmt, ...) {
+    char stack[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(stack, sizeof(stack), fmt, ap);
+    va_end(ap);
+    if (n <= 0) return;
+    if ((size_t)n < sizeof(stack)) {
+        agent_publish_system_status(w, stack);
+        return;
+    }
+
+    char *heap = xmalloc((size_t)n + 1);
+    va_start(ap, fmt);
+    vsnprintf(heap, (size_t)n + 1, fmt, ap);
+    va_end(ap);
+    agent_publish_system_status(w, heap);
+    free(heap);
+}
+
 static int agent_web_confirm(void *privdata, const char *message,
                              char *err, size_t err_len) {
     agent_worker *w = privdata;
@@ -6428,6 +6448,7 @@ static char *agent_tool_google_search(agent_worker *w, const agent_tool_call *ca
     const char *query = agent_tool_arg_value(call, "query");
     if (!query || !query[0]) return xstrdup("Tool error: google_search requires query\n");
     char err[256] = {0};
+    agent_publishf_system_status(w, "Searching Google for %s...", query);
     char *md = ds4_web_google_search(w->web, query, err, sizeof(err));
     if (!md) {
         agent_buf b = {0};
@@ -6443,6 +6464,7 @@ static char *agent_tool_visit_page(agent_worker *w, const agent_tool_call *call)
     const char *url = agent_tool_arg_value(call, "url");
     if (!url || !url[0]) return xstrdup("Tool error: visit_page requires url\n");
     char err[256] = {0};
+    agent_publishf_system_status(w, "Opening page %s...", url);
     char *md = ds4_web_visit_page(w->web, url, err, sizeof(err));
     if (!md) {
         agent_buf b = {0};
