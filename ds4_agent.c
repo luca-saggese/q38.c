@@ -85,6 +85,7 @@ typedef struct {
     unsigned prefill_label;
     int generated;
     double gen_tps;
+    bool greedy_sampling;
     int ctx_used;
     int ctx_size;
     int power_percent;
@@ -1114,6 +1115,8 @@ static bool worker_is_idle(agent_worker *w);
 static void agent_set_status(agent_worker *w, agent_worker_state state) {
     pthread_mutex_lock(&w->mu);
     w->status.state = state;
+    if (state != AGENT_WORKER_GENERATING)
+        w->status.greedy_sampling = false;
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
 }
@@ -1121,6 +1124,7 @@ static void agent_set_status(agent_worker *w, agent_worker_state state) {
 static void agent_set_error(agent_worker *w, const char *msg) {
     pthread_mutex_lock(&w->mu);
     w->status.state = AGENT_WORKER_ERROR;
+    w->status.greedy_sampling = false;
     snprintf(w->status.error, sizeof(w->status.error), "%s", msg ? msg : "unknown error");
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
@@ -4193,6 +4197,7 @@ static bool agent_worker_reset_to_sysprompt(agent_worker *w, char *err, size_t e
     w->status.prefill_total = 0;
     w->status.generated = 0;
     w->status.gen_tps = 0.0;
+    w->status.greedy_sampling = false;
     w->status.error[0] = '\0';
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
@@ -5336,6 +5341,7 @@ static bool agent_worker_switch_session(agent_worker *w, const char *prefix,
         w->status.state = AGENT_WORKER_IDLE;
         w->status.ctx_used = w->transcript.len;
         w->status.ctx_size = w->cfg->gen.ctx_size;
+        w->status.greedy_sampling = false;
         w->status.error[0] = '\0';
         agent_wake_locked(w);
         pthread_mutex_unlock(&w->mu);
@@ -7178,6 +7184,7 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
     w->status.prefill_total = 0;
     w->status.generated = 0;
     w->status.gen_tps = 0.0;
+    w->status.greedy_sampling = false;
     agent_wake_locked(w);
     pthread_mutex_unlock(&w->mu);
 
@@ -7254,6 +7261,7 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
         pthread_mutex_lock(&w->mu);
         w->status.generated = i + 1;
         w->status.gen_tps = dt > 0.0 ? (double)(i + 1) / dt : 0.0;
+        w->status.greedy_sampling = false;
         agent_wake_locked(w);
         pthread_mutex_unlock(&w->mu);
     }
@@ -7414,16 +7422,23 @@ static bool agent_stream_wants_greedy_sampling(const agent_stream_renderer *sr) 
     return sr->parser->param_close_prefix;
 }
 
-static int worker_sample_for_stream(agent_worker *w, const agent_config *cfg,
-                                    const agent_stream_renderer *sr,
-                                    uint64_t *rng) {
-    const bool greedy = agent_stream_wants_greedy_sampling(sr);
+static int worker_sample_with_mode(agent_worker *w, const agent_config *cfg,
+                                   bool greedy, uint64_t *rng) {
     return ds4_session_sample(w->session,
                               greedy ? 0.0f : cfg->gen.temperature,
                               0,
                               greedy ? 1.0f : cfg->gen.top_p,
                               greedy ? 0.0f : cfg->gen.min_p,
                               rng);
+}
+
+static void worker_set_greedy_sampling(agent_worker *w, bool greedy) {
+    pthread_mutex_lock(&w->mu);
+    if (w->status.greedy_sampling != greedy) {
+        w->status.greedy_sampling = greedy;
+        agent_wake_locked(w);
+    }
+    pthread_mutex_unlock(&w->mu);
 }
 
 /* Run one user turn until the assistant stops or returns a tool call.  Tool
@@ -7499,6 +7514,7 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         w->status.prefill_label = prefill_label;
         w->status.generated = 0;
         w->status.gen_tps = 0.0;
+        w->status.greedy_sampling = false;
         agent_wake_locked(w);
         pthread_mutex_unlock(&w->mu);
 
@@ -7544,12 +7560,19 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
 
         pthread_mutex_lock(&w->mu);
         w->status.state = AGENT_WORKER_GENERATING;
+        w->status.greedy_sampling = false;
         agent_wake_locked(w);
         pthread_mutex_unlock(&w->mu);
 
+        bool status_greedy_sampling = false;
         while (generated < max_tokens && !worker_should_interrupt(w)) {
             worker_apply_pending_power(w);
-            int token = worker_sample_for_stream(w, cfg, &stream, &rng);
+            bool greedy_sampling = agent_stream_wants_greedy_sampling(&stream);
+            if (greedy_sampling != status_greedy_sampling) {
+                worker_set_greedy_sampling(w, greedy_sampling);
+                status_greedy_sampling = greedy_sampling;
+            }
+            int token = worker_sample_with_mode(w, cfg, greedy_sampling, &rng);
             if (token == ds4_token_eos(w->engine)) break;
 
             size_t text_len = 0;
@@ -7577,6 +7600,12 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
                 }
             }
 
+            greedy_sampling = agent_stream_wants_greedy_sampling(&stream);
+            if (greedy_sampling != status_greedy_sampling) {
+                worker_set_greedy_sampling(w, greedy_sampling);
+                status_greedy_sampling = greedy_sampling;
+            }
+
             if (dsml.state == AGENT_DSML_DONE) {
                 got_tool = true;
                 break;
@@ -7598,6 +7627,7 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
         bool interrupted = worker_should_interrupt(w);
         agent_stream_text(&stream, NULL, 0, true);
         renderer_finish(&renderer);
+        worker_set_greedy_sampling(w, false);
         if (stream.dsml_in_think) {
             got_tool = false;
             malformed_tool = true;
@@ -7900,6 +7930,7 @@ static bool worker_submit(agent_worker *w, const char *text) {
         w->status.prefill_label = agent_next_prefill_label();
         w->status.generated = 0;
         w->status.gen_tps = 0.0;
+        w->status.greedy_sampling = false;
         pthread_cond_signal(&w->cond);
     }
     pthread_mutex_unlock(&w->mu);
@@ -7923,6 +7954,7 @@ static void worker_interrupt(agent_worker *w) {
          w->status.state == AGENT_WORKER_COMPACTING))
     {
         w->status.state = AGENT_WORKER_DRAINING;
+        w->status.greedy_sampling = false;
         agent_wake_locked(w);
     }
     pthread_mutex_unlock(&w->mu);
@@ -8116,8 +8148,9 @@ static void build_status_text(const agent_status *st, char *buf, size_t len) {
         break;
     }
     case AGENT_WORKER_GENERATING:
-        snprintf(buf, len, "ctx %s/%s | generation %d tokens %.1f t/s%s",
-                 used, total_ctx, st->generated, st->gen_tps, power);
+        snprintf(buf, len, "ctx %s/%s | generation %d tokens%s %.1f t/s%s",
+                 used, total_ctx, st->generated,
+                 st->greedy_sampling ? " ❄️" : "", st->gen_tps, power);
         break;
     case AGENT_WORKER_COMPACTING:
         snprintf(buf, len, "ctx %s/%s | COMPACTING summary %d tokens %.1f t/s%s",
@@ -9573,6 +9606,7 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                                prompt, statusline, true);
             pthread_mutex_lock(&worker.mu);
             worker.status.state = AGENT_WORKER_IDLE;
+            worker.status.greedy_sampling = false;
             worker.status.error[0] = '\0';
             pthread_mutex_unlock(&worker.mu);
         }
