@@ -18338,8 +18338,19 @@ static bool metal_graph_eval_token_raw_swa(
     return ok;
 }
 
+static bool metal_graph_streaming_decode_prefill_wide_default(
+        const ds4_weights *weights) {
+    return DS4_MODEL_VARIANT == DS4_VARIANT_FLASH &&
+           weights &&
+           DS4_N_LAYER > 0 &&
+           weights->layer[0].ffn_gate_exps->type == DS4_TENSOR_Q4_K &&
+           weights->layer[0].ffn_up_exps->type == DS4_TENSOR_Q4_K &&
+           weights->layer[0].ffn_down_exps->type == DS4_TENSOR_Q4_K;
+}
+
 static uint32_t metal_graph_streaming_decode_prefill_max_tokens(
-        const ds4_gpu_graph *g) {
+        const ds4_gpu_graph *g,
+        const ds4_weights   *weights) {
     (void)g;
     if (getenv("DS4_METAL_DISABLE_STREAMING_DECODE_PREFILL") != NULL) return 0;
 
@@ -18358,14 +18369,15 @@ static uint32_t metal_graph_streaming_decode_prefill_max_tokens(
         DS4_MODEL_VARIANT != DS4_VARIANT_FLASH) {
         return 0u;
     }
-    return 64u;
+    return metal_graph_streaming_decode_prefill_wide_default(weights) ? 64u : 18u;
 }
 
 static bool metal_graph_use_streaming_decode_prefill(
         const ds4_gpu_graph *g,
+        const ds4_weights   *weights,
         uint32_t             n_tokens) {
     const uint32_t max_tokens =
-        metal_graph_streaming_decode_prefill_max_tokens(g);
+        metal_graph_streaming_decode_prefill_max_tokens(g, weights);
     return g &&
            g->ssd_streaming &&
            !g->quality &&
@@ -18376,6 +18388,7 @@ static bool metal_graph_use_streaming_decode_prefill(
 
 static bool metal_graph_use_streaming_decode_prefill_range(
         const ds4_gpu_graph *g,
+        const ds4_weights   *weights,
         uint32_t             start,
         uint32_t             n_tokens) {
     /*
@@ -18387,7 +18400,7 @@ static bool metal_graph_use_streaming_decode_prefill_range(
         if (getenv("DS4_METAL_DISABLE_STREAMING_COLD_DECODE_PREFILL") != NULL)
             return false;
     }
-    return metal_graph_use_streaming_decode_prefill(g, n_tokens);
+    return metal_graph_use_streaming_decode_prefill(g, weights, n_tokens);
 }
 
 static bool metal_graph_prefill_decode_streaming_range(
@@ -18406,7 +18419,7 @@ static bool metal_graph_prefill_decode_streaming_range(
         ds4_session_cancel_fn  cancel,
         void                  *cancel_ud,
         bool                  *cancelled) {
-    if (!metal_graph_use_streaming_decode_prefill(g, n_tokens)) return false;
+    if (!metal_graph_use_streaming_decode_prefill(g, weights, n_tokens)) return false;
     if (!prompt || start > (uint32_t)prompt->len ||
         n_tokens > (uint32_t)prompt->len - start) return false;
 
@@ -19628,7 +19641,8 @@ static bool metal_graph_prefill_raw_swa(
         bool                  *cancelled) {
     if (n_tokens <= 0 || n_tokens > prompt->len) return false;
     if ((uint32_t)n_tokens > g->prefill_cap) return false;
-    if (metal_graph_use_streaming_decode_prefill_range(g, 0, (uint32_t)n_tokens)) {
+    if (metal_graph_use_streaming_decode_prefill_range(g, weights, 0,
+                                                       (uint32_t)n_tokens)) {
         return metal_graph_prefill_decode_streaming_range(g,
                                                           model,
                                                           weights,
@@ -19695,7 +19709,8 @@ static bool metal_graph_prefill_chunked_range(
     if (start > (uint32_t)prompt->len) return false;
     if (n_tokens > (uint32_t)prompt->len - start) return false;
     if (!imatrix &&
-        metal_graph_use_streaming_decode_prefill_range(g, start, n_tokens)) {
+        metal_graph_use_streaming_decode_prefill_range(g, weights,
+                                                       start, n_tokens)) {
         return metal_graph_prefill_decode_streaming_range(g,
                                                           model,
                                                           weights,
