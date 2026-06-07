@@ -4201,6 +4201,27 @@ static DS4_MAYBE_UNUSED bool weights_model_map_decode_static_spans(
     return model_map_span_vec_finish(spans);
 }
 
+static DS4_MAYBE_UNUSED bool weights_model_map_decode_static_slice_spans(
+        const ds4_weights *w,
+        uint32_t layer_start,
+        uint32_t layer_end,
+        bool include_token,
+        bool include_output,
+        ds4_model_map_span_vec *spans) {
+    if (!w || !spans) return false;
+    if (layer_start >= DS4_N_LAYER) return false;
+    if (layer_end == UINT32_MAX) layer_end = DS4_N_LAYER - 1u;
+    if (layer_end >= DS4_N_LAYER || layer_end < layer_start) return false;
+
+    memset(spans, 0, sizeof(*spans));
+    if (include_token) model_map_span_vec_include_one(spans, w->token_embd);
+    for (uint32_t il = layer_start; il <= layer_end; il++) {
+        model_map_span_vec_include_layer_decode_static(spans, &w->layer[il]);
+    }
+    if (include_output) model_map_span_vec_include_output(spans, w);
+    return model_map_span_vec_finish(spans);
+}
+
 static DS4_MAYBE_UNUSED uint64_t model_map_span_vec_total_bytes(
         const ds4_model_map_span_vec *spans) {
     if (!spans) return 0;
@@ -24101,6 +24122,36 @@ static bool ds4_engine_configure_streaming_auto_cache(ds4_engine *e) {
         return false;
     }
 
+    const uint64_t uncapped_model_target_bytes = plan.model_target_bytes;
+    const uint64_t uncapped_effective_cache_bytes = plan.effective_cache_bytes;
+    const uint32_t uncapped_cache_experts = plan.cache_experts;
+    bool throughput_capped = false;
+    if (DS4_MODEL_VARIANT == DS4_VARIANT_PRO &&
+        recommended <= 128ull * 1024ull * 1024ull * 1024ull) {
+        /*
+         * Work around the current PRO q2 cache-policy bug on 128GB M-series
+         * machines: beyond this point, more resident experts reduce SSD reads
+         * but can still slow decode because the Metal path works over a larger
+         * random shared-buffer set.  Let explicit CLI budgets reproduce and
+         * debug the bug, but keep auto near the measured throughput knee.
+         */
+        const uint64_t cap_bytes = 40ull * 1024ull * 1024ull * 1024ull;
+        const uint32_t cap_experts =
+            ds4_ssd_cache_experts_for_byte_budget(cap_bytes,
+                                                  per_expert_bytes);
+        if (cap_experts != 0 && cap_experts < plan.cache_experts) {
+            plan.cache_experts = cap_experts;
+            plan.effective_cache_bytes =
+                (uint64_t)cap_experts * per_expert_bytes;
+            plan.cache_bytes = plan.effective_cache_bytes;
+            if (non_routed_bytes <= UINT64_MAX - plan.effective_cache_bytes) {
+                plan.model_target_bytes =
+                    non_routed_bytes + plan.effective_cache_bytes;
+            }
+            throughput_capped = true;
+        }
+    }
+
     e->ssd_streaming_cache_experts = plan.cache_experts;
     fprintf(stderr,
             "ds4: Metal SSD streaming auto cache budget\n");
@@ -24108,14 +24159,22 @@ static bool ds4_engine_configure_streaming_auto_cache(ds4_engine *e) {
             "ds4:   Metal recommends %.2f GiB working set\n",
             (double)recommended / 1073741824.0);
     fprintf(stderr,
-            "ds4:   using 80%% total for model + cached experts: %.2f GiB\n",
-            (double)plan.model_target_bytes / 1073741824.0);
+            "ds4:   80%% total model + cached expert target before caps: %.2f GiB\n",
+            (double)uncapped_model_target_bytes / 1073741824.0);
     fprintf(stderr,
             "ds4:   non-routed weights: %.2f GiB\n",
             (double)non_routed_bytes / 1073741824.0);
     fprintf(stderr,
             "ds4:   routed expert size: %.2f MiB\n",
             (double)per_expert_bytes / 1048576.0);
+    if (throughput_capped) {
+        fprintf(stderr,
+                "ds4:   PRO 128GB throughput cap: %u experts (%.2f GiB), uncapped would be %u experts (%.2f GiB)\n",
+                plan.cache_experts,
+                (double)plan.effective_cache_bytes / 1073741824.0,
+                uncapped_cache_experts,
+                (double)uncapped_effective_cache_bytes / 1073741824.0);
+    }
     fprintf(stderr,
             "ds4:   cached expert count: %u (%.2f GiB)\n",
             e->ssd_streaming_cache_experts,
@@ -24393,8 +24452,24 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
         uint64_t *load_sizes = NULL;
         uint32_t load_span_count = 0;
         if (e->ssd_streaming) {
+            const bool map_output = load_slice &&
+                                    (load_output ||
+                                     (load_output_optional &&
+                                      weights_have_output_head(&e->weights)));
             ds4_model_map_span_vec spans;
-            if (!weights_model_map_token_spans(&e->weights, &spans)) {
+            bool spans_ok = false;
+            if (load_slice) {
+                spans_ok = weights_model_map_decode_static_slice_spans(
+                        &e->weights,
+                        load_layer_start,
+                        load_layer_end,
+                        true,
+                        map_output,
+                        &spans);
+            } else {
+                spans_ok = weights_model_map_token_spans(&e->weights, &spans);
+            }
+            if (!spans_ok) {
                 fprintf(stderr, "ds4: invalid SSD streaming initial token embedding map\n");
                 ds4_engine_close(e);
                 *out = NULL;
@@ -24411,11 +24486,29 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
             load_offsets = offsets;
             load_sizes = sizes;
             load_span_count = spans.len;
-            fprintf(stderr,
-                    "ds4: SSD streaming initial %s model map restricted to token embedding (%u spans, %.2f GiB tensor span)\n",
-                    ds4_backend_name(e->backend),
-                    spans.len,
-                    (double)span_bytes / 1073741824.0);
+            if (load_slice) {
+                char load_end[32];
+                if (map_output && load_layer_end == UINT32_MAX) {
+                    snprintf(load_end, sizeof(load_end), "output");
+                } else if (map_output) {
+                    snprintf(load_end, sizeof(load_end), "%u+output", load_layer_end);
+                } else {
+                    snprintf(load_end, sizeof(load_end), "%u", load_layer_end);
+                }
+                fprintf(stderr,
+                        "ds4: SSD streaming initial %s model map restricted to token + non-routed layers %u:%s (%u spans, %.2f GiB tensor span)\n",
+                        ds4_backend_name(e->backend),
+                        load_layer_start,
+                        load_end,
+                        spans.len,
+                        (double)span_bytes / 1073741824.0);
+            } else {
+                fprintf(stderr,
+                        "ds4: SSD streaming initial %s model map restricted to token embedding (%u spans, %.2f GiB tensor span)\n",
+                        ds4_backend_name(e->backend),
+                        spans.len,
+                        (double)span_bytes / 1073741824.0);
+            }
             model_map_ok = ds4_gpu_set_model_map_spans(e->model.map,
                                                         e->model.size,
                                                         load_offsets,

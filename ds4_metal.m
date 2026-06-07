@@ -7298,7 +7298,6 @@ static void ds4_gpu_stream_expert_timing_note_cache_class(
 
 static int ds4_gpu_stream_expert_readahead_enabled(void) {
     return g_ssd_streaming_mode &&
-           getenv("DS4_METAL_ENABLE_STREAMING_EXPERT_READAHEAD") != NULL &&
            getenv("DS4_METAL_DISABLE_STREAMING_EXPERT_READAHEAD") == NULL;
 }
 
