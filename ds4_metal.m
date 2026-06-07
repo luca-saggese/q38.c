@@ -189,6 +189,7 @@ static uint64_t g_stream_expert_cache_bytes;
 static uint64_t g_stream_expert_cache_expert_bytes;
 static uint32_t g_stream_expert_cache_entry_count;
 static uint32_t g_stream_expert_cache_budget_override;
+static uint32_t g_stream_expert_cache_mlock_budget_cap;
 static uint64_t g_stream_expert_cache_hits;
 static uint64_t g_stream_expert_cache_misses;
 static uint64_t g_stream_expert_cache_evictions;
@@ -7199,12 +7200,22 @@ static int ds4_gpu_stream_expert_cache_note_expert_size(
     return 1;
 }
 
-static uint32_t ds4_gpu_stream_expert_cache_configured_budget(void) {
+static uint32_t ds4_gpu_stream_expert_cache_requested_budget(void) {
     if (!g_ssd_streaming_mode) return 0;
     if (g_stream_expert_cache_budget_override != 0) {
         return g_stream_expert_cache_budget_override;
     }
     return 0;
+}
+
+static uint32_t ds4_gpu_stream_expert_cache_configured_budget(void) {
+    uint32_t budget = ds4_gpu_stream_expert_cache_requested_budget();
+    if (budget != 0 &&
+        g_stream_expert_cache_mlock_budget_cap != 0 &&
+        budget > g_stream_expert_cache_mlock_budget_cap) {
+        budget = g_stream_expert_cache_mlock_budget_cap;
+    }
+    return budget;
 }
 
 static uint32_t ds4_gpu_stream_expert_cache_effective_cap(
@@ -7772,7 +7783,7 @@ static void ds4_gpu_stream_expert_cache_warn_mlock_failure(
     g_stream_expert_cache_mlock_warned = 1;
 
     const uint64_t gib = 1024ull * 1024ull * 1024ull;
-    const uint32_t budget = ds4_gpu_stream_expert_cache_configured_budget();
+    const uint32_t budget = ds4_gpu_stream_expert_cache_requested_budget();
     uint64_t requested = 0;
     if (budget != 0 && g_stream_expert_cache_expert_bytes != 0) {
         requested =
@@ -7805,6 +7816,19 @@ static void ds4_gpu_stream_expert_cache_warn_mlock_failure(
             err != 0 ? strerror(err) : "mlock unavailable");
     fprintf(stderr,
             "ds4:   macOS may page unlocked expert buffers, causing poor or unstable speed\n");
+    if (g_stream_expert_cache_mlock_budget_cap != 0 &&
+        g_stream_expert_cache_expert_bytes != 0) {
+        const uint64_t capped_bytes =
+            g_stream_expert_cache_mlock_budget_cap >
+                UINT64_MAX / g_stream_expert_cache_expert_bytes ?
+                    UINT64_MAX :
+                    (uint64_t)g_stream_expert_cache_mlock_budget_cap *
+                        g_stream_expert_cache_expert_bytes;
+        fprintf(stderr,
+                "ds4:   using locked cache cap: %u experts / %.2f GiB\n",
+                g_stream_expert_cache_mlock_budget_cap,
+                ds4_gpu_gib(capped_bytes));
+    }
     if (suggested_gib != 0) {
         fprintf(stderr,
                 "ds4:   try: --ssd-streaming-cache-experts %" PRIu64 "GB\n",
@@ -7812,6 +7836,27 @@ static void ds4_gpu_stream_expert_cache_warn_mlock_failure(
     } else {
         fprintf(stderr,
                 "ds4:   try a smaller --ssd-streaming-cache-experts NGB budget\n");
+    }
+}
+
+static void ds4_gpu_stream_expert_cache_cap_budget_to_locked(void) {
+    uint32_t cap = g_stream_expert_cache_entry_count;
+    const uint64_t gib = 1024ull * 1024ull * 1024ull;
+    uint64_t safe_gib = g_stream_expert_cache_mlock_bytes / gib;
+    if (safe_gib > 1) safe_gib--;
+    if (safe_gib != 0 && g_stream_expert_cache_expert_bytes != 0) {
+        uint64_t safe_bytes =
+            safe_gib > UINT64_MAX / gib ? UINT64_MAX : safe_gib * gib;
+        uint64_t safe_cap64 = safe_bytes / g_stream_expert_cache_expert_bytes;
+        if (safe_cap64 > UINT32_MAX) safe_cap64 = UINT32_MAX;
+        if (safe_cap64 != 0 && safe_cap64 < cap) {
+            cap = (uint32_t)safe_cap64;
+        }
+    }
+    if (cap == 0) return;
+    if (g_stream_expert_cache_mlock_budget_cap == 0 ||
+        cap < g_stream_expert_cache_mlock_budget_cap) {
+        g_stream_expert_cache_mlock_budget_cap = cap;
     }
 }
 
@@ -7856,6 +7901,7 @@ static id<MTLBuffer> ds4_gpu_stream_expert_alloc_buffer(
                 g_stream_expert_cache_mlock_fail_bytes += (uint64_t)n;
             }
             const int err = ptr && n != 0 ? errno : 0;
+            ds4_gpu_stream_expert_cache_cap_budget_to_locked();
             ds4_gpu_stream_expert_cache_warn_mlock_failure((uint64_t)n, err);
             if (getenv("DS4_METAL_STREAMING_EXPERT_BUFFER_MLOCK_PROFILE") != NULL) {
                 fprintf(stderr,
@@ -8013,6 +8059,7 @@ static int ds4_gpu_stream_expert_slab_lock_slot(uint32_t slot) {
         g_stream_expert_cache_mlock_fail_bytes +=
             g_stream_expert_cache_slab_slot_bytes;
     }
+    ds4_gpu_stream_expert_cache_cap_budget_to_locked();
     ds4_gpu_stream_expert_cache_warn_mlock_failure(
             g_stream_expert_cache_slab_slot_bytes,
             errno);
@@ -8042,8 +8089,8 @@ static int ds4_gpu_stream_expert_slab_slot_buffers(
             (uint64_t)NSUIntegerMax) {
         return 0;
     }
-    (void)ds4_gpu_stream_expert_slab_lock_slot(slot);
     id<MTLBuffer> b = g_stream_expert_cache_slabs[slab];
+    if (!ds4_gpu_stream_expert_slab_lock_slot(slot)) return 0;
     *gate_buf = b;
     *up_buf = b;
     *down_buf = b;
@@ -9162,6 +9209,7 @@ static void ds4_gpu_stream_expert_cache_clear_all(int reset_stats) {
         g_stream_expert_cache_mlock_failures = 0;
         g_stream_expert_cache_mlock_ms = 0.0;
         g_stream_expert_cache_mlock_warned = 0;
+        g_stream_expert_cache_mlock_budget_cap = 0;
         g_stream_expert_cache_buffer_allocs = 0;
         g_stream_expert_cache_buffer_reuses = 0;
         g_stream_expert_cache_decode_tokens = 0;
@@ -9460,6 +9508,24 @@ static int ds4_gpu_stream_expert_cache_prepare_load_buffers(
                                                   up_inner,
                                                   down_inner)) {
             return 1;
+        }
+        if (g_stream_expert_cache_mlock_budget_cap != 0) {
+            if (!ds4_gpu_stream_expert_cache_take_reusable(1,
+                                                           protect_layer,
+                                                           protect_ids,
+                                                           n_protect,
+                                                           gate_expert_bytes,
+                                                           down_expert_bytes,
+                                                           &reuse)) {
+                return 0;
+            }
+            *gate_buf = reuse.gate_buffer;
+            *up_buf = reuse.up_buffer;
+            *down_buf = reuse.down_buffer;
+            *gate_inner = reuse.gate_inner;
+            *up_inner = reuse.up_inner;
+            *down_inner = reuse.down_inner;
+            return *gate_buf && *up_buf && *down_buf;
         }
         const uint64_t up_off = gate_expert_bytes;
         const uint64_t down_off = gate_expert_bytes * 2ull;

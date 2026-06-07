@@ -3268,6 +3268,27 @@ static uint32_t ds4_streaming_cache_experts_for_byte_budget(
     return ds4_ssd_cache_experts_for_byte_budget(bytes, per_expert_bytes);
 }
 
+static uint64_t ds4_streaming_manual_cache_safe_bytes(void) {
+#ifdef DS4_NO_GPU
+    return 0;
+#else
+    const uint64_t gib = 1024ull * 1024ull * 1024ull;
+    const uint64_t recommended = ds4_gpu_recommended_working_set_size();
+    if (recommended == 0) return 0;
+
+    /*
+     * Explicit NGB budgets name only the routed expert cache.  Keep that cache
+     * below the full Metal working-set recommendation so non-routed weights,
+     * scratch buffers, KV, and macOS wired-memory overhead do not force expert
+     * slots out of mlock during decode.
+     */
+    uint64_t safe = recommended > UINT64_MAX / 7ull ?
+        UINT64_MAX : (recommended * 7ull) / 10ull;
+    safe = (safe / gib) * gib;
+    return safe;
+#endif
+}
+
 static void tensor_expect_routed_expert(
         const ds4_tensor *t,
         uint32_t          ndim,
@@ -24335,6 +24356,18 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
                  load_output,
                  load_output_optional);
     if (e->ssd_streaming && e->ssd_streaming_cache_bytes != 0) {
+        const uint64_t requested_cache_bytes = e->ssd_streaming_cache_bytes;
+        const uint64_t safe_cache_bytes =
+            ds4_streaming_manual_cache_safe_bytes();
+        if (safe_cache_bytes != 0 &&
+            e->ssd_streaming_cache_bytes > safe_cache_bytes) {
+            e->ssd_streaming_cache_bytes = safe_cache_bytes;
+            fprintf(stderr,
+                    "ds4: Metal SSD streaming cache budget %.2f GiB capped to %.2f GiB "
+                    "to keep expert buffers lockable\n",
+                    (double)requested_cache_bytes / 1073741824.0,
+                    (double)e->ssd_streaming_cache_bytes / 1073741824.0);
+        }
         uint64_t per_expert_bytes = 0;
         const uint32_t budget =
             ds4_streaming_cache_experts_for_byte_budget(
