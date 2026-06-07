@@ -18443,6 +18443,9 @@ static bool metal_graph_prefill_decode_streaming_range(
     if (!metal_graph_use_streaming_decode_prefill(g, weights, n_tokens)) return false;
     if (!prompt || start > (uint32_t)prompt->len ||
         n_tokens > (uint32_t)prompt->len - start) return false;
+    if (start == 0) {
+        ds4_gpu_stream_expert_cache_reset_route_hotness();
+    }
 
     const bool profile = getenv("DS4_METAL_GRAPH_PREFILL_PROFILE") != NULL;
     const double t0 = profile ? now_sec() : 0.0;
@@ -19729,6 +19732,9 @@ static bool metal_graph_prefill_chunked_range(
     if (n_tokens == 0 || g->prefill_cap == 0) return false;
     if (start > (uint32_t)prompt->len) return false;
     if (n_tokens > (uint32_t)prompt->len - start) return false;
+    if (g->ssd_streaming && start == 0) {
+        ds4_gpu_stream_expert_cache_reset_route_hotness();
+    }
     if (!imatrix &&
         metal_graph_use_streaming_decode_prefill_range(g, weights,
                                                        start, n_tokens)) {

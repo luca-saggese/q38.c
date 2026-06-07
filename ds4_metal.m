@@ -8262,6 +8262,14 @@ static void ds4_gpu_stream_expert_cache_decay_route_hotness(void) {
     }
 }
 
+void ds4_gpu_stream_expert_cache_reset_route_hotness(void) {
+    memset(g_stream_expert_cache_route_hotness,
+           0,
+           sizeof(g_stream_expert_cache_route_hotness));
+    g_stream_expert_cache_hotness_decay_token =
+        g_stream_expert_cache_decode_tokens;
+}
+
 static void ds4_gpu_stream_expert_cache_maybe_decay_route_hotness(void) {
     if (g_stream_expert_cache_decode_tokens == 0) return;
     if (g_stream_expert_cache_hotness_decay_token == 0) {

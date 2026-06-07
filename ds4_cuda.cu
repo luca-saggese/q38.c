@@ -1800,6 +1800,9 @@ extern "C" uint32_t ds4_gpu_stream_expert_cache_current_count(void) {
     return 0;
 }
 
+extern "C" void ds4_gpu_stream_expert_cache_reset_route_hotness(void) {
+}
+
 extern "C" uint32_t ds4_gpu_stream_expert_cache_budget_for_expert_size(
         uint64_t gate_expert_bytes,
         uint64_t down_expert_bytes) {

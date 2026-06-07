@@ -61,6 +61,9 @@ void ds4_gpu_set_streaming_expert_cache_budget(uint32_t experts);
 uint64_t ds4_gpu_recommended_working_set_size(void);
 uint32_t ds4_gpu_stream_expert_cache_configured_count(void);
 uint32_t ds4_gpu_stream_expert_cache_current_count(void);
+/* Reset only the prompt-local eviction heuristic.  The resident SSD expert
+ * cache itself is intentionally kept warm across sessions. */
+void ds4_gpu_stream_expert_cache_reset_route_hotness(void);
 uint32_t ds4_gpu_stream_expert_cache_budget_for_expert_size(
         uint64_t gate_expert_bytes,
         uint64_t down_expert_bytes);
