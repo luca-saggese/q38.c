@@ -206,6 +206,7 @@ static int g_stream_expert_cache_mlock_warned;
 static uint64_t g_stream_expert_cache_buffer_allocs;
 static uint64_t g_stream_expert_cache_buffer_reuses;
 static uint64_t g_stream_expert_cache_decode_tokens;
+static uint64_t g_stream_expert_cache_hotness_decay_token;
 static uint64_t g_stream_expert_timing_selected_calls;
 static double g_stream_expert_timing_selected_read_ms;
 static double g_stream_expert_timing_selected_bind_ms;
@@ -365,6 +366,7 @@ enum {
         DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER *
         DS4_METAL_STREAM_EXPERT_CACHE_MAX_EXPERT,
     DS4_METAL_STREAM_EXPERT_CACHE_MAX_SLABS = 256,
+    DS4_METAL_STREAM_EXPERT_HOTNESS_DECAY_TOKENS = 16,
     DS4_METAL_STREAM_EXPERT_VALIDATE_WORDS = 16,
 };
 
@@ -426,6 +428,8 @@ static uint64_t g_stream_expert_cache_layer_last_misses[DS4_METAL_STREAM_EXPERT_
 static uint64_t g_stream_expert_cache_layer_last_evictions[DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER];
 static uint64_t g_stream_expert_cache_layer_last_pread_bytes[DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER];
 static double g_stream_expert_cache_layer_last_pread_ms[DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER];
+static uint32_t
+    g_stream_expert_cache_route_hotness[DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER][DS4_METAL_STREAM_EXPERT_CACHE_MAX_EXPERT];
 static id<MTLBuffer> g_stream_expert_cache_gate_addr_buffers[DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER];
 static id<MTLBuffer> g_stream_expert_cache_up_addr_buffers[DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER];
 static id<MTLBuffer> g_stream_expert_cache_down_addr_buffers[DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER];
@@ -8246,12 +8250,99 @@ static int ds4_gpu_stream_expert_split_ready(void) {
            ds4_gpu_stream_expert_split_min_cached();
 }
 
+static void ds4_gpu_stream_expert_cache_decay_route_hotness(void) {
+    for (uint32_t layer = 0;
+         layer < DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER;
+         layer++) {
+        for (uint32_t expert = 0;
+             expert < DS4_METAL_STREAM_EXPERT_CACHE_MAX_EXPERT;
+             expert++) {
+            g_stream_expert_cache_route_hotness[layer][expert] >>= 1;
+        }
+    }
+}
+
+static void ds4_gpu_stream_expert_cache_maybe_decay_route_hotness(void) {
+    if (g_stream_expert_cache_decode_tokens == 0) return;
+    if (g_stream_expert_cache_hotness_decay_token == 0) {
+        g_stream_expert_cache_hotness_decay_token =
+            g_stream_expert_cache_decode_tokens;
+        return;
+    }
+    while (g_stream_expert_cache_decode_tokens -
+           g_stream_expert_cache_hotness_decay_token >=
+           DS4_METAL_STREAM_EXPERT_HOTNESS_DECAY_TOKENS) {
+        ds4_gpu_stream_expert_cache_decay_route_hotness();
+        g_stream_expert_cache_hotness_decay_token +=
+            DS4_METAL_STREAM_EXPERT_HOTNESS_DECAY_TOKENS;
+    }
+}
+
+static void ds4_gpu_stream_expert_cache_note_route_hotness(
+        uint32_t layer,
+        uint32_t expert,
+        uint32_t amount) {
+    if (layer >= DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER ||
+        expert >= DS4_METAL_STREAM_EXPERT_CACHE_MAX_EXPERT ||
+        amount == 0) {
+        return;
+    }
+    uint32_t *hotness = &g_stream_expert_cache_route_hotness[layer][expert];
+    if (*hotness > UINT32_MAX - amount) {
+        *hotness = UINT32_MAX;
+    } else {
+        *hotness += amount;
+    }
+}
+
+static void ds4_gpu_stream_expert_cache_note_selected_hotness(
+        uint32_t       layer,
+        const int32_t *selected_ids,
+        uint32_t       n_selected) {
+    if (!selected_ids ||
+        layer >= DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER ||
+        n_selected == 0) {
+        return;
+    }
+    ds4_gpu_stream_expert_cache_maybe_decay_route_hotness();
+    for (uint32_t i = 0; i < n_selected; i++) {
+        if (selected_ids[i] < 0 ||
+            selected_ids[i] >=
+                (int32_t)DS4_METAL_STREAM_EXPERT_CACHE_MAX_EXPERT) {
+            continue;
+        }
+        ds4_gpu_stream_expert_cache_note_route_hotness(
+                layer,
+                (uint32_t)selected_ids[i],
+                1);
+    }
+}
+
+static void ds4_gpu_stream_expert_cache_note_frequency_hotness(
+        uint32_t        layer,
+        const uint32_t *frequency,
+        uint32_t        n_total_expert) {
+    if (!frequency || layer >= DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER) {
+        return;
+    }
+    if (n_total_expert > DS4_METAL_STREAM_EXPERT_CACHE_MAX_EXPERT) {
+        n_total_expert = DS4_METAL_STREAM_EXPERT_CACHE_MAX_EXPERT;
+    }
+    ds4_gpu_stream_expert_cache_maybe_decay_route_hotness();
+    for (uint32_t expert = 0; expert < n_total_expert; expert++) {
+        ds4_gpu_stream_expert_cache_note_route_hotness(layer,
+                                                       expert,
+                                                       frequency[expert]);
+    }
+}
+
 static void ds4_gpu_stream_expert_cache_note_token(uint32_t layer_index) {
     if (!g_ssd_streaming_mode || layer_index != 0 ||
         g_stream_expert_cache_decode_tokens == UINT64_MAX) {
         return;
     }
     g_stream_expert_cache_decode_tokens++;
+    ds4_gpu_stream_expert_cache_maybe_decay_route_hotness();
 }
 
 static int ds4_gpu_stream_compact_addr_requested(void) {
@@ -9066,6 +9157,10 @@ static void ds4_gpu_stream_expert_cache_clear_all(int reset_stats) {
         g_stream_expert_cache_buffer_allocs = 0;
         g_stream_expert_cache_buffer_reuses = 0;
         g_stream_expert_cache_decode_tokens = 0;
+        g_stream_expert_cache_hotness_decay_token = 0;
+        memset(g_stream_expert_cache_route_hotness,
+               0,
+               sizeof(g_stream_expert_cache_route_hotness));
         g_stream_expert_timing_selected_calls = 0;
         g_stream_expert_timing_selected_read_ms = 0.0;
         g_stream_expert_timing_selected_bind_ms = 0.0;
@@ -9134,9 +9229,14 @@ static void ds4_gpu_stream_expert_cache_prune_layer(
                                                              n_selected);
     if (cap == 0) return;
 
+    /*
+     * Route hotness counts selected experts even when they miss.  Hit-count
+     * LFU penalizes experts that are repeatedly selected but evicted before a
+     * second hit, which keeps too many decode layers in the mixed-cache path.
+     */
     while (g_stream_expert_cache_layer_count[layer] > cap) {
         uint32_t victim = UINT32_MAX;
-        uint64_t lowest_use_count = UINT64_MAX;
+        uint32_t lowest_hotness = UINT32_MAX;
         uint64_t oldest = UINT64_MAX;
         for (uint32_t expert = 0; expert < n_total_expert; expert++) {
             ds4_gpu_stream_expert_cache_entry *e =
@@ -9145,9 +9245,11 @@ static void ds4_gpu_stream_expert_cache_prune_layer(
                 ds4_gpu_stream_expert_cache_is_protected(expert, protect_ids, n_protect)) {
                 continue;
             }
-            if (e->use_count < lowest_use_count ||
-                (e->use_count == lowest_use_count && e->last_used < oldest)) {
-                lowest_use_count = e->use_count;
+            const uint32_t hotness =
+                g_stream_expert_cache_route_hotness[layer][expert];
+            if (hotness < lowest_hotness ||
+                (hotness == lowest_hotness && e->last_used < oldest)) {
+                lowest_hotness = hotness;
                 oldest = e->last_used;
                 victim = expert;
             }
@@ -9206,7 +9308,7 @@ static int ds4_gpu_stream_expert_cache_take_reusable(
 
     uint32_t victim_layer = UINT32_MAX;
     uint32_t victim_expert = UINT32_MAX;
-    uint64_t lowest_use_count = UINT64_MAX;
+    uint32_t lowest_hotness = UINT32_MAX;
     uint64_t oldest = UINT64_MAX;
     for (uint32_t layer = 0;
          layer < DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER;
@@ -9226,9 +9328,11 @@ static int ds4_gpu_stream_expert_cache_take_reusable(
                                                             n_protect)) {
                 continue;
             }
-            if (e->use_count < lowest_use_count ||
-                (e->use_count == lowest_use_count && e->last_used < oldest)) {
-                lowest_use_count = e->use_count;
+            const uint32_t hotness =
+                g_stream_expert_cache_route_hotness[layer][expert];
+            if (hotness < lowest_hotness ||
+                (hotness == lowest_hotness && e->last_used < oldest)) {
+                lowest_hotness = hotness;
                 oldest = e->last_used;
                 victim_layer = layer;
                 victim_expert = expert;
@@ -9384,7 +9488,7 @@ static void ds4_gpu_stream_expert_cache_prune_global(
     while (g_stream_expert_cache_entry_count > budget) {
         uint32_t victim_layer = UINT32_MAX;
         uint32_t victim_expert = UINT32_MAX;
-        uint64_t lowest_use_count = UINT64_MAX;
+        uint32_t lowest_hotness = UINT32_MAX;
         uint64_t oldest = UINT64_MAX;
         for (uint32_t layer = 0;
              layer < DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER;
@@ -9402,9 +9506,11 @@ static void ds4_gpu_stream_expert_cache_prune_global(
                                                                 n_protect)) {
                     continue;
                 }
-                if (e->use_count < lowest_use_count ||
-                    (e->use_count == lowest_use_count && e->last_used < oldest)) {
-                    lowest_use_count = e->use_count;
+                const uint32_t hotness =
+                    g_stream_expert_cache_route_hotness[layer][expert];
+                if (hotness < lowest_hotness ||
+                    (hotness == lowest_hotness && e->last_used < oldest)) {
+                    lowest_hotness = hotness;
                     oldest = e->last_used;
                     victim_layer = layer;
                     victim_expert = expert;
@@ -10479,6 +10585,11 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
         }
     }
     if (ok) {
+        ds4_gpu_stream_expert_cache_note_frequency_hotness(layer,
+                                                           frequency,
+                                                           n_total_expert);
+    }
+    if (ok) {
         const uint32_t cache_budget =
             ds4_gpu_stream_expert_cache_configured_budget();
         if (cache_budget != 0 && unique_count > cache_budget) {
@@ -10626,6 +10737,9 @@ int ds4_gpu_stream_expert_cache_seed_selected(
     }
     if (!g_initialized && !ds4_gpu_init()) return 0;
 
+    ds4_gpu_stream_expert_cache_note_selected_hotness(layer,
+                                                      selected_ids,
+                                                      n_selected);
     for (uint32_t i = 0; i < n_selected; i++) {
         if (selected_ids[i] < 0 || (uint32_t)selected_ids[i] >= n_total_expert) {
             fprintf(stderr,
@@ -10702,6 +10816,7 @@ int ds4_gpu_stream_expert_cache_seed_experts(
     }
     if (!g_initialized && !ds4_gpu_init()) return 0;
 
+    ds4_gpu_stream_expert_cache_maybe_decay_route_hotness();
     uint32_t remaining = n_experts;
     while (remaining != 0) {
         const uint32_t batch =
@@ -10743,6 +10858,10 @@ int ds4_gpu_stream_expert_cache_seed_experts(
                 return 0;
             }
 
+            ds4_gpu_stream_expert_cache_note_route_hotness(
+                    layer,
+                    (uint32_t)expert,
+                    priority != 0 ? priority : 1u);
             selected_ids[i] = expert;
             gate_abs_offsets[i] = gate_offset + gate_rel;
             up_abs_offsets[i] = up_offset + gate_rel;
@@ -22389,6 +22508,9 @@ int ds4_gpu_routed_moe_one_tensor(
                         return 0;
                     }
                 }
+                ds4_gpu_stream_expert_cache_note_selected_hotness(layer_index,
+                                                                  selected_ids,
+                                                                  n_expert);
                 if (!ds4_gpu_moe_selected_trace_record(selected_ids, n_expert) ||
                     !ds4_gpu_moe_selected_hotlist_record(layer_index,
                                                          selected_ids,
