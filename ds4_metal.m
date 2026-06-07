@@ -23505,8 +23505,9 @@ int ds4_gpu_routed_moe_batch_tensor(
         n_tokens == 1 &&
         n_expert == 6 &&
         n_total_expert >= 128 &&
-        gate_tensor_bytes >= q4_selected_min_tensor_bytes &&
-        down_tensor_bytes >= q4_selected_min_tensor_bytes &&
+        (g_ssd_streaming_mode ||
+         (gate_tensor_bytes >= q4_selected_min_tensor_bytes &&
+          down_tensor_bytes >= q4_selected_min_tensor_bytes)) &&
         !g_quality_mode &&
         getenv("DS4_METAL_MOE_WRITE_CLAMPED_ACT") == NULL &&
         getenv("DS4_METAL_DISABLE_ROUTED_PAIR_SWIGLU_FUSION") == NULL &&

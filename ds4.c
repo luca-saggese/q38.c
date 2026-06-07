@@ -13242,8 +13242,9 @@ static bool metal_graph_decode_q4_selected_slots_expected(
            layer->ffn_down_exps->type == DS4_TENSOR_Q4_K &&
            DS4_N_EXPERT_USED == 6 &&
            DS4_N_EXPERT >= 128 &&
-           gate_tensor_bytes >= q4_selected_min_tensor_bytes &&
-           down_tensor_bytes >= q4_selected_min_tensor_bytes &&
+           (g->ssd_streaming ||
+            (gate_tensor_bytes >= q4_selected_min_tensor_bytes &&
+             down_tensor_bytes >= q4_selected_min_tensor_bytes)) &&
            getenv("DS4_METAL_MOE_WRITE_CLAMPED_ACT") == NULL &&
            getenv("DS4_METAL_DISABLE_ROUTED_PAIR_SWIGLU_FUSION") == NULL &&
            getenv("DS4_METAL_DISABLE_Q4_SELECTED_EXPERT_VIEWS") == NULL;
@@ -18357,7 +18358,7 @@ static uint32_t metal_graph_streaming_decode_prefill_max_tokens(
         DS4_MODEL_VARIANT != DS4_VARIANT_FLASH) {
         return 0u;
     }
-    return 18u;
+    return 64u;
 }
 
 static bool metal_graph_use_streaming_decode_prefill(
