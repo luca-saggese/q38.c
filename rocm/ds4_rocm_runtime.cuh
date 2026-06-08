@@ -43,6 +43,12 @@ struct cuda_model_arena {
     uint64_t used;
 };
 
+struct cuda_model_image {
+    const void *host_base;
+    uint64_t size;
+    char *device_ptr;
+};
+
 struct cuda_q8_f16_range {
     const void *host_base;
     uint64_t offset;
@@ -63,6 +69,7 @@ struct cuda_q8_f16_transpose_range {
 
 static std::vector<cuda_model_range> g_model_ranges;
 static std::vector<cuda_model_arena> g_model_arenas;
+static std::vector<cuda_model_image> g_model_images;
 static std::unordered_map<uint64_t, size_t> g_model_range_by_offset;
 static std::vector<cuda_q8_f16_range> g_q8_f16_ranges;
 static std::unordered_map<uint64_t, size_t> g_q8_f16_by_offset;
@@ -190,7 +197,42 @@ static int cuda_attention_score_buffer_fits(uint32_t n_comp) {
     return n_comp <= DS4_ROCM_ATTENTION_SCORE_CAP - DS4_ROCM_ATTENTION_RAW_SCORE_CAP;
 }
 
+static int cuda_model_image_find(const void *model_map) {
+    if (!model_map) return -1;
+    for (size_t i = 0; i < g_model_images.size(); i++) {
+        if (g_model_images[i].host_base == model_map) return (int)i;
+    }
+    return -1;
+}
+
+static const char *cuda_model_image_ptr(const void *model_map, uint64_t offset) {
+    const int idx = cuda_model_image_find(model_map);
+    if (idx < 0) return NULL;
+    const cuda_model_image &img = g_model_images[(size_t)idx];
+    if (offset > img.size) return NULL;
+    return img.device_ptr + offset;
+}
+
+static int cuda_model_image_owned(const void *model_map) {
+    return cuda_model_image_find(model_map) >= 0;
+}
+
+static uint64_t cuda_model_image_bytes(void) {
+    uint64_t bytes = 0;
+    for (const cuda_model_image &img : g_model_images) bytes += img.size;
+    return bytes;
+}
+
+static void cuda_model_image_release_all(void) {
+    for (const cuda_model_image &img : g_model_images) {
+        if (img.device_ptr) (void)cudaFree(img.device_ptr);
+    }
+    g_model_images.clear();
+}
+
 static const char *cuda_model_ptr(const void *model_map, uint64_t offset) {
+    const char *owned = cuda_model_image_ptr(model_map, offset);
+    if (owned) return owned;
     if (model_map == g_model_host_base && g_model_device_base) return g_model_device_base + offset;
     return (const char *)model_map + offset;
 }
@@ -224,7 +266,7 @@ static const char *cuda_model_range_copy_uncached(
 
 static const char *cuda_model_range_ptr(const void *model_map, uint64_t offset, uint64_t bytes, const char *what) {
     if (bytes == 0) return cuda_model_ptr(model_map, offset);
-    if (g_model_device_owned) return cuda_model_ptr(model_map, offset);
+    if (cuda_model_image_owned(model_map)) return cuda_model_ptr(model_map, offset);
 
     if (model_map != g_model_host_base) {
         return cuda_model_range_copy_uncached(model_map, offset, bytes, what);
@@ -315,7 +357,7 @@ static const char *cuda_model_range_ptr(const void *model_map, uint64_t offset, 
 
 static int cuda_model_range_is_cached(const void *model_map, uint64_t offset, uint64_t bytes) {
     if (bytes == 0) return 1;
-    if (g_model_device_owned) return 1;
+    if (cuda_model_image_owned(model_map)) return 1;
 
     const uint64_t end = offset + bytes;
     if (end < offset) return 0;
@@ -561,6 +603,13 @@ static const __half *cuda_q8_f16_ptr(
             return r.device_ptr;
         }
     }
+    for (const cuda_q8_f16_range &r : g_q8_f16_ranges) {
+        if (r.host_base == model_map && r.offset == offset &&
+            r.weight_bytes == weight_bytes &&
+            r.in_dim == in_dim && r.out_dim == out_dim) {
+            return r.device_ptr;
+        }
+    }
     if (!cuda_q8_f16_cache_allowed(label, in_dim, out_dim)) return NULL;
 
     const char *q8 = cuda_model_range_ptr(model_map, offset, weight_bytes, "q8_0");
@@ -608,6 +657,13 @@ static const __half *cuda_q8_f16_transpose_ptr(
     if (exact != g_q8_f16_transpose_by_offset.end()) {
         const cuda_q8_f16_transpose_range &r = g_q8_f16_transpose_ranges[exact->second];
         if (r.host_base == model_map && r.weight_bytes == weight_bytes &&
+            r.in_dim == in_dim && r.out_dim == out_dim) {
+            return r.device_ptr;
+        }
+    }
+    for (const cuda_q8_f16_transpose_range &r : g_q8_f16_transpose_ranges) {
+        if (r.host_base == model_map && r.offset == offset &&
+            r.weight_bytes == weight_bytes &&
             r.in_dim == in_dim && r.out_dim == out_dim) {
             return r.device_ptr;
         }
@@ -1087,7 +1143,13 @@ static const char *cuda_model_range_ptr_from_fd(
 
 static int cuda_model_copy_chunked(const void *model_map, uint64_t model_size, uint64_t map_offset, uint64_t map_size) {
     if (!model_map || model_size == 0 || map_offset > model_size || map_size > model_size - map_offset) return 0;
-    if (g_model_device_owned) return 1;
+    if (cuda_model_image_owned(model_map)) {
+        g_model_host_base = model_map;
+        g_model_device_base = cuda_model_image_ptr(model_map, 0);
+        g_model_registered_size = model_size;
+        g_model_device_owned = 1;
+        return 1;
+    }
 
     void *dev = NULL;
     const double t0 = cuda_wall_sec();
@@ -1159,7 +1221,10 @@ static int cuda_model_copy_chunked(const void *model_map, uint64_t model_size, u
         (void)cudaGetLastError();
         return 0;
     }
+    g_model_images.push_back({model_map, model_size, (char *)dev});
+    g_model_host_base = model_map;
     g_model_device_base = (const char *)dev;
+    g_model_registered_size = model_size;
     g_model_device_owned = 1;
     const double t1 = cuda_wall_sec();
     fprintf(stderr,
@@ -1261,9 +1326,7 @@ extern "C" void ds4_gpu_cleanup(void) {
         (void)cudaStreamDestroy(g_model_upload_stream);
         g_model_upload_stream = NULL;
     }
-    if (g_model_device_owned && g_model_device_base) {
-        (void)cudaFree((void *)g_model_device_base);
-    }
+    cuda_model_image_release_all();
     g_model_host_base = NULL;
     g_model_device_base = NULL;
     g_model_registered_size = 0;
@@ -1415,13 +1478,12 @@ extern "C" int ds4_gpu_set_model_map(const void *model_map, uint64_t model_size)
     cuda_q8_f16_cache_release_all();
     g_q8_f16_disabled_after_oom = 0;
     g_q8_f16_budget_notice_printed = 0;
-    if (g_model_device_owned && g_model_device_base) {
-        (void)cudaFree((void *)g_model_device_base);
-        g_model_device_owned = 0;
-    }
     g_model_host_base = model_map;
-    g_model_device_base = (const char *)model_map;
+    g_model_device_base = cuda_model_image_owned(model_map) ?
+                          cuda_model_image_ptr(model_map, 0) :
+                          (const char *)model_map;
     g_model_registered_size = model_size;
+    g_model_device_owned = cuda_model_image_owned(model_map);
     g_model_range_mapping_supported = 1;
     g_model_cache_full = 0;
     if (g_model_fd >= 0 && g_model_fd_host_base == NULL) {
@@ -1544,7 +1606,7 @@ extern "C" void ds4_gpu_print_memory_report(const char *label) {
         return;
     }
     const uint64_t used_b = (uint64_t)total_b - (uint64_t)free_b;
-    const char *placement = g_model_device_owned ? "device_copy" : "mapped/range_cache";
+    const char *placement = cuda_model_image_bytes() ? "device_copy" : "mapped/range_cache";
     fprintf(stderr,
             DS4_GPU_LOG_PREFIX "memory %s: used=%.2f GiB free=%.2f GiB total=%.2f GiB "
             "placement=%s model_image=%.2f GiB range_cache=%.2f GiB "
@@ -1554,7 +1616,7 @@ extern "C" void ds4_gpu_print_memory_report(const char *label) {
             (double)free_b / 1073741824.0,
             (double)total_b / 1073741824.0,
             placement,
-            g_model_device_owned ? (double)g_model_registered_size / 1073741824.0 : 0.0,
+            (double)cuda_model_image_bytes() / 1073741824.0,
             (double)g_model_range_bytes / 1073741824.0,
             (double)g_q8_f16_bytes / 1073741824.0,
             (double)g_cuda_tmp_bytes / 1073741824.0);
