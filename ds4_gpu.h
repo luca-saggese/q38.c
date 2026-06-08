@@ -209,6 +209,14 @@ int ds4_gpu_matmul_q8_0_tensor(
         const ds4_gpu_tensor *x,
         uint64_t                n_tok);
 
+/* Optional fused GPU operations.
+ *
+ * These are acceleration hooks, not required backend primitives.  A backend
+ * that does not provide the fused kernel must still define the symbol and
+ * return 0.  Callers then use the portable sequence of required primitives.
+ * Backends that return nonzero from a fused half-output operation must also
+ * implement the matching half-input HC expansion helpers below.
+ */
 int ds4_gpu_matmul_q8_0_pair_tensor(
         ds4_gpu_tensor       *out0,
         ds4_gpu_tensor       *out1,
