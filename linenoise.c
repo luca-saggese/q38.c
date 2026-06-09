@@ -624,6 +624,35 @@ static void disableRawMode(int fd) {
     }
 }
 
+/* Re-enable raw mode if a child process changed the terminal state.  This is
+ * useful when the application spawns external processes that may reset the
+ * terminal to cooked mode.  The caller should ensure that no concurrent
+ * linenoise operations are in progress (e.g., not inside a refresh cycle). */
+void linenoiseRestoreRawMode(void) {
+    if (getenv("LINENOISE_ASSUME_TTY")) return;
+    if (!isatty(STDIN_FILENO)) return;
+    struct termios raw;
+    if (tcgetattr(STDIN_FILENO, &raw) == -1) return;
+    /* If we are already in raw mode, the current attributes are the raw-mode
+     * settings we set earlier.  Do NOT overwrite orig_termios with them;
+     * orig_termios must remain the original cooked-mode state so that
+     * disableRawMode() can restore it later.  If rawmode is 0, a child
+     * process changed the terminal to cooked mode, so we save the current
+     * (cooked) state as the new orig_termios before applying raw mode. */
+    if (!rawmode) {
+        orig_termios = raw;
+    }
+    raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw.c_oflag &= ~(OPOST);
+    raw.c_cflag |= (CS8);
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw.c_cc[VMIN] = 1; raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    rawmode = 1;
+    /* Re-enable bracketed paste mode. */
+    if (write(rawmode_output, "\x1b[?2004h", 8) == -1) {}
+}
+
 /* Use the ESC [6n escape sequence to query the horizontal cursor position
  * and return it. On error -1 is returned, on success the position of the
  * cursor. */
