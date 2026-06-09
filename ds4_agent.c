@@ -9465,7 +9465,17 @@ static bool agent_prompt_yes_no_ex(const char *prompt,
             }
             if (rc < 0) return false;
         }
-        if (!fgets(buf, sizeof(buf), stdin)) return false;
+        /* stdin may be in non-blocking mode (set by editor_start).
+         * Temporarily switch to blocking so fgets can wait for input. */
+        int saved_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+        if (saved_flags >= 0 && (saved_flags & O_NONBLOCK)) {
+            fcntl(STDIN_FILENO, F_SETFL, saved_flags & ~O_NONBLOCK);
+        }
+        bool got_line = fgets(buf, sizeof(buf), stdin) != NULL;
+        if (saved_flags >= 0 && (saved_flags & O_NONBLOCK)) {
+            fcntl(STDIN_FILENO, F_SETFL, saved_flags);
+        }
+        if (!got_line) return false;
         char *p = buf;
         while (*p == ' ' || *p == '\t') p++;
         if (*p == 'y' || *p == 'Y') return true;
@@ -9963,7 +9973,11 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                 } else if (cmd[0] == '/' && busy) {
                     printf("command requires the model to be idle: %s\n", cmd);
                 } else if (!strcmp(cmd, "/quit") || !strcmp(cmd, "/exit")) {
-                    editor_restore_terminal_layout(&editor);
+                    /* Stop the editor so raw mode and non-blocking stdin are
+                     * disabled before we prompt the user.  If we exit, the
+                     * terminal is already restored.  If the user cancels, we
+                     * restart the editor below. */
+                    editor_stop(&editor);
                     agent_exit_save_result exit_save =
                         agent_maybe_save_before_exiting(&worker);
                     if (exit_save == AGENT_EXIT_NOW) {
@@ -9971,6 +9985,10 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                     } else if (exit_save == AGENT_EXIT_CLEAN) {
                         exit_save_handled = true;
                         running = false;
+                    } else {
+                        /* AGENT_EXIT_CANCEL: user declined to proceed after a
+                         * save failure.  Reopen the editor and continue. */
+                        editor_start(&editor, prompt, statusline, NULL);
                     }
                 } else if (!strcmp(cmd, "/new")) {
                     editor_restore_terminal_layout(&editor);

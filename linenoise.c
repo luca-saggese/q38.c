@@ -631,11 +631,17 @@ static void disableRawMode(int fd) {
 void linenoiseRestoreRawMode(void) {
     if (getenv("LINENOISE_ASSUME_TTY")) return;
     if (!isatty(STDIN_FILENO)) return;
-    /* Re-fetch the original terminal attributes (they may have been changed
-     * by a child process) and re-apply raw mode. */
     struct termios raw;
-    if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) return;
-    raw = orig_termios;
+    if (tcgetattr(STDIN_FILENO, &raw) == -1) return;
+    /* If we are already in raw mode, the current attributes are the raw-mode
+     * settings we set earlier.  Do NOT overwrite orig_termios with them;
+     * orig_termios must remain the original cooked-mode state so that
+     * disableRawMode() can restore it later.  If rawmode is 0, a child
+     * process changed the terminal to cooked mode, so we save the current
+     * (cooked) state as the new orig_termios before applying raw mode. */
+    if (!rawmode) {
+        orig_termios = raw;
+    }
     raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
     raw.c_oflag &= ~(OPOST);
     raw.c_cflag |= (CS8);
