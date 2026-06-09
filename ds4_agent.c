@@ -6662,6 +6662,13 @@ static void agent_bash_drain(agent_bash_job *job) {
     }
 }
 
+static void agent_worker_note_terminal_mode_may_have_changed(agent_worker *w) {
+    if (!w) return;
+    pthread_mutex_lock(&w->mu);
+    w->raw_mode_needs_restore = true;
+    pthread_mutex_unlock(&w->mu);
+}
+
 static void agent_bash_finalize(agent_bash_job *job, int status) {
     agent_bash_drain(job);
     if (job->pipe_fd >= 0) {
@@ -6676,13 +6683,10 @@ static void agent_bash_finalize(agent_bash_job *job, int status) {
     else if (WIFSIGNALED(status)) job->exit_status = 128 + WTERMSIG(status);
     else job->exit_status = -1;
     job->running = false;
-    /* A child process (especially sh) may have changed the terminal mode
-     * from raw to cooked.  Notify the UI thread to restore raw mode. */
-    if (job->worker) {
-        pthread_mutex_lock(&job->worker->mu);
-        job->worker->raw_mode_needs_restore = true;
-        pthread_mutex_unlock(&job->worker->mu);
-    }
+    /* A child can still open /dev/tty directly and alter terminal state even
+     * though its stdin is /dev/null.  Ask the UI thread to verify raw mode at
+     * a safe point instead of touching linenoise from the worker path. */
+    agent_worker_note_terminal_mode_may_have_changed(job->worker);
 }
 
 /* Drain available output, notice process exit, and enforce timeout.  This is
@@ -6709,6 +6713,7 @@ static void agent_bash_poll(agent_bash_job *job) {
             close(job->tmp_fd);
             job->tmp_fd = -1;
         }
+        agent_worker_note_terminal_mode_may_have_changed(job->worker);
         return;
     }
     if (now_sec() - job->start_time >= job->timeout_sec) {
@@ -6750,16 +6755,17 @@ static agent_bash_job *agent_bash_start(agent_worker *w, const char *cmd,
     if (pid == 0) {
         setpgid(0, 0);
         close(tmpfd);
-        /* Redirect stdin to /dev/null so the shell does not attempt to
-         * change the terminal mode (cooked/raw) on the controlling
-         * terminal.  If the shell sets cooked mode while linenoise has
-         * raw mode active, the terminal becomes unresponsive to user
-         * input until the process exits and linenoise re-enables raw
-         * mode. */
+        /* The bash tool is not interactive.  Give the shell /dev/null as
+         * stdin so it does not inherit the live linenoise terminal and reset
+         * it from raw mode to cooked mode behind the agent's back. */
         int null_fd = open("/dev/null", O_RDONLY);
         if (null_fd >= 0) {
-            dup2(null_fd, STDIN_FILENO);
-            close(null_fd);
+            if (dup2(null_fd, STDIN_FILENO) < 0)
+                close(STDIN_FILENO);
+            if (null_fd != STDIN_FILENO)
+                close(null_fd);
+        } else {
+            close(STDIN_FILENO);
         }
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
@@ -8052,7 +8058,7 @@ static int set_nonblock(int fd, bool on, int *old_flags) {
 }
 
 /* Check and clear the raw_mode_needs_restore flag under the worker mutex.
- * Returns true if the UI thread should call linenoiseRestoreRawMode(). */
+ * Returns true if the UI thread should verify/reapply linenoise raw mode. */
 static bool worker_check_raw_mode_restore(agent_worker *w) {
     bool needs = false;
     pthread_mutex_lock(&w->mu);
@@ -9974,10 +9980,10 @@ static int run_agent(ds4_engine *engine, agent_config *cfg) {
                     printf("command requires the model to be idle: %s\n", cmd);
                 } else if (!strcmp(cmd, "/quit") || !strcmp(cmd, "/exit")) {
                     /* Stop the editor so raw mode and non-blocking stdin are
-                     * disabled before we prompt the user.  If we exit, the
-                     * terminal is already restored.  If the user cancels, we
-                     * restart the editor below. */
+                     * disabled before we prompt the user.  Then restore the
+                     * ANSI scroll region too; AGENT_EXIT_NOW exits directly. */
                     editor_stop(&editor);
+                    editor_restore_terminal_layout(&editor);
                     agent_exit_save_result exit_save =
                         agent_maybe_save_before_exiting(&worker);
                     if (exit_save == AGENT_EXIT_NOW) {
