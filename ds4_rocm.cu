@@ -142,8 +142,32 @@ extern "C" void ds4_gpu_tp_set_batch_exchange(ds4_gpu_tp_batch_exchange_fn fn) {
     (void)fn;
 }
 
+extern "C" void ds4_gpu_tp_suspend_expert_sharding(int suspend) {
+    (void)suspend;
+}
+
 extern "C" void ds4_gpu_tp_keepalive_pause(int paused) {
     (void)paused;
+}
+
+extern "C" void ds4_gpu_tp_set_attn_head_split(int enabled) {
+    (void)enabled;
+}
+
+extern "C" void ds4_gpu_model_residency_skip(int skip) {
+    (void)skip;
+}
+
+extern "C" void ds4_gpu_tp_set_big_exchange(ds4_gpu_tp_big_exchange_fn fn) {
+    (void)fn;
+}
+
+extern "C" int ds4_gpu_tp_big_gate_encode(uint32_t layer, uint32_t rows,
+                                          const ds4_gpu_tensor *out_t,
+                                          ds4_gpu_tensor *in_t,
+                                          uint64_t bytes) {
+    (void)layer; (void)rows; (void)out_t; (void)in_t; (void)bytes;
+    return 0;
 }
 
 extern "C" int ds4_gpu_tp_batch_gate_encode(uint32_t layer, uint32_t rows) {

@@ -3,6 +3,10 @@ set -e
 
 REPO="antirez/deepseek-v4-gguf"
 DSPARK_REPO="deepseek-ai/DeepSeek-V4-Flash-DSpark"
+DEEPSEEK_REPO="antirez/deepseek-v4-gguf"
+GLM_UNSLOTH_REPO="unsloth/GLM-5.2-GGUF"
+GLM_ANTIREZ_REPO="antirez/GLM-5.2-GGUF"
+REPO=$DEEPSEEK_REPO
 Q2_IMATRIX_FILE="DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf"
 Q4_IMATRIX_FILE="DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix.gguf"
 Q2_Q4_IMATRIX_FILE="DeepSeek-V4-Flash-Layers37-42Q4KExperts-OtherExpertLayersIQ2XXSGateUp-Q2KDown-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-fixed.gguf"
@@ -11,6 +15,12 @@ PRO_Q4_LAYERS00_30_FILE="DeepSeek-V4-Pro-Q4K-Layers00-30.gguf"
 PRO_Q4_LAYERS31_OUTPUT_FILE="DeepSeek-V4-Pro-Q4K-Layers-31-output.gguf"
 MTP_FILE="DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf"
 DSPARK_SUPPORT_FILE="DeepSeek-V4-Flash-DSpark-support.gguf"
+GLM_UNSLOTH_Q4_REMOTE_BASE="UD-Q4_K_XL/GLM-5.2-UD-Q4_K_XL"
+GLM_UNSLOTH_Q4_LOCAL_BASE="GLM-5.2-UD-Q4_K_XL"
+GLM_UNSLOTH_Q4_FIRST_FILE="$GLM_UNSLOTH_Q4_LOCAL_BASE-00001-of-00011.gguf"
+GLM_ANTIREZ_IQ2XXS_FILE="GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K.gguf"
+GLM_ANTIREZ_Q2_FILE="GLM-5.2-UD-Q2_K_RoutedQ2K.gguf"
+GLM_ANTIREZ_Q4_FILE="GLM-5.2-UD-Q4_K_RoutedQ4K.gguf"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 OUT_DIR=${DS4_GGUF_DIR:-"$ROOT/gguf"}
@@ -27,7 +37,7 @@ TOKEN=${HF_TOKEN:-}
 
 usage() {
     cat <<EOF
-DeepSeek V4 GGUF downloader
+DwarfStar GGUF downloader
 
 Usage:
   ./download_model.sh q2-imatrix [--token TOKEN]
@@ -41,6 +51,10 @@ Usage:
   ./download_model.sh dspark-source [--token TOKEN]
   ./download_model.sh dspark-support-dry-run
   ./download_model.sh dspark-support
+  ./download_model.sh glm-unsloth-q4 [--token TOKEN]
+  ./download_model.sh glm-antirez-iq2xxs [--token TOKEN]
+  ./download_model.sh glm-antirez-q2 [--token TOKEN]
+  ./download_model.sh glm-antirez-q4 [--token TOKEN]
 
 Targets:
 
@@ -93,6 +107,21 @@ Targets:
        Converts the local DSpark source checkpoint into a standalone support
        GGUF for ds4 --mtp. Output is written under DS4_GGUF_DIR and is about
        6 GB. Requires the full DSpark source payloads.
+  glm-unsloth-q4
+       GLM 5.2 Unsloth UD-Q4_K_XL quant from unsloth/GLM-5.2-GGUF.
+       Downloads all 11 shards and links ./ds4flash.gguf to the first shard.
+
+  glm-antirez-iq2xxs
+       GLM 5.2 antirez routed IQ2_XXS GGUF from antirez/GLM-5.2-GGUF.
+       Includes Q2_K block 78 and is intended for reduced-memory testing.
+
+  glm-antirez-q2
+       GLM 5.2 antirez routed Q2_K GGUF from antirez/GLM-5.2-GGUF.
+       About 262 GB on disk.
+
+  glm-antirez-q4
+       GLM 5.2 antirez routed Q4_K GGUF from antirez/GLM-5.2-GGUF.
+       About 434 GB on disk.
 
 Options:
   --token TOKEN  Hugging Face token. Otherwise HF_TOKEN or the local HF token
@@ -120,6 +149,9 @@ After building DSpark support, enable it explicitly in greedy mode:
 
 PRO files are downloaded with the official Hugging Face downloader because
 they are too large for the curl path used by the smaller GGUF files.
+PRO and GLM files are downloaded with the official Hugging Face downloader
+because they are too large, sharded, or nested for the curl path used by the
+smaller DeepSeek Flash GGUF files.
 EOF
 }
 
@@ -135,6 +167,8 @@ LINK_MODEL=1
 DSPARK_SOURCE=0
 DSPARK_SUPPORT_DRY_RUN=0
 DSPARK_SUPPORT=0
+FORCE_HF_DOWNLOAD=0
+FLATTEN_DOWNLOADS=0
 
 case "$MODEL" in
     q2-imatrix) MODEL_FILE=$Q2_IMATRIX_FILE ;;
@@ -159,6 +193,30 @@ case "$MODEL" in
     dspark-support)
         DSPARK_SUPPORT=1
         LINK_MODEL=0
+    glm-unsloth-q4)
+        REPO=$GLM_UNSLOTH_REPO
+        MODEL_FILE=$GLM_UNSLOTH_Q4_FIRST_FILE
+        MODEL_FILES=
+        for part in 00001 00002 00003 00004 00005 00006 00007 00008 00009 00010 00011; do
+            MODEL_FILES="$MODEL_FILES $GLM_UNSLOTH_Q4_REMOTE_BASE-${part}-of-00011.gguf"
+        done
+        FORCE_HF_DOWNLOAD=1
+        FLATTEN_DOWNLOADS=1
+        ;;
+    glm-antirez-q2)
+        REPO=$GLM_ANTIREZ_REPO
+        MODEL_FILE=$GLM_ANTIREZ_Q2_FILE
+        FORCE_HF_DOWNLOAD=1
+        ;;
+    glm-antirez-iq2xxs)
+        REPO=$GLM_ANTIREZ_REPO
+        MODEL_FILE=$GLM_ANTIREZ_IQ2XXS_FILE
+        FORCE_HF_DOWNLOAD=1
+        ;;
+    glm-antirez-q4)
+        REPO=$GLM_ANTIREZ_REPO
+        MODEL_FILE=$GLM_ANTIREZ_Q4_FILE
+        FORCE_HF_DOWNLOAD=1
         ;;
     -h|--help|help)
         usage
@@ -195,6 +253,9 @@ if [ -z "$TOKEN" ] && [ -s "$HOME/.cache/huggingface/token" ]; then
 fi
 
 needs_hf_download() {
+    if [ "${FORCE_HF_DOWNLOAD:-0}" -eq 1 ]; then
+        return 0
+    fi
     case "$1" in
         "$PRO_Q2_IMATRIX_FILE"|"$PRO_Q4_LAYERS00_30_FILE"|"$PRO_Q4_LAYERS31_OUTPUT_FILE")
             return 0
@@ -219,12 +280,22 @@ find_hf_command() {
     return 1
 }
 
+local_download_name() {
+    if [ "${FLATTEN_DOWNLOADS:-0}" -eq 1 ]; then
+        basename "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
 download_one_hf() {
     file=$1
-    out="$OUT_DIR/$file"
+    local_file=$(local_download_name "$file")
+    out="$OUT_DIR/$local_file"
+    hf_out="$OUT_DIR/$file"
     part="$out.part"
 
-    mkdir -p "$OUT_DIR"
+    mkdir -p "$(dirname "$out")"
 
     if [ -s "$out" ]; then
         echo "Already downloaded: $out"
@@ -240,7 +311,7 @@ download_one_hf() {
 
     HF_CMD=$(find_hf_command || true)
     if [ -z "$HF_CMD" ]; then
-        echo "PRO downloads require the official Hugging Face CLI." >&2
+        echo "Large GGUF downloads require the official Hugging Face CLI." >&2
         echo "Install it with:" >&2
         echo "  python3 -m pip install -U huggingface_hub hf_xet" >&2
         exit 1
@@ -255,6 +326,11 @@ download_one_hf() {
         "$HF_CMD" download "$REPO" "$file" --repo-type model --local-dir "$OUT_DIR" --token "$TOKEN"
     else
         "$HF_CMD" download "$REPO" "$file" --repo-type model --local-dir "$OUT_DIR"
+    fi
+
+    if [ "$hf_out" != "$out" ] && [ -s "$hf_out" ]; then
+        mv "$hf_out" "$out"
+        rmdir "$(dirname "$hf_out")" 2>/dev/null || true
     fi
 
     if [ ! -s "$out" ]; then
@@ -376,7 +452,8 @@ build_dspark_support() {
 
 download_one() {
     file=$1
-    out="$OUT_DIR/$file"
+    local_file=$(local_download_name "$file")
+    out="$OUT_DIR/$local_file"
     part="$out.part"
     aria2_part="$out.aria2"
     url="https://huggingface.co/$REPO/resolve/main/$file"
@@ -386,7 +463,7 @@ download_one() {
         return
     fi
 
-    mkdir -p "$OUT_DIR"
+    mkdir -p "$(dirname "$out")"
 
     if [ -e "$aria2_part" ]; then
         echo "Found incomplete aria2 download sidecar: $aria2_part" >&2

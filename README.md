@@ -163,6 +163,19 @@ target-only continuation path; set `DS4_DSPARK_STRICT=1` for the same behavior
 without enabling all quality-mode kernels. Plain sampled and non-speculative
 session eval also skips DSpark draft preparation; DSpark speculation is
 currently a greedy argmax-only path.
+GLM 5.2 support is currently limited to the GGUF files tested by this branch:
+
+```sh
+./download_model.sh glm-unsloth-q4  # Unsloth UD-Q4_K_XL, 11 shards
+./download_model.sh glm-antirez-q2  # antirez routed Q2_K single-file GGUF
+./download_model.sh glm-antirez-q4  # antirez routed Q4_K single-file GGUF
+```
+
+The supported GLM layout keeps dense/model-control tensors in the existing
+Q8/F32 paths and supports routed expert gate/up tensors in `Q2_K`, `Q4_K`, or
+`Q5_K`; routed expert down tensors are supported in `Q2_K`, `Q4_K`, `Q5_K`, or
+`Q6_K`. Other GLM GGUF quant layouts should be treated as unsupported until they
+are added deliberately and scored against the official 100-case fixture.
 
 Then build:
 
@@ -231,14 +244,19 @@ more memory for context, set the routed expert cache explicitly:
 ./ds4 -m ./ds4flash.gguf --ssd-streaming --ssd-streaming-cache-experts 32GB
 ```
 
-The `32GB` value is a memory budget for complete routed experts, not a generic
-byte cache. DwarfStar converts it to the number of full experts that fit for the
-current GGUF. Non-routed weights, KV cache, graph scratch, and activations need
-additional memory. Only the automatic cache budget does the subtraction for you:
-it takes 80% of the Metal recommended working set, subtracts non-routed weights,
-then uses the rest for routed experts. Leave the hot expert preload enabled for
-normal use; use `--ssd-streaming-cold` and `--ssd-streaming-preload-experts N`
-only for measurements.
+The `32GB` value is a routed-expert memory budget, not a generic byte cache.
+DwarfStar first reserves headroom for the two full routed layers used by
+overlapped streaming prefill, then converts the remaining bytes to the number of
+dynamic cached experts that fit for the current GGUF. Explicit `NGB` budgets may
+also be capped after context/KV accounting so the Metal working set stays out of
+the slow pressure zone. A plain number such as
+`--ssd-streaming-cache-experts 4000` is different: it means exactly 4000 dynamic
+expert slots, with no extra accounting. Non-routed weights, KV cache, graph
+scratch, and activations need additional memory. The automatic cache budget takes
+80% of the Metal recommended working set, subtracts non-routed weights, then
+applies the same routed-prefill headroom before sizing the dynamic cache. Leave
+the hot expert preload enabled for normal use; use `--ssd-streaming-cold` and
+`--ssd-streaming-preload-experts N` only for measurements.
 
 ### Practical SSD streaming examples
 
@@ -270,15 +288,11 @@ and occasional work when you accept slow generation. Start with `--nothink`:
 
 On an M5 Max with 128GB of RAM, a short PRO q2 streaming decode benchmark found
 the automatic budget best: it selected about `59GB` of routed expert cache.
-Manual `64GB` to `75GB` caches were close on that machine. Larger explicit
-`NGB` requests are capped before inference so the expert buffers remain
-lockable instead of falling into macOS paging. If the system is under extra
-memory pressure and `mlock` still fails, ds4 refuses to install pageable
-expert-cache entries and releases a locked-cache margin before continuing with
-the measured lockable cache size. Prefer the automatic budget; if setting the
-cache manually on this class of machine, start around `48GB` to `64GB`, then
-increase only while the startup log reports a lockable cache. Once the machine
-is stable, re-enable thinking with a conservative generation limit:
+Manual `64GB` to `75GB` caches were close on that machine. Prefer the automatic
+budget; if setting the cache manually on this class of machine, start around
+`48GB` to `64GB`, then increase only while the machine remains responsive and
+the startup log shows the requested dynamic cache. Once the machine is stable,
+re-enable thinking with a conservative generation limit:
 
 ```sh
 ./ds4 \
@@ -508,6 +522,77 @@ agent/server cache file. The protocol has no
 encryption or authentication, and is not release-stable yet; coordinator and
 workers should be built from the same commit and used on trusted machines and
 trusted networks.
+
+## Tensor Parallelism
+
+Tensor parallelism runs a single decode across two Macs connected with a
+Thunderbolt 5 cable, splitting the heavy per-layer work between the two
+GPUs and exchanging 16-24KB partial sums at synchronization gates inside the
+graph (RDMA over Thunderbolt when available, a dedicated TCP socket
+otherwise). Unlike the pipelined distributed mode above, both
+machines work on the *same token at the same time*, so it reduces
+per-token latency instead of just fitting a bigger model.
+
+Each machine keeps one contiguous half of the routed experts resident. Dense,
+attention, shared-expert, embedding, and output weights remain replicated.
+This lets a model whose routed experts do not fit on one machine run fully
+resident across the pair; routed kernels never touch the peer's expert half.
+
+### Running GLM 5.2 across two 128 GB MacBooks
+
+One-time setup per boot, on **both** machines:
+
+```
+# Let the GPU wire ~117 GB (default cap is ~75% of RAM; the resident
+# expert shard needs ~97.5 GiB plus KV/scratch).
+sudo sysctl iogpu.wired_limit_mb=120000
+
+# RDMA over Thunderbolt needs an IPv4 address directly on the cabled
+# member interface (the bridge IP does not count). Use the interface
+# that is 'active' in ifconfig, e.g. en1 on one side and en6 on the
+# other. Skip this if you are fine with the TCP fallback.
+sudo ifconfig en1 inet 10.99.0.2/30 alias     # machine A
+sudo ifconfig en6 inet 10.99.0.1/30 alias     # machine B
+```
+
+Both machines need the same tree, the same commit, and the same GGUF
+path. Start the worker first (machine B, dialing the coordinator's
+Thunderbolt bridge address), then the coordinator (machine A):
+
+```
+# Machine B: worker. Computes its expert half in lockstep; never
+# tokenizes or samples.
+./ds4 -m models/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K-DenseQ4.gguf \
+      --tp-worker 172.31.255.2 9911
+
+# Machine A: coordinator. Owns the prompt, sampling, and output.
+./ds4 -m models/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K-DenseQ4.gguf \
+      -c 8192 --tp-coordinator 9911 -p "Tell me something about the sea."
+```
+
+Startup takes about 9 seconds per machine: each rank pre-faults its
+~100 GiB shard from SSD and pins it through a Metal residency set.
+DeepSeek V4 Flash works the same way with its own GGUF on both machines.
+DeepSeek gate vectors are 16 KB and ride as one RDMA message. GLM's
+6144-wide 24 KB vectors are split into two ordered RDMA messages.
+
+Measured on two M5 Max 128 GB MacBooks (GLM 5.2, IQ2_XXS, 188 GiB):
+
+| | two Macs, tensor parallel | one Mac, SSD streaming |
+|---|---|---|
+| decode | ~16.8 t/s (15.4 at 4k context) | ~4.8 t/s |
+| prefill (4096 tokens) | ~94 t/s | ~3-5 t/s |
+| residency | fully memory-resident | streams experts from SSD |
+
+Notes: the coordinator mirrors every prompt sync and eval to the worker, so
+both KV caches stay in lockstep; prompt processing splits both the
+routed-expert GEMMs (by expert ownership) and the attention heads (a
+contiguous half per machine) with one bulk partial-sum exchange per
+layer per stage (`DS4_GLM_TP_TOKEN_PREFILL=1` selects a slower
+token-by-token prefill that exactly matches the single-machine arithmetic).
+The split graph is deterministic, but its changed floating-point reduction
+order is not generally byte-identical to single-machine execution. Design
+notes and the full bring-up log live in `misc/METAL_TENSOR_PARALLELISM.md`.
 
 ## Reducing heat, power usage and fan noise
 

@@ -10,13 +10,14 @@
 
 /* Tensor-parallel transport and lockstep protocol.
  *
- * Two ranks run the same full model.  Rank 0 (leader) is a normal frontend
- * session that mirrors every ds4_session_sync()/ds4_session_eval() call to
- * rank 1 (worker) over a TCP control socket, so both engines execute the
- * identical graph sequence.  Inside each decoded token, partial block
- * outputs are exchanged at two gates per layer through a registered memory
- * slab: RDMA WRITE + sequence flag when RDMA over Thunderbolt is available,
- * or a full-duplex TCP exchange as fallback.
+ * Two ranks run the same logical model, each with one contiguous half of the
+ * routed experts resident. Rank 0 (leader) is a normal frontend session that
+ * mirrors every ds4_session_sync()/ds4_session_eval() call to rank 1 (worker)
+ * over a TCP control socket, so both engines execute the identical graph
+ * sequence.
+ * Inside each decoded token, partial block outputs are exchanged through a
+ * registered memory slab: two-sided RDMA SEND/RECV when RDMA over
+ * Thunderbolt is available, or a full-duplex TCP exchange as fallback.
  *
  * Layering: ds4.c calls the session-mirroring and slab entry points;
  * ds4_metal.m only ever sees ds4_tp_gate_exchange() through a callback
@@ -43,6 +44,15 @@ typedef struct {
     uint32_t n_vocab;
     uint32_t quant_bits;
     uint32_t ctx_size;
+    /* Decode gate schedule, used to place RDMA recvs into the right slab
+     * slot: slot(seq) = start + ((seq-1) % per_token) * step.
+     * per_token 0 falls back to the identity mapping over all slots
+     * (DS4: every layer fires ATTN then FFN). GLM fires one FFN gate per
+     * sparse layer only, so its schedule skips the dense prefix and the
+     * ATTN slots. Exchanged in the hello; both sides must agree. */
+    uint32_t gate_slot_start;
+    uint32_t gate_slot_step;
+    uint32_t gates_per_token;
 } ds4_tp_identity;
 
 bool ds4_tp_enabled(const ds4_tp_options *opt);
@@ -112,11 +122,16 @@ int ds4_tp_attach_slab(ds4_tp *tp, void *base, char *err, size_t errlen);
  * Called from the GPU gate service thread.  Returns 0 on failure. */
 int ds4_tp_gate_exchange(ds4_tp *tp, uint32_t layer, uint32_t gate, uint64_t seq);
 
-/* Verify-block batch gate: exchange `rows` row partials for one layer in a
- * single symmetric transfer over the TCP data socket (used even when the
- * row gates run RDMA).  Called from the GPU gate service thread. */
+/* Verify-block batch gate: exchange `rows` row partials for one layer in one
+ * bulk RDMA transfer, with a symmetric TCP transfer as fallback. Called from
+ * the GPU gate service thread. */
 int ds4_tp_batch_gate_exchange(ds4_tp *tp, uint32_t layer, uint32_t rows,
                                uint64_t seq);
+
+/* Prefill batch gate: arbitrary-size symmetric payload exchange over bulk
+ * RDMA, with interleaved 2MB TCP rounds as fallback (see ds4_tp.c). */
+int ds4_tp_big_gate_exchange(ds4_tp *tp, uint32_t layer, uint64_t seq,
+                             const void *out, void *in, uint64_t bytes);
 
 /* Lockstep mirroring (leader side) and worker loop primitives. */
 int ds4_tp_send_sync(ds4_tp *tp, const int *tokens, uint32_t n_tokens);
@@ -166,11 +181,10 @@ int ds4_tp_send_logits_half(ds4_tp *tp, const float *half, uint32_t count);
 int ds4_tp_recv_logits_half(ds4_tp *tp, float *half, uint32_t count);
 
 /* Speculative verify mirroring.  The leader announces a draft block right
- * before running the (replicated, ungated) batch verify; the worker runs
- * the same verify for its KV side effects and then blocks on the commit
- * frame, which carries the leader's decision: full_accept keeps the pushed
- * rows, otherwise both sides roll back and replay replay_n tokens through
- * the gated single-token decode in lockstep. */
+ * before both ranks run the expert-split batch verify; the worker then blocks
+ * on the commit frame, which carries the leader's decision: full_accept keeps
+ * the pushed rows, otherwise both sides roll back and replay replay_n tokens
+ * through the gated single-token decode in lockstep. */
 int ds4_tp_send_verify(ds4_tp *tp, const int *drafts, uint32_t n);
 int ds4_tp_send_verify_commit(ds4_tp *tp, int32_t full_accept, int32_t replay_n);
 int ds4_tp_recv_verify_commit(ds4_tp *tp, int32_t *full_accept, int32_t *replay_n);
