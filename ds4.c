@@ -14421,6 +14421,9 @@ static bool metal_graph_cuda_stream_prefill_batch_selected_load(
 typedef struct metal_graph_selected_async_load {
     bool                      active;
     bool                      ok;
+    /* Selected ids were read and validated even if the load itself failed:
+     * the caller can then retry the load synchronously. */
+    bool                      ids_ok;
     ds4_gpu_graph            *g;
     const ds4_model          *model;
     const ds4_layer_weights  *layer;
@@ -14489,6 +14492,7 @@ static void metal_graph_selected_async_load_run(
             return;
         }
     }
+    job->ids_ok = true;
     const ds4_gpu_stream_expert_table table =
         graph_stream_expert_table_make(job->model,
                                        job->layer,
@@ -14507,6 +14511,12 @@ static void metal_graph_selected_async_load_run(
 
 static void *metal_graph_selected_async_load_worker_main(void *arg) {
     (void)arg;
+#ifdef __APPLE__
+    /* The Metal cache paths must never wait on command buffers from this
+     * thread while the main thread is encoding; register it so those waits
+     * turn into load failures that the caller retries synchronously. */
+    ds4_gpu_stream_expert_cache_note_service_thread();
+#endif
     for (;;) {
         pthread_mutex_lock(&g_metal_graph_selected_async_load_mutex);
         while (!g_metal_graph_selected_async_load_has_job) {
@@ -15833,8 +15843,27 @@ static bool metal_graph_encode_decode_layer(
         DS4_METAL_PROFILE_DECODE_STAGE("shared_down");
         if (async_load_started) {
             const bool flush_ok = ds4_gpu_flush_commands() != 0;
-            const bool finish_ok =
+            bool finish_ok =
                 metal_graph_selected_async_load_finish(&async_load);
+            if (!finish_ok && async_load.ids_ok) {
+                /* The worker read valid ids but could not stage the load
+                 * (it is not allowed to wait on in-flight cache entries).
+                 * This thread is, so retry the same load synchronously. */
+                const ds4_gpu_stream_expert_table retry_table =
+                    graph_stream_expert_table_make(model,
+                                                   layer,
+                                                   il,
+                                                   gate_expert_bytes,
+                                                   down_expert_bytes);
+                finish_ok =
+                    ds4_gpu_stream_expert_cache_begin_selected_load(
+                            &retry_table,
+                            async_load.selected_ids,
+                            DS4_N_EXPERT_USED) != 0 &&
+                    ds4_gpu_routed_moe_set_selected_override(
+                            async_load.selected_ids,
+                            DS4_N_EXPERT_USED) != 0;
+            }
             ok = ok && flush_ok && finish_ok;
         } else if (ok) {
             ok = ds4_gpu_commit_and_wait_selected_readback(selected_event,
@@ -25759,6 +25788,31 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
                             "slab size class (is the FIRST routed layer itself boosted?); "
                             "expert-cache hit rate will be catastrophic\n",
                             boosted, routed);
+                }
+                /*
+                 * Below one token's routed working set (uniform routed layers
+                 * x experts used) every token evicts entries it is about to
+                 * reuse, and prefill serves layer overflow through mapped
+                 * model views.  Output stays byte-identical at any budget
+                 * (the addr-table kernels read the same bytes either way);
+                 * only throughput collapses, so warn instead of refusing.
+                 */
+                const uint64_t min_experts =
+                    (uint64_t)(routed - boosted) * DS4_N_EXPERT_USED;
+                if (min_experts != 0 &&
+                    e->ssd_streaming_cache_experts != 0 &&
+                    e->ssd_streaming_cache_experts < 2u * min_experts) {
+                    fprintf(stderr,
+                            "ds4: WARNING: SSD streaming expert cache (%u experts) is "
+                            "under twice the per-token routed working set (%u layers "
+                            "x %u experts = %llu); expect heavy thrashing below "
+                            "%.2f GiB\n",
+                            e->ssd_streaming_cache_experts,
+                            routed - boosted,
+                            DS4_N_EXPERT_USED,
+                            (unsigned long long)min_experts,
+                            (double)(2u * min_experts * slab_expert_bytes) /
+                                1073741824.0);
                 }
             }
         }

@@ -103,6 +103,12 @@ int ds4_gpu_stream_expert_cache_begin_selected_load(
         const ds4_gpu_stream_expert_table *table,
         const int32_t                     *selected_ids,
         uint32_t                           n_selected);
+#ifdef __APPLE__
+/* The async selected-load worker registers itself so Metal cache paths never
+ * wait on command buffers from that thread (they fail the load instead and
+ * the caller retries synchronously). */
+void ds4_gpu_stream_expert_cache_note_service_thread(void);
+#endif
 #if defined(DS4_ROCM_BUILD) || (!defined(DS4_NO_GPU) && !defined(__APPLE__))
 int ds4_gpu_stream_expert_cache_prepare_selected_batch(
         const ds4_gpu_stream_expert_table *table,

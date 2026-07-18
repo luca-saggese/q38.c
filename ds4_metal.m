@@ -289,6 +289,22 @@ static int ds4_gpu_stream_expert_cache_entry_protected(
         uint32_t       protect_layer,
         const int32_t *protect_ids,
         uint32_t       n_protect);
+
+/* The async selected-load worker registers itself so cache paths that would
+ * flush/wait on command buffers (a race against the encoding thread) fail
+ * the load instead; the caller then retries on the main thread. */
+static pthread_t g_stream_expert_service_thread;
+static int g_stream_expert_service_thread_set;
+
+void ds4_gpu_stream_expert_cache_note_service_thread(void) {
+    g_stream_expert_service_thread = pthread_self();
+    g_stream_expert_service_thread_set = 1;
+}
+
+static int ds4_gpu_stream_expert_cache_on_service_thread(void) {
+    return g_stream_expert_service_thread_set &&
+           pthread_equal(pthread_self(), g_stream_expert_service_thread);
+}
 static NSUInteger g_flash_attn_mask_bytes;
 static NSUInteger g_flash_attn_pad_bytes;
 static NSUInteger g_flash_attn_tmp_bytes;
@@ -8871,7 +8887,16 @@ static int ds4_gpu_stream_prefill_batch_selected_addr_enabled(
         getenv("DS4_METAL_DISABLE_ROUTED_PAIR_SWIGLU_FUSION") != NULL) {
         return 0;
     }
-    if (ds4_gpu_stream_expert_cache_configured_count() < n_total_expert) {
+    /*
+     * The addr path must stay reachable at ANY cache budget: unique selected
+     * experts that do not fit the cache are addressed into mapped model views
+     * by ds4_gpu_stream_expert_cache_prepare_selected_batch, so the computed
+     * logits never depend on the budget.  Gating this path on the budget (the
+     * old `configured_count < n_total_expert` check) silently switched small
+     * caches to the mm_id fallback, whose different accumulation order
+     * changed the streamed prefill logits with no warning.
+     */
+    if (ds4_gpu_stream_expert_cache_configured_count() == 0) {
         return 0;
     }
     if (getenv("DS4_METAL_ENABLE_STREAMING_PREFILL_BATCH_SELECTED_ADDR") != NULL) {
@@ -9804,7 +9829,8 @@ retry:
     }
 
     if (victim_layer == UINT32_MAX || victim_expert == UINT32_MAX) {
-        if (skipped_inflight && !waited_inflight) {
+        if (skipped_inflight && !waited_inflight &&
+            !ds4_gpu_stream_expert_cache_on_service_thread()) {
             waited_inflight = 1;
             if (!ds4_gpu_stream_expert_cache_wait_inflight(
                     "streaming expert cache reuse")) {
@@ -9962,6 +9988,7 @@ static int ds4_gpu_stream_expert_cache_prepare_load_buffers(
     ds4_gpu_stream_expert_cache_entry *e =
         &g_stream_expert_cache[layer][expert];
     if (e->valid && ds4_gpu_stream_expert_cache_entry_inflight(e)) {
+        if (ds4_gpu_stream_expert_cache_on_service_thread()) return 0;
         if (!ds4_gpu_stream_expert_cache_wait_inflight(
                 "streaming expert cache replacement")) {
             return 0;
@@ -10236,6 +10263,10 @@ ds4_gpu_stream_expert_cache_install_loaded(
     ds4_gpu_stream_expert_cache_entry *e =
         &g_stream_expert_cache[layer][expert];
     if (e->valid) {
+        if (ds4_gpu_stream_expert_cache_entry_inflight(e) &&
+            ds4_gpu_stream_expert_cache_on_service_thread()) {
+            return NULL;
+        }
         if (ds4_gpu_stream_expert_cache_entry_inflight(e) &&
             !ds4_gpu_stream_expert_cache_wait_inflight(
                     "streaming expert cache install")) {
@@ -11148,7 +11179,13 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
         id<MTLBuffer> *down_addrs,
         ds4_gpu_stream_expert_cache_entry **resources,
         uint32_t      *n_resources,
-        uint32_t      *unique_out) {
+        uint32_t      *unique_out,
+        id<MTLBuffer> *overflow_gate,
+        id<MTLBuffer> *overflow_up,
+        id<MTLBuffer> *overflow_down) {
+    if (overflow_gate) *overflow_gate = nil;
+    if (overflow_up) *overflow_up = nil;
+    if (overflow_down) *overflow_down = nil;
     if (!g_ssd_streaming_mode ||
         !model_map ||
         !selected ||
@@ -11158,6 +11195,9 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
         !resources ||
         !n_resources ||
         !unique_out ||
+        !overflow_gate ||
+        !overflow_up ||
+        !overflow_down ||
         layer >= DS4_METAL_STREAM_EXPERT_CACHE_MAX_LAYER ||
         n_tokens == 0 ||
         n_selected == 0 ||
@@ -11219,19 +11259,18 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
                                                            frequency,
                                                            n_total_expert);
     }
-    if (ok) {
-        const uint32_t cache_budget =
-            ds4_gpu_stream_expert_cache_configured_budget();
-        if (cache_budget != 0 && unique_count > cache_budget) {
-            fprintf(stderr,
-                    "ds4: Metal streaming prefill batch selected addr layer=%u "
-                    "needs %u unique experts but cache budget is %u\n",
-                    layer,
-                    unique_count,
-                    cache_budget);
-            ok = 0;
-        }
-    }
+    /*
+     * When the layer's unique selected set does not fit the cache budget, the
+     * overflow experts are addressed straight into whole-tensor mapped model
+     * views instead: the address-table kernels read identical bytes either
+     * way, so the cache/view partition never changes the computed logits.
+     * Falling back to a different kernel path here (the old behavior) made
+     * the output silently depend on the cache size.
+     */
+    uint32_t view_served = 0;
+    uint64_t overflow_gate_inner = 0;
+    uint64_t overflow_up_inner = 0;
+    uint64_t overflow_down_inner = 0;
     if (ok) {
         for (uint32_t u = 0; u < unique_count; u++) {
             const uint32_t expert = (uint32_t)unique_ids[u];
@@ -11267,15 +11306,58 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
                                                           unique_ids,
                                                           unique_count);
             if (!entry) {
-                fprintf(stderr,
-                        "ds4: Metal streaming prefill batch selected addr failed "
-                        "to load layer=%u expert=%u unique=%u budget=%u\n",
-                        layer,
-                        expert,
-                        unique_count,
-                        ds4_gpu_stream_expert_cache_configured_budget());
-                ok = 0;
-                break;
+                if (!*overflow_gate) {
+                    const uint64_t gate_tensor_bytes =
+                        (uint64_t)n_total_expert * gate_expert_bytes;
+                    const uint64_t down_tensor_bytes =
+                        (uint64_t)n_total_expert * down_expert_bytes;
+                    uint64_t gate_view_inner = 0;
+                    uint64_t up_view_inner = 0;
+                    uint64_t down_view_inner = 0;
+                    id<MTLBuffer> gv = ds4_gpu_wrap_model_range(model_map,
+                                                                model_size,
+                                                                gate_offset,
+                                                                gate_tensor_bytes,
+                                                                &gate_view_inner);
+                    id<MTLBuffer> uv = ds4_gpu_wrap_model_range(model_map,
+                                                                model_size,
+                                                                up_offset,
+                                                                gate_tensor_bytes,
+                                                                &up_view_inner);
+                    id<MTLBuffer> dv = ds4_gpu_wrap_model_range(model_map,
+                                                                model_size,
+                                                                down_offset,
+                                                                down_tensor_bytes,
+                                                                &down_view_inner);
+                    if (!gv || !uv || !dv) {
+                        fprintf(stderr,
+                                "ds4: Metal streaming prefill batch selected addr "
+                                "failed to map overflow expert views at layer %u\n",
+                                layer);
+                        ok = 0;
+                        break;
+                    }
+                    *overflow_gate = gv;
+                    *overflow_up = uv;
+                    *overflow_down = dv;
+                    overflow_gate_inner = gate_view_inner;
+                    overflow_up_inner = up_view_inner;
+                    overflow_down_inner = down_view_inner;
+                }
+                if (!ds4_gpu_stream_expert_cache_set_addr_slot(
+                            layer,
+                            expert,
+                            *overflow_gate,
+                            (NSUInteger)(overflow_gate_inner + gate_rel),
+                            *overflow_up,
+                            (NSUInteger)(overflow_up_inner + gate_rel),
+                            *overflow_down,
+                            (NSUInteger)(overflow_down_inner + down_rel))) {
+                    ok = 0;
+                    break;
+                }
+                view_served++;
+                continue;
             }
             const uint32_t extra_uses =
                 frequency[expert] > 0 ? frequency[expert] - 1u : 0;
@@ -11303,7 +11385,7 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
     }
     free(ids);
 
-    if (!ok || *n_resources == 0) {
+    if (!ok || (*n_resources == 0 && view_served == 0)) {
         ds4_gpu_stream_expert_cache_clear_layer(layer);
         return 0;
     }
@@ -11314,7 +11396,17 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
         ds4_gpu_stream_expert_cache_clear_layer(layer);
         return 0;
     }
-    *unique_out = *n_resources;
+    *unique_out = *n_resources + view_served;
+    if (view_served != 0 &&
+        ds4_gpu_stream_expert_timing_summary_enabled()) {
+        fprintf(stderr,
+                "ds4: Metal streaming prefill batch selected addr layer=%u "
+                "served %u/%u unique experts via mapped views (cache budget %u)\n",
+                layer,
+                view_served,
+                unique_count,
+                ds4_gpu_stream_expert_cache_configured_budget());
+    }
     if (profile) {
         const double t_done = ds4_gpu_now_ms();
         uint64_t per_expert_bytes = UINT64_MAX;
@@ -20845,8 +20937,11 @@ static int ds4_gpu_encode_mul_mv_addr_iq2_pair_swiglu(
         NSUInteger                  weights_off,
         NSUInteger                  threadgroup_bytes,
         NSUInteger                  nsg,
-        bool                        rows_per_group_is_nr0) {
-    if (!cb || !pipeline || !args || !act || !entries || n_entries == 0 ||
+        bool                        rows_per_group_is_nr0,
+        id<MTLBuffer>               overflow_gate,
+        id<MTLBuffer>               overflow_up) {
+    if (!cb || !pipeline || !args || !act || !entries ||
+        (n_entries == 0 && !overflow_gate) ||
         !gate_addrs || !up_addrs ||
         !src1 || !dst_a || !dst_b || !dst_mid || !ids || !weights ||
         args->ne00 <= 0 || args->ne01 <= 0 || args->nei0 != 6 || args->nei1 <= 0 ||
@@ -20883,6 +20978,10 @@ static int ds4_gpu_encode_mul_mv_addr_iq2_pair_swiglu(
         [enc useResource:entries[i]->gate_buffer usage:MTLResourceUsageRead];
         [enc useResource:entries[i]->up_buffer usage:MTLResourceUsageRead];
     }
+    /* Overflow experts are addressed straight into the mapped model views
+     * when a layer's unique selected set exceeds the cache budget. */
+    if (overflow_gate) [enc useResource:overflow_gate usage:MTLResourceUsageRead];
+    if (overflow_up) [enc useResource:overflow_up usage:MTLResourceUsageRead];
     if (threadgroup_bytes != 0) {
         [enc setThreadgroupMemoryLength:threadgroup_bytes atIndex:0];
     }
@@ -20906,8 +21005,10 @@ static int ds4_gpu_encode_mul_mv_addr_q2_sum6(
         id<MTLBuffer>               ids,
         NSUInteger                  ids_off,
         NSUInteger                  threadgroup_bytes,
-        NSUInteger                  nsg) {
-    if (!cb || !pipeline || !args || !entries || n_entries == 0 ||
+        NSUInteger                  nsg,
+        id<MTLBuffer>               overflow_down) {
+    if (!cb || !pipeline || !args || !entries ||
+        (n_entries == 0 && !overflow_down) ||
         !addrs || !src1 || !dst || !ids ||
         args->ne00 <= 0 || args->ne01 <= 0 || args->nei0 != 6 || args->nei1 <= 0 ||
         args->ne02 <= 0 || args->ne02 > 384) {
@@ -20935,6 +21036,7 @@ static int ds4_gpu_encode_mul_mv_addr_q2_sum6(
     for (uint32_t i = 0; i < n_entries; i++) {
         [enc useResource:entries[i]->down_buffer usage:MTLResourceUsageRead];
     }
+    if (overflow_down) [enc useResource:overflow_down usage:MTLResourceUsageRead];
     if (threadgroup_bytes != 0) {
         [enc setThreadgroupMemoryLength:threadgroup_bytes atIndex:0];
     }
@@ -24223,7 +24325,9 @@ int ds4_gpu_routed_moe_one_tensor(
                                                                     ds4_gpu_tensor_offset(weights),
                                                                     gate_smem,
                                                                     2,
-                                                                    false);
+                                                                    false,
+                                                                    nil,
+                                                                    nil);
                 }
             } else {
                 ok = (!use_stream_expert_cache ||
@@ -24543,7 +24647,8 @@ int ds4_gpu_routed_moe_one_tensor(
                                                              selected_exec_buf,
                                                              selected_exec_off,
                                                              down_smem,
-                                                             2);
+                                                             2,
+                                                             nil);
                 }
             } else {
                 ok = (!use_stream_expert_cache ||
@@ -24819,6 +24924,9 @@ int ds4_gpu_routed_moe_batch_tensor(
         id<MTLBuffer> stream_gate_addr_buf = nil;
         id<MTLBuffer> stream_up_addr_buf = nil;
         id<MTLBuffer> stream_down_addr_buf = nil;
+        id<MTLBuffer> stream_overflow_gate = nil;
+        id<MTLBuffer> stream_overflow_up = nil;
+        id<MTLBuffer> stream_overflow_down = nil;
         ds4_gpu_stream_expert_cache_entry
             *stream_resources[DS4_METAL_STREAM_EXPERT_CACHE_MAX_EXPERT] = { NULL };
         uint32_t stream_resource_count = 0;
@@ -24997,7 +25105,10 @@ int ds4_gpu_routed_moe_batch_tensor(
                         &stream_down_addr_buf,
                         stream_resources,
                         &stream_resource_count,
-                        &stream_unique)) {
+                        &stream_unique,
+                        &stream_overflow_gate,
+                        &stream_overflow_up,
+                        &stream_overflow_down)) {
                 g_stream_prefill_batch_selected_addr_building--;
                 return 0;
             }
@@ -25245,7 +25356,9 @@ int ds4_gpu_routed_moe_batch_tensor(
                     ds4_gpu_tensor_offset(weights),
                     gate_smem,
                     2,
-                    false);
+                    false,
+                    stream_overflow_gate,
+                    stream_overflow_up);
             if (!ok) {
                 fprintf(stderr,
                         "ds4: Metal streaming prefill batch selected addr layer=%u "
@@ -25525,7 +25638,8 @@ int ds4_gpu_routed_moe_batch_tensor(
                         selectedbuf,
                         ds4_gpu_tensor_offset(selected),
                         down_smem,
-                        2);
+                        2,
+                        stream_overflow_down);
                 if (!ok) {
                     fprintf(stderr,
                             "ds4: Metal streaming prefill batch selected addr layer=%u "

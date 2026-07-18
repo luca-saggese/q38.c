@@ -609,6 +609,12 @@ typedef struct {
     float temperature;
     float top_p;
     float min_p;
+    /* Explicit client sampling wins even in thinking mode; the fixed
+     * DeepSeek-style thinking defaults apply only to omitted knobs. */
+    bool temperature_set;
+    bool top_p_set;
+    bool min_p_set;
+    bool top_k_set;
     uint64_t seed;
     bool stream;
     bool stream_include_usage;
@@ -2704,6 +2710,7 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
                 goto bad;
             }
             r->temperature = (float)v;
+            r->temperature_set = true;
         } else if (!strcmp(key, "top_p")) {
             double v = 0.0;
             if (!json_number(&p, &v)) {
@@ -2711,6 +2718,7 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
                 goto bad;
             }
             r->top_p = (float)v;
+            r->top_p_set = true;
         } else if (!strcmp(key, "min_p")) {
             double v = 0.0;
             if (!json_number(&p, &v)) {
@@ -2718,11 +2726,13 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
                 goto bad;
             }
             r->min_p = (float)v;
+            r->min_p_set = true;
         } else if (!strcmp(key, "top_k")) {
             if (!json_int(&p, &r->top_k)) {
                 free(key);
                 goto bad;
             }
+            r->top_k_set = true;
         } else if (!strcmp(key, "seed")) {
             double v = 0.0;
             if (!json_number(&p, &v)) {
@@ -2915,6 +2925,7 @@ static bool parse_anthropic_request(ds4_engine *e, server *s, const char *body, 
                 goto bad;
             }
             r->temperature = (float)v;
+            r->temperature_set = true;
         } else if (!strcmp(key, "top_p")) {
             double v = 0.0;
             if (!json_number(&p, &v)) {
@@ -2922,11 +2933,13 @@ static bool parse_anthropic_request(ds4_engine *e, server *s, const char *body, 
                 goto bad;
             }
             r->top_p = (float)v;
+            r->top_p_set = true;
         } else if (!strcmp(key, "top_k")) {
             if (!json_int(&p, &r->top_k)) {
                 free(key);
                 goto bad;
             }
+            r->top_k_set = true;
         } else if (!strcmp(key, "stream")) {
             if (!json_bool(&p, &r->stream)) {
                 free(key);
@@ -3817,6 +3830,7 @@ static bool parse_responses_request(ds4_engine *e, server *s, const char *body, 
                 goto bad;
             }
             r->temperature = (float)v;
+            r->temperature_set = true;
         } else if (!strcmp(key, "top_p")) {
             double v = 0.0;
             if (!json_number(&p, &v)) {
@@ -3824,6 +3838,7 @@ static bool parse_responses_request(ds4_engine *e, server *s, const char *body, 
                 goto bad;
             }
             r->top_p = (float)v;
+            r->top_p_set = true;
         } else if (!strcmp(key, "stream")) {
             if (!json_bool(&p, &r->stream)) {
                 free(key);
@@ -4035,6 +4050,7 @@ static bool parse_completion_request(ds4_engine *e, const char *body, int def_to
                 goto bad;
             }
             r->temperature = (float)v;
+            r->temperature_set = true;
         } else if (!strcmp(key, "top_p")) {
             double v = 0.0;
             if (!json_number(&p, &v)) {
@@ -4042,6 +4058,7 @@ static bool parse_completion_request(ds4_engine *e, const char *body, int def_to
                 goto bad;
             }
             r->top_p = (float)v;
+            r->top_p_set = true;
         } else if (!strcmp(key, "min_p")) {
             double v = 0.0;
             if (!json_number(&p, &v)) {
@@ -4049,11 +4066,13 @@ static bool parse_completion_request(ds4_engine *e, const char *body, int def_to
                 goto bad;
             }
             r->min_p = (float)v;
+            r->min_p_set = true;
         } else if (!strcmp(key, "top_k")) {
             if (!json_int(&p, &r->top_k)) {
                 free(key);
                 goto bad;
             }
+            r->top_k_set = true;
         } else if (!strcmp(key, "seed")) {
             double v = 0.0;
             if (!json_number(&p, &v)) {
@@ -10399,10 +10418,14 @@ decode_again:
         float top_p = j->req.top_p;
         float min_p = j->req.min_p;
         if (ds4_think_mode_enabled(j->req.think_mode)) {
-            temperature = DS4_DEFAULT_TEMPERATURE;
-            top_k = 0;
-            top_p = DS4_DEFAULT_TOP_P;
-            min_p = DS4_DEFAULT_MIN_P;
+            /* Thinking keeps the fixed DeepSeek-style sampling defaults, but
+             * only for knobs the client left out: an explicit request value
+             * (e.g. temperature 0 from a benchmark harness) must win, or the
+             * same greedy request returns different text on every call. */
+            if (!j->req.temperature_set) temperature = DS4_DEFAULT_TEMPERATURE;
+            if (!j->req.top_k_set) top_k = 0;
+            if (!j->req.top_p_set) top_p = DS4_DEFAULT_TOP_P;
+            if (!j->req.min_p_set) min_p = DS4_DEFAULT_MIN_P;
         }
         if (in_tool_call && !dsml_decode_state_uses_payload_sampling(dsml_state)) {
             temperature = 0.0f;
