@@ -653,6 +653,21 @@ static bool ds4_streq(ds4_str s, const char *z) {
     return s.len == n && memcmp(s.ptr, z, n) == 0;
 }
 
+static bool ds4_str_starts_with(ds4_str s, const char *prefix) {
+    size_t n = strlen(prefix);
+    return s.len >= n && memcmp(s.ptr, prefix, n) == 0;
+}
+
+static bool ds4_str_contains(ds4_str s, const char *needle) {
+    size_t n = strlen(needle);
+    if (n == 0) return true;
+    if (s.len < n) return false;
+    for (uint64_t i = 0; i <= s.len - n; i++) {
+        if (memcmp(s.ptr + i, needle, n) == 0) return true;
+    }
+    return false;
+}
+
 static bool ds4_str_eq(ds4_str a, ds4_str b) {
     return a.len == b.len && memcmp(a.ptr, b.ptr, a.len) == 0;
 }
@@ -1995,6 +2010,182 @@ static void print_size(uint64_t bytes) {
     printf("%.2f GiB", (double)bytes / gib);
 }
 
+#define DS4_DSPARK_MAX_TARGET_LAYERS 8
+#define DS4_DSPARK_MAX_STAGES 8
+#define DS4_DSPARK_MAX_BLOCK_SIZE 16
+
+typedef struct {
+    uint32_t stages;
+    uint32_t block_size;
+    uint32_t markov_rank;
+    uint32_t noise_token_id;
+    uint32_t target_layer_count;
+    uint32_t target_layers[DS4_DSPARK_MAX_TARGET_LAYERS];
+    bool has_metadata;
+    bool has_main_proj;
+    bool has_main_norm;
+    bool has_markov_head;
+    bool has_confidence_head;
+    bool has_final_head;
+    bool has_block_size;
+    bool has_markov_rank;
+    bool has_noise_token_id;
+    bool has_target_layers;
+} ds4_dspark_summary;
+
+typedef enum {
+    DS4_SUPPORT_NONE = 0,
+    DS4_SUPPORT_MTP_LEGACY,
+    DS4_SUPPORT_DSPARK,
+} ds4_support_kind;
+
+static bool model_get_u32_any(const ds4_model *m, const char *const *keys,
+                              size_t nkeys, uint32_t *out) {
+    for (size_t i = 0; i < nkeys; i++) {
+        if (model_get_u32(m, keys[i], out)) return true;
+    }
+    return false;
+}
+
+static bool model_get_u32_array_any(const ds4_model *m, const char *const *keys,
+                                    size_t nkeys, uint32_t *out,
+                                    uint32_t cap, uint32_t *n_out) {
+    for (size_t ik = 0; ik < nkeys; ik++) {
+        ds4_array_ref arr = {0};
+        if (!model_get_array(m, keys[ik], &arr)) continue;
+        if (arr.type != GGUF_VALUE_UINT32 && arr.type != GGUF_VALUE_INT32) continue;
+
+        ds4_cursor c = cursor_at(m, arr.data_pos);
+        uint32_t n = arr.len < cap ? (uint32_t)arr.len : cap;
+        for (uint32_t i = 0; i < n; i++) {
+            if (arr.type == GGUF_VALUE_UINT32) {
+                if (!cursor_u32(&c, &out[i])) return false;
+            } else {
+                int32_t v = 0;
+                if (!cursor_read(&c, &v, sizeof(v))) return false;
+                if (v < 0) return false;
+                out[i] = (uint32_t)v;
+            }
+        }
+        *n_out = n;
+        return true;
+    }
+    return false;
+}
+
+static bool ds4_tensor_mtp_stage(ds4_str name, uint32_t *stage) {
+    if (!ds4_str_starts_with(name, "mtp.")) return false;
+    uint64_t pos = 4;
+    if (pos >= name.len || !isdigit((unsigned char)name.ptr[pos])) return false;
+
+    uint32_t value = 0;
+    while (pos < name.len && isdigit((unsigned char)name.ptr[pos])) {
+        uint32_t digit = (uint32_t)(name.ptr[pos] - '0');
+        if (value > (UINT32_MAX - digit) / 10u) return false;
+        value = value * 10u + digit;
+        pos++;
+    }
+    if (pos >= name.len || name.ptr[pos] != '.') return false;
+    *stage = value;
+    return true;
+}
+
+static ds4_dspark_summary model_dspark_summary(const ds4_model *m) {
+    static const char *const block_keys[] = {
+        "deepseek4.dspark.block_size",
+        "deepseek4.dspark_block_size",
+        "dspark.block_size",
+    };
+    static const char *const markov_keys[] = {
+        "deepseek4.dspark.markov_rank",
+        "deepseek4.dspark_markov_rank",
+        "dspark.markov_rank",
+    };
+    static const char *const noise_keys[] = {
+        "deepseek4.dspark.noise_token_id",
+        "deepseek4.dspark_noise_token_id",
+        "dspark.noise_token_id",
+    };
+    static const char *const target_keys[] = {
+        "deepseek4.dspark.target_layer_ids",
+        "deepseek4.dspark_target_layer_ids",
+        "dspark.target_layer_ids",
+    };
+
+    ds4_dspark_summary s = {0};
+    if (model_get_u32_any(m, block_keys, sizeof(block_keys) / sizeof(block_keys[0]),
+                          &s.block_size)) {
+        s.has_metadata = true;
+        s.has_block_size = true;
+    }
+    if (model_get_u32_any(m, markov_keys, sizeof(markov_keys) / sizeof(markov_keys[0]),
+                          &s.markov_rank)) {
+        s.has_metadata = true;
+        s.has_markov_rank = true;
+    }
+    if (model_get_u32_any(m, noise_keys, sizeof(noise_keys) / sizeof(noise_keys[0]),
+                          &s.noise_token_id)) {
+        s.has_metadata = true;
+        s.has_noise_token_id = true;
+    }
+    if (model_get_u32_array_any(m,
+                                target_keys,
+                                sizeof(target_keys) / sizeof(target_keys[0]),
+                                s.target_layers,
+                                DS4_DSPARK_MAX_TARGET_LAYERS,
+                                &s.target_layer_count)) {
+        s.has_metadata = true;
+        s.has_target_layers = true;
+    }
+
+    uint32_t max_stage = 0;
+    bool have_stage = false;
+    for (uint64_t i = 0; i < m->n_tensors; i++) {
+        ds4_str name = m->tensors[i].name;
+        uint32_t stage = 0;
+        if (!ds4_tensor_mtp_stage(name, &stage)) continue;
+        if (!have_stage || stage > max_stage) max_stage = stage;
+        have_stage = true;
+
+        if (ds4_str_contains(name, ".main_proj.")) s.has_main_proj = true;
+        if (ds4_str_contains(name, ".main_norm.")) s.has_main_norm = true;
+        if (ds4_str_contains(name, ".markov_head.")) s.has_markov_head = true;
+        if (ds4_str_contains(name, ".confidence_head.")) s.has_confidence_head = true;
+        if (ds4_str_contains(name, ".hc_head_") ||
+            ds4_str_contains(name, ".norm.weight")) {
+            s.has_final_head = true;
+        }
+    }
+    if (have_stage) s.stages = max_stage + 1u;
+    return s;
+}
+
+static void model_print_dspark_summary(const ds4_model *m) {
+    ds4_dspark_summary s = model_dspark_summary(m);
+    if (!s.stages && !s.has_metadata) return;
+
+    printf("mtp/dspark: stages=%u", s.stages);
+    if (s.block_size) printf(" block=%u", s.block_size);
+    if (s.markov_rank) printf(" markov_rank=%u", s.markov_rank);
+    if (s.noise_token_id) printf(" noise_token=%u", s.noise_token_id);
+    if (s.target_layer_count) {
+        printf(" target_layers=");
+        for (uint32_t i = 0; i < s.target_layer_count; i++) {
+            printf("%s%u", i == 0 ? "" : ",", s.target_layers[i]);
+        }
+    }
+    printf("\n");
+    if (s.has_main_proj || s.has_main_norm || s.has_markov_head ||
+        s.has_confidence_head || s.has_final_head) {
+        printf("mtp/dspark tensors: main_proj=%s main_norm=%s markov=%s confidence=%s final_head=%s\n",
+               s.has_main_proj ? "yes" : "no",
+               s.has_main_norm ? "yes" : "no",
+               s.has_markov_head ? "yes" : "no",
+               s.has_confidence_head ? "yes" : "no",
+               s.has_final_head ? "yes" : "no");
+    }
+}
+
 static void model_summary(const ds4_model *m) {
     ds4_str name = {0};
     ds4_str arch = {0};
@@ -2053,6 +2244,7 @@ static void model_summary(const ds4_model *m) {
         printf("experts: count=%u used=%u groups=%u groups_used=%u\n",
                n_expert, n_expert_used, n_expert_groups, n_group_used);
     }
+    model_print_dspark_summary(m);
     printf("file size: ");
     print_size(m->size);
     printf("\n");
@@ -2089,6 +2281,44 @@ static ds4_tensor *model_find_tensor(const ds4_model *m, const char *name) {
         }
     }
     return NULL;
+}
+
+static const char *support_kind_name(ds4_support_kind kind) {
+    switch (kind) {
+    case DS4_SUPPORT_MTP_LEGACY: return "legacy MTP";
+    case DS4_SUPPORT_DSPARK:     return "DSpark";
+    case DS4_SUPPORT_NONE:       return "none";
+    }
+    return "unknown";
+}
+
+static ds4_support_kind support_model_detect(
+        const ds4_model *m,
+        uint32_t        *stages_out,
+        ds4_dspark_summary *summary_out) {
+    if (stages_out) *stages_out = 0;
+    if (summary_out) memset(summary_out, 0, sizeof(*summary_out));
+    if (!m) return DS4_SUPPORT_NONE;
+
+    ds4_dspark_summary s = model_dspark_summary(m);
+    if (summary_out) *summary_out = s;
+    if (stages_out) *stages_out = s.stages;
+
+    if (s.stages >= 3 &&
+        s.has_main_proj &&
+        s.has_markov_head &&
+        s.has_confidence_head) {
+        return DS4_SUPPORT_DSPARK;
+    }
+
+    if (model_find_tensor(m, "mtp.0.e_proj.weight") &&
+        model_find_tensor(m, "mtp.0.h_proj.weight") &&
+        model_find_tensor(m, "mtp.0.hc_head_base.weight")) {
+        if (stages_out) *stages_out = s.stages ? s.stages : 1u;
+        return DS4_SUPPORT_MTP_LEGACY;
+    }
+
+    return DS4_SUPPORT_NONE;
 }
 
 #ifndef DS4_NO_GPU
@@ -3073,6 +3303,37 @@ typedef struct {
     ds4_layer_weights block;
 } ds4_mtp_weights;
 
+typedef struct {
+    ds4_tensor *main_proj;
+    ds4_tensor *main_norm;
+    ds4_tensor *norm;
+    ds4_tensor *hc_head_base;
+    ds4_tensor *hc_head_fn;
+    ds4_tensor *hc_head_scale;
+    ds4_tensor *markov_w1;
+    ds4_tensor *markov_w2;
+    ds4_tensor *confidence_proj;
+    ds4_layer_weights block;
+} ds4_dspark_stage_weights;
+
+typedef struct {
+    uint32_t n_stages;
+    uint32_t block_size;
+    uint32_t markov_rank;
+    uint32_t noise_token_id;
+    uint32_t target_layer_count;
+    uint32_t target_layers[DS4_DSPARK_MAX_TARGET_LAYERS];
+    uint32_t present_tensors;
+    uint32_t missing_tensors;
+    uint32_t invalid_tensors;
+    uint32_t metadata_errors;
+    bool has_block_size;
+    bool has_markov_rank;
+    bool has_noise_token_id;
+    bool has_target_layers;
+    ds4_dspark_stage_weights stage[DS4_DSPARK_MAX_STAGES];
+} ds4_dspark_weights;
+
 /* =========================================================================
  * Fixed Weight Binding and Model Validation.
  * =========================================================================
@@ -3131,6 +3392,16 @@ static ds4_tensor *required_tensorf(const ds4_model *m, const char *fmt, uint32_
     int n = snprintf(name, sizeof(name), fmt, layer);
     if (n < 0 || (size_t)n >= sizeof(name)) ds4_die("tensor name is too long");
     return required_tensor(m, name);
+}
+
+static ds4_tensor *tensor_by_mtp_stage_suffix(
+        const ds4_model *m,
+        uint32_t         stage,
+        const char      *suffix) {
+    char name[160];
+    int n = snprintf(name, sizeof(name), "mtp.%u.%s", stage, suffix);
+    if (n < 0 || (size_t)n >= sizeof(name)) ds4_die("tensor name is too long");
+    return model_find_tensor(m, name);
 }
 
 static void tensor_expect_layout(
@@ -3683,6 +3954,265 @@ static void mtp_weights_validate_layout(const ds4_mtp_weights *w) {
     tensor_expect_layout(l->ffn_gate_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
     tensor_expect_layout(l->ffn_up_shexp,   DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
     tensor_expect_layout(l->ffn_down_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_FF_EXP, DS4_N_EMBD, 0);
+}
+
+typedef enum {
+    DS4_DSPARK_LAYOUT_F32,
+    DS4_DSPARK_LAYOUT_PLAIN,
+    DS4_DSPARK_LAYOUT_DENSE,
+    DS4_DSPARK_LAYOUT_ROUTED,
+} ds4_dspark_layout_kind;
+
+static const char *dspark_layout_kind_name(ds4_dspark_layout_kind kind) {
+    switch (kind) {
+    case DS4_DSPARK_LAYOUT_F32:    return "F32";
+    case DS4_DSPARK_LAYOUT_PLAIN:  return "F16 or F32";
+    case DS4_DSPARK_LAYOUT_DENSE:  return "F16, F32, or Q8_0";
+    case DS4_DSPARK_LAYOUT_ROUTED: return "routed expert quant";
+    }
+    return "unknown";
+}
+
+static bool dspark_tensor_type_matches(uint32_t type,
+                                       ds4_dspark_layout_kind kind) {
+    switch (kind) {
+    case DS4_DSPARK_LAYOUT_F32:
+        return type == DS4_TENSOR_F32;
+    case DS4_DSPARK_LAYOUT_PLAIN:
+        return type == DS4_TENSOR_F16 || type == DS4_TENSOR_F32;
+    case DS4_DSPARK_LAYOUT_DENSE:
+        return type == DS4_TENSOR_F16 ||
+               type == DS4_TENSOR_F32 ||
+               type == DS4_TENSOR_Q8_0;
+    case DS4_DSPARK_LAYOUT_ROUTED:
+        return tensor_is_routed_expert_type(type);
+    }
+    return false;
+}
+
+static void dspark_validate_tensor_layout(
+        ds4_dspark_weights       *dw,
+        const ds4_tensor         *t,
+        const char               *role,
+        ds4_dspark_layout_kind    kind,
+        uint32_t                  ndim,
+        uint64_t                  d0,
+        uint64_t                  d1,
+        uint64_t                  d2) {
+    if (!dw || !t) return;
+
+    bool ok = true;
+    if (!dspark_tensor_type_matches(t->type, kind)) {
+        fprintf(stderr,
+                "ds4: DSpark tensor %.*s (%s) has type %s, expected %s\n",
+                (int)t->name.len,
+                t->name.ptr,
+                role,
+                tensor_type_name(t->type),
+                dspark_layout_kind_name(kind));
+        ok = false;
+    }
+    if (t->ndim != ndim) {
+        fprintf(stderr,
+                "ds4: DSpark tensor %.*s (%s) has %u dimensions, expected %u\n",
+                (int)t->name.len,
+                t->name.ptr,
+                role,
+                t->ndim,
+                ndim);
+        ok = false;
+    }
+
+    const uint64_t want[3] = { d0, d1, d2 };
+    const uint32_t n = t->ndim < ndim ? t->ndim : ndim;
+    for (uint32_t i = 0; i < n; i++) {
+        if (t->dim[i] == want[i]) continue;
+        fprintf(stderr,
+                "ds4: DSpark tensor %.*s (%s) has dim[%u]=%" PRIu64
+                ", expected %" PRIu64 "\n",
+                (int)t->name.len,
+                t->name.ptr,
+                role,
+                i,
+                t->dim[i],
+                want[i]);
+        ok = false;
+    }
+    if (!ok) dw->invalid_tensors++;
+}
+
+static void dspark_weights_note_metadata_error(
+        ds4_dspark_weights *dw,
+        const char         *msg) {
+    if (!dw) return;
+    fprintf(stderr, "ds4: DSpark metadata error: %s\n", msg);
+    dw->metadata_errors++;
+}
+
+static void dspark_weights_validate_metadata(ds4_dspark_weights *dw) {
+    if (!dw) return;
+    if (!dw->has_block_size || dw->block_size == 0) {
+        dspark_weights_note_metadata_error(dw, "missing or zero block size");
+    } else if (dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE) {
+        dspark_weights_note_metadata_error(dw, "block size exceeds runtime limit");
+    }
+    if (!dw->has_markov_rank || dw->markov_rank == 0) {
+        dspark_weights_note_metadata_error(dw, "missing or zero Markov rank");
+    }
+    if (!dw->has_noise_token_id || dw->noise_token_id >= DS4_N_VOCAB) {
+        dspark_weights_note_metadata_error(dw, "missing or out-of-range noise token");
+    }
+    if (!dw->has_target_layers || dw->target_layer_count == 0) {
+        dspark_weights_note_metadata_error(dw, "missing target layer list");
+        return;
+    }
+
+    uint32_t prev = UINT32_MAX;
+    for (uint32_t i = 0; i < dw->target_layer_count; i++) {
+        const uint32_t layer = dw->target_layers[i];
+        if (layer >= DS4_N_LAYER) {
+            dspark_weights_note_metadata_error(dw, "target layer is outside the target model");
+        }
+        if (i != 0 && layer <= prev) {
+            dspark_weights_note_metadata_error(dw, "target layers are not strictly increasing");
+        }
+        prev = layer;
+    }
+}
+
+static void dspark_weights_validate_block_layout(
+        ds4_dspark_weights *dw,
+        const ds4_layer_weights *l) {
+    const uint64_t hc_dim = (uint64_t)DS4_N_EMBD * DS4_N_HC;
+    const uint64_t hc_mix_dim = 2u * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
+    const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
+    const uint64_t out_low_dim = (uint64_t)DS4_N_OUT_GROUP * DS4_N_LORA_O;
+
+    dspark_validate_tensor_layout(dw, l->hc_attn_fn, "hc_attn_fn",
+                                  DS4_DSPARK_LAYOUT_PLAIN, 2,
+                                  hc_dim, hc_mix_dim, 0);
+    dspark_validate_tensor_layout(dw, l->hc_attn_scale, "hc_attn_scale",
+                                  DS4_DSPARK_LAYOUT_F32, 1, 3, 0, 0);
+    dspark_validate_tensor_layout(dw, l->hc_attn_base, "hc_attn_base",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  hc_mix_dim, 0, 0);
+    dspark_validate_tensor_layout(dw, l->attn_norm, "attn_norm",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  DS4_N_EMBD, 0, 0);
+    dspark_validate_tensor_layout(dw, l->attn_q_a, "attn_q_a",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  DS4_N_EMBD, DS4_N_LORA_Q, 0);
+    dspark_validate_tensor_layout(dw, l->attn_q_a_norm, "attn_q_a_norm",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  DS4_N_LORA_Q, 0, 0);
+    dspark_validate_tensor_layout(dw, l->attn_q_b, "attn_q_b",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  DS4_N_LORA_Q, q_dim, 0);
+    dspark_validate_tensor_layout(dw, l->attn_kv, "attn_kv",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  DS4_N_EMBD, DS4_N_HEAD_DIM, 0);
+    dspark_validate_tensor_layout(dw, l->attn_kv_a_norm, "attn_kv_a_norm",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  DS4_N_HEAD_DIM, 0, 0);
+    dspark_validate_tensor_layout(dw, l->attn_sinks, "attn_sinks",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  DS4_N_HEAD, 0, 0);
+    dspark_validate_tensor_layout(dw, l->attn_output_a, "attn_output_a",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  DS4_N_HEAD_DIM * (DS4_N_HEAD / DS4_N_OUT_GROUP),
+                                  out_low_dim, 0);
+    dspark_validate_tensor_layout(dw, l->attn_output_b, "attn_output_b",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  out_low_dim, DS4_N_EMBD, 0);
+
+    dspark_validate_tensor_layout(dw, l->hc_ffn_fn, "hc_ffn_fn",
+                                  DS4_DSPARK_LAYOUT_PLAIN, 2,
+                                  hc_dim, hc_mix_dim, 0);
+    dspark_validate_tensor_layout(dw, l->hc_ffn_scale, "hc_ffn_scale",
+                                  DS4_DSPARK_LAYOUT_F32, 1, 3, 0, 0);
+    dspark_validate_tensor_layout(dw, l->hc_ffn_base, "hc_ffn_base",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  hc_mix_dim, 0, 0);
+    dspark_validate_tensor_layout(dw, l->ffn_norm, "ffn_norm",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  DS4_N_EMBD, 0, 0);
+    dspark_validate_tensor_layout(dw, l->ffn_gate_inp, "ffn_gate_inp",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  DS4_N_EMBD, DS4_N_EXPERT, 0);
+    dspark_validate_tensor_layout(dw, l->ffn_exp_probs_b, "exp_probs_b",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  DS4_N_EXPERT, 0, 0);
+    dspark_validate_tensor_layout(dw, l->ffn_gate_exps, "ffn_gate_exps",
+                                  DS4_DSPARK_LAYOUT_ROUTED, 3,
+                                  DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
+    dspark_validate_tensor_layout(dw, l->ffn_up_exps, "ffn_up_exps",
+                                  DS4_DSPARK_LAYOUT_ROUTED, 3,
+                                  DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
+    dspark_validate_tensor_layout(dw, l->ffn_down_exps, "ffn_down_exps",
+                                  DS4_DSPARK_LAYOUT_ROUTED, 3,
+                                  DS4_N_FF_EXP, DS4_N_EMBD, DS4_N_EXPERT);
+    if (l->ffn_gate_exps &&
+        l->ffn_up_exps &&
+        l->ffn_gate_exps->type != l->ffn_up_exps->type) {
+        fprintf(stderr,
+                "ds4: DSpark routed gate/up experts use different quant types\n");
+        dw->invalid_tensors++;
+    }
+    dspark_validate_tensor_layout(dw, l->ffn_gate_shexp, "ffn_gate_shexp",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  DS4_N_EMBD, DS4_N_FF_EXP, 0);
+    dspark_validate_tensor_layout(dw, l->ffn_up_shexp, "ffn_up_shexp",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  DS4_N_EMBD, DS4_N_FF_EXP, 0);
+    dspark_validate_tensor_layout(dw, l->ffn_down_shexp, "ffn_down_shexp",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  DS4_N_FF_EXP, DS4_N_EMBD, 0);
+}
+
+static void dspark_weights_validate_layout(ds4_dspark_weights *dw) {
+    if (!dw) return;
+    dspark_weights_validate_metadata(dw);
+
+    for (uint32_t stage = 0; stage < dw->n_stages; stage++) {
+        ds4_dspark_stage_weights *sw = &dw->stage[stage];
+        dspark_weights_validate_block_layout(dw, &sw->block);
+        if (stage == 0) {
+            dspark_validate_tensor_layout(dw, sw->main_proj, "main_proj",
+                                          DS4_DSPARK_LAYOUT_DENSE, 2,
+                                          (uint64_t)dw->target_layer_count *
+                                              DS4_N_EMBD,
+                                          DS4_N_EMBD, 0);
+            dspark_validate_tensor_layout(dw, sw->main_norm, "main_norm",
+                                          DS4_DSPARK_LAYOUT_F32, 1,
+                                          DS4_N_EMBD, 0, 0);
+        }
+    }
+
+    if (dw->n_stages == 0) return;
+    ds4_dspark_stage_weights *final = &dw->stage[dw->n_stages - 1u];
+    dspark_validate_tensor_layout(dw, final->norm, "norm",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  DS4_N_EMBD, 0, 0);
+    dspark_validate_tensor_layout(dw, final->hc_head_base, "hc_head_base",
+                                  DS4_DSPARK_LAYOUT_F32, 1,
+                                  DS4_N_HC, 0, 0);
+    dspark_validate_tensor_layout(dw, final->hc_head_fn, "hc_head_fn",
+                                  DS4_DSPARK_LAYOUT_PLAIN, 2,
+                                  (uint64_t)DS4_N_EMBD * DS4_N_HC,
+                                  DS4_N_HC, 0);
+    dspark_validate_tensor_layout(dw, final->hc_head_scale, "hc_head_scale",
+                                  DS4_DSPARK_LAYOUT_F32, 1, 1, 0, 0);
+    dspark_validate_tensor_layout(dw, final->markov_w1, "markov_w1",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  dw->markov_rank, DS4_N_VOCAB, 0);
+    dspark_validate_tensor_layout(dw, final->markov_w2, "markov_w2",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  dw->markov_rank, DS4_N_VOCAB, 0);
+    dspark_validate_tensor_layout(dw, final->confidence_proj,
+                                  "confidence_proj",
+                                  DS4_DSPARK_LAYOUT_DENSE, 2,
+                                  (uint64_t)DS4_N_EMBD + dw->markov_rank,
+                                  1, 0);
 }
 
 static bool ds4_shape_matches_metadata(
@@ -4472,6 +5002,104 @@ static void mtp_weights_bind(ds4_mtp_weights *w, const ds4_model *m) {
     l->ffn_down_shexp  = required_tensor(m, "mtp.0.ffn_down_shexp.weight");
 
     mtp_weights_validate_layout(w);
+}
+
+static ds4_tensor *dspark_bind_tensor(
+        ds4_dspark_weights *dw,
+        const ds4_model    *m,
+        uint32_t            stage,
+        const char         *suffix,
+        bool                required) {
+    ds4_tensor *t = tensor_by_mtp_stage_suffix(m, stage, suffix);
+    if (t) {
+        dw->present_tensors++;
+    } else if (required) {
+        dw->missing_tensors++;
+    }
+    return t;
+}
+
+static void dspark_bind_block(
+        ds4_dspark_weights      *dw,
+        ds4_layer_weights       *l,
+        const ds4_model         *m,
+        uint32_t                 stage) {
+    l->hc_attn_fn      = dspark_bind_tensor(dw, m, stage, "hc_attn_fn.weight", true);
+    l->hc_attn_scale   = dspark_bind_tensor(dw, m, stage, "hc_attn_scale.weight", true);
+    l->hc_attn_base    = dspark_bind_tensor(dw, m, stage, "hc_attn_base.weight", true);
+    l->attn_norm       = dspark_bind_tensor(dw, m, stage, "attn_norm.weight", true);
+    l->attn_q_a        = dspark_bind_tensor(dw, m, stage, "attn_q_a.weight", true);
+    l->attn_q_a_norm   = dspark_bind_tensor(dw, m, stage, "attn_q_a_norm.weight", true);
+    l->attn_q_b        = dspark_bind_tensor(dw, m, stage, "attn_q_b.weight", true);
+    l->attn_kv         = dspark_bind_tensor(dw, m, stage, "attn_kv.weight", true);
+    l->attn_kv_a_norm  = dspark_bind_tensor(dw, m, stage, "attn_kv_a_norm.weight", true);
+    l->attn_sinks      = dspark_bind_tensor(dw, m, stage, "attn_sinks.weight", true);
+    l->attn_output_a   = dspark_bind_tensor(dw, m, stage, "attn_output_a.weight", true);
+    l->attn_output_b   = dspark_bind_tensor(dw, m, stage, "attn_output_b.weight", true);
+    l->hc_ffn_fn       = dspark_bind_tensor(dw, m, stage, "hc_ffn_fn.weight", true);
+    l->hc_ffn_scale    = dspark_bind_tensor(dw, m, stage, "hc_ffn_scale.weight", true);
+    l->hc_ffn_base     = dspark_bind_tensor(dw, m, stage, "hc_ffn_base.weight", true);
+    l->ffn_norm        = dspark_bind_tensor(dw, m, stage, "ffn_norm.weight", true);
+    l->ffn_gate_inp    = dspark_bind_tensor(dw, m, stage, "ffn_gate_inp.weight", true);
+    l->ffn_exp_probs_b = dspark_bind_tensor(dw, m, stage, "exp_probs_b.bias", true);
+    l->ffn_gate_exps   = dspark_bind_tensor(dw, m, stage, "ffn_gate_exps.weight", true);
+    l->ffn_up_exps     = dspark_bind_tensor(dw, m, stage, "ffn_up_exps.weight", true);
+    l->ffn_down_exps   = dspark_bind_tensor(dw, m, stage, "ffn_down_exps.weight", true);
+    l->ffn_gate_shexp  = dspark_bind_tensor(dw, m, stage, "ffn_gate_shexp.weight", true);
+    l->ffn_up_shexp    = dspark_bind_tensor(dw, m, stage, "ffn_up_shexp.weight", true);
+    l->ffn_down_shexp  = dspark_bind_tensor(dw, m, stage, "ffn_down_shexp.weight", true);
+}
+
+static void dspark_weights_bind_optional(
+        ds4_dspark_weights        *dw,
+        const ds4_model           *m,
+        const ds4_dspark_summary  *summary) {
+    memset(dw, 0, sizeof(*dw));
+    if (!m || !summary) return;
+
+    dw->n_stages = summary->stages < DS4_DSPARK_MAX_STAGES ?
+                   summary->stages : DS4_DSPARK_MAX_STAGES;
+    dw->block_size = summary->block_size;
+    dw->markov_rank = summary->markov_rank;
+    dw->noise_token_id = summary->noise_token_id;
+    dw->target_layer_count = summary->target_layer_count;
+    dw->has_block_size = summary->has_block_size;
+    dw->has_markov_rank = summary->has_markov_rank;
+    dw->has_noise_token_id = summary->has_noise_token_id;
+    dw->has_target_layers = summary->has_target_layers;
+    memcpy(dw->target_layers,
+           summary->target_layers,
+           (size_t)dw->target_layer_count * sizeof(dw->target_layers[0]));
+    if (summary->stages > DS4_DSPARK_MAX_STAGES) dw->missing_tensors++;
+
+    for (uint32_t stage = 0; stage < dw->n_stages; stage++) {
+        ds4_dspark_stage_weights *sw = &dw->stage[stage];
+        dspark_bind_block(dw, &sw->block, m, stage);
+        if (stage == 0) {
+            sw->main_proj = dspark_bind_tensor(dw, m, stage, "main_proj.weight", true);
+            sw->main_norm = dspark_bind_tensor(dw, m, stage, "main_norm.weight", true);
+        }
+    }
+
+    if (dw->n_stages != 0) {
+        const uint32_t final_stage = dw->n_stages - 1u;
+        ds4_dspark_stage_weights *sw = &dw->stage[final_stage];
+        sw->norm = dspark_bind_tensor(dw, m, final_stage, "norm.weight", true);
+        sw->hc_head_base =
+            dspark_bind_tensor(dw, m, final_stage, "hc_head_base.weight", true);
+        sw->hc_head_fn =
+            dspark_bind_tensor(dw, m, final_stage, "hc_head_fn.weight", true);
+        sw->hc_head_scale =
+            dspark_bind_tensor(dw, m, final_stage, "hc_head_scale.weight", true);
+        sw->markov_w1 =
+            dspark_bind_tensor(dw, m, final_stage, "markov_head.markov_w1.weight", true);
+        sw->markov_w2 =
+            dspark_bind_tensor(dw, m, final_stage, "markov_head.markov_w2.weight", true);
+        sw->confidence_proj =
+            dspark_bind_tensor(dw, m, final_stage, "confidence_head.proj.weight", true);
+    }
+
+    dspark_weights_validate_layout(dw);
 }
 
 static void weights_free(ds4_weights *w) {
@@ -10407,6 +11035,39 @@ typedef struct {
     ds4_gpu_tensor *output_norm;
     ds4_gpu_tensor *logits;
 
+    /* DSpark target features.  The proposer consumes mean-over-HC rows from
+     * selected target layers; keeping them on-GPU avoids adding readbacks to
+     * the target path. */
+    ds4_gpu_tensor *dspark_hc_mean_weights;
+    ds4_gpu_tensor *dspark_hc_mean_rows;
+    ds4_gpu_tensor *dspark_target_hidden;
+    ds4_gpu_tensor *dspark_target_hidden_batch;
+    ds4_gpu_tensor *dspark_stage0_packed;
+    ds4_gpu_tensor *dspark_stage0_proj;
+    ds4_gpu_tensor *dspark_main_x;
+    ds4_gpu_tensor *dspark_draft_tokens;
+    ds4_gpu_tensor *dspark_draft_hc;
+    ds4_gpu_tensor *dspark_target_hc;
+    ds4_gpu_tensor *dspark_stage_input_hc;
+    ds4_gpu_tensor *dspark_stage_output_hc;
+    ds4_gpu_tensor *dspark_position_ids;
+    ds4_gpu_tensor *dspark_raw_cache[DS4_DSPARK_MAX_STAGES];
+    uint32_t dspark_cache_cap;
+    uint32_t dspark_cache_start;
+    uint32_t dspark_cache_token_start;
+    uint32_t dspark_cache_len;
+    uint32_t dspark_target_layer_count;
+    uint32_t dspark_block_size;
+    uint32_t dspark_target_layers[DS4_DSPARK_MAX_TARGET_LAYERS];
+    uint32_t dspark_capture_mask;
+    uint32_t dspark_capture_checkpoint_len;
+    uint32_t dspark_capture_batch_mask;
+    uint32_t dspark_capture_batch_start;
+    uint32_t dspark_capture_batch_tokens;
+    bool dspark_capture_valid;
+    bool dspark_capture_batch_valid;
+    bool dspark_capture_enabled;
+
     /* Optional MTP model state.  It has its own raw cache because the drafter
      * runs on speculative future tokens; target KV state is updated only after
      * verification accepts draft tokens. */
@@ -10591,6 +11252,22 @@ static void metal_graph_free(ds4_gpu_graph *g) {
     ds4_gpu_tensor_free(g->output_embd);
     ds4_gpu_tensor_free(g->output_weights);
     ds4_gpu_tensor_free(g->output_pre);
+    ds4_gpu_tensor_free(g->dspark_position_ids);
+    ds4_gpu_tensor_free(g->dspark_stage_output_hc);
+    ds4_gpu_tensor_free(g->dspark_stage_input_hc);
+    ds4_gpu_tensor_free(g->dspark_target_hc);
+    ds4_gpu_tensor_free(g->dspark_draft_hc);
+    ds4_gpu_tensor_free(g->dspark_draft_tokens);
+    for (uint32_t stage = 0; stage < DS4_DSPARK_MAX_STAGES; stage++) {
+        ds4_gpu_tensor_free(g->dspark_raw_cache[stage]);
+    }
+    ds4_gpu_tensor_free(g->dspark_main_x);
+    ds4_gpu_tensor_free(g->dspark_stage0_proj);
+    ds4_gpu_tensor_free(g->dspark_stage0_packed);
+    ds4_gpu_tensor_free(g->dspark_target_hidden_batch);
+    ds4_gpu_tensor_free(g->dspark_target_hidden);
+    ds4_gpu_tensor_free(g->dspark_hc_mean_rows);
+    ds4_gpu_tensor_free(g->dspark_hc_mean_weights);
     ds4_gpu_tensor_free(g->after_ffn_hc);
     ds4_gpu_tensor_free(g->ffn_out);
     ds4_gpu_tensor_free(g->routed_out);
@@ -10758,6 +11435,118 @@ static bool metal_graph_apply_directional_steering_ffn(
         uint32_t          il,
         uint32_t          rows) {
     return metal_graph_apply_directional_steering(g, x, il, rows, g ? g->directional_steering_ffn_scale : 0.0f);
+}
+
+static bool metal_graph_configure_dspark_capture(
+        ds4_gpu_graph            *g,
+        const ds4_dspark_weights *dw) {
+    if (!g || !dw || dw->target_layer_count == 0) return true;
+    if (dw->target_layer_count > DS4_DSPARK_MAX_TARGET_LAYERS ||
+        DS4_N_HC == 0 ||
+        DS4_N_HC > DS4_MAX_HC) {
+        return false;
+    }
+
+    g->dspark_hc_mean_weights =
+        ds4_gpu_tensor_alloc((uint64_t)DS4_N_HC * sizeof(float));
+    g->dspark_hc_mean_rows =
+        ds4_gpu_tensor_alloc((uint64_t)g->prefill_cap *
+                             DS4_N_HC * sizeof(float));
+    g->dspark_target_hidden =
+        ds4_gpu_tensor_alloc((uint64_t)dw->target_layer_count *
+                             DS4_N_EMBD * sizeof(float));
+    g->dspark_target_hidden_batch =
+        ds4_gpu_tensor_alloc((uint64_t)dw->target_layer_count *
+                             g->prefill_cap *
+                             DS4_N_EMBD * sizeof(float));
+    if (dw->block_size != 0 && dw->block_size <= DS4_DSPARK_MAX_BLOCK_SIZE) {
+        g->dspark_stage0_packed =
+            ds4_gpu_tensor_alloc(((uint64_t)dw->block_size + 1u) *
+                                 dw->target_layer_count *
+                                 DS4_N_EMBD * sizeof(float));
+    }
+    g->dspark_stage0_proj =
+        ds4_gpu_tensor_alloc((uint64_t)DS4_N_EMBD * sizeof(float));
+    g->dspark_main_x =
+        ds4_gpu_tensor_alloc((uint64_t)DS4_N_EMBD * sizeof(float));
+    if (!g->dspark_hc_mean_weights || !g->dspark_hc_mean_rows ||
+        !g->dspark_target_hidden || !g->dspark_target_hidden_batch ||
+        !g->dspark_stage0_proj || !g->dspark_main_x) {
+        return false;
+    }
+    if (dw->block_size != 0 && dw->block_size <= DS4_DSPARK_MAX_BLOCK_SIZE) {
+        const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+        g->dspark_draft_tokens =
+            ds4_gpu_tensor_alloc((uint64_t)dw->block_size * sizeof(int32_t));
+        g->dspark_draft_hc =
+            ds4_gpu_tensor_alloc((uint64_t)dw->block_size * hc_dim * sizeof(float));
+        g->dspark_target_hc =
+            ds4_gpu_tensor_alloc(hc_dim * sizeof(float));
+        g->dspark_stage_input_hc =
+            ds4_gpu_tensor_alloc((uint64_t)(dw->block_size + 1u) *
+                                 hc_dim * sizeof(float));
+        g->dspark_stage_output_hc =
+            ds4_gpu_tensor_alloc((uint64_t)dw->block_size *
+                                 hc_dim * sizeof(float));
+        g->dspark_position_ids =
+            ds4_gpu_tensor_alloc((uint64_t)(dw->block_size + 1u) *
+                                 sizeof(int32_t));
+        if (!g->dspark_draft_tokens || !g->dspark_draft_hc ||
+            !g->dspark_target_hc || !g->dspark_stage_input_hc ||
+            !g->dspark_stage_output_hc || !g->dspark_position_ids) {
+            return false;
+        }
+        if (dw->n_stages != 0 && g->raw_cap != 0) {
+            for (uint32_t stage = 0; stage < dw->n_stages; stage++) {
+                g->dspark_raw_cache[stage] =
+                    ds4_gpu_tensor_alloc((uint64_t)g->raw_cap *
+                                         DS4_N_HEAD_DIM * sizeof(float));
+                if (!g->dspark_raw_cache[stage]) return false;
+            }
+            g->dspark_cache_cap = g->raw_cap;
+            g->dspark_cache_start = 0;
+            g->dspark_cache_token_start = 0;
+            g->dspark_cache_len = 0;
+        }
+        g->dspark_block_size = dw->block_size;
+    }
+
+    float mean[DS4_MAX_HC] = {0};
+    const float inv_hc = 1.0f / (float)DS4_N_HC;
+    for (uint32_t i = 0; i < DS4_N_HC; i++) mean[i] = inv_hc;
+    if (ds4_gpu_tensor_write(g->dspark_hc_mean_weights,
+                             0,
+                             mean,
+                             (uint64_t)DS4_N_HC * sizeof(mean[0])) == 0) {
+        return false;
+    }
+    const uint64_t mean_rows_count = (uint64_t)g->prefill_cap * DS4_N_HC;
+    if (mean_rows_count == 0 || mean_rows_count > (uint64_t)SIZE_MAX / sizeof(float)) {
+        return false;
+    }
+    float *mean_rows = xmalloc((size_t)mean_rows_count * sizeof(mean_rows[0]));
+    for (uint64_t i = 0; i < mean_rows_count; i++) mean_rows[i] = inv_hc;
+    const bool mean_rows_ok =
+        ds4_gpu_tensor_write(g->dspark_hc_mean_rows,
+                             0,
+                             mean_rows,
+                             mean_rows_count * sizeof(mean_rows[0])) != 0;
+    free(mean_rows);
+    if (!mean_rows_ok) return false;
+
+    g->dspark_target_layer_count = dw->target_layer_count;
+    memcpy(g->dspark_target_layers,
+           dw->target_layers,
+           (size_t)dw->target_layer_count * sizeof(g->dspark_target_layers[0]));
+    g->dspark_capture_mask = 0;
+    g->dspark_capture_checkpoint_len = 0;
+    g->dspark_capture_batch_mask = 0;
+    g->dspark_capture_batch_start = 0;
+    g->dspark_capture_batch_tokens = 0;
+    g->dspark_capture_valid = false;
+    g->dspark_capture_batch_valid = false;
+    g->dspark_capture_enabled = true;
+    return true;
 }
 
 static uint64_t metal_graph_kv_cache_bytes_for_context(uint32_t ctx_size, uint32_t raw_cap) {
@@ -11941,12 +12730,12 @@ static uint64_t metal_graph_stream_prefill_selected_profile_add_bytes(
     return a > UINT64_MAX - b ? UINT64_MAX : a + b;
 }
 
-static bool metal_graph_stream_prefill_selected_profile_layer(
+static bool metal_graph_selected_profile_layer_impl(
         ds4_gpu_graph          *g,
         const ds4_layer_weights *layer,
         uint32_t                il,
-        uint32_t                n_tokens) {
-    if (!metal_graph_stream_prefill_selected_profile_enabled(g)) return true;
+        uint32_t                n_tokens,
+        const char             *label) {
     if (!layer || !g->batch_router_selected || n_tokens == 0 ||
         DS4_N_EXPERT == 0 || DS4_N_EXPERT > DS4_MAX_EXPERT ||
         DS4_N_EXPERT_USED == 0 || DS4_N_EXPERT_USED > DS4_MAX_EXPERT_USED) {
@@ -12035,8 +12824,9 @@ static bool metal_graph_stream_prefill_selected_profile_layer(
     }
 
     fprintf(stderr,
-            "ds4: Metal streaming prefill selected profile layer=%u "
+            "ds4: %s layer=%u "
             "tokens=%u unique=%u/%u selected=%.2f GiB full=%.2f GiB ratio=%.3f\n",
+            label ? label : "selected expert profile",
             il,
             n_tokens,
             unique,
@@ -12047,10 +12837,24 @@ static bool metal_graph_stream_prefill_selected_profile_layer(
     return true;
 }
 
-static void metal_graph_stream_prefill_selected_profile_summary(
-        const ds4_gpu_graph *g) {
-    if (!metal_graph_stream_prefill_selected_profile_enabled(g) ||
-        g->prefill_selected_profile_layers == 0) {
+static bool metal_graph_stream_prefill_selected_profile_layer(
+        ds4_gpu_graph          *g,
+        const ds4_layer_weights *layer,
+        uint32_t                il,
+        uint32_t                n_tokens) {
+    if (!metal_graph_stream_prefill_selected_profile_enabled(g)) return true;
+    return metal_graph_selected_profile_layer_impl(
+            g,
+            layer,
+            il,
+            n_tokens,
+            "Metal streaming prefill selected profile");
+}
+
+static void metal_graph_selected_profile_summary_impl(
+        const ds4_gpu_graph *g,
+        const char          *label) {
+    if (!g || g->prefill_selected_profile_layers == 0) {
         return;
     }
     const double layers = (double)g->prefill_selected_profile_layers;
@@ -12059,9 +12863,10 @@ static void metal_graph_stream_prefill_selected_profile_summary(
         (double)g->prefill_selected_profile_selected_bytes /
         (double)g->prefill_selected_profile_full_bytes;
     fprintf(stderr,
-            "ds4: Metal streaming prefill selected profile summary "
+            "ds4: %s summary "
             "layers=%u avg_unique=%.1f min_unique=%u max_unique=%u "
             "selected=%.2f GiB full=%.2f GiB ratio=%.3f rows=%" PRIu64 "\n",
+            label ? label : "selected expert profile",
             g->prefill_selected_profile_layers,
             avg_unique,
             g->prefill_selected_profile_min_unique == UINT32_MAX ?
@@ -12073,6 +12878,14 @@ static void metal_graph_stream_prefill_selected_profile_summary(
                 (1024.0 * 1024.0 * 1024.0),
             ratio,
             g->prefill_selected_profile_rows);
+}
+
+static void metal_graph_stream_prefill_selected_profile_summary(
+        const ds4_gpu_graph *g) {
+    if (!metal_graph_stream_prefill_selected_profile_enabled(g)) return;
+    metal_graph_selected_profile_summary_impl(
+            g,
+            "Metal streaming prefill selected profile");
 }
 
 static bool metal_graph_stream_pagein_touch_range(
@@ -13283,8 +14096,19 @@ static bool metal_graph_use_reference_hc_norm_decode(void) {
 
 static bool metal_graph_enable_batch_hc_norm_fusion(void) {
     static int cache = -1;
-    return !metal_graph_use_reference_hc_norm_decode() &&
-           metal_graph_env_flag("DS4_METAL_ENABLE_BATCH_HC_NORM_FUSION", &cache);
+    if (metal_graph_use_reference_hc_norm_decode()) return false;
+    if (cache == -1) {
+        const char *disable = getenv("DS4_METAL_DISABLE_BATCH_HC_NORM_FUSION");
+        if (disable && disable[0] && strcmp(disable, "0") != 0) {
+            cache = 0;
+        } else {
+            const char *legacy_enable =
+                getenv("DS4_METAL_ENABLE_BATCH_HC_NORM_FUSION");
+            cache = (!legacy_enable || !legacy_enable[0] ||
+                     strcmp(legacy_enable, "0") != 0) ? 1 : 0;
+        }
+    }
+    return cache != 0;
 }
 
 static bool metal_graph_use_reference_shared_down_hc(void) {
@@ -16970,6 +17794,385 @@ static uint32_t metal_graph_token_split_after_layers(void) {
     return split_after_layers;
 }
 
+static int metal_graph_dspark_target_slot(
+        const ds4_gpu_graph *g,
+        uint32_t             il) {
+    if (!g || !g->dspark_capture_enabled) return -1;
+    for (uint32_t i = 0; i < g->dspark_target_layer_count; i++) {
+        if (g->dspark_target_layers[i] == il) return (int)i;
+    }
+    return -1;
+}
+
+static uint32_t metal_graph_dspark_capture_complete_mask(
+        const ds4_gpu_graph *g) {
+    if (!g || g->dspark_target_layer_count == 0) return 0;
+    return g->dspark_target_layer_count >= 32u ?
+        UINT32_MAX : ((1u << g->dspark_target_layer_count) - 1u);
+}
+
+static void metal_graph_dspark_capture_note_slot(ds4_gpu_graph *g,
+                                                 uint32_t       slot) {
+    if (!g || slot >= g->dspark_target_layer_count) return;
+    g->dspark_capture_mask |= 1u << slot;
+    g->dspark_capture_valid =
+        g->dspark_capture_mask == metal_graph_dspark_capture_complete_mask(g);
+}
+
+static void metal_graph_dspark_capture_row_invalidate(ds4_gpu_graph *g) {
+    if (!g || !g->dspark_capture_enabled) return;
+    g->dspark_capture_mask = 0;
+    g->dspark_capture_checkpoint_len = 0;
+    g->dspark_capture_valid = false;
+}
+
+static void metal_graph_dspark_capture_batch_invalidate(ds4_gpu_graph *g) {
+    if (!g || !g->dspark_capture_enabled) return;
+    g->dspark_capture_batch_mask = 0;
+    g->dspark_capture_batch_start = 0;
+    g->dspark_capture_batch_tokens = 0;
+    g->dspark_capture_batch_valid = false;
+}
+
+static void metal_graph_dspark_capture_invalidate(ds4_gpu_graph *g) {
+    metal_graph_dspark_capture_row_invalidate(g);
+    metal_graph_dspark_capture_batch_invalidate(g);
+}
+
+static void metal_graph_dspark_cache_reset(ds4_gpu_graph *g) {
+    if (!g) return;
+    g->dspark_cache_start = 0;
+    g->dspark_cache_token_start = 0;
+    g->dspark_cache_len = 0;
+}
+
+static bool metal_graph_dspark_cache_window_valid(
+        const ds4_gpu_graph *g,
+        uint32_t             token_start,
+        uint32_t             raw_start,
+        uint32_t             len) {
+    if (!g || len > g->dspark_cache_cap) return false;
+    if (len == 0) return true;
+    if (g->dspark_cache_cap == 0 ||
+        raw_start >= g->dspark_cache_cap ||
+        token_start > UINT32_MAX - len ||
+        raw_start != token_start % g->dspark_cache_cap) {
+        return false;
+    }
+    return true;
+}
+
+static bool metal_graph_dspark_cache_current_window_valid(
+        const ds4_gpu_graph *g) {
+    if (!g) return false;
+    return metal_graph_dspark_cache_window_valid(g,
+                                                g->dspark_cache_token_start,
+                                                g->dspark_cache_start,
+                                                g->dspark_cache_len);
+}
+
+static bool metal_graph_dspark_cache_set_window(ds4_gpu_graph *g,
+                                                uint32_t       token_start,
+                                                uint32_t       len) {
+    if (!g || len > g->dspark_cache_cap) return false;
+    const uint32_t raw_start =
+        len && g->dspark_cache_cap ? token_start % g->dspark_cache_cap : 0;
+    if (!metal_graph_dspark_cache_window_valid(g,
+                                               len ? token_start : 0,
+                                               raw_start,
+                                               len)) {
+        return false;
+    }
+    g->dspark_cache_start = raw_start;
+    g->dspark_cache_token_start = len ? token_start : 0;
+    g->dspark_cache_len = len;
+    return true;
+}
+
+static bool metal_graph_dspark_cache_crop_to_prefix(ds4_gpu_graph *g,
+                                                    uint32_t       prefix_len) {
+    if (!g) return false;
+    if (g->dspark_cache_len == 0) return true;
+    if (!metal_graph_dspark_cache_current_window_valid(g)) return false;
+
+    const uint32_t start = g->dspark_cache_token_start;
+    const uint32_t end = start + g->dspark_cache_len;
+    if (prefix_len <= start || prefix_len > end) {
+        metal_graph_dspark_cache_reset(g);
+        return true;
+    }
+    g->dspark_cache_len = prefix_len - start;
+    return true;
+}
+
+static bool metal_graph_dspark_cache_ends_at(const ds4_gpu_graph *g,
+                                             uint32_t             pos) {
+    if (!metal_graph_dspark_cache_current_window_valid(g)) return false;
+    if (g->dspark_cache_len == 0) return true;
+    return g->dspark_cache_token_start <= UINT32_MAX - g->dspark_cache_len &&
+           g->dspark_cache_token_start + g->dspark_cache_len == pos;
+}
+
+bool ds4_test_dspark_cache_window_crop(void) {
+    ds4_gpu_graph g;
+    memset(&g, 0, sizeof(g));
+    g.dspark_cache_cap = 8;
+
+    if (!metal_graph_dspark_cache_set_window(&g, 10, 5)) return false;
+    if (g.dspark_cache_token_start != 10 ||
+        g.dspark_cache_start != 2 ||
+        g.dspark_cache_len != 5) return false;
+    if (!metal_graph_dspark_cache_ends_at(&g, 15)) return false;
+    if (metal_graph_dspark_cache_ends_at(&g, 14)) return false;
+    if (metal_graph_dspark_cache_window_valid(&g, 10, 3, 5)) return false;
+
+    if (!metal_graph_dspark_cache_crop_to_prefix(&g, 13)) return false;
+    if (g.dspark_cache_token_start != 10 ||
+        g.dspark_cache_start != 2 ||
+        g.dspark_cache_len != 3) return false;
+    if (!metal_graph_dspark_cache_ends_at(&g, 13)) return false;
+
+    if (!metal_graph_dspark_cache_crop_to_prefix(&g, 20)) return false;
+    if (g.dspark_cache_token_start != 0 ||
+        g.dspark_cache_start != 0 ||
+        g.dspark_cache_len != 0) return false;
+    if (!metal_graph_dspark_cache_ends_at(&g, 20)) return false;
+
+    if (metal_graph_dspark_cache_set_window(&g, UINT32_MAX - 1u, 2)) {
+        return false;
+    }
+    return true;
+}
+
+static void metal_graph_dspark_capture_begin(ds4_gpu_graph *g) {
+    metal_graph_dspark_capture_row_invalidate(g);
+}
+
+static void metal_graph_dspark_capture_begin_prefill(ds4_gpu_graph *g) {
+    metal_graph_dspark_capture_invalidate(g);
+}
+
+static bool metal_graph_dspark_capture_hc(
+        ds4_gpu_graph       *g,
+        const ds4_gpu_tensor *hc,
+        uint32_t             slot) {
+    if (!g || !hc || !g->dspark_target_hidden ||
+        !g->dspark_hc_mean_weights ||
+        slot >= g->dspark_target_layer_count) {
+        return false;
+    }
+
+    ds4_gpu_tensor *dst =
+        ds4_gpu_tensor_view(g->dspark_target_hidden,
+                            (uint64_t)slot * DS4_N_EMBD * sizeof(float),
+                            (uint64_t)DS4_N_EMBD * sizeof(float));
+    if (!dst) return false;
+    const bool ok = ds4_gpu_hc_weighted_sum_tensor(dst,
+                                                   hc,
+                                                   g->dspark_hc_mean_weights,
+                                                   DS4_N_EMBD,
+                                                   DS4_N_HC) != 0;
+    ds4_gpu_tensor_free(dst);
+    if (ok) metal_graph_dspark_capture_note_slot(g, slot);
+    return ok;
+}
+
+static bool metal_graph_dspark_capture_batch_note_slot(
+        ds4_gpu_graph *g,
+        uint32_t       slot,
+        uint32_t       start,
+        uint32_t       n_tokens) {
+    if (!g || slot >= g->dspark_target_layer_count || n_tokens == 0) {
+        return false;
+    }
+    if (g->dspark_capture_batch_mask == 0) {
+        g->dspark_capture_batch_start = start;
+        g->dspark_capture_batch_tokens = n_tokens;
+    } else if (g->dspark_capture_batch_start != start ||
+               g->dspark_capture_batch_tokens != n_tokens) {
+        metal_graph_dspark_capture_batch_invalidate(g);
+        return false;
+    }
+    g->dspark_capture_batch_mask |= 1u << slot;
+    g->dspark_capture_batch_valid =
+        g->dspark_capture_batch_mask ==
+        metal_graph_dspark_capture_complete_mask(g);
+    return true;
+}
+
+static bool metal_graph_dspark_capture_decode_layer(
+        ds4_gpu_graph *g,
+        uint32_t       il) {
+    const int slot = metal_graph_dspark_target_slot(g, il);
+    if (slot < 0) return true;
+    return metal_graph_dspark_capture_hc(g, g->cur_hc, (uint32_t)slot);
+}
+
+static bool metal_graph_dspark_capture_prefill_layer(
+        ds4_gpu_graph *g,
+        uint32_t       il,
+        uint32_t       start,
+        uint32_t       n_tokens) {
+    const int slot = metal_graph_dspark_target_slot(g, il);
+    if (slot < 0) return true;
+    if (n_tokens == 0) return false;
+
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t embd_bytes = (uint64_t)DS4_N_EMBD * sizeof(float);
+    if (g->dspark_target_hidden_batch &&
+        g->dspark_hc_mean_rows &&
+        n_tokens <= g->prefill_cap) {
+        ds4_gpu_tensor *batch_dst =
+            ds4_gpu_tensor_view(g->dspark_target_hidden_batch,
+                                ((uint64_t)slot * g->prefill_cap *
+                                 DS4_N_EMBD) * sizeof(float),
+                                (uint64_t)n_tokens * embd_bytes);
+        ds4_gpu_tensor *last_src =
+            batch_dst ?
+                ds4_gpu_tensor_view(batch_dst,
+                                    (uint64_t)(n_tokens - 1u) * embd_bytes,
+                                    embd_bytes) : NULL;
+        ds4_gpu_tensor *last_dst =
+            ds4_gpu_tensor_view(g->dspark_target_hidden,
+                                (uint64_t)slot * embd_bytes,
+                                embd_bytes);
+        bool ok = batch_dst && last_src && last_dst &&
+                  ds4_gpu_hc_weighted_sum_tensor(batch_dst,
+                                                 g->batch_cur_hc,
+                                                 g->dspark_hc_mean_rows,
+                                                 DS4_N_EMBD,
+                                                 DS4_N_HC) != 0 &&
+                  ds4_gpu_tensor_copy(last_dst,
+                                      0,
+                                      last_src,
+                                      0,
+                                      embd_bytes) != 0;
+        ds4_gpu_tensor_free(last_dst);
+        ds4_gpu_tensor_free(last_src);
+        ds4_gpu_tensor_free(batch_dst);
+        if (ok) {
+            metal_graph_dspark_capture_note_slot(g, (uint32_t)slot);
+            ok = metal_graph_dspark_capture_batch_note_slot(g,
+                                                            (uint32_t)slot,
+                                                            start,
+                                                            n_tokens);
+        }
+        return ok;
+    }
+
+    ds4_gpu_tensor *last_hc =
+        ds4_gpu_tensor_view(g->batch_cur_hc,
+                            (uint64_t)(n_tokens - 1u) * hc_dim * sizeof(float),
+                            hc_dim * sizeof(float));
+    if (!last_hc) return false;
+    const bool ok = metal_graph_dspark_capture_hc(g, last_hc, (uint32_t)slot);
+    ds4_gpu_tensor_free(last_hc);
+    return ok;
+}
+
+static bool metal_graph_dspark_capture_verified_suffix_begin(
+        ds4_gpu_graph *g,
+        uint32_t       start,
+        uint32_t       n_tokens,
+        bool           commands_open) {
+    if (!g || !g->dspark_capture_enabled ||
+        !g->dspark_target_hidden ||
+        !g->dspark_target_hidden_batch ||
+        start == 0 ||
+        n_tokens == 0 ||
+        n_tokens + 1u < n_tokens ||
+        n_tokens + 1u > g->prefill_cap ||
+        !g->dspark_capture_valid ||
+        g->dspark_capture_checkpoint_len != start) {
+        metal_graph_dspark_capture_invalidate(g);
+        return false;
+    }
+
+    const uint64_t embd_bytes = (uint64_t)DS4_N_EMBD * sizeof(float);
+    metal_graph_dspark_capture_batch_invalidate(g);
+    bool ok = commands_open || ds4_gpu_begin_commands() != 0;
+    for (uint32_t slot = 0; ok && slot < g->dspark_target_layer_count; slot++) {
+        ds4_gpu_tensor *dst =
+            ds4_gpu_tensor_view(g->dspark_target_hidden_batch,
+                                ((uint64_t)slot * g->prefill_cap *
+                                 DS4_N_EMBD) * sizeof(float),
+                                embd_bytes);
+        ds4_gpu_tensor *src =
+            ds4_gpu_tensor_view(g->dspark_target_hidden,
+                                (uint64_t)slot * embd_bytes,
+                                embd_bytes);
+        ok = dst && src &&
+             ds4_gpu_tensor_copy(dst, 0, src, 0, embd_bytes) != 0;
+        ds4_gpu_tensor_free(src);
+        ds4_gpu_tensor_free(dst);
+    }
+    if (ok && !commands_open) ok = ds4_gpu_end_commands() != 0;
+    else if (!ok && !commands_open) (void)ds4_gpu_synchronize();
+    if (!ok) {
+        metal_graph_dspark_capture_invalidate(g);
+        return false;
+    }
+
+    metal_graph_dspark_capture_row_invalidate(g);
+    return true;
+}
+
+static bool metal_graph_dspark_capture_verified_suffix_layer(
+        ds4_gpu_graph *g,
+        uint32_t       il,
+        uint32_t       start,
+        uint32_t       n_tokens) {
+    const int slot = metal_graph_dspark_target_slot(g, il);
+    if (slot < 0) return true;
+    if (!g || !g->dspark_target_hidden_batch ||
+        !g->dspark_target_hidden ||
+        !g->dspark_hc_mean_rows ||
+        start == 0 ||
+        n_tokens == 0 ||
+        n_tokens + 1u < n_tokens ||
+        n_tokens + 1u > g->prefill_cap) {
+        return false;
+    }
+
+    const uint64_t embd_bytes = (uint64_t)DS4_N_EMBD * sizeof(float);
+    ds4_gpu_tensor *batch_dst =
+        ds4_gpu_tensor_view(g->dspark_target_hidden_batch,
+                            (((uint64_t)(uint32_t)slot * g->prefill_cap +
+                              1u) * DS4_N_EMBD) * sizeof(float),
+                            (uint64_t)n_tokens * embd_bytes);
+    ds4_gpu_tensor *last_src =
+        batch_dst ?
+            ds4_gpu_tensor_view(batch_dst,
+                                (uint64_t)(n_tokens - 1u) * embd_bytes,
+                                embd_bytes) : NULL;
+    ds4_gpu_tensor *last_dst =
+        ds4_gpu_tensor_view(g->dspark_target_hidden,
+                            (uint64_t)(uint32_t)slot * embd_bytes,
+                            embd_bytes);
+    bool ok = batch_dst && last_src && last_dst &&
+              ds4_gpu_hc_weighted_sum_tensor(batch_dst,
+                                             g->batch_cur_hc,
+                                             g->dspark_hc_mean_rows,
+                                             DS4_N_EMBD,
+                                             DS4_N_HC) != 0 &&
+              ds4_gpu_tensor_copy(last_dst,
+                                  0,
+                                  last_src,
+                                  0,
+                                  embd_bytes) != 0;
+    ds4_gpu_tensor_free(last_dst);
+    ds4_gpu_tensor_free(last_src);
+    ds4_gpu_tensor_free(batch_dst);
+    if (ok) {
+        metal_graph_dspark_capture_note_slot(g, (uint32_t)slot);
+        ok = metal_graph_dspark_capture_batch_note_slot(g,
+                                                        (uint32_t)slot,
+                                                        start - 1u,
+                                                        n_tokens + 1u);
+    }
+    return ok;
+}
+
 /* Encode a full single-token decode step on Metal.  This is the generation
  * hot path: update caches, run all layers, then produce logits. */
 static bool metal_graph_encode_token_raw_swa(
@@ -16986,6 +18189,7 @@ static bool metal_graph_encode_token_raw_swa(
     }
     const uint32_t raw_row = pos % g->raw_cap;
     const uint32_t n_raw = metal_graph_raw_span_for_batch(g, pos, 1);
+    metal_graph_dspark_capture_begin(g);
 
     bool ok = ds4_gpu_embed_token_hc_tensor(g->cur_hc,
                                               model->map,
@@ -17019,6 +18223,7 @@ static bool metal_graph_encode_token_raw_swa(
         ds4_gpu_tensor *tmp = g->cur_hc;
         g->cur_hc = g->after_ffn_hc;
         g->after_ffn_hc = tmp;
+        if (ok) ok = metal_graph_dspark_capture_decode_layer(g, il);
         if (ok && allow_split_flush && split_after_layers != 0 && il + 1u == split_after_layers) {
             ok = ds4_gpu_flush_commands() != 0;
         }
@@ -17295,6 +18500,12 @@ static bool metal_graph_decode_stage_profile_enabled(uint32_t il) {
            metal_graph_profile_layer_env_match("DS4_METAL_DECODE_STAGE_PROFILE_LAYER", il);
 }
 
+static bool metal_graph_layer_stage_profile_start(uint32_t il) {
+    if (!metal_graph_layer_stage_profile_enabled(il)) return true;
+    if (ds4_gpu_end_commands() == 0) return false;
+    return ds4_gpu_begin_commands() != 0;
+}
+
 /* Optional prefill stage profiler. It intentionally ends the current Metal
  * command buffer and waits, so the printed number includes encoding plus GPU
  * execution for the stage just emitted. This is disabled by default because it
@@ -17381,8 +18592,29 @@ static bool metal_graph_encode_layer_attention_batch(
     if (ext_factor != 0.0f && freq_scale > 0.0f) {
         attn_factor /= 1.0f + 0.1f * logf(1.0f / freq_scale);
     }
-    uint32_t *comp_counts = compressed ? xcalloc(n_tokens, sizeof(comp_counts[0])) : NULL;
-    uint32_t *index_counts = ratio == 4 ? xcalloc(n_tokens, sizeof(index_counts[0])) : NULL;
+    enum { stack_count_cap = 16 };
+    uint32_t comp_counts_stack[stack_count_cap];
+    uint32_t index_counts_stack[stack_count_cap];
+    uint32_t *comp_counts = NULL;
+    uint32_t *index_counts = NULL;
+    if (compressed) {
+        if (n_tokens <= stack_count_cap) {
+            memset(comp_counts_stack, 0,
+                   (size_t)n_tokens * sizeof(comp_counts_stack[0]));
+            comp_counts = comp_counts_stack;
+        } else {
+            comp_counts = xcalloc(n_tokens, sizeof(comp_counts[0]));
+        }
+    }
+    if (ratio == 4) {
+        if (n_tokens <= stack_count_cap) {
+            memset(index_counts_stack, 0,
+                   (size_t)n_tokens * sizeof(index_counts_stack[0]));
+            index_counts = index_counts_stack;
+        } else {
+            index_counts = xcalloc(n_tokens, sizeof(index_counts[0]));
+        }
+    }
     const bool qkv_rms_fused = !metal_graph_use_reference_qkv_norm();
     ds4_gpu_tensor *hc_mix_view = ds4_gpu_tensor_view(
             g->batch_hc_mix, 0, (uint64_t)n_tokens * mix_hc * sizeof(float));
@@ -18797,8 +20029,8 @@ static bool metal_graph_encode_layer_attention_batch(
     ds4_gpu_tensor_free(attn_cur_view);
     ds4_gpu_tensor_free(hc_split_view);
     ds4_gpu_tensor_free(hc_mix_view);
-    free(index_counts);
-    free(comp_counts);
+    if (index_counts != index_counts_stack) free(index_counts);
+    if (comp_counts != comp_counts_stack) free(comp_counts);
 #undef DS4_METAL_PROFILE_ATTN_STAGE
 #undef DS4_METAL_PROFILE_Q_STAGE
     return ok;
@@ -18851,14 +20083,13 @@ static bool metal_graph_encode_layer_ffn_batch(
                                                       (uint32_t)hc_dim,
                                                       n_tokens,
                                                       DS4_RMS_EPS) != 0;
-    if (ok) ok = ds4_gpu_matmul_f16_tensor(hc_mix_view,
-                                             model->map,
-                                             model->size,
-                                             layer->hc_ffn_fn->abs_offset,
-                                             hc_dim,
-                                             mix_hc,
-                                             g->batch_flat_hc,
-                                             n_tokens) != 0;
+    if (ok) ok = metal_graph_matmul_plain_tensor(hc_mix_view,
+                                                 model,
+                                                 layer->hc_ffn_fn,
+                                                 hc_dim,
+                                                 mix_hc,
+                                                 g->batch_flat_hc,
+                                                 n_tokens);
     if (metal_graph_use_reference_hc_decode()) {
         if (ok) ok = ds4_gpu_hc_split_sinkhorn_tensor(hc_split_view,
                                                         hc_mix_view,
@@ -18924,14 +20155,13 @@ static bool metal_graph_encode_layer_ffn_batch(
                                       (uint64_t)n_tokens * DS4_N_EMBD, il, pos0);
     }
     DS4_METAL_PROFILE_FFN_STAGE("norm");
-    if (ok) ok = ds4_gpu_matmul_f16_tensor(g->batch_router_logits,
-                                             model->map,
-                                             model->size,
-                                             layer->ffn_gate_inp->abs_offset,
-                                             DS4_N_EMBD,
-                                             DS4_N_EXPERT,
-                                             g->batch_ffn_norm,
-                                             n_tokens) != 0;
+    if (ok) ok = metal_graph_matmul_plain_tensor(g->batch_router_logits,
+                                                 model,
+                                                 layer->ffn_gate_inp,
+                                                 DS4_N_EMBD,
+                                                 DS4_N_EXPERT,
+                                                 g->batch_ffn_norm,
+                                                 n_tokens);
 
     if (ok) ok = ds4_gpu_router_select_batch_tensor(g->batch_router_selected,
                                                       g->batch_router_weights,
@@ -19294,7 +20524,10 @@ static bool metal_graph_encode_layer_batch(
         uint32_t                il,
         uint32_t                pos0,
         uint32_t                n_tokens) {
-    bool ok = metal_graph_encode_layer_attention_batch(g, model, layer, il, pos0, n_tokens);
+    bool ok = metal_graph_layer_stage_profile_start(il);
+    if (ok) {
+        ok = metal_graph_encode_layer_attention_batch(g, model, layer, il, pos0, n_tokens);
+    }
     if (!ok) {
         fprintf(stderr, "ds4: gpu layer %u attention batch encode failed\n", il);
     }
@@ -19329,6 +20562,7 @@ static bool metal_graph_eval_token_raw_swa_streaming(
     const double t0 = (profile || throttle) ? now_sec() : 0.0;
     const uint32_t raw_row = pos % g->raw_cap;
     const uint32_t n_raw = metal_graph_raw_span_for_batch(g, pos, 1);
+    metal_graph_dspark_capture_begin(g);
 
     const bool static_decode_map = metal_graph_stream_decode_static_map_enabled();
     const bool static_map_state_cache =
@@ -19375,6 +20609,7 @@ static bool metal_graph_eval_token_raw_swa_streaming(
                 ds4_gpu_tensor *tmp = g->cur_hc;
                 g->cur_hc = g->after_ffn_hc;
                 g->after_ffn_hc = tmp;
+                ok = metal_graph_dspark_capture_decode_layer(g, il);
             }
         }
         if (ok && logits) {
@@ -19441,6 +20676,7 @@ static bool metal_graph_eval_token_raw_swa_streaming(
             ds4_gpu_tensor *tmp = g->cur_hc;
             g->cur_hc = g->after_ffn_hc;
             g->after_ffn_hc = tmp;
+            if (ok) ok = metal_graph_dspark_capture_decode_layer(g, il);
         }
         const double tl_encoded = profile ? now_sec() : 0.0;
         if (ok) ok = ds4_gpu_end_commands() != 0;
@@ -19950,6 +21186,2156 @@ static bool metal_graph_eval_token_raw_swa_top(
     return ok;
 }
 
+static bool dspark_stage0_weights_ready(
+        const ds4_gpu_graph     *g,
+        const ds4_dspark_weights *dw) {
+    if (!g || !dw || dw->n_stages == 0 || dw->target_layer_count == 0 ||
+        dw->target_layer_count != g->dspark_target_layer_count ||
+        !g->dspark_target_hidden || !g->dspark_stage0_proj ||
+        !g->dspark_main_x) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *stage0 = &dw->stage[0];
+    const ds4_tensor *main_proj = stage0->main_proj;
+    const ds4_tensor *main_norm = stage0->main_norm;
+    const uint64_t in_dim = (uint64_t)dw->target_layer_count * DS4_N_EMBD;
+    return main_proj &&
+           main_norm &&
+           dspark_tensor_type_matches(main_proj->type, DS4_DSPARK_LAYOUT_DENSE) &&
+           main_norm->type == DS4_TENSOR_F32 &&
+           main_proj->ndim == 2 &&
+           main_proj->dim[0] == in_dim &&
+           main_proj->dim[1] == DS4_N_EMBD &&
+           main_norm->ndim == 1 &&
+           main_norm->dim[0] == DS4_N_EMBD;
+}
+
+static bool metal_graph_eval_dspark_stage0(
+        ds4_gpu_graph          *g,
+        const ds4_model        *dspark_model,
+        const ds4_dspark_weights *dw) {
+    if (!g || !dspark_model || !dw || !dspark_stage0_weights_ready(g, dw)) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *stage0 = &dw->stage[0];
+    const uint64_t in_dim = (uint64_t)dw->target_layer_count * DS4_N_EMBD;
+    bool ok = ds4_gpu_begin_commands() != 0;
+    if (ok) {
+        ok = metal_graph_matmul_plain_tensor(g->dspark_stage0_proj,
+                                             dspark_model,
+                                             stage0->main_proj,
+                                             in_dim,
+                                             DS4_N_EMBD,
+                                             g->dspark_target_hidden,
+                                             1);
+    }
+    if (ok) {
+        ok = ds4_gpu_rms_norm_weight_tensor(g->dspark_main_x,
+                                            g->dspark_stage0_proj,
+                                            dspark_model->map,
+                                            dspark_model->size,
+                                            stage0->main_norm->abs_offset,
+                                            DS4_N_EMBD,
+                                            DS4_RMS_EPS) != 0;
+    }
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) (void)ds4_gpu_synchronize();
+    return ok;
+}
+
+static bool dspark_stage0_batch_ready(
+        const ds4_gpu_graph      *g,
+        const ds4_dspark_weights *dw,
+        uint32_t                  n_tokens) {
+    if (!dspark_stage0_weights_ready(g, dw) ||
+        n_tokens == 0 ||
+        n_tokens > g->prefill_cap ||
+        !g->dspark_target_hidden_batch ||
+        !g->batch_ffn_cur ||
+        !g->batch_ffn_norm ||
+        !g->batch_cur_hc) {
+        return false;
+    }
+    const uint64_t in_dim = (uint64_t)dw->target_layer_count * DS4_N_EMBD;
+    return ds4_gpu_tensor_bytes(g->batch_ffn_cur) >=
+               (uint64_t)n_tokens * DS4_N_EMBD * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->batch_ffn_norm) >=
+               (uint64_t)n_tokens * DS4_N_EMBD * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->batch_cur_hc) >=
+               (uint64_t)n_tokens * DS4_N_HC * DS4_N_EMBD * sizeof(float) &&
+           in_dim <= SIZE_MAX / sizeof(float);
+}
+
+static bool metal_graph_pack_dspark_target_hidden_batch(
+        ds4_gpu_graph     *g,
+        const ds4_dspark_weights *dw,
+        ds4_gpu_tensor    *packed,
+        uint32_t           n_tokens) {
+    if (!g || !dw || !packed || n_tokens == 0 ||
+        n_tokens > g->prefill_cap ||
+        dw->target_layer_count != g->dspark_target_layer_count) {
+        return false;
+    }
+
+    const uint64_t in_dim = (uint64_t)dw->target_layer_count * DS4_N_EMBD;
+    const uint64_t packed_count = (uint64_t)n_tokens * in_dim;
+    if (packed_count == 0 ||
+        packed_count > (uint64_t)SIZE_MAX / sizeof(float)) {
+        return false;
+    }
+    return ds4_gpu_pack_slot_rows_f32_tensor(packed,
+                                             g->dspark_target_hidden_batch,
+                                             n_tokens,
+                                             DS4_N_EMBD,
+                                             dw->target_layer_count,
+                                             g->prefill_cap) != 0;
+}
+
+static bool metal_graph_eval_dspark_stage0_batch(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw,
+        uint32_t                  n_tokens,
+        bool                      commands_open) {
+    if (!g || !dspark_model || !dw ||
+        !dspark_stage0_batch_ready(g, dw, n_tokens)) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *stage0 = &dw->stage[0];
+    const uint64_t in_dim = (uint64_t)dw->target_layer_count * DS4_N_EMBD;
+    const uint64_t packed_bytes = (uint64_t)n_tokens * in_dim * sizeof(float);
+    bool packed_owned = false;
+    ds4_gpu_tensor *packed = NULL;
+    if (g->dspark_stage0_packed &&
+        ds4_gpu_tensor_bytes(g->dspark_stage0_packed) >= packed_bytes) {
+        packed = g->dspark_stage0_packed;
+    } else {
+        packed = ds4_gpu_tensor_alloc(packed_bytes);
+        packed_owned = true;
+    }
+    if (!packed) return false;
+
+    bool ok = metal_graph_pack_dspark_target_hidden_batch(g, dw, packed, n_tokens);
+    if (ok && !commands_open) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) {
+        ok = metal_graph_matmul_plain_tensor(g->batch_ffn_cur,
+                                             dspark_model,
+                                             stage0->main_proj,
+                                             in_dim,
+                                             DS4_N_EMBD,
+                                             packed,
+                                             n_tokens);
+    }
+    if (ok) {
+        ok = ds4_gpu_rms_norm_weight_rows_tensor(g->batch_ffn_norm,
+                                                 g->batch_ffn_cur,
+                                                 dspark_model->map,
+                                                 dspark_model->size,
+                                                 stage0->main_norm->abs_offset,
+                                                 DS4_N_EMBD,
+                                                 n_tokens,
+                                                 DS4_RMS_EPS) != 0;
+    }
+    if (ok && !commands_open) ok = ds4_gpu_end_commands() != 0;
+    if (!ok && !commands_open) (void)ds4_gpu_synchronize();
+    if (packed_owned) ds4_gpu_tensor_free(packed);
+    return ok;
+}
+
+static bool dspark_draft_block_ready(
+        const ds4_gpu_graph      *g,
+        const ds4_weights        *base_weights,
+        const ds4_dspark_weights *dw,
+        int                       token) {
+    if (!g || !base_weights || !dw || !base_weights->token_embd ||
+        !g->dspark_draft_tokens || !g->dspark_draft_hc ||
+        dw->block_size == 0 ||
+        dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE ||
+        g->dspark_block_size != dw->block_size ||
+        !dw->has_noise_token_id) {
+        return false;
+    }
+    const uint32_t n_vocab = (uint32_t)base_weights->token_embd->dim[1];
+    return token >= 0 &&
+           (uint32_t)token < n_vocab &&
+           dw->noise_token_id < n_vocab;
+}
+
+static bool dspark_stage_input_ready(
+        const ds4_gpu_graph      *g,
+        const ds4_dspark_weights *dw) {
+    if (!g || !dw ||
+        dw->block_size == 0 ||
+        dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE ||
+        g->dspark_block_size != dw->block_size ||
+        !g->dspark_main_x || !g->dspark_draft_hc ||
+        !g->dspark_target_hc || !g->dspark_stage_input_hc ||
+        !g->dspark_position_ids) {
+        return false;
+    }
+    if (dw->block_size == UINT32_MAX) return false;
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t rows = (uint64_t)dw->block_size + 1u;
+    return ds4_gpu_tensor_bytes(g->dspark_target_hc) >=
+               hc_dim * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->dspark_stage_input_hc) >=
+               rows * hc_dim * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->dspark_position_ids) >=
+               rows * sizeof(int32_t);
+}
+
+static bool dspark_stage_cache_ready(
+        const ds4_gpu_graph      *g,
+        const ds4_dspark_weights *dw) {
+    if (!g || !dw ||
+        dw->n_stages == 0 ||
+        dw->n_stages > DS4_DSPARK_MAX_STAGES ||
+        g->dspark_cache_cap == 0 ||
+        !metal_graph_dspark_cache_current_window_valid(g)) {
+        return false;
+    }
+    const uint64_t bytes =
+        (uint64_t)g->dspark_cache_cap * DS4_N_HEAD_DIM * sizeof(float);
+    for (uint32_t stage = 0; stage < dw->n_stages; stage++) {
+        if (!g->dspark_raw_cache[stage] ||
+            ds4_gpu_tensor_bytes(g->dspark_raw_cache[stage]) < bytes) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool dspark_noncausal_attention_probe_ready(
+        const ds4_gpu_graph      *g,
+        const ds4_dspark_weights *dw) {
+    if (!g || !dw ||
+        dw->n_stages == 0 ||
+        dw->block_size == 0 ||
+        dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE ||
+        g->prefill_cap < dw->block_size + 1u ||
+        !g->batch_q || !g->batch_heads ||
+        !g->dspark_raw_cache[0]) {
+        return false;
+    }
+    const ds4_layer_weights *block = &dw->stage[0].block;
+    if (!block->attn_sinks) return false;
+
+    const uint64_t rows = (uint64_t)dw->block_size + 1u;
+    const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
+    return ds4_gpu_tensor_bytes(g->batch_q) >=
+               rows * q_dim * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->batch_heads) >=
+               rows * q_dim * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->dspark_raw_cache[0]) >=
+               rows * DS4_N_HEAD_DIM * sizeof(float);
+}
+
+static bool metal_graph_probe_dspark_noncausal_attention(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw) {
+    if (!g || !dspark_model || !dspark_noncausal_attention_probe_ready(g, dw)) {
+        return false;
+    }
+
+    const uint32_t rows = dw->block_size + 1u;
+    const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
+    const ds4_layer_weights *block = &dw->stage[0].block;
+    bool ok = ds4_gpu_tensor_fill_f32(g->batch_q,
+                                      0.0f,
+                                      (uint64_t)rows * q_dim) != 0 &&
+              ds4_gpu_tensor_fill_f32(g->dspark_raw_cache[0],
+                                      0.0f,
+                                      (uint64_t)rows * DS4_N_HEAD_DIM) != 0;
+    if (ok) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) {
+        ok = ds4_gpu_attention_noncausal_raw_batch_heads_tensor(
+                g->batch_heads,
+                dspark_model->map,
+                dspark_model->size,
+                block->attn_sinks->abs_offset,
+                g->batch_q,
+                g->dspark_raw_cache[0],
+                rows,
+                rows,
+                rows,
+                0,
+                DS4_N_HEAD,
+                DS4_N_HEAD_DIM) != 0;
+    }
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) (void)ds4_gpu_synchronize();
+    return ok;
+}
+
+static bool metal_graph_prepare_dspark_setup_block(
+        ds4_gpu_graph            *g,
+        const ds4_model          *base_model,
+        const ds4_weights        *base_weights,
+        const ds4_dspark_weights *dw,
+        int                       token,
+        uint32_t                  pos) {
+    if (!g || !base_model ||
+        !dspark_draft_block_ready(g, base_weights, dw, token) ||
+        !dspark_stage_input_ready(g, dw)) {
+        return false;
+    }
+    if (pos > (uint32_t)INT32_MAX ||
+        dw->block_size > (uint32_t)INT32_MAX ||
+        pos > (uint32_t)INT32_MAX - dw->block_size) {
+        return false;
+    }
+
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t hc_bytes = hc_dim * sizeof(float);
+    int32_t positions[DS4_DSPARK_MAX_BLOCK_SIZE + 1u];
+    positions[0] = (int32_t)pos;
+    for (uint32_t i = 0; i < dw->block_size; i++) {
+        positions[i + 1u] = (int32_t)(pos + i);
+    }
+    int32_t ids[DS4_DSPARK_MAX_BLOCK_SIZE];
+    ids[0] = (int32_t)token;
+    for (uint32_t i = 1; i < dw->block_size; i++) {
+        ids[i] = (int32_t)dw->noise_token_id;
+    }
+
+    bool ok = ds4_gpu_tensor_write(g->dspark_draft_tokens,
+                                   0,
+                                   ids,
+                                   (uint64_t)dw->block_size * sizeof(ids[0])) != 0 &&
+              ds4_gpu_tensor_write(g->dspark_position_ids,
+                                   0,
+                                   positions,
+                                   ((uint64_t)dw->block_size + 1u) *
+                                       sizeof(positions[0])) != 0;
+    if (ok) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) {
+        ok = ds4_gpu_embed_tokens_hc_tensor(g->dspark_draft_hc,
+                                            g->dspark_draft_tokens,
+                                            base_model->map,
+                                            base_model->size,
+                                            base_weights->token_embd->abs_offset,
+                                            (uint32_t)base_weights->token_embd->dim[1],
+                                            dw->block_size,
+                                            DS4_N_EMBD,
+                                            DS4_N_HC) != 0;
+    }
+    if (ok) {
+        ok = ds4_gpu_repeat_hc_tensor(g->dspark_target_hc,
+                                      g->dspark_main_x,
+                                      DS4_N_EMBD,
+                                      DS4_N_HC) != 0;
+    }
+    if (ok) {
+        ok = ds4_gpu_tensor_copy(g->dspark_stage_input_hc,
+                                 0,
+                                 g->dspark_target_hc,
+                                 0,
+                                 hc_bytes) != 0;
+    }
+    if (ok) {
+        ok = ds4_gpu_tensor_copy(g->dspark_stage_input_hc,
+                                 hc_bytes,
+                                 g->dspark_draft_hc,
+                                 0,
+                                 (uint64_t)dw->block_size * hc_bytes) != 0;
+    }
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) (void)ds4_gpu_synchronize();
+    return ok;
+}
+
+static bool metal_graph_prepare_dspark_stage0_setup_block(
+        ds4_gpu_graph            *g,
+        const ds4_model          *base_model,
+        const ds4_weights        *base_weights,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw,
+        int                       token,
+        uint32_t                  pos) {
+    if (!g || !base_model || !dspark_model ||
+        !dspark_stage0_weights_ready(g, dw) ||
+        !dspark_draft_block_ready(g, base_weights, dw, token) ||
+        !dspark_stage_input_ready(g, dw)) {
+        return false;
+    }
+    if (pos > (uint32_t)INT32_MAX ||
+        dw->block_size > (uint32_t)INT32_MAX ||
+        pos > (uint32_t)INT32_MAX - dw->block_size) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *stage0 = &dw->stage[0];
+    const uint64_t in_dim = (uint64_t)dw->target_layer_count * DS4_N_EMBD;
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t hc_bytes = hc_dim * sizeof(float);
+    int32_t positions[DS4_DSPARK_MAX_BLOCK_SIZE + 1u];
+    positions[0] = (int32_t)pos;
+    for (uint32_t i = 0; i < dw->block_size; i++) {
+        positions[i + 1u] = (int32_t)(pos + i);
+    }
+    int32_t ids[DS4_DSPARK_MAX_BLOCK_SIZE];
+    ids[0] = (int32_t)token;
+    for (uint32_t i = 1; i < dw->block_size; i++) {
+        ids[i] = (int32_t)dw->noise_token_id;
+    }
+
+    bool ok = ds4_gpu_tensor_write(g->dspark_draft_tokens,
+                                   0,
+                                   ids,
+                                   (uint64_t)dw->block_size * sizeof(ids[0])) != 0 &&
+              ds4_gpu_tensor_write(g->dspark_position_ids,
+                                   0,
+                                   positions,
+                                   ((uint64_t)dw->block_size + 1u) *
+                                       sizeof(positions[0])) != 0;
+    if (ok) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) {
+        ok = metal_graph_matmul_plain_tensor(g->dspark_stage0_proj,
+                                             dspark_model,
+                                             stage0->main_proj,
+                                             in_dim,
+                                             DS4_N_EMBD,
+                                             g->dspark_target_hidden,
+                                             1);
+    }
+    if (ok) {
+        ok = ds4_gpu_rms_norm_weight_tensor(g->dspark_main_x,
+                                            g->dspark_stage0_proj,
+                                            dspark_model->map,
+                                            dspark_model->size,
+                                            stage0->main_norm->abs_offset,
+                                            DS4_N_EMBD,
+                                            DS4_RMS_EPS) != 0;
+    }
+    if (ok) {
+        ok = ds4_gpu_embed_tokens_hc_tensor(g->dspark_draft_hc,
+                                            g->dspark_draft_tokens,
+                                            base_model->map,
+                                            base_model->size,
+                                            base_weights->token_embd->abs_offset,
+                                            (uint32_t)base_weights->token_embd->dim[1],
+                                            dw->block_size,
+                                            DS4_N_EMBD,
+                                            DS4_N_HC) != 0;
+    }
+    if (ok) {
+        ok = ds4_gpu_repeat_hc_tensor(g->dspark_target_hc,
+                                      g->dspark_main_x,
+                                      DS4_N_EMBD,
+                                      DS4_N_HC) != 0;
+    }
+    if (ok) {
+        ok = ds4_gpu_tensor_copy(g->dspark_stage_input_hc,
+                                 0,
+                                 g->dspark_target_hc,
+                                 0,
+                                 hc_bytes) != 0;
+    }
+    if (ok) {
+        ok = ds4_gpu_tensor_copy(g->dspark_stage_input_hc,
+                                 hc_bytes,
+                                 g->dspark_draft_hc,
+                                 0,
+                                 (uint64_t)dw->block_size * hc_bytes) != 0;
+    }
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) (void)ds4_gpu_synchronize();
+    return ok;
+}
+
+static bool dspark_stage_block_ready(
+        const ds4_gpu_graph      *g,
+        const ds4_dspark_weights *dw,
+        uint32_t                  stage) {
+    if (!g || !dw ||
+        stage >= dw->n_stages ||
+        dw->block_size == 0 ||
+        dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE ||
+        g->prefill_cap < dw->block_size + 1u ||
+        !g->dspark_stage_output_hc ||
+        !dspark_stage_input_ready(g, dw) ||
+        !dspark_stage_cache_ready(g, dw)) {
+        return false;
+    }
+
+    const ds4_layer_weights *l = &dw->stage[stage].block;
+    if (!l->hc_attn_fn || !l->hc_attn_scale || !l->hc_attn_base ||
+        !l->attn_norm || !l->attn_q_a || !l->attn_q_a_norm ||
+        !l->attn_q_b || !l->attn_kv || !l->attn_kv_a_norm ||
+        !l->attn_sinks || !l->attn_output_a || !l->attn_output_b ||
+        !l->hc_ffn_fn || !l->hc_ffn_scale || !l->hc_ffn_base ||
+        !l->ffn_norm || !l->ffn_gate_inp || !l->ffn_exp_probs_b ||
+        !l->ffn_gate_exps || !l->ffn_up_exps || !l->ffn_down_exps ||
+        !l->ffn_gate_shexp || !l->ffn_up_shexp || !l->ffn_down_shexp) {
+        return false;
+    }
+
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t mix_hc = 2ull * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
+    const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
+    const uint64_t rows = (uint64_t)dw->block_size + 1u;
+    const uint64_t draft = dw->block_size;
+    const uint64_t out_low_dim = (uint64_t)DS4_N_OUT_GROUP * DS4_N_LORA_O;
+    const uint64_t group_dim =
+        (uint64_t)DS4_N_HEAD_DIM * (DS4_N_HEAD / DS4_N_OUT_GROUP);
+
+    return
+        dspark_tensor_type_matches(l->hc_attn_fn->type, DS4_DSPARK_LAYOUT_PLAIN) &&
+        l->hc_attn_scale->type == DS4_TENSOR_F32 &&
+        l->hc_attn_base->type == DS4_TENSOR_F32 &&
+        l->attn_norm->type == DS4_TENSOR_F32 &&
+        dspark_tensor_type_matches(l->attn_q_a->type, DS4_DSPARK_LAYOUT_DENSE) &&
+        l->attn_q_a_norm->type == DS4_TENSOR_F32 &&
+        dspark_tensor_type_matches(l->attn_q_b->type, DS4_DSPARK_LAYOUT_DENSE) &&
+        dspark_tensor_type_matches(l->attn_kv->type, DS4_DSPARK_LAYOUT_DENSE) &&
+        l->attn_kv_a_norm->type == DS4_TENSOR_F32 &&
+        l->attn_sinks->type == DS4_TENSOR_F32 &&
+        l->attn_output_a->type == DS4_TENSOR_Q8_0 &&
+        l->attn_output_b->type == DS4_TENSOR_Q8_0 &&
+        dspark_tensor_type_matches(l->hc_ffn_fn->type, DS4_DSPARK_LAYOUT_PLAIN) &&
+        l->hc_ffn_scale->type == DS4_TENSOR_F32 &&
+        l->hc_ffn_base->type == DS4_TENSOR_F32 &&
+        l->ffn_norm->type == DS4_TENSOR_F32 &&
+        dspark_tensor_type_matches(l->ffn_gate_inp->type, DS4_DSPARK_LAYOUT_DENSE) &&
+        l->ffn_exp_probs_b->type == DS4_TENSOR_F32 &&
+        tensor_is_routed_expert_type(l->ffn_gate_exps->type) &&
+        l->ffn_gate_exps->type == l->ffn_up_exps->type &&
+        tensor_is_routed_expert_type(l->ffn_down_exps->type) &&
+        l->ffn_gate_shexp->type == DS4_TENSOR_Q8_0 &&
+        l->ffn_up_shexp->type == DS4_TENSOR_Q8_0 &&
+        l->ffn_down_shexp->type == DS4_TENSOR_Q8_0 &&
+        l->hc_attn_fn->ndim == 2 &&
+        l->hc_attn_fn->dim[0] == hc_dim &&
+        l->hc_attn_fn->dim[1] == mix_hc &&
+        l->attn_q_a->ndim == 2 &&
+        l->attn_q_a->dim[0] == DS4_N_EMBD &&
+        l->attn_q_a->dim[1] == DS4_N_LORA_Q &&
+        l->attn_q_b->ndim == 2 &&
+        l->attn_q_b->dim[0] == DS4_N_LORA_Q &&
+        l->attn_q_b->dim[1] == q_dim &&
+        l->attn_kv->ndim == 2 &&
+        l->attn_kv->dim[0] == DS4_N_EMBD &&
+        l->attn_kv->dim[1] == DS4_N_HEAD_DIM &&
+        l->attn_output_a->ndim == 2 &&
+        l->attn_output_a->dim[0] == group_dim &&
+        l->attn_output_a->dim[1] == out_low_dim &&
+        l->attn_output_b->ndim == 2 &&
+        l->attn_output_b->dim[0] == out_low_dim &&
+        l->attn_output_b->dim[1] == DS4_N_EMBD &&
+        ds4_gpu_tensor_bytes(g->batch_hc_mix) >= rows * mix_hc * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_hc_split) >= rows * mix_hc * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_flat_hc) >= rows * hc_dim * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_attn_cur) >= rows * DS4_N_EMBD * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_attn_norm) >= rows * DS4_N_EMBD * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_qr) >= draft * DS4_N_LORA_Q * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_qr_norm) >= draft * DS4_N_LORA_Q * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_q) >= draft * q_dim * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_kv_raw) >= rows * DS4_N_HEAD_DIM * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_kv) >= rows * DS4_N_HEAD_DIM * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_heads) >= draft * q_dim * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_attn_out) >= draft * DS4_N_EMBD * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_after_attn_hc) >= draft * hc_dim * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_next_hc) >= draft * hc_dim * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->prefill_tokens) >= draft * sizeof(int32_t) &&
+        ds4_gpu_tensor_bytes(g->dspark_stage_output_hc) >= draft * hc_dim * sizeof(float);
+}
+
+static bool dspark_stage_target_cache_seed_ready(
+        const ds4_gpu_graph      *g,
+        const ds4_dspark_weights *dw,
+        uint32_t                  stage,
+        uint32_t                  n_tokens) {
+    if (!g || !dw ||
+        stage >= dw->n_stages ||
+        n_tokens == 0 ||
+        n_tokens > g->prefill_cap ||
+        !dspark_stage_cache_ready(g, dw) ||
+        !g->batch_cur_hc ||
+        !g->batch_hc_mix ||
+        !g->batch_hc_split ||
+        !g->batch_flat_hc ||
+        !g->batch_attn_cur ||
+        !g->batch_attn_norm ||
+        !g->batch_kv_raw ||
+        !g->batch_kv) {
+        return false;
+    }
+
+    const ds4_layer_weights *l = &dw->stage[stage].block;
+    if (!l->hc_attn_fn || !l->hc_attn_scale || !l->hc_attn_base ||
+        !l->attn_norm || !l->attn_kv || !l->attn_kv_a_norm) {
+        return false;
+    }
+
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t mix_hc = 2ull * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
+    return
+        dspark_tensor_type_matches(l->hc_attn_fn->type, DS4_DSPARK_LAYOUT_PLAIN) &&
+        l->hc_attn_scale->type == DS4_TENSOR_F32 &&
+        l->hc_attn_base->type == DS4_TENSOR_F32 &&
+        l->attn_norm->type == DS4_TENSOR_F32 &&
+        dspark_tensor_type_matches(l->attn_kv->type, DS4_DSPARK_LAYOUT_DENSE) &&
+        l->attn_kv_a_norm->type == DS4_TENSOR_F32 &&
+        l->hc_attn_fn->ndim == 2 &&
+        l->hc_attn_fn->dim[0] == hc_dim &&
+        l->hc_attn_fn->dim[1] == mix_hc &&
+        l->attn_kv->ndim == 2 &&
+        l->attn_kv->dim[0] == DS4_N_EMBD &&
+        l->attn_kv->dim[1] == DS4_N_HEAD_DIM &&
+        ds4_gpu_tensor_bytes(g->batch_cur_hc) >=
+            (uint64_t)n_tokens * hc_dim * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_hc_mix) >=
+            (uint64_t)n_tokens * mix_hc * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_hc_split) >=
+            (uint64_t)n_tokens * mix_hc * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_flat_hc) >=
+            (uint64_t)n_tokens * hc_dim * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_attn_cur) >=
+            (uint64_t)n_tokens * DS4_N_EMBD * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_attn_norm) >=
+            (uint64_t)n_tokens * DS4_N_EMBD * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_kv_raw) >=
+            (uint64_t)n_tokens * DS4_N_HEAD_DIM * sizeof(float) &&
+        ds4_gpu_tensor_bytes(g->batch_kv) >=
+            (uint64_t)n_tokens * DS4_N_HEAD_DIM * sizeof(float);
+}
+
+static bool metal_graph_seed_dspark_stage_target_cache(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw,
+        uint32_t                  stage,
+        uint32_t                  pos0,
+        uint32_t                  n_tokens,
+        bool                      commands_open) {
+    if (!g || !dspark_model || !dw ||
+        !dspark_stage_target_cache_seed_ready(g, dw, stage, n_tokens) ||
+        n_tokens > g->dspark_cache_cap) {
+        return false;
+    }
+
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t mix_hc = 2ull * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
+    const ds4_layer_weights *block = &dw->stage[stage].block;
+    const bool fuse_hc_norm = DS4_N_HC == 4 &&
+                              !metal_graph_use_reference_hc_decode() &&
+                              metal_graph_enable_batch_hc_norm_fusion();
+
+    ds4_gpu_tensor *hc_mix_view =
+        ds4_gpu_tensor_view(g->batch_hc_mix,
+                            0,
+                            (uint64_t)n_tokens * mix_hc * sizeof(float));
+    ds4_gpu_tensor *hc_split_view =
+        ds4_gpu_tensor_view(g->batch_hc_split,
+                            0,
+                            (uint64_t)n_tokens * mix_hc * sizeof(float));
+    ds4_gpu_tensor *attn_cur_view =
+        ds4_gpu_tensor_view(g->batch_attn_cur,
+                            0,
+                            (uint64_t)n_tokens * DS4_N_EMBD * sizeof(float));
+    bool ok = hc_mix_view && hc_split_view && attn_cur_view;
+
+    const float freq_base = DS4_ROPE_FREQ_BASE;
+    const float freq_scale = 1.0f;
+    const float ext_factor = 0.0f;
+    const float attn_factor = 1.0f;
+
+    if (ok && !commands_open) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) ok = ds4_gpu_rms_norm_plain_rows_tensor(g->batch_flat_hc,
+                                                      g->batch_cur_hc,
+                                                      (uint32_t)hc_dim,
+                                                      n_tokens,
+                                                      DS4_RMS_EPS) != 0;
+    if (ok) ok = metal_graph_matmul_plain_tensor(hc_mix_view,
+                                                 dspark_model,
+                                                 block->hc_attn_fn,
+                                                 hc_dim,
+                                                 mix_hc,
+                                                 g->batch_flat_hc,
+                                                 n_tokens);
+    if (fuse_hc_norm) {
+        if (ok) ok = ds4_gpu_hc_split_weighted_sum_norm_tensor(attn_cur_view,
+                                                                 g->batch_attn_norm,
+                                                                 hc_split_view,
+                                                                 hc_mix_view,
+                                                                 g->batch_cur_hc,
+                                                                 dspark_model->map,
+                                                                 dspark_model->size,
+                                                                 block->hc_attn_scale->abs_offset,
+                                                                 block->hc_attn_base->abs_offset,
+                                                                 block->attn_norm->abs_offset,
+                                                                 DS4_N_EMBD,
+                                                                 DS4_N_HC,
+                                                                 DS4_N_HC_SINKHORN_ITER,
+                                                                 DS4_HC_EPS,
+                                                                 DS4_RMS_EPS) != 0;
+    } else {
+        if (ok) ok = ds4_gpu_hc_split_weighted_sum_tensor(attn_cur_view,
+                                                            hc_split_view,
+                                                            hc_mix_view,
+                                                            g->batch_cur_hc,
+                                                            dspark_model->map,
+                                                            dspark_model->size,
+                                                            block->hc_attn_scale->abs_offset,
+                                                            block->hc_attn_base->abs_offset,
+                                                            DS4_N_EMBD,
+                                                            DS4_N_HC,
+                                                            DS4_N_HC_SINKHORN_ITER,
+                                                            DS4_HC_EPS) != 0;
+        if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(g->batch_attn_norm,
+                                                          g->batch_attn_cur,
+                                                          dspark_model->map,
+                                                          dspark_model->size,
+                                                          block->attn_norm->abs_offset,
+                                                          DS4_N_EMBD,
+                                                          n_tokens,
+                                                          DS4_RMS_EPS) != 0;
+    }
+    if (ok) ok = metal_graph_matmul_plain_tensor(g->batch_kv_raw,
+                                                 dspark_model,
+                                                 block->attn_kv,
+                                                 DS4_N_EMBD,
+                                                 DS4_N_HEAD_DIM,
+                                                 g->batch_attn_norm,
+                                                 n_tokens);
+    if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(g->batch_kv,
+                                                      g->batch_kv_raw,
+                                                      dspark_model->map,
+                                                      dspark_model->size,
+                                                      block->attn_kv_a_norm->abs_offset,
+                                                      DS4_N_HEAD_DIM,
+                                                      n_tokens,
+                                                      DS4_RMS_EPS) != 0;
+    if (ok) ok = ds4_gpu_rope_tail_tensor(g->batch_kv,
+                                           n_tokens,
+                                           1,
+                                           DS4_N_HEAD_DIM,
+                                           DS4_N_ROT,
+                                           pos0,
+                                           0,
+                                           false,
+                                           freq_base,
+                                           freq_scale,
+                                           ext_factor,
+                                           attn_factor,
+                                           DS4_ROPE_YARN_BETA_FAST,
+                                           DS4_ROPE_YARN_BETA_SLOW) != 0;
+    if (ok) ok = ds4_gpu_dsv4_fp8_kv_quantize_tensor(g->batch_kv,
+                                                       n_tokens,
+                                                       DS4_N_HEAD_DIM,
+                                                       DS4_N_ROT) != 0;
+    if (ok) ok = ds4_gpu_store_raw_kv_batch_tensor(g->dspark_raw_cache[stage],
+                                                    g->batch_kv,
+                                                    g->dspark_cache_cap,
+                                                    pos0,
+                                                    n_tokens,
+                                                    DS4_N_HEAD_DIM) != 0;
+    if (ok && !commands_open) ok = ds4_gpu_end_commands() != 0;
+
+    ds4_gpu_tensor_free(attn_cur_view);
+    ds4_gpu_tensor_free(hc_split_view);
+    ds4_gpu_tensor_free(hc_mix_view);
+    if (!ok && !commands_open) (void)ds4_gpu_synchronize();
+    return ok;
+}
+
+static bool metal_graph_seed_dspark_initial_cache_from_prefill(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw,
+        uint32_t                  batch_start,
+        uint32_t                  n_tokens,
+        uint32_t                 *seeded_rows) {
+    if (seeded_rows) *seeded_rows = 0;
+    if (!g || !dspark_model || !dw ||
+        n_tokens == 0 ||
+        n_tokens > g->prefill_cap ||
+        n_tokens > g->dspark_cache_cap ||
+        dw->n_stages == 0 ||
+        dw->n_stages > DS4_DSPARK_MAX_STAGES ||
+        !dspark_stage0_batch_ready(g, dw, n_tokens) ||
+        !dspark_stage_cache_ready(g, dw)) {
+        return false;
+    }
+
+    bool ok = ds4_gpu_begin_commands() != 0;
+    if (ok) {
+        ok = metal_graph_eval_dspark_stage0_batch(g,
+                                                  dspark_model,
+                                                  dw,
+                                                  n_tokens,
+                                                  true);
+    }
+    if (ok) {
+        ok = ds4_gpu_repeat_hc_rows_tensor(g->batch_cur_hc,
+                                           g->batch_ffn_norm,
+                                           n_tokens,
+                                           DS4_N_EMBD,
+                                           DS4_N_HC) != 0;
+    }
+    for (uint32_t stage = 0; ok && stage < dw->n_stages; stage++) {
+        ok = metal_graph_seed_dspark_stage_target_cache(g,
+                                                        dspark_model,
+                                                        dw,
+                                                        stage,
+                                                        batch_start,
+                                                        n_tokens,
+                                                        true);
+    }
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) {
+        (void)ds4_gpu_synchronize();
+        return false;
+    }
+    if (!metal_graph_dspark_cache_set_window(g, batch_start, n_tokens)) {
+        return false;
+    }
+    if (seeded_rows) *seeded_rows = n_tokens;
+    return true;
+}
+
+static bool metal_graph_encode_dspark_next_stage_draft_input_from(
+        ds4_gpu_graph            *g,
+        const ds4_dspark_weights *dw,
+        const ds4_gpu_tensor     *draft_hc) {
+    if (!g || !dw || !dspark_stage_input_ready(g, dw) ||
+        !draft_hc) {
+        return false;
+    }
+
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t hc_bytes = hc_dim * sizeof(float);
+    if (ds4_gpu_tensor_bytes(draft_hc) <
+        (uint64_t)dw->block_size * hc_bytes) {
+        return false;
+    }
+
+    return ds4_gpu_tensor_copy(g->dspark_stage_input_hc,
+                               hc_bytes,
+                               draft_hc,
+                               0,
+                               (uint64_t)dw->block_size * hc_bytes) != 0;
+}
+
+static bool metal_graph_dspark_stage_profile_enabled(uint32_t stage) {
+    return getenv("DS4_DSPARK_STAGE_PROFILE") != NULL &&
+           metal_graph_profile_layer_env_match("DS4_DSPARK_STAGE_PROFILE_STAGE",
+                                               stage);
+}
+
+static bool metal_graph_dspark_stage_profile_boundary(
+        const char *part,
+        uint32_t    stage,
+        uint32_t    pos,
+        uint32_t    rows,
+        double     *stage_t0) {
+    if (ds4_gpu_end_commands() == 0) return false;
+    const double now = now_sec();
+    fprintf(stderr,
+            "ds4: DSpark stage profile stage=%u pos=%u rows=%u %s=%.3f ms\n",
+            stage,
+            pos,
+            rows,
+            part,
+            (now - *stage_t0) * 1000.0);
+    *stage_t0 = now;
+    return ds4_gpu_begin_commands() != 0;
+}
+
+static bool metal_graph_eval_dspark_stage_block(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw,
+        uint32_t                  stage,
+        uint32_t                  pos,
+        uint32_t                  support_len,
+        uint32_t                  raw_start,
+        bool                      prepare_next_stage_input,
+        bool                      commands_open) {
+    if (!g || !dspark_model || !dw ||
+        !dspark_stage_block_ready(g, dw, stage)) {
+        return false;
+    }
+
+    const uint32_t draft = dw->block_size;
+    const uint32_t rows = draft + 1u;
+    if (support_len > g->dspark_cache_cap ||
+        rows > g->dspark_cache_cap - support_len ||
+        (support_len != 0 && raw_start >= g->dspark_cache_cap)) {
+        return false;
+    }
+    const uint32_t visible_rows = support_len + rows;
+    const uint32_t attention_raw_start =
+        support_len ? raw_start : (pos % g->dspark_cache_cap);
+    const uint32_t append_pos = support_len ?
+        (uint32_t)(((uint64_t)raw_start + support_len) %
+                   g->dspark_cache_cap) :
+        attention_raw_start;
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t mix_hc = 2ull * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
+    const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
+    const uint64_t group_dim =
+        (uint64_t)DS4_N_HEAD_DIM * (DS4_N_HEAD / DS4_N_OUT_GROUP);
+    const ds4_layer_weights *block = &dw->stage[stage].block;
+    const bool fuse_hc_norm = DS4_N_HC == 4 &&
+                              !metal_graph_use_reference_hc_decode() &&
+                              metal_graph_enable_batch_hc_norm_fusion();
+
+    ds4_gpu_tensor *hc_mix_view =
+        ds4_gpu_tensor_view(g->batch_hc_mix,
+                            0,
+                            (uint64_t)rows * mix_hc * sizeof(float));
+    ds4_gpu_tensor *hc_split_view =
+        ds4_gpu_tensor_view(g->batch_hc_split,
+                            0,
+                            (uint64_t)rows * mix_hc * sizeof(float));
+    ds4_gpu_tensor *attn_cur_view =
+        ds4_gpu_tensor_view(g->batch_attn_cur,
+                            0,
+                            (uint64_t)rows * DS4_N_EMBD * sizeof(float));
+    ds4_gpu_tensor *draft_attn_norm_view =
+        ds4_gpu_tensor_view(g->batch_attn_norm,
+                            (uint64_t)DS4_N_EMBD * sizeof(float),
+                            (uint64_t)draft * DS4_N_EMBD * sizeof(float));
+    ds4_gpu_tensor *draft_hc_view =
+        ds4_gpu_tensor_view(g->dspark_stage_input_hc,
+                            hc_dim * sizeof(float),
+                            (uint64_t)draft * hc_dim * sizeof(float));
+    ds4_gpu_tensor *draft_hc_split_view =
+        ds4_gpu_tensor_view(g->batch_hc_split,
+                            mix_hc * sizeof(float),
+                            (uint64_t)draft * mix_hc * sizeof(float));
+    ds4_gpu_tensor *kv_target_view =
+        ds4_gpu_tensor_view(g->batch_kv,
+                            0,
+                            (uint64_t)DS4_N_HEAD_DIM * sizeof(float));
+    ds4_gpu_tensor *kv_draft_view =
+        ds4_gpu_tensor_view(g->batch_kv,
+                            (uint64_t)DS4_N_HEAD_DIM * sizeof(float),
+                            (uint64_t)draft * DS4_N_HEAD_DIM * sizeof(float));
+    ds4_gpu_tensor *after_attn_hc_view =
+        ds4_gpu_tensor_view(g->batch_after_attn_hc,
+                            0,
+                            (uint64_t)draft * hc_dim * sizeof(float));
+
+    bool ok = hc_mix_view && hc_split_view && attn_cur_view &&
+              draft_attn_norm_view && draft_hc_view &&
+              draft_hc_split_view && kv_target_view && kv_draft_view &&
+              after_attn_hc_view;
+    const bool saved_streaming = g->ssd_streaming;
+    g->ssd_streaming = false;
+
+    const float freq_base = DS4_ROPE_FREQ_BASE;
+    const float freq_scale = 1.0f;
+    const float ext_factor = 0.0f;
+    const float attn_factor = 1.0f;
+    const bool stage_profile =
+        metal_graph_dspark_stage_profile_enabled(stage);
+    double stage_t0 = stage_profile ? now_sec() : 0.0;
+#define DS4_DSPARK_PROFILE_STAGE(part_) do {                               \
+        if (ok && stage_profile) {                                          \
+            ok = metal_graph_dspark_stage_profile_boundary((part_),         \
+                                                           stage,           \
+                                                           pos,             \
+                                                           rows,            \
+                                                           &stage_t0);      \
+        }                                                                   \
+    } while (0)
+
+    if (ok && !commands_open) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) ok = ds4_gpu_rms_norm_plain_rows_tensor(g->batch_flat_hc,
+                                                      g->dspark_stage_input_hc,
+                                                      (uint32_t)hc_dim,
+                                                      rows,
+                                                      DS4_RMS_EPS) != 0;
+    if (ok) ok = metal_graph_matmul_plain_tensor(hc_mix_view,
+                                                 dspark_model,
+                                                 block->hc_attn_fn,
+                                                 hc_dim,
+                                                 mix_hc,
+                                                 g->batch_flat_hc,
+                                                 rows);
+    DS4_DSPARK_PROFILE_STAGE("attn_hc_pre");
+    if (fuse_hc_norm) {
+        if (ok) ok = ds4_gpu_hc_split_weighted_sum_norm_tensor(attn_cur_view,
+                                                                 g->batch_attn_norm,
+                                                                 hc_split_view,
+                                                                 hc_mix_view,
+                                                                 g->dspark_stage_input_hc,
+                                                                 dspark_model->map,
+                                                                 dspark_model->size,
+                                                                 block->hc_attn_scale->abs_offset,
+                                                                 block->hc_attn_base->abs_offset,
+                                                                 block->attn_norm->abs_offset,
+                                                                 DS4_N_EMBD,
+                                                                 DS4_N_HC,
+                                                                 DS4_N_HC_SINKHORN_ITER,
+                                                                 DS4_HC_EPS,
+                                                                 DS4_RMS_EPS) != 0;
+    } else {
+        if (ok) ok = ds4_gpu_hc_split_weighted_sum_tensor(attn_cur_view,
+                                                            hc_split_view,
+                                                            hc_mix_view,
+                                                            g->dspark_stage_input_hc,
+                                                            dspark_model->map,
+                                                            dspark_model->size,
+                                                            block->hc_attn_scale->abs_offset,
+                                                            block->hc_attn_base->abs_offset,
+                                                            DS4_N_EMBD,
+                                                            DS4_N_HC,
+                                                            DS4_N_HC_SINKHORN_ITER,
+                                                            DS4_HC_EPS) != 0;
+        if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(g->batch_attn_norm,
+                                                          g->batch_attn_cur,
+                                                          dspark_model->map,
+                                                          dspark_model->size,
+                                                          block->attn_norm->abs_offset,
+                                                          DS4_N_EMBD,
+                                                          rows,
+                                                          DS4_RMS_EPS) != 0;
+    }
+    DS4_DSPARK_PROFILE_STAGE("attn_norm");
+
+    if (ok) ok = metal_graph_matmul_plain_tensor(g->batch_qr,
+                                                 dspark_model,
+                                                 block->attn_q_a,
+                                                 DS4_N_EMBD,
+                                                 DS4_N_LORA_Q,
+                                                 draft_attn_norm_view,
+                                                 draft);
+    if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(g->batch_qr_norm,
+                                                      g->batch_qr,
+                                                      dspark_model->map,
+                                                      dspark_model->size,
+                                                      block->attn_q_a_norm->abs_offset,
+                                                      DS4_N_LORA_Q,
+                                                      draft,
+                                                      DS4_RMS_EPS) != 0;
+    if (ok) ok = metal_graph_matmul_plain_tensor(g->batch_q,
+                                                 dspark_model,
+                                                 block->attn_q_b,
+                                                 DS4_N_LORA_Q,
+                                                 q_dim,
+                                                 g->batch_qr_norm,
+                                                 draft);
+    if (ok) ok = ds4_gpu_head_rms_norm_tensor(g->batch_q,
+                                               draft,
+                                               DS4_N_HEAD,
+                                               DS4_N_HEAD_DIM,
+                                               DS4_RMS_EPS) != 0;
+    if (ok) ok = ds4_gpu_rope_tail_tensor(g->batch_q,
+                                           draft,
+                                           DS4_N_HEAD,
+                                           DS4_N_HEAD_DIM,
+                                           DS4_N_ROT,
+                                           pos,
+                                           0,
+                                           false,
+                                           freq_base,
+                                           freq_scale,
+                                           ext_factor,
+                                           attn_factor,
+                                           DS4_ROPE_YARN_BETA_FAST,
+                                           DS4_ROPE_YARN_BETA_SLOW) != 0;
+    DS4_DSPARK_PROFILE_STAGE("q_path");
+
+    if (ok) ok = metal_graph_matmul_plain_tensor(g->batch_kv_raw,
+                                                 dspark_model,
+                                                 block->attn_kv,
+                                                 DS4_N_EMBD,
+                                                 DS4_N_HEAD_DIM,
+                                                 g->batch_attn_norm,
+                                                 rows);
+    if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(g->batch_kv,
+                                                      g->batch_kv_raw,
+                                                      dspark_model->map,
+                                                      dspark_model->size,
+                                                      block->attn_kv_a_norm->abs_offset,
+                                                      DS4_N_HEAD_DIM,
+                                                      rows,
+                                                      DS4_RMS_EPS) != 0;
+    if (ok) ok = ds4_gpu_rope_tail_tensor(kv_target_view,
+                                           1,
+                                           1,
+                                           DS4_N_HEAD_DIM,
+                                           DS4_N_ROT,
+                                           pos,
+                                           0,
+                                           false,
+                                           freq_base,
+                                           freq_scale,
+                                           ext_factor,
+                                           attn_factor,
+                                           DS4_ROPE_YARN_BETA_FAST,
+                                           DS4_ROPE_YARN_BETA_SLOW) != 0;
+    if (ok) ok = ds4_gpu_rope_tail_tensor(kv_draft_view,
+                                           draft,
+                                           1,
+                                           DS4_N_HEAD_DIM,
+                                           DS4_N_ROT,
+                                           pos,
+                                           0,
+                                           false,
+                                           freq_base,
+                                           freq_scale,
+                                           ext_factor,
+                                           attn_factor,
+                                           DS4_ROPE_YARN_BETA_FAST,
+                                           DS4_ROPE_YARN_BETA_SLOW) != 0;
+    if (ok) ok = ds4_gpu_dsv4_fp8_kv_quantize_tensor(g->batch_kv,
+                                                       rows,
+                                                       DS4_N_HEAD_DIM,
+                                                       DS4_N_ROT) != 0;
+    if (ok) ok = ds4_gpu_store_raw_kv_batch_tensor(g->dspark_raw_cache[stage],
+                                                    g->batch_kv,
+                                                    g->dspark_cache_cap,
+                                                    append_pos,
+                                                    rows,
+                                                    DS4_N_HEAD_DIM) != 0;
+    DS4_DSPARK_PROFILE_STAGE("kv_path");
+
+    if (ok) ok = ds4_gpu_attention_noncausal_raw_batch_heads_tensor(
+                    g->batch_heads,
+                    dspark_model->map,
+                    dspark_model->size,
+                    block->attn_sinks->abs_offset,
+                    g->batch_q,
+                    g->dspark_raw_cache[stage],
+                    draft,
+                    visible_rows,
+                    g->dspark_cache_cap,
+                    attention_raw_start,
+                    DS4_N_HEAD,
+                    DS4_N_HEAD_DIM) != 0;
+    if (ok) ok = ds4_gpu_rope_tail_tensor(g->batch_heads,
+                                           draft,
+                                           DS4_N_HEAD,
+                                           DS4_N_HEAD_DIM,
+                                           DS4_N_ROT,
+                                           pos,
+                                           0,
+                                           true,
+                                           freq_base,
+                                           freq_scale,
+                                           ext_factor,
+                                           attn_factor,
+                                           DS4_ROPE_YARN_BETA_FAST,
+                                           DS4_ROPE_YARN_BETA_SLOW) != 0;
+    DS4_DSPARK_PROFILE_STAGE("attention");
+    if (ok) ok = ds4_gpu_attention_output_q8_batch_tensor(
+                    g->batch_attn_out,
+                    g->batch_attn_low,
+                    g->batch_group_tmp,
+                    g->batch_low_tmp,
+                    dspark_model->map,
+                    dspark_model->size,
+                    block->attn_output_a->abs_offset,
+                    block->attn_output_b->abs_offset,
+                    group_dim,
+                    DS4_N_LORA_O,
+                    DS4_N_OUT_GROUP,
+                    DS4_N_EMBD,
+                    g->batch_heads,
+                    draft) != 0;
+    if (ok) ok = ds4_gpu_hc_expand_split_tensor(after_attn_hc_view,
+                                                 g->batch_attn_out,
+                                                 draft_hc_view,
+                                                 draft_hc_split_view,
+                                                 DS4_N_EMBD,
+                                                 DS4_N_HC) != 0;
+    DS4_DSPARK_PROFILE_STAGE("attn_output_hc");
+
+    if (ok) ok = metal_graph_encode_layer_ffn_batch(g,
+                                                     dspark_model,
+                                                     block,
+                                                     stage,
+                                                     pos,
+                                                     draft);
+    DS4_DSPARK_PROFILE_STAGE("ffn");
+    if (ok &&
+        !prepare_next_stage_input &&
+        getenv("DS4_DSPARK_DISABLE_FINAL_OUTPUT_ALIAS") != NULL) {
+        ok = ds4_gpu_tensor_copy(g->dspark_stage_output_hc,
+                                  0,
+                                  g->batch_next_hc,
+                                  0,
+                                  (uint64_t)draft * hc_dim * sizeof(float)) != 0;
+    }
+    DS4_DSPARK_PROFILE_STAGE("copy_output");
+    if (ok && prepare_next_stage_input) {
+        ok = metal_graph_encode_dspark_next_stage_draft_input_from(
+                g, dw, g->batch_next_hc);
+    }
+    DS4_DSPARK_PROFILE_STAGE("next_input");
+    if (ok && !commands_open) ok = ds4_gpu_end_commands() != 0;
+    g->ssd_streaming = saved_streaming;
+
+    ds4_gpu_tensor_free(after_attn_hc_view);
+    ds4_gpu_tensor_free(kv_draft_view);
+    ds4_gpu_tensor_free(kv_target_view);
+    ds4_gpu_tensor_free(draft_hc_split_view);
+    ds4_gpu_tensor_free(draft_hc_view);
+    ds4_gpu_tensor_free(draft_attn_norm_view);
+    ds4_gpu_tensor_free(attn_cur_view);
+    ds4_gpu_tensor_free(hc_split_view);
+    ds4_gpu_tensor_free(hc_mix_view);
+    if (!ok && !commands_open) (void)ds4_gpu_synchronize();
+#undef DS4_DSPARK_PROFILE_STAGE
+    return ok;
+}
+
+static bool metal_graph_eval_dspark_stage_chain(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw,
+        uint32_t                  pos,
+        uint32_t                 *completed_stages,
+        uint32_t                 *cache_start_out,
+        uint32_t                 *cache_rows_out) {
+    if (completed_stages) *completed_stages = 0;
+    if (cache_start_out) *cache_start_out = 0;
+    if (cache_rows_out) *cache_rows_out = 0;
+    if (!g || !dspark_model || !dw ||
+        dw->n_stages == 0 ||
+        dw->n_stages > DS4_DSPARK_MAX_STAGES ||
+        !dspark_stage_input_ready(g, dw) ||
+        !dspark_stage_cache_ready(g, dw) ||
+        !g->prefill_tokens ||
+        !g->dspark_draft_tokens) {
+        return false;
+    }
+
+    const uint32_t rows = dw->block_size + 1u;
+    const uint32_t support_len = g->dspark_cache_len;
+    const uint32_t raw_start = support_len ? g->dspark_cache_start : 0;
+    if (support_len > g->dspark_cache_cap ||
+        rows > g->dspark_cache_cap - support_len ||
+        (support_len != 0 && raw_start >= g->dspark_cache_cap) ||
+        !metal_graph_dspark_cache_ends_at(g, pos)) {
+        return false;
+    }
+    if (cache_start_out) {
+        *cache_start_out = support_len ? raw_start :
+            (pos % g->dspark_cache_cap);
+    }
+    if (cache_rows_out) *cache_rows_out = support_len + rows;
+
+    for (uint32_t stage = 0; stage < dw->n_stages; stage++) {
+        if (!dspark_stage_block_ready(g, dw, stage)) return false;
+    }
+
+    bool ok = ds4_gpu_begin_commands() != 0;
+    if (ok) {
+        ok = ds4_gpu_tensor_copy(g->prefill_tokens,
+                                  0,
+                                  g->dspark_draft_tokens,
+                                  0,
+                                  (uint64_t)dw->block_size * sizeof(int32_t)) != 0;
+    }
+    for (uint32_t stage = 0; ok && stage < dw->n_stages; stage++) {
+        const bool stage_ok =
+            metal_graph_eval_dspark_stage_block(g,
+                                                dspark_model,
+                                                dw,
+                                                stage,
+                                                pos,
+                                                support_len,
+                                                raw_start,
+                                                stage + 1u < dw->n_stages,
+                                                true);
+        if (!stage_ok) {
+            ok = false;
+            break;
+        }
+        if (completed_stages) *completed_stages = stage + 1u;
+    }
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) {
+        (void)ds4_gpu_synchronize();
+        return false;
+    }
+    return true;
+}
+
+static ds4_gpu_tensor *metal_graph_dspark_final_output_hc(const ds4_gpu_graph *g) {
+    if (!g) return NULL;
+    if (getenv("DS4_DSPARK_DISABLE_FINAL_OUTPUT_ALIAS") == NULL &&
+        g->batch_next_hc) {
+        return g->batch_next_hc;
+    }
+    return g->dspark_stage_output_hc;
+}
+
+static bool dspark_final_head_ready(
+        const ds4_gpu_graph      *g,
+        const ds4_weights        *base_weights,
+        const ds4_dspark_weights *dw) {
+    if (!g || !base_weights || !dw ||
+        dw->n_stages == 0 ||
+        dw->n_stages > DS4_DSPARK_MAX_STAGES ||
+        dw->block_size == 0 ||
+        dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE ||
+        !base_weights->output ||
+        !metal_graph_dspark_final_output_hc(g) ||
+        !g->batch_hc_mix ||
+        !g->batch_hc_split ||
+        !g->batch_flat_hc ||
+        !g->batch_ffn_cur ||
+        !g->batch_ffn_norm ||
+        !g->spec_logits) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t draft = dw->block_size;
+    const uint64_t vocab_dim = base_weights->output->dim[1];
+    if (!final->norm ||
+        !final->hc_head_base ||
+        !final->hc_head_fn ||
+        !final->hc_head_scale ||
+        final->norm->type != DS4_TENSOR_F32 ||
+        final->hc_head_base->type != DS4_TENSOR_F32 ||
+        !dspark_tensor_type_matches(final->hc_head_fn->type,
+                                    DS4_DSPARK_LAYOUT_PLAIN) ||
+        final->hc_head_scale->type != DS4_TENSOR_F32 ||
+        base_weights->output->type != DS4_TENSOR_Q8_0) {
+        return false;
+    }
+
+    return final->norm->ndim == 1 &&
+           final->norm->dim[0] == DS4_N_EMBD &&
+           final->hc_head_base->ndim == 1 &&
+           final->hc_head_base->dim[0] == DS4_N_HC &&
+           final->hc_head_fn->ndim == 2 &&
+           final->hc_head_fn->dim[0] == hc_dim &&
+           final->hc_head_fn->dim[1] == DS4_N_HC &&
+           final->hc_head_scale->ndim == 1 &&
+           final->hc_head_scale->dim[0] == 1 &&
+           base_weights->output->ndim == 2 &&
+           base_weights->output->dim[0] == DS4_N_EMBD &&
+           vocab_dim == DS4_N_VOCAB &&
+           ds4_gpu_tensor_bytes(
+                   metal_graph_dspark_final_output_hc(g)) >=
+               draft * hc_dim * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->batch_flat_hc) >=
+               draft * hc_dim * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->batch_hc_mix) >=
+               draft * DS4_N_HC * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->batch_hc_split) >=
+               draft * DS4_N_HC * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->batch_ffn_cur) >=
+               draft * DS4_N_EMBD * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->batch_ffn_norm) >=
+               draft * DS4_N_EMBD * sizeof(float) &&
+           ds4_gpu_tensor_bytes(g->spec_logits) >=
+               draft * vocab_dim * sizeof(float);
+}
+
+static bool metal_graph_eval_dspark_base_logits(
+        ds4_gpu_graph            *g,
+        const ds4_model          *base_model,
+        const ds4_weights        *base_weights,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw) {
+    if (!g || !base_model || !base_weights || !dspark_model || !dw ||
+        !dspark_final_head_ready(g, base_weights, dw)) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    const uint32_t draft = dw->block_size;
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t vocab_dim = base_weights->output->dim[1];
+    ds4_gpu_tensor *stage_output_hc = metal_graph_dspark_final_output_hc(g);
+    ds4_gpu_tensor *output_pre =
+        ds4_gpu_tensor_view(g->batch_hc_mix,
+                            0,
+                            (uint64_t)draft * DS4_N_HC * sizeof(float));
+    ds4_gpu_tensor *output_weights =
+        ds4_gpu_tensor_view(g->batch_hc_split,
+                            0,
+                            (uint64_t)draft * DS4_N_HC * sizeof(float));
+    ds4_gpu_tensor *output_embd =
+        ds4_gpu_tensor_view(g->batch_ffn_cur,
+                            0,
+                            (uint64_t)draft * DS4_N_EMBD * sizeof(float));
+    ds4_gpu_tensor *output_norm =
+        ds4_gpu_tensor_view(g->batch_ffn_norm,
+                            0,
+                            (uint64_t)draft * DS4_N_EMBD * sizeof(float));
+    ds4_gpu_tensor *logits =
+        ds4_gpu_tensor_view(g->spec_logits,
+                            0,
+                            (uint64_t)draft * vocab_dim * sizeof(float));
+
+    bool ok = stage_output_hc && output_pre && output_weights && output_embd &&
+              output_norm && logits;
+    if (ok) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) ok = ds4_gpu_rms_norm_plain_rows_tensor(g->batch_flat_hc,
+                                                     stage_output_hc,
+                                                     (uint32_t)hc_dim,
+                                                     draft,
+                                                     DS4_RMS_EPS) != 0;
+    if (ok) ok = metal_graph_matmul_plain_tensor(output_pre,
+                                                 dspark_model,
+                                                 final->hc_head_fn,
+                                                 hc_dim,
+                                                 DS4_N_HC,
+                                                 g->batch_flat_hc,
+                                                 draft);
+    if (ok) ok = ds4_gpu_output_hc_weights_tensor(output_weights,
+                                                   output_pre,
+                                                   dspark_model->map,
+                                                   dspark_model->size,
+                                                   final->hc_head_scale->abs_offset,
+                                                   final->hc_head_base->abs_offset,
+                                                   DS4_N_HC,
+                                                   DS4_HC_EPS) != 0;
+    if (ok) ok = ds4_gpu_hc_weighted_sum_tensor(output_embd,
+                                                 stage_output_hc,
+                                                 output_weights,
+                                                 DS4_N_EMBD,
+                                                 DS4_N_HC) != 0;
+    if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(output_norm,
+                                                      output_embd,
+                                                      dspark_model->map,
+                                                      dspark_model->size,
+                                                      final->norm->abs_offset,
+                                                      DS4_N_EMBD,
+                                                      draft,
+                                                      DS4_RMS_EPS) != 0;
+    if (ok) ok = ds4_gpu_matmul_q8_0_tensor(logits,
+                                             base_model->map,
+                                             base_model->size,
+                                             base_weights->output->abs_offset,
+                                             DS4_N_EMBD,
+                                             vocab_dim,
+                                             output_norm,
+                                             draft) != 0;
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) (void)ds4_gpu_synchronize();
+
+    ds4_gpu_tensor_free(logits);
+    ds4_gpu_tensor_free(output_norm);
+    ds4_gpu_tensor_free(output_embd);
+    ds4_gpu_tensor_free(output_weights);
+    ds4_gpu_tensor_free(output_pre);
+    return ok;
+}
+
+static bool metal_graph_eval_dspark_final_hidden(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw) {
+    if (!g || !dspark_model || !dw ||
+        dw->n_stages == 0 ||
+        dw->n_stages > DS4_DSPARK_MAX_STAGES ||
+        dw->block_size == 0 ||
+        dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE ||
+        !metal_graph_dspark_final_output_hc(g) ||
+        !g->batch_hc_mix ||
+        !g->batch_hc_split ||
+        !g->batch_flat_hc ||
+        !g->batch_ffn_cur ||
+        !g->batch_ffn_norm) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    const uint32_t draft = dw->block_size;
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    if (!final->norm ||
+        !final->hc_head_base ||
+        !final->hc_head_fn ||
+        !final->hc_head_scale ||
+        final->norm->type != DS4_TENSOR_F32 ||
+        final->hc_head_base->type != DS4_TENSOR_F32 ||
+        !dspark_tensor_type_matches(final->hc_head_fn->type,
+                                    DS4_DSPARK_LAYOUT_PLAIN) ||
+        final->hc_head_scale->type != DS4_TENSOR_F32 ||
+        final->norm->ndim != 1 ||
+        final->norm->dim[0] != DS4_N_EMBD ||
+        final->hc_head_base->ndim != 1 ||
+        final->hc_head_base->dim[0] != DS4_N_HC ||
+        final->hc_head_fn->ndim != 2 ||
+        final->hc_head_fn->dim[0] != hc_dim ||
+        final->hc_head_fn->dim[1] != DS4_N_HC ||
+        final->hc_head_scale->ndim != 1 ||
+        final->hc_head_scale->dim[0] != 1 ||
+        ds4_gpu_tensor_bytes(metal_graph_dspark_final_output_hc(g)) <
+            (uint64_t)draft * hc_dim * sizeof(float) ||
+        ds4_gpu_tensor_bytes(g->batch_flat_hc) <
+            (uint64_t)draft * hc_dim * sizeof(float) ||
+        ds4_gpu_tensor_bytes(g->batch_hc_mix) <
+            (uint64_t)draft * DS4_N_HC * sizeof(float) ||
+        ds4_gpu_tensor_bytes(g->batch_hc_split) <
+            (uint64_t)draft * DS4_N_HC * sizeof(float) ||
+        ds4_gpu_tensor_bytes(g->batch_ffn_cur) <
+            (uint64_t)draft * DS4_N_EMBD * sizeof(float) ||
+        ds4_gpu_tensor_bytes(g->batch_ffn_norm) <
+            (uint64_t)draft * DS4_N_EMBD * sizeof(float)) {
+        return false;
+    }
+
+    ds4_gpu_tensor *output_pre =
+        ds4_gpu_tensor_view(g->batch_hc_mix,
+                            0,
+                            (uint64_t)draft * DS4_N_HC * sizeof(float));
+    ds4_gpu_tensor *output_weights =
+        ds4_gpu_tensor_view(g->batch_hc_split,
+                            0,
+                            (uint64_t)draft * DS4_N_HC * sizeof(float));
+    ds4_gpu_tensor *output_embd =
+        ds4_gpu_tensor_view(g->batch_ffn_cur,
+                            0,
+                            (uint64_t)draft * DS4_N_EMBD * sizeof(float));
+    ds4_gpu_tensor *output_norm =
+        ds4_gpu_tensor_view(g->batch_ffn_norm,
+                            0,
+                            (uint64_t)draft * DS4_N_EMBD * sizeof(float));
+    ds4_gpu_tensor *stage_output_hc = metal_graph_dspark_final_output_hc(g);
+
+    bool ok = stage_output_hc && output_pre && output_weights &&
+              output_embd && output_norm;
+    if (ok) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) ok = ds4_gpu_rms_norm_plain_rows_tensor(g->batch_flat_hc,
+                                                     stage_output_hc,
+                                                     (uint32_t)hc_dim,
+                                                     draft,
+                                                     DS4_RMS_EPS) != 0;
+    if (ok) ok = metal_graph_matmul_plain_tensor(output_pre,
+                                                 dspark_model,
+                                                 final->hc_head_fn,
+                                                 hc_dim,
+                                                 DS4_N_HC,
+                                                 g->batch_flat_hc,
+                                                 draft);
+    if (ok) ok = ds4_gpu_output_hc_weights_tensor(output_weights,
+                                                   output_pre,
+                                                   dspark_model->map,
+                                                   dspark_model->size,
+                                                   final->hc_head_scale->abs_offset,
+                                                   final->hc_head_base->abs_offset,
+                                                   DS4_N_HC,
+                                                   DS4_HC_EPS) != 0;
+    if (ok) ok = ds4_gpu_hc_weighted_sum_tensor(output_embd,
+                                                 stage_output_hc,
+                                                 output_weights,
+                                                 DS4_N_EMBD,
+                                                 DS4_N_HC) != 0;
+    if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(output_norm,
+                                                      output_embd,
+                                                      dspark_model->map,
+                                                      dspark_model->size,
+                                                      final->norm->abs_offset,
+                                                      DS4_N_EMBD,
+                                                      draft,
+                                                      DS4_RMS_EPS) != 0;
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) (void)ds4_gpu_synchronize();
+
+    ds4_gpu_tensor_free(output_norm);
+    ds4_gpu_tensor_free(output_embd);
+    ds4_gpu_tensor_free(output_weights);
+    ds4_gpu_tensor_free(output_pre);
+    return ok;
+}
+
+static bool metal_graph_eval_dspark_base_logits_from_hidden(
+        ds4_gpu_graph      *g,
+        const ds4_model    *base_model,
+        const ds4_weights  *base_weights,
+        const ds4_dspark_weights *dw) {
+    if (!g || !base_model || !base_weights || !dw ||
+        dw->block_size == 0 ||
+        dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE ||
+        !base_weights->output ||
+        base_weights->output->type != DS4_TENSOR_Q8_0 ||
+        base_weights->output->ndim != 2 ||
+        base_weights->output->dim[0] != DS4_N_EMBD ||
+        base_weights->output->dim[1] != DS4_N_VOCAB ||
+        !g->batch_ffn_norm ||
+        !g->spec_logits ||
+        ds4_gpu_tensor_bytes(g->batch_ffn_norm) <
+            (uint64_t)dw->block_size * DS4_N_EMBD * sizeof(float) ||
+        ds4_gpu_tensor_bytes(g->spec_logits) <
+            (uint64_t)dw->block_size * DS4_N_VOCAB * sizeof(float)) {
+        return false;
+    }
+
+    ds4_gpu_tensor *output_norm =
+        ds4_gpu_tensor_view(g->batch_ffn_norm,
+                            0,
+                            (uint64_t)dw->block_size *
+                                DS4_N_EMBD * sizeof(float));
+    ds4_gpu_tensor *logits =
+        ds4_gpu_tensor_view(g->spec_logits,
+                            0,
+                            (uint64_t)dw->block_size *
+                                DS4_N_VOCAB * sizeof(float));
+    bool ok = output_norm && logits;
+    if (ok) ok = ds4_gpu_begin_commands() != 0;
+    if (ok) ok = ds4_gpu_matmul_q8_0_tensor(logits,
+                                             base_model->map,
+                                             base_model->size,
+                                             base_weights->output->abs_offset,
+                                             DS4_N_EMBD,
+                                             DS4_N_VOCAB,
+                                             output_norm,
+                                             dw->block_size) != 0;
+    if (ok) ok = ds4_gpu_end_commands() != 0;
+    if (!ok) (void)ds4_gpu_synchronize();
+
+    ds4_gpu_tensor_free(logits);
+    ds4_gpu_tensor_free(output_norm);
+    return ok;
+}
+
+static bool dspark_markov_probe_ready(
+        const ds4_dspark_weights *dw) {
+    if (!dw ||
+        dw->n_stages == 0 ||
+        dw->n_stages > DS4_DSPARK_MAX_STAGES ||
+        dw->block_size == 0 ||
+        dw->block_size > DS4_DSPARK_MAX_BLOCK_SIZE ||
+        dw->markov_rank == 0) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    if (!final->markov_w1 ||
+        !final->markov_w2 ||
+        !dspark_tensor_type_matches(final->markov_w1->type,
+                                    DS4_DSPARK_LAYOUT_DENSE) ||
+        !dspark_tensor_type_matches(final->markov_w2->type,
+                                    DS4_DSPARK_LAYOUT_DENSE)) {
+        return false;
+    }
+
+    return final->markov_w1->ndim == 2 &&
+           final->markov_w1->dim[0] == dw->markov_rank &&
+           final->markov_w1->dim[1] == DS4_N_VOCAB &&
+           final->markov_w2->ndim == 2 &&
+           final->markov_w2->dim[0] == dw->markov_rank &&
+           final->markov_w2->dim[1] == DS4_N_VOCAB;
+}
+
+static bool dspark_dense_row_to_f32(
+        float           *out,
+        const ds4_model *model,
+        const ds4_tensor *t,
+        uint32_t         row) {
+    if (!out || !model || !t || t->ndim != 2 || row >= t->dim[1]) {
+        return false;
+    }
+
+    const uint64_t width = t->dim[0];
+    if (t->type == DS4_TENSOR_F32) {
+        const float *base = tensor_data(model, t);
+        memcpy(out, base + (uint64_t)row * width, width * sizeof(out[0]));
+        return true;
+    }
+    if (t->type == DS4_TENSOR_F16) {
+        const uint16_t *base = tensor_data(model, t);
+        const uint16_t *src = base + (uint64_t)row * width;
+        for (uint64_t i = 0; i < width; i++) out[i] = f16_to_f32(src[i]);
+        return true;
+    }
+    if (t->type == DS4_TENSOR_Q8_0) {
+        const uint64_t blocks = (width + 31u) / 32u;
+        const uint8_t *src =
+            (const uint8_t *)tensor_data(model, t) +
+            (uint64_t)row * blocks * 34u;
+        for (uint64_t b = 0; b < blocks; b++) {
+            uint16_t scale_bits;
+            memcpy(&scale_bits, src + b * 34u, sizeof(scale_bits));
+            const float scale = f16_to_f32(scale_bits);
+            const int8_t *qs = (const int8_t *)(src + b * 34u + 2u);
+            const uint64_t i0 = b * 32u;
+            const uint64_t n = width - i0 < 32u ? width - i0 : 32u;
+            for (uint64_t i = 0; i < n; i++) {
+                out[i0 + i] = scale * (float)qs[i];
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+static uint32_t dspark_argmax_f32(const float *x, uint32_t n) {
+    uint32_t best = 0;
+    float best_v = x[0];
+    for (uint32_t i = 1; i < n; i++) {
+        if (x[i] > best_v) {
+            best_v = x[i];
+            best = i;
+        }
+    }
+    return best;
+}
+
+typedef struct {
+    const uint8_t *data;
+    const int8_t *xq;
+    const float *xscale;
+    const float *logits;
+    uint64_t in_dim;
+    uint64_t blocks;
+    uint64_t rows_per_slot;
+    uint32_t best_idx[DS4_MAX_THREADS];
+    float best_val[DS4_MAX_THREADS];
+} dspark_markov_q8_0_argmax_ctx;
+
+static void dspark_markov_q8_0_argmax_worker(
+        void *vctx,
+        uint64_t row0,
+        uint64_t row1) {
+    dspark_markov_q8_0_argmax_ctx *ctx = vctx;
+    uint64_t slot = ctx->rows_per_slot ? row0 / ctx->rows_per_slot : 0;
+    if (slot >= DS4_MAX_THREADS) slot = DS4_MAX_THREADS - 1u;
+
+    float best_v = -FLT_MAX;
+    uint32_t best = (uint32_t)row0;
+    for (uint64_t row = row0; row < row1; row++) {
+        const uint8_t *wrow = ctx->data + row * ctx->blocks * 34u;
+        const float score =
+            ctx->logits[row] +
+            dot_q8_0_row(wrow, ctx->xq, ctx->xscale, ctx->in_dim, ctx->blocks);
+        if (score > best_v) {
+            best_v = score;
+            best = (uint32_t)row;
+        }
+    }
+
+    ctx->best_idx[slot] = best;
+    ctx->best_val[slot] = best_v;
+}
+
+static bool dspark_markov_q8_0_argmax(
+        uint32_t        *token_out,
+        const ds4_model *model,
+        const ds4_tensor *w,
+        const float     *state,
+        const float     *logits) {
+    if (!token_out ||
+        !model ||
+        !w ||
+        !state ||
+        !logits ||
+        w->type != DS4_TENSOR_Q8_0 ||
+        w->ndim != 2 ||
+        w->dim[1] > UINT32_MAX) {
+        return false;
+    }
+
+    const uint64_t in_dim = w->dim[0];
+    const uint64_t out_dim = w->dim[1];
+    const uint64_t blocks = (in_dim + 31u) / 32u;
+    if (out_dim == 0 ||
+        blocks == 0 ||
+        blocks > (uint64_t)SIZE_MAX / 32u ||
+        blocks > (uint64_t)SIZE_MAX / sizeof(float)) {
+        return false;
+    }
+
+    enum { DSPARK_MARKOV_ARGMAX_STACK_BLOCKS = 32 };
+    int8_t xq_stack[DSPARK_MARKOV_ARGMAX_STACK_BLOCKS * 32u];
+    float xscale_stack[DSPARK_MARKOV_ARGMAX_STACK_BLOCKS];
+    const bool use_stack = blocks <= DSPARK_MARKOV_ARGMAX_STACK_BLOCKS;
+    int8_t *xq = use_stack ? xq_stack : xmalloc((size_t)blocks * 32u);
+    float *xscale = use_stack ? xscale_stack :
+        xmalloc((size_t)blocks * sizeof(xscale[0]));
+    quantize_q8_0_activation(state, xq, xscale, in_dim);
+
+    ds4_threads_init();
+    const uint32_t n_slots =
+        g_pool.n_threads == 0 ? 1u : g_pool.n_threads;
+    const uint64_t rows_per_slot = (out_dim + n_slots - 1u) / n_slots;
+    dspark_markov_q8_0_argmax_ctx ctx = {
+        .data = tensor_data(model, w),
+        .xq = xq,
+        .xscale = xscale,
+        .logits = logits,
+        .in_dim = in_dim,
+        .blocks = blocks,
+        .rows_per_slot = rows_per_slot,
+    };
+    for (uint32_t i = 0; i < DS4_MAX_THREADS; i++) {
+        ctx.best_idx[i] = 0;
+        ctx.best_val[i] = -FLT_MAX;
+    }
+
+    ds4_parallel_for(out_dim, dspark_markov_q8_0_argmax_worker, &ctx);
+
+    uint32_t best = 0;
+    float best_v = -FLT_MAX;
+    for (uint32_t slot = 0; slot < n_slots && slot < DS4_MAX_THREADS; slot++) {
+        const uint64_t row0 = (uint64_t)slot * rows_per_slot;
+        if (row0 >= out_dim) break;
+        if (ctx.best_val[slot] > best_v) {
+            best_v = ctx.best_val[slot];
+            best = ctx.best_idx[slot];
+        }
+    }
+
+    if (!use_stack) {
+        free(xscale);
+        free(xq);
+    }
+    *token_out = best;
+    return true;
+}
+
+static bool dspark_disable_fused_cpu_markov_argmax(void) {
+    static int cache = -1;
+    if (cache < 0) {
+        const char *env = getenv("DS4_DSPARK_DISABLE_FUSED_CPU_MARKOV_ARGMAX");
+        cache = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    return cache != 0;
+}
+
+static bool dspark_disable_reuse_confidence0_markov(void) {
+    static int cache = -1;
+    if (cache < 0) {
+        const char *env = getenv("DS4_DSPARK_DISABLE_REUSE_CONFIDENCE0_MARKOV");
+        cache = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    return cache != 0;
+}
+
+static bool dspark_apply_markov_greedy_probe(
+        float                  *logits,
+        const ds4_model        *dspark_model,
+        const ds4_dspark_weights *dw,
+        int                     first_prev_token,
+        float                  *markov_state,
+        float                  *markov_bias,
+        int32_t                 proposal[DS4_DSPARK_MAX_BLOCK_SIZE],
+        uint32_t               *proposal_len) {
+    if (proposal_len) *proposal_len = 0;
+    if (!logits ||
+        !dspark_model ||
+        !dw ||
+        !markov_state ||
+        !markov_bias ||
+        !proposal ||
+        first_prev_token < 0 ||
+        (uint32_t)first_prev_token >= DS4_N_VOCAB ||
+        !dspark_markov_probe_ready(dw)) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    int32_t prev_token = first_prev_token;
+    for (uint32_t draft = 0; draft < dw->block_size; draft++) {
+        if (!dspark_dense_row_to_f32(markov_state,
+                                     dspark_model,
+                                     final->markov_w1,
+                                     (uint32_t)prev_token)) {
+            return false;
+        }
+        matvec_any(markov_bias, dspark_model, final->markov_w2, markov_state);
+
+        float *row = logits + (uint64_t)draft * DS4_N_VOCAB;
+        for (uint32_t i = 0; i < DS4_N_VOCAB; i++) {
+            row[i] += markov_bias[i];
+        }
+        const uint32_t token = dspark_argmax_f32(row, DS4_N_VOCAB);
+        proposal[draft] = (int32_t)token;
+        prev_token = (int32_t)token;
+    }
+
+    if (proposal_len) *proposal_len = dw->block_size;
+    return true;
+}
+
+static bool dspark_confidence_probe_ready(
+        const ds4_dspark_weights *dw) {
+    if (!dspark_markov_probe_ready(dw)) return false;
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    if (!final->confidence_proj ||
+        !dspark_tensor_type_matches(final->confidence_proj->type,
+                                    DS4_DSPARK_LAYOUT_DENSE)) {
+        return false;
+    }
+    return final->confidence_proj->ndim == 2 &&
+           final->confidence_proj->dim[0] ==
+               (uint64_t)DS4_N_EMBD + dw->markov_rank &&
+           final->confidence_proj->dim[1] == 1;
+}
+
+static bool dspark_eval_confidence_probe(
+        float                  *confidence_logits,
+        const float            *hidden_rows,
+        const ds4_model        *dspark_model,
+        const ds4_dspark_weights *dw,
+        int                     first_prev_token,
+        const int32_t           proposal[DS4_DSPARK_MAX_BLOCK_SIZE],
+        float                  *markov_state,
+        float                  *features,
+        uint32_t               *confidence_len) {
+    if (confidence_len) *confidence_len = 0;
+    if (!confidence_logits ||
+        !hidden_rows ||
+        !dspark_model ||
+        !dw ||
+        !proposal ||
+        !markov_state ||
+        !features ||
+        first_prev_token < 0 ||
+        (uint32_t)first_prev_token >= DS4_N_VOCAB ||
+        !dspark_confidence_probe_ready(dw)) {
+        return false;
+    }
+
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    int32_t prev_token = first_prev_token;
+    for (uint32_t draft = 0; draft < dw->block_size; draft++) {
+        if (prev_token < 0 || (uint32_t)prev_token >= DS4_N_VOCAB) {
+            return false;
+        }
+        if (!dspark_dense_row_to_f32(markov_state,
+                                     dspark_model,
+                                     final->markov_w1,
+                                     (uint32_t)prev_token)) {
+            return false;
+        }
+        memcpy(features,
+               hidden_rows + (uint64_t)draft * DS4_N_EMBD,
+               (uint64_t)DS4_N_EMBD * sizeof(features[0]));
+        memcpy(features + DS4_N_EMBD,
+               markov_state,
+               (uint64_t)dw->markov_rank * sizeof(features[0]));
+        matvec_any(confidence_logits + draft,
+                   dspark_model,
+                   final->confidence_proj,
+                   features);
+        prev_token = proposal[draft];
+    }
+
+    if (confidence_len) *confidence_len = dw->block_size;
+    return true;
+}
+
+static bool dspark_apply_markov_confidence_lazy_runtime(
+        ds4_gpu_graph          *g,
+        const ds4_model        *dspark_model,
+        const ds4_dspark_weights *dw,
+        int                     first_prev_token,
+        float                   confidence_threshold,
+        float                  *logits,
+        float                  *markov_bias,
+        float                  *features,
+        size_t                  features_cap,
+        int32_t                 proposal[DS4_DSPARK_MAX_BLOCK_SIZE],
+        uint32_t               *proposal_len,
+        uint32_t               *confidence_len,
+        uint32_t               *confidence_prefix_len,
+        bool                    reuse_first_confidence,
+        float                  *confidence0) {
+    if (proposal_len) *proposal_len = 0;
+    if (confidence_len) *confidence_len = 0;
+    if (confidence_prefix_len) *confidence_prefix_len = 0;
+    if (confidence0 && !reuse_first_confidence) *confidence0 = 0.0f;
+    if (!g ||
+        !g->spec_logits ||
+        !g->batch_ffn_norm ||
+        !dspark_model ||
+        !dw ||
+        !logits ||
+        !markov_bias ||
+        !features ||
+        !proposal ||
+        confidence_threshold <= 0.0f ||
+        first_prev_token < 0 ||
+        (uint32_t)first_prev_token >= DS4_N_VOCAB ||
+        (reuse_first_confidence && !confidence0) ||
+        !dspark_markov_probe_ready(dw) ||
+        !dspark_confidence_probe_ready(dw)) {
+        return false;
+    }
+
+    const uint64_t logits_bytes =
+        (uint64_t)DS4_N_VOCAB * sizeof(float);
+    const uint64_t hidden_bytes =
+        (uint64_t)DS4_N_EMBD * sizeof(float);
+    const uint64_t feature_count =
+        (uint64_t)DS4_N_EMBD + (uint64_t)dw->markov_rank;
+    if (feature_count > features_cap) return false;
+    float *markov_state = features + DS4_N_EMBD;
+    bool ok = true;
+
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    int32_t prev_token = first_prev_token;
+    uint32_t produced = 0;
+    uint32_t confident = 0;
+    for (uint32_t draft = 0; ok && draft < dw->block_size; draft++) {
+        if (prev_token < 0 || (uint32_t)prev_token >= DS4_N_VOCAB) {
+            ok = false;
+            break;
+        }
+        float confidence_logit = 0.0f;
+        if (draft == 0 && reuse_first_confidence) {
+            confidence_logit = *confidence0;
+        } else {
+            ok = dspark_dense_row_to_f32(markov_state,
+                                         dspark_model,
+                                         final->markov_w1,
+                                         (uint32_t)prev_token);
+            if (!ok) break;
+
+            ok = ds4_gpu_tensor_read(g->batch_ffn_norm,
+                                     (uint64_t)draft * hidden_bytes,
+                                     features,
+                                     hidden_bytes) != 0;
+            if (!ok) break;
+            matvec_any(&confidence_logit,
+                       dspark_model,
+                       final->confidence_proj,
+                       features);
+        }
+        if (draft == 0 && confidence0) *confidence0 = confidence_logit;
+        if (confidence_len) *confidence_len = draft + 1u;
+        if (sigmoid_stable(confidence_logit) < confidence_threshold) {
+            ok = true;
+            break;
+        }
+
+        int32_t token = -1;
+        if (ok) {
+            ok = ds4_gpu_tensor_read(g->spec_logits,
+                                     (uint64_t)draft * logits_bytes,
+                                     logits,
+                                     logits_bytes) != 0;
+            if (ok) {
+                uint32_t fused_token = 0;
+                if (!dspark_disable_fused_cpu_markov_argmax() &&
+                    dspark_markov_q8_0_argmax(&fused_token,
+                                              dspark_model,
+                                              final->markov_w2,
+                                              markov_state,
+                                              logits)) {
+                    token = (int32_t)fused_token;
+                } else {
+                    matvec_any(markov_bias, dspark_model, final->markov_w2, markov_state);
+                    for (uint32_t i = 0; i < DS4_N_VOCAB; i++) {
+                        logits[i] += markov_bias[i];
+                    }
+                    token = (int32_t)dspark_argmax_f32(logits, DS4_N_VOCAB);
+                }
+            }
+        }
+        if (!ok || token < 0 || (uint32_t)token >= DS4_N_VOCAB) {
+            ok = false;
+            break;
+        }
+        proposal[draft] = token;
+        produced = draft + 1u;
+        confident = produced;
+        prev_token = token;
+    }
+
+    if (ok) {
+        if (proposal_len) *proposal_len = produced;
+        if (confidence_prefix_len) *confidence_prefix_len = confident;
+    }
+    return ok;
+}
+
+static bool dspark_eval_confidence0_runtime(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw,
+        int                       first_prev_token,
+        float                    *features,
+        size_t                    features_cap,
+        float                    *confidence0) {
+    if (confidence0) *confidence0 = 0.0f;
+    if (!confidence0 ||
+        !g ||
+        !g->batch_ffn_norm ||
+        !dspark_model ||
+        !dw ||
+        !features ||
+        first_prev_token < 0 ||
+        (uint32_t)first_prev_token >= DS4_N_VOCAB ||
+        !dspark_confidence_probe_ready(dw)) {
+        return false;
+    }
+
+    const uint64_t hidden_bytes =
+        (uint64_t)DS4_N_EMBD * sizeof(float);
+    const uint64_t feature_count =
+        (uint64_t)DS4_N_EMBD + (uint64_t)dw->markov_rank;
+    if (feature_count > features_cap ||
+        ds4_gpu_tensor_bytes(g->batch_ffn_norm) < hidden_bytes) {
+        return false;
+    }
+
+    float *markov_state = features + DS4_N_EMBD;
+    bool ok = true;
+
+    const ds4_dspark_stage_weights *final =
+        &dw->stage[dw->n_stages - 1u];
+    if (ok) {
+        ok = dspark_dense_row_to_f32(markov_state,
+                                     dspark_model,
+                                     final->markov_w1,
+                                     (uint32_t)first_prev_token);
+    }
+    if (ok) {
+        ok = ds4_gpu_tensor_read(g->batch_ffn_norm,
+                                 0,
+                                 features,
+                                 hidden_bytes) != 0;
+    }
+    if (ok) {
+        matvec_any(confidence0, dspark_model, final->confidence_proj, features);
+    }
+
+    return ok;
+}
+
+static float dspark_confidence_threshold(void) {
+    const float default_threshold = 0.9f;
+    const char *env = getenv("DS4_DSPARK_CONFIDENCE_THRESHOLD");
+    if (!env || !env[0]) return default_threshold;
+    char *end = NULL;
+    errno = 0;
+    float v = strtof(env, &end);
+    if (end == env || errno != 0 || !isfinite(v)) return default_threshold;
+    if (v <= 0.0f) return 0.0f;
+    if (v >= 1.0f) return 1.0f;
+    return v;
+}
+
+static uint32_t dspark_confident_prefix_len(
+        const float *confidence_logits,
+        uint32_t     confidence_len,
+        float        threshold) {
+    if (!confidence_logits || confidence_len == 0 || threshold <= 0.0f) {
+        return confidence_len;
+    }
+    for (uint32_t i = 0; i < confidence_len; i++) {
+        if (sigmoid_stable(confidence_logits[i]) < threshold) return i;
+    }
+    return confidence_len;
+}
+
 static bool metal_graph_eval_mtp_draft_from_hc(
         ds4_gpu_graph       *g,
         const ds4_model       *base_model,
@@ -20301,6 +23687,8 @@ static bool metal_graph_reset_prefill_state(ds4_gpu_graph *g) {
     memset(g->layer_n_comp, 0, sizeof(g->layer_n_comp));
     memset(g->layer_n_index_comp, 0, sizeof(g->layer_n_index_comp));
     g->mtp_n_raw = 0;
+    metal_graph_dspark_cache_reset(g);
+    metal_graph_dspark_capture_invalidate(g);
     for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
         const uint32_t ratio = ds4_layer_compress_ratio(il);
         if (ratio == 0) continue;
@@ -20367,6 +23755,7 @@ static bool metal_graph_prefill_layer_major(
 #endif
 
     if (!metal_graph_warmup_prefill_kernels(g, model, weights, n_tokens)) return false;
+    metal_graph_dspark_capture_begin_prefill(g);
 
     const bool split_profile = getenv("DS4_METAL_GRAPH_PREFILL_SPLIT_PROFILE") != NULL;
     /*
@@ -20405,6 +23794,10 @@ static bool metal_graph_prefill_layer_major(
             if (!ok) {
                 fprintf(stderr, "ds4: gpu whole-prefill layer %u encode failed\n", il);
             }
+            if (ok) ok = metal_graph_dspark_capture_prefill_layer(g,
+                                                                  il,
+                                                                  start,
+                                                                  n_tokens);
             if (show_progress) {
                 fprintf(stderr, "ds4: gpu prefill layer %u/%u\r", il + 1, (uint32_t)DS4_N_LAYER);
                 fflush(stderr);
@@ -20692,6 +24085,10 @@ static bool metal_graph_prefill_layer_major(
                 g->batch_cur_hc = g->batch_next_hc;
                 g->batch_next_hc = tmp;
             }
+            if (ok) ok = metal_graph_dspark_capture_prefill_layer(g,
+                                                                  il,
+                                                                  start,
+                                                                  n_tokens);
             if (ok) ok = metal_graph_capture_prefill_seed_router_selected(g,
                                                                           il,
                                                                           n_tokens);
@@ -20738,6 +24135,10 @@ static bool metal_graph_prefill_layer_major(
             if (!ok) {
                 fprintf(stderr, "ds4: gpu layer-major prefill layer %u encode failed\n", il);
             }
+            if (ok) ok = metal_graph_dspark_capture_prefill_layer(g,
+                                                                  il,
+                                                                  start,
+                                                                  n_tokens);
             if (ok) ok = metal_graph_capture_prefill_seed_router_selected(g,
                                                                           il,
                                                                           n_tokens);
@@ -21133,6 +24534,19 @@ static bool metal_graph_prefill_chunked(
                                              cancelled);
 }
 
+typedef struct ds4_verify_suffix_timing {
+    double upload_ms;
+    double layer_ms;
+    double head_ms;
+    double read_ms;
+    bool fused_head;
+} ds4_verify_suffix_timing;
+
+static bool metal_graph_dspark_verify_selected_profile_enabled(void) {
+    return getenv("DS4_DSPARK_VERIFY_SELECTED_PROFILE") != NULL &&
+           getenv("DS4_DSPARK_DISABLE_VERIFY_SELECTED_PROFILE") == NULL;
+}
+
 /* Layer-major speculative target verifier for tiny MTP suffixes.
  *
  * This is the first production-shaped verifier attempt: unlike repeated decode
@@ -21151,13 +24565,17 @@ static bool metal_graph_verify_suffix_tops(
         uint32_t               start,
         uint32_t               n_tokens,
         bool                   capture_prefix1,
+        bool                   capture_dspark_hidden,
         int                   *row_tops,
-        float                 *row_logits) {
+        float                 *row_logits,
+        ds4_verify_suffix_timing *timing) {
+    if (timing) memset(timing, 0, sizeof(*timing));
     if (n_tokens == 0 || n_tokens > g->prefill_cap || !g->spec_logits) return false;
     if (start > (uint32_t)prompt->len || n_tokens > (uint32_t)prompt->len - start) return false;
     const uint32_t top_rows = n_tokens > 1 ? n_tokens - 1 : 0;
     if (top_rows && !row_tops) return false;
 
+    const double upload_t0 = timing ? now_sec() : 0.0;
     bool ok = metal_graph_upload_prompt_tokens(g->prefill_tokens, prompt, start, n_tokens);
     if (ok) ok = metal_graph_upload_prompt_embeddings_hc(g->batch_cur_hc,
                                                          g->prefill_tokens,
@@ -21170,8 +24588,28 @@ static bool metal_graph_verify_suffix_tops(
 
     const bool saved_capture = g->spec_capture_prefix1;
     g->spec_capture_prefix1 = capture_prefix1 && n_tokens == 2;
+    const char *split_head_env = getenv("DS4_DSPARK_VERIFY_SPLIT_HEAD");
+    const bool fuse_head =
+        !split_head_env || !split_head_env[0] ||
+        strcmp(split_head_env, "0") == 0;
+    if (timing) timing->fused_head = fuse_head;
+    if (timing) timing->upload_ms += (now_sec() - upload_t0) * 1000.0;
 
+    const bool selected_profile =
+        metal_graph_dspark_verify_selected_profile_enabled();
+    if (selected_profile) {
+        metal_graph_stream_prefill_selected_profile_reset(g);
+    }
+
+    const double layer_t0 = timing ? now_sec() : 0.0;
     ok = ds4_gpu_begin_commands() != 0;
+    const bool dspark_capture_active =
+        ok &&
+        capture_dspark_hidden &&
+        metal_graph_dspark_capture_verified_suffix_begin(g,
+                                                         start,
+                                                         n_tokens,
+                                                         true);
     for (uint32_t il = 0; ok && il < DS4_N_LAYER; il++) {
         ok = metal_graph_encode_layer_batch(g,
                                             model,
@@ -21179,39 +24617,89 @@ static bool metal_graph_verify_suffix_tops(
                                             il,
                                             start,
                                             n_tokens);
+        if (ok && dspark_capture_active) {
+            ok = metal_graph_dspark_capture_verified_suffix_layer(g,
+                                                                  il,
+                                                                  start,
+                                                                  n_tokens);
+        }
+        if (ok && selected_profile) {
+            ok = ds4_gpu_end_commands() != 0 &&
+                 metal_graph_selected_profile_layer_impl(
+                         g,
+                         &weights->layer[il],
+                         il,
+                         n_tokens,
+                         "DSpark verifier selected profile") &&
+                 ds4_gpu_begin_commands() != 0;
+        }
     }
-    if (ok) ok = ds4_gpu_end_commands() != 0;
-    else (void)ds4_gpu_synchronize();
-    g->spec_capture_prefix1 = saved_capture;
-    if (!ok) return false;
-
-    ok = ds4_gpu_begin_commands() != 0;
-    if (ok) ok = metal_graph_encode_output_head_batch(g,
-                                                      model,
-                                                      weights,
-                                                      n_tokens,
-                                                      weights->output->dim[1]);
-    if (ok) {
+    if (ok && fuse_head) {
+        ok = metal_graph_encode_output_head_batch(g,
+                                                  model,
+                                                  weights,
+                                                  n_tokens,
+                                                  weights->output->dim[1]);
+    }
+    if (ok && fuse_head) {
         if (top_rows == 1) {
-            /* Common K=2 verify case: top_k=1 over n_vocab → use the dedicated
-             * argmax kernel (single-block tree-reduce) instead of the legacy
-             * indexer_topk_kernel's single-thread O(n_vocab * top_k) fall-through. */
             ok = ds4_gpu_argmax_tensor(g->comp_selected,
                                        g->spec_logits,
                                        DS4_N_VOCAB) != 0;
         } else if (top_rows) {
-            /* top-1 of each of the top_rows rows: n_tokens=top_rows, top_k=1.
-             * The order is transposed vs the indexer-score callers; a swap
-             * silently scores row 0's runner-ups instead of each row. */
             ok = ds4_gpu_indexer_topk_tensor(g->comp_selected,
-                                               g->spec_logits,
-                                               DS4_N_VOCAB,
-                                               top_rows,
-                                               1) != 0;
+                                             g->spec_logits,
+                                             DS4_N_VOCAB,
+                                             top_rows,
+                                             1) != 0;
         }
     }
     if (ok) ok = ds4_gpu_end_commands() != 0;
     else (void)ds4_gpu_synchronize();
+    g->spec_capture_prefix1 = saved_capture;
+    if (!ok && dspark_capture_active) {
+        metal_graph_dspark_capture_invalidate(g);
+    }
+    if (timing) timing->layer_ms += (now_sec() - layer_t0) * 1000.0;
+    if (!ok) return false;
+    if (selected_profile) {
+        metal_graph_selected_profile_summary_impl(
+                g,
+                "DSpark verifier selected profile");
+    }
+
+    if (!fuse_head) {
+        const double head_t0 = timing ? now_sec() : 0.0;
+        ok = ds4_gpu_begin_commands() != 0;
+        if (ok) ok = metal_graph_encode_output_head_batch(g,
+                                                          model,
+                                                          weights,
+                                                          n_tokens,
+                                                          weights->output->dim[1]);
+        if (ok) {
+            if (top_rows == 1) {
+                /* Common K=2 verify case: top_k=1 over n_vocab → use the dedicated
+                 * argmax kernel (single-block tree-reduce) instead of the legacy
+                 * indexer_topk_kernel's single-thread O(n_vocab * top_k) fall-through. */
+                ok = ds4_gpu_argmax_tensor(g->comp_selected,
+                                           g->spec_logits,
+                                           DS4_N_VOCAB) != 0;
+            } else if (top_rows) {
+                /* top-1 of each of the top_rows rows: n_tokens=top_rows, top_k=1.
+                 * The order is transposed vs the indexer-score callers; a swap
+                 * silently scores row 0's runner-ups instead of each row. */
+                ok = ds4_gpu_indexer_topk_tensor(g->comp_selected,
+                                                   g->spec_logits,
+                                                   DS4_N_VOCAB,
+                                                   top_rows,
+                                                   1) != 0;
+            }
+        }
+        if (ok) ok = ds4_gpu_end_commands() != 0;
+        else (void)ds4_gpu_synchronize();
+        if (timing) timing->head_ms += (now_sec() - head_t0) * 1000.0;
+    }
+    const double read_t0 = timing ? now_sec() : 0.0;
     if (ok && top_rows) {
         ok = ds4_gpu_tensor_read(g->comp_selected,
                                    0,
@@ -21224,6 +24712,7 @@ static bool metal_graph_verify_suffix_tops(
                                    row_logits,
                                    (uint64_t)n_tokens * DS4_N_VOCAB * sizeof(row_logits[0])) != 0;
     }
+    if (timing) timing->read_ms += (now_sec() - read_t0) * 1000.0;
     return ok;
 }
 
@@ -21840,7 +25329,10 @@ struct ds4_engine {
     ds4_vocab vocab;
     ds4_weights weights;
     ds4_mtp_weights mtp_weights;
+    ds4_dspark_weights dspark_weights;
     ds4_backend backend;
+    ds4_support_kind support_kind;
+    uint32_t support_stages;
     int mtp_draft_tokens;
     float mtp_margin;
     char *directional_steering_file;
@@ -23285,6 +26777,49 @@ static void ds4_acquire_instance_lock(void) {
     atexit(ds4_release_instance_lock);
 }
 
+#ifndef DS4_NO_GPU
+typedef struct ds4_dspark_spec_stats {
+    uint64_t cycles;
+    uint64_t first_tokens;
+    uint64_t proposed_tokens;
+    uint64_t accepted_draft_tokens;
+    uint64_t full_accepts;
+    uint64_t partial_accepts;
+    uint64_t first_misses;
+    uint64_t no_draft;
+    uint64_t no_room;
+    uint64_t invalid_draft;
+    uint64_t draft_len_hist[DS4_DSPARK_MAX_BLOCK_SIZE + 1u];
+    uint64_t accepted_len_hist[DS4_DSPARK_MAX_BLOCK_SIZE + 1u];
+    uint64_t scheduler_skips;
+    uint64_t tail_skips;
+    uint64_t verifier_unavailable;
+    uint64_t verifier_errors;
+    double target_ms;
+    double saved_ms;
+    double propose_ms;
+    double propose_stage0_ms;
+    double propose_setup_ms;
+    double propose_cache_ms;
+    double propose_chain_ms;
+    double propose_hidden_ms;
+    double propose_conf0_ms;
+    double propose_logits_ms;
+    double propose_markov_ms;
+    double propose_confidence_ms;
+    double snapshot_ms;
+    double verify_ms;
+    double verify_upload_ms;
+    double verify_layer_ms;
+    double verify_head_ms;
+    double verify_read_ms;
+    uint64_t verifier_fused_head;
+    double replay_ms;
+    double total_ms;
+} ds4_dspark_spec_stats;
+
+#endif
+
 struct ds4_session {
     ds4_engine *engine;
     ds4_dist_session *distributed;
@@ -23296,7 +26831,32 @@ struct ds4_session {
     token_vec checkpoint;
     float *logits;
     float *mtp_logits;
+#ifndef DS4_NO_GPU
+    float *spec_row_logits;
+    float *dspark_markov_bias;
+    float *dspark_conf_features;
+    size_t dspark_conf_features_cap;
+#endif
     int mtp_draft_token;
+#ifndef DS4_NO_GPU
+    int dspark_draft_tokens[DS4_DSPARK_MAX_BLOCK_SIZE];
+    uint32_t dspark_draft_len;
+    uint32_t dspark_sched_cycles;
+    uint32_t dspark_sched_accepted;
+    uint32_t dspark_sched_no_draft;
+    uint32_t dspark_sched_skip;
+    uint32_t dspark_sched_lifetime_accepted;
+    double dspark_sched_extra_ms;
+    double dspark_sched_saved_ms;
+    double dspark_last_target_eval_ms;
+    double dspark_last_propose_ms;
+    float dspark_last_confidence0;
+    bool dspark_draft_valid;
+    bool dspark_sched_skipped_cycle;
+    bool dspark_sched_long_accept_seen;
+    bool dspark_last_confidence0_valid;
+    ds4_dspark_spec_stats dspark_stats;
+#endif
     uint64_t mtp_probe_total;
     uint64_t mtp_probe_hit;
     ds4_session_progress_fn progress;
@@ -23310,6 +26870,253 @@ struct ds4_session {
     bool checkpoint_valid;
     bool mtp_draft_valid;
 };
+
+#ifndef DS4_NO_GPU
+static bool ds4_dspark_stats_enabled(void);
+
+static void ds4_dspark_stats_note_len(
+        uint64_t hist[DS4_DSPARK_MAX_BLOCK_SIZE + 1u],
+        uint32_t len) {
+    if (len > DS4_DSPARK_MAX_BLOCK_SIZE) len = DS4_DSPARK_MAX_BLOCK_SIZE;
+    hist[len]++;
+}
+
+static uint32_t ds4_dspark_env_u32(const char *name, uint32_t fallback) {
+    const char *env = getenv(name);
+    if (!env || !env[0]) return fallback;
+    char *end = NULL;
+    errno = 0;
+    unsigned long v = strtoul(env, &end, 10);
+    if (end == env || errno != 0 || v > UINT32_MAX) return fallback;
+    return (uint32_t)v;
+}
+
+static bool ds4_dspark_scheduler_enabled(void) {
+    const char *env = getenv("DS4_DSPARK_SCHEDULER");
+    return !env || !env[0] || strcmp(env, "0") != 0;
+}
+
+static uint32_t ds4_dspark_scheduler_window(void) {
+    uint32_t v = ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_WINDOW", 4);
+    return v ? v : 4;
+}
+
+static uint32_t ds4_dspark_scheduler_skip_cycles(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_SKIP", 2);
+}
+
+static uint32_t ds4_dspark_scheduler_slow_skip_cycles(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_SLOW_SKIP", 4);
+}
+
+static uint32_t ds4_dspark_scheduler_min_avg_milli(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_MIN_AVG_MILLI", 1500);
+}
+
+static uint32_t ds4_dspark_scheduler_max_ms_per_accept_milli(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_MAX_MS_PER_ACCEPT_MILLI", 28000);
+}
+
+static uint32_t ds4_dspark_scheduler_max_extra_saved_ratio_milli(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_MAX_EXTRA_SAVED_RATIO_MILLI", 1000);
+}
+
+static uint32_t ds4_dspark_scheduler_break_even_window(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_BREAK_EVEN_WINDOW", 0);
+}
+
+static uint32_t ds4_dspark_scheduler_no_draft_skip_cycles(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_NO_DRAFT_SKIP", 3);
+}
+
+static uint32_t ds4_dspark_scheduler_short_accept_no_draft_skip_cycles(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_SHORT_ACCEPT_NO_DRAFT_SKIP", 4);
+}
+
+static uint32_t ds4_dspark_scheduler_cold_low_confidence_skip_cycles(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_COLD_LOW_CONFIDENCE_SKIP", 7);
+}
+
+static uint32_t ds4_dspark_scheduler_tail_min_tokens(void) {
+    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_TAIL_MIN_TOKENS", 10);
+}
+
+static float ds4_dspark_scheduler_cold_low_confidence_threshold(void) {
+    return (float)ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_COLD_LOW_CONFIDENCE_MILLI", 500) / 1000.0f;
+}
+
+static void ds4_session_dspark_scheduler_reset(ds4_session *s) {
+    if (!s) return;
+    s->dspark_sched_cycles = 0;
+    s->dspark_sched_accepted = 0;
+    s->dspark_sched_no_draft = 0;
+    s->dspark_sched_extra_ms = 0.0;
+    s->dspark_sched_saved_ms = 0.0;
+}
+
+static bool ds4_session_dspark_scheduler_should_skip(ds4_session *s) {
+    if (!s || !ds4_dspark_scheduler_enabled()) return false;
+    s->dspark_sched_skipped_cycle = false;
+    if (s->dspark_sched_skip == 0) return false;
+    s->dspark_sched_skip--;
+    s->dspark_sched_skipped_cycle = true;
+    s->dspark_stats.scheduler_skips++;
+    if (getenv("DS4_DSPARK_SPEC_LOG") != NULL) {
+        fprintf(stderr,
+                "ds4: DSpark scheduler skip remaining=%u\n",
+                s->dspark_sched_skip);
+    }
+    return true;
+}
+
+static void ds4_session_dspark_scheduler_note(
+        ds4_session *s,
+        uint32_t     accepted_drafts,
+        bool         no_draft,
+        double       extra_ms) {
+    if (!s || !ds4_dspark_scheduler_enabled()) return;
+    if (s->dspark_sched_skipped_cycle) {
+        s->dspark_sched_skipped_cycle = false;
+        return;
+    }
+
+    s->dspark_sched_cycles++;
+    s->dspark_sched_accepted += accepted_drafts;
+    if (accepted_drafts != 0) {
+        if (s->dspark_sched_lifetime_accepted <=
+            UINT32_MAX - accepted_drafts) {
+            s->dspark_sched_lifetime_accepted += accepted_drafts;
+        } else {
+            s->dspark_sched_lifetime_accepted = UINT32_MAX;
+        }
+        if (accepted_drafts > 2u) {
+            s->dspark_sched_long_accept_seen = true;
+        }
+    }
+    if (no_draft) s->dspark_sched_no_draft++;
+    if (extra_ms > 0.0 && isfinite(extra_ms)) {
+        s->dspark_sched_extra_ms += extra_ms;
+    }
+    if (accepted_drafts != 0 &&
+        s->dspark_last_target_eval_ms > 0.0 &&
+        isfinite(s->dspark_last_target_eval_ms)) {
+        const double saved_ms =
+            s->dspark_last_target_eval_ms * (double)accepted_drafts;
+        s->dspark_sched_saved_ms += saved_ms;
+        if (ds4_dspark_stats_enabled()) {
+            s->dspark_stats.saved_ms += saved_ms;
+        }
+    }
+
+    const uint32_t no_draft_skip =
+        ds4_dspark_scheduler_no_draft_skip_cycles();
+    if (no_draft && no_draft_skip != 0) {
+        uint32_t skip = no_draft_skip;
+        if (s->dspark_sched_lifetime_accepted != 0 &&
+            !s->dspark_sched_long_accept_seen) {
+            const uint32_t short_accept_skip =
+                ds4_dspark_scheduler_short_accept_no_draft_skip_cycles();
+            if (skip < short_accept_skip) skip = short_accept_skip;
+        } else if (s->dspark_sched_lifetime_accepted == 0 &&
+                   s->dspark_last_confidence0_valid &&
+                   s->dspark_last_confidence0 <=
+                       ds4_dspark_scheduler_cold_low_confidence_threshold()) {
+            const uint32_t cold_low_conf_skip =
+                ds4_dspark_scheduler_cold_low_confidence_skip_cycles();
+            if (skip < cold_low_conf_skip) skip = cold_low_conf_skip;
+        }
+        if (s->dspark_sched_skip < skip) {
+            s->dspark_sched_skip = skip;
+        }
+        if (getenv("DS4_DSPARK_SPEC_LOG") != NULL) {
+            fprintf(stderr,
+                    "ds4: DSpark scheduler no-draft pause skip=%u "
+                    "accepted_total=%u long_accept=%d confidence0=%s%.3f\n",
+                    s->dspark_sched_skip,
+                    s->dspark_sched_lifetime_accepted,
+                    s->dspark_sched_long_accept_seen ? 1 : 0,
+                    s->dspark_last_confidence0_valid ? "" : "n/a:",
+                    s->dspark_last_confidence0);
+        }
+    }
+
+    const uint32_t window = ds4_dspark_scheduler_window();
+    const uint32_t break_even_window =
+        ds4_dspark_scheduler_break_even_window();
+
+    const uint32_t max_extra_saved_ratio_milli =
+        ds4_dspark_scheduler_max_extra_saved_ratio_milli();
+    const bool measured_unprofitable =
+        max_extra_saved_ratio_milli != 0 &&
+        s->dspark_sched_accepted != 0 &&
+        s->dspark_sched_saved_ms > 0.0 &&
+        s->dspark_sched_extra_ms * 1000.0 >
+            s->dspark_sched_saved_ms *
+            (double)max_extra_saved_ratio_milli;
+
+    if (break_even_window != 0 &&
+        s->dspark_sched_cycles >= break_even_window &&
+        measured_unprofitable) {
+        s->dspark_sched_skip = ds4_dspark_scheduler_slow_skip_cycles();
+        if (getenv("DS4_DSPARK_SPEC_LOG") != NULL) {
+            fprintf(stderr,
+                    "ds4: DSpark scheduler break-even pause cycles=%u "
+                    "accepted=%u saved=%.3fms extra=%.3fms skip=%u\n",
+                    s->dspark_sched_cycles,
+                    s->dspark_sched_accepted,
+                    s->dspark_sched_saved_ms,
+                    s->dspark_sched_extra_ms,
+                    s->dspark_sched_skip);
+        }
+        ds4_session_dspark_scheduler_reset(s);
+        return;
+    }
+
+    if (s->dspark_sched_cycles < window) return;
+
+    const uint64_t avg_milli =
+        ((uint64_t)s->dspark_sched_accepted * 1000ull) /
+        (uint64_t)s->dspark_sched_cycles;
+    const uint32_t min_avg_milli =
+        ds4_dspark_scheduler_min_avg_milli();
+    const bool low_accept = avg_milli < min_avg_milli;
+    const bool many_no_draft =
+        s->dspark_sched_no_draft * 2u >= s->dspark_sched_cycles;
+    const uint32_t max_ms_per_accept_milli =
+        ds4_dspark_scheduler_max_ms_per_accept_milli();
+    const double extra_per_accept_ms =
+        s->dspark_sched_accepted != 0 ?
+        s->dspark_sched_extra_ms / (double)s->dspark_sched_accepted : 0.0;
+    const bool slow_accept =
+        max_ms_per_accept_milli != 0 &&
+        s->dspark_sched_accepted != 0 &&
+        extra_per_accept_ms * 1000.0 > (double)max_ms_per_accept_milli;
+    if (low_accept || many_no_draft || slow_accept || measured_unprofitable) {
+        s->dspark_sched_skip = ds4_dspark_scheduler_skip_cycles();
+        if (many_no_draft || slow_accept || measured_unprofitable) {
+            const uint32_t slow_skip = ds4_dspark_scheduler_slow_skip_cycles();
+            if (s->dspark_sched_skip < slow_skip) {
+                s->dspark_sched_skip = slow_skip;
+            }
+        }
+        if (getenv("DS4_DSPARK_SPEC_LOG") != NULL) {
+            fprintf(stderr,
+                    "ds4: DSpark scheduler pause cycles=%u accepted=%u "
+                    "avg=%.3f no_draft=%u extra_per_accept=%.3fms "
+                    "saved=%.3fms extra=%.3fms skip=%u\n",
+                    s->dspark_sched_cycles,
+                    s->dspark_sched_accepted,
+                    (double)avg_milli / 1000.0,
+                    s->dspark_sched_no_draft,
+                    extra_per_accept_ms,
+                    s->dspark_sched_saved_ms,
+                    s->dspark_sched_extra_ms,
+                    s->dspark_sched_skip);
+        }
+    }
+    ds4_session_dspark_scheduler_reset(s);
+}
+#endif
 
 /* =========================================================================
  * Session Snapshot Payloads.
@@ -23604,6 +27411,33 @@ static DS4_MAYBE_UNUSED int payload_read_tensor_span_f32_as_f16(FILE *fp, ds4_gp
 
 static bool ds4_session_is_cpu(const ds4_session *s) {
     return s && s->engine && s->engine->backend == DS4_BACKEND_CPU;
+}
+
+static void ds4_session_dspark_capture_invalidate(ds4_session *s) {
+#ifndef DS4_NO_GPU
+    if (!s) return;
+    s->dspark_draft_valid = false;
+    s->dspark_draft_len = 0;
+    if (ds4_session_is_cpu(s)) return;
+    metal_graph_dspark_capture_invalidate(&s->graph);
+#else
+    (void)s;
+#endif
+}
+
+static void ds4_session_dspark_capture_note_checkpoint(ds4_session *s) {
+#ifndef DS4_NO_GPU
+    if (!s || ds4_session_is_cpu(s)) return;
+    ds4_gpu_graph *g = &s->graph;
+    if (!g->dspark_capture_enabled) return;
+    if (!s->checkpoint_valid || s->checkpoint.len <= 0 || !g->dspark_capture_valid) {
+        metal_graph_dspark_capture_invalidate(g);
+        return;
+    }
+    g->dspark_capture_checkpoint_len = (uint32_t)s->checkpoint.len;
+#else
+    (void)s;
+#endif
 }
 
 static uint32_t session_cpu_raw_live_rows(const ds4_session *s) {
@@ -23936,7 +27770,9 @@ int ds4_session_load_layer_payload(ds4_session *s, FILE *fp,
     }
     s->checkpoint_valid = false;
     s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_invalidate(s);
     g->mtp_n_raw = 0;
+    metal_graph_dspark_cache_reset(g);
 
     uint8_t *buf = xmalloc(DS4_SESSION_IO_CHUNK);
     int rc = 0;
@@ -24047,7 +27883,9 @@ int ds4_session_load_layer_payload(ds4_session *s, FILE *fp,
         }
         s->checkpoint_valid = true;
         s->mtp_draft_valid = false;
+        ds4_session_dspark_capture_invalidate(s);
         g->mtp_n_raw = 0;
+        metal_graph_dspark_cache_reset(g);
     }
     free(n_comp);
     free(n_index_comp);
@@ -24076,7 +27914,21 @@ bool ds4_engine_has_mtp(ds4_engine *e) {
 }
 
 int ds4_engine_mtp_draft_tokens(ds4_engine *e) {
-    return ds4_engine_has_mtp(e) ? e->mtp_draft_tokens : 0;
+    if (ds4_engine_has_mtp(e)) return e->mtp_draft_tokens;
+#ifndef DS4_NO_GPU
+    const char *dspark_enable = getenv("DS4_DSPARK_ENABLE");
+    const bool dspark_runtime_enabled =
+        dspark_enable && dspark_enable[0] && strcmp(dspark_enable, "0") != 0;
+    if (e &&
+        e->backend != DS4_BACKEND_CPU &&
+        e->distributed.role == DS4_DISTRIBUTED_NONE &&
+        e->support_kind == DS4_SUPPORT_DSPARK &&
+        dspark_runtime_enabled &&
+        e->dspark_weights.block_size > 1) {
+        return (int)e->dspark_weights.block_size;
+    }
+#endif
+    return 0;
 }
 
 const ds4_tokens *ds4_session_tokens(ds4_session *s) {
@@ -24088,6 +27940,9 @@ typedef struct {
     uint32_t n_comp[DS4_MAX_LAYER];
     uint32_t n_index_comp[DS4_MAX_LAYER];
     uint32_t mtp_n_raw;
+    uint32_t dspark_cache_start;
+    uint32_t dspark_cache_token_start;
+    uint32_t dspark_cache_len;
 } ds4_spec_frontier;
 
 static void spec_frontier_free(ds4_spec_frontier *f) {
@@ -24098,7 +27953,11 @@ static void spec_frontier_free(ds4_spec_frontier *f) {
 static bool spec_frontier_snapshot(ds4_spec_frontier *f, ds4_session *s) {
     memset(f, 0, sizeof(*f));
     ds4_gpu_graph *g = &s->graph;
+    if (!metal_graph_dspark_cache_current_window_valid(g)) return false;
     f->mtp_n_raw = g->mtp_n_raw;
+    f->dspark_cache_start = g->dspark_cache_start;
+    f->dspark_cache_token_start = g->dspark_cache_token_start;
+    f->dspark_cache_len = g->dspark_cache_len;
 
     bool ok = ds4_gpu_begin_commands() != 0;
     for (uint32_t il = 0; ok && il < DS4_N_LAYER; il++) {
@@ -24130,8 +27989,19 @@ static bool spec_frontier_snapshot(ds4_spec_frontier *f, ds4_session *s) {
 
 static bool spec_frontier_restore(ds4_spec_frontier *f, ds4_session *s) {
     ds4_gpu_graph *g = &s->graph;
+    if (!metal_graph_dspark_cache_window_valid(g,
+                                               f->dspark_cache_token_start,
+                                               f->dspark_cache_start,
+                                               f->dspark_cache_len)) {
+        return false;
+    }
     bool ok = ds4_gpu_begin_commands() != 0;
     g->mtp_n_raw = f->mtp_n_raw;
+    if (ok) {
+        ok = metal_graph_dspark_cache_set_window(g,
+                                                 f->dspark_cache_token_start,
+                                                 f->dspark_cache_len);
+    }
     for (uint32_t il = 0; ok && il < DS4_N_LAYER; il++) {
         g->layer_n_comp[il] = f->n_comp[il];
         g->layer_n_index_comp[il] = f->n_index_comp[il];
@@ -24606,6 +28476,7 @@ int ds4_session_load_payload(ds4_session *s, FILE *fp, uint64_t payload_bytes, c
 
         s->checkpoint_valid = false;
         s->mtp_draft_valid = false;
+        ds4_session_dspark_capture_invalidate(s);
         session_cpu_reset_cache(s);
         for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
             ds4_layer_cache *layer = &s->cpu_cache.layer[il];
@@ -24660,6 +28531,7 @@ int ds4_session_load_payload(ds4_session *s, FILE *fp, uint64_t payload_bytes, c
         s->checkpoint = new_checkpoint;
         s->checkpoint_valid = true;
         s->mtp_draft_valid = false;
+        ds4_session_dspark_capture_invalidate(s);
         return 0;
     }
 #ifdef DS4_NO_GPU
@@ -24753,7 +28625,9 @@ int ds4_session_load_payload(ds4_session *s, FILE *fp, uint64_t payload_bytes, c
     }
     s->checkpoint_valid = false;
     s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_invalidate(s);
     g->mtp_n_raw = 0;
+    metal_graph_dspark_cache_reset(g);
 
     uint8_t *buf = xmalloc(DS4_SESSION_IO_CHUNK);
     int rc = 0;
@@ -24870,7 +28744,9 @@ int ds4_session_load_payload(ds4_session *s, FILE *fp, uint64_t payload_bytes, c
     }
     s->checkpoint_valid = true;
     s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_invalidate(s);
     g->mtp_n_raw = 0;
+    metal_graph_dspark_cache_reset(g);
     return 0;
 #endif
 }
@@ -25700,6 +29576,18 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
                 budget);
     }
     if (opt->inspect_only) {
+        if (opt->mtp_path && opt->mtp_path[0] &&
+            opt->distributed.role == DS4_DISTRIBUTED_NONE) {
+            model_open(&e->mtp_model, opt->mtp_path, false, false);
+            ds4_dspark_summary dspark = {0};
+            e->support_kind =
+                support_model_detect(&e->mtp_model, &e->support_stages, &dspark);
+            if (e->support_kind == DS4_SUPPORT_DSPARK) {
+                dspark_weights_bind_optional(&e->dspark_weights,
+                                             &e->mtp_model,
+                                             &dspark);
+            }
+        }
         *out = e;
         return 0;
     }
@@ -25717,11 +29605,42 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
             return 1;
         }
         model_open(&e->mtp_model, opt->mtp_path, graph_backend, true);
-        mtp_weights_bind(&e->mtp_weights, &e->mtp_model);
-        e->mtp_ready = true;
-        fprintf(stderr, "ds4: MTP support model loaded: %s (draft=%d)\n",
-                opt->mtp_path,
-                e->mtp_draft_tokens);
+        ds4_dspark_summary dspark = {0};
+        e->support_kind =
+            support_model_detect(&e->mtp_model, &e->support_stages, &dspark);
+        if (e->support_kind == DS4_SUPPORT_MTP_LEGACY) {
+            mtp_weights_bind(&e->mtp_weights, &e->mtp_model);
+            e->mtp_ready = true;
+            fprintf(stderr, "ds4: MTP support model loaded: %s (draft=%d)\n",
+                    opt->mtp_path,
+                    e->mtp_draft_tokens);
+        } else if (e->support_kind == DS4_SUPPORT_DSPARK) {
+            dspark_weights_bind_optional(&e->dspark_weights,
+                                         &e->mtp_model,
+                                         &dspark);
+            fprintf(stderr,
+                    "ds4: DSpark support model detected: %s "
+                    "(stages=%u block=%u markov_rank=%u tensors=%u missing=%u "
+                    "invalid=%u metadata_errors=%u); "
+                    "experimental runtime decode is opt-in via DS4_DSPARK_ENABLE\n",
+                    opt->mtp_path,
+                    e->support_stages,
+                    dspark.block_size,
+                    dspark.markov_rank,
+                    e->dspark_weights.present_tensors,
+                    e->dspark_weights.missing_tensors,
+                    e->dspark_weights.invalid_tensors,
+                    e->dspark_weights.metadata_errors);
+        } else {
+            fprintf(stderr,
+                    "ds4: unsupported --mtp support model %s (detected=%s); "
+                    "expected legacy MTP or DSpark tensors\n",
+                    opt->mtp_path,
+                    support_kind_name(e->support_kind));
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
     }
 
 #ifndef DS4_NO_GPU
@@ -25956,7 +29875,13 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
             *out = NULL;
             return 1;
         }
-        if (e->mtp_ready &&
+        const char *dspark_enable = getenv("DS4_DSPARK_ENABLE");
+        const bool dspark_runtime_enabled =
+            dspark_enable && dspark_enable[0] && strcmp(dspark_enable, "0") != 0;
+        const bool support_model_runtime_ready =
+            e->mtp_ready ||
+            (e->support_kind == DS4_SUPPORT_DSPARK && dspark_runtime_enabled);
+        if (support_model_runtime_ready &&
             !ds4_gpu_set_model_map_range(e->mtp_model.map,
                                            e->mtp_model.size,
                                            e->mtp_model.tensor_data_pos,
@@ -25964,7 +29889,7 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
                                            e->mtp_model.max_tensor_bytes))
         {
             fprintf(stderr,
-                    "ds4: %s failed to map MTP model views; aborting startup. "
+                    "ds4: %s failed to map support model views; aborting startup. "
                     "This is commonly caused by insufficient memory or accelerator VM budget.\n",
                     ds4_backend_name(e->backend));
             free(load_offsets);
@@ -25997,13 +29922,13 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
         }
         free(load_offsets);
         free(load_sizes);
-        /* Also apply explicit optional Q8 preload settings to the MTP support
-         * model when loaded. */
-        if (e->mtp_ready) {
+        /* Also apply explicit optional Q8 preload settings to the runtime
+         * support model when loaded. */
+        if (support_model_runtime_ready) {
             (void)ds4_gpu_set_model_fd_for_map(e->mtp_model.fd, e->mtp_model.map);
             if (!accelerator_cache_model_tensors(e->backend, &e->mtp_model,
                                                  NULL, NULL, 0)) {
-                fprintf(stderr, "ds4: %s failed to prepare optional MTP model cache\n",
+                fprintf(stderr, "ds4: %s failed to prepare optional support model cache\n",
                         ds4_backend_name(e->backend));
                 ds4_engine_close(e);
                 *out = NULL;
@@ -26030,6 +29955,24 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
 
 void ds4_engine_summary(ds4_engine *e) {
     model_summary(&e->model);
+    if (e->mtp_model.map) {
+        printf("\nsupport model");
+        if (e->support_kind != DS4_SUPPORT_NONE) {
+            printf(" (%s", support_kind_name(e->support_kind));
+            if (e->support_stages) printf(", stages=%u", e->support_stages);
+            printf(")");
+        }
+        printf(":\n");
+        model_summary(&e->mtp_model);
+        if (e->support_kind == DS4_SUPPORT_DSPARK &&
+            e->dspark_weights.n_stages != 0) {
+            printf("support binding: tensors=%u missing=%u invalid=%u metadata_errors=%u\n",
+                   e->dspark_weights.present_tensors,
+                   e->dspark_weights.missing_tensors,
+                   e->dspark_weights.invalid_tensors,
+                   e->dspark_weights.metadata_errors);
+        }
+    }
 }
 
 int ds4_engine_vocab_size(ds4_engine *e) {
@@ -26078,7 +30021,7 @@ void ds4_engine_close(ds4_engine *e) {
     weights_free(&e->weights);
     vocab_free(&e->vocab);
     ds4_threads_shutdown();
-    if (e->mtp_ready) model_close(&e->mtp_model);
+    if (e->mtp_model.map) model_close(&e->mtp_model);
     model_close(&e->model);
 #ifndef DS4_NO_GPU
     ds4_gpu_cleanup();
@@ -26089,6 +30032,113 @@ void ds4_engine_close(ds4_engine *e) {
     free(e->directional_steering_file);
     free(e);
 }
+
+#ifndef DS4_NO_GPU
+static bool ds4_dspark_stats_enabled(void) {
+    const char *env = getenv("DS4_DSPARK_STATS");
+    return env && env[0] && strcmp(env, "0") != 0;
+}
+
+static void ds4_format_len_hist(
+        char           *buf,
+        size_t          buflen,
+        const uint64_t *hist) {
+    if (!buf || buflen == 0 || !hist) return;
+    size_t off = 0;
+    buf[0] = '\0';
+    for (uint32_t i = 0; i <= DS4_DSPARK_MAX_BLOCK_SIZE; i++) {
+        if (hist[i] == 0) continue;
+        const int n = snprintf(buf + off,
+                               off < buflen ? buflen - off : 0,
+                               "%s%u:%llu",
+                               off ? "," : "",
+                               i,
+                               (unsigned long long)hist[i]);
+        if (n < 0) break;
+        if ((size_t)n >= (off < buflen ? buflen - off : 0)) {
+            off = buflen - 1u;
+            break;
+        }
+        off += (size_t)n;
+    }
+    if (off == 0) {
+        snprintf(buf, buflen, "none");
+    }
+}
+
+static void ds4_session_print_dspark_stats(const ds4_session *s) {
+    if (!s || !ds4_dspark_stats_enabled()) return;
+    const ds4_dspark_spec_stats *st = &s->dspark_stats;
+    if (st->cycles == 0 && st->propose_ms == 0.0) return;
+    char draft_hist[192];
+    char accept_hist[192];
+    ds4_format_len_hist(draft_hist, sizeof(draft_hist), st->draft_len_hist);
+    ds4_format_len_hist(accept_hist, sizeof(accept_hist), st->accepted_len_hist);
+    const double accept_rate =
+        st->proposed_tokens ?
+            (100.0 * (double)st->accepted_draft_tokens /
+             (double)st->proposed_tokens) : 0.0;
+    const double avg_accept =
+        st->cycles ?
+            (double)st->accepted_draft_tokens / (double)st->cycles : 0.0;
+    const double extra_ms = st->propose_ms + st->total_ms;
+    const double net_saved_ms = st->saved_ms - extra_ms;
+    fprintf(stderr,
+            "ds4: DSpark stats cycles=%llu first_tokens=%llu proposed=%llu "
+            "accepted_draft=%llu accept_rate=%.2f%% avg_accept=%.3f "
+            "full=%llu partial=%llu miss_first=%llu no_draft=%llu "
+            "no_room=%llu invalid=%llu scheduler_skips=%llu "
+            "tail_skips=%llu verifier_unavailable=%llu errors=%llu time_ms propose=%.3f "
+            "prop_stage0=%.3f prop_setup=%.3f prop_cache=%.3f "
+            "prop_chain=%.3f prop_hidden=%.3f prop_conf0=%.3f "
+            "prop_logits=%.3f prop_markov=%.3f prop_confidence=%.3f "
+            "snapshot=%.3f verify=%.3f verify_upload=%.3f "
+            "verify_layer=%.3f verify_head=%.3f verify_read=%.3f "
+            "verify_fused_head=%llu replay=%.3f spec_total=%.3f "
+            "target=%.3f saved=%.3f net_saved=%.3f "
+            "draft_len_hist=%s accepted_len_hist=%s\n",
+            (unsigned long long)st->cycles,
+            (unsigned long long)st->first_tokens,
+            (unsigned long long)st->proposed_tokens,
+            (unsigned long long)st->accepted_draft_tokens,
+            accept_rate,
+            avg_accept,
+            (unsigned long long)st->full_accepts,
+            (unsigned long long)st->partial_accepts,
+            (unsigned long long)st->first_misses,
+            (unsigned long long)st->no_draft,
+            (unsigned long long)st->no_room,
+            (unsigned long long)st->invalid_draft,
+            (unsigned long long)st->scheduler_skips,
+            (unsigned long long)st->tail_skips,
+            (unsigned long long)st->verifier_unavailable,
+            (unsigned long long)st->verifier_errors,
+            st->propose_ms,
+            st->propose_stage0_ms,
+            st->propose_setup_ms,
+            st->propose_cache_ms,
+            st->propose_chain_ms,
+            st->propose_hidden_ms,
+            st->propose_conf0_ms,
+            st->propose_logits_ms,
+            st->propose_markov_ms,
+            st->propose_confidence_ms,
+            st->snapshot_ms,
+            st->verify_ms,
+            st->verify_upload_ms,
+            st->verify_layer_ms,
+            st->verify_head_ms,
+            st->verify_read_ms,
+            (unsigned long long)st->verifier_fused_head,
+            st->replay_ms,
+            st->total_ms,
+            st->target_ms,
+            st->saved_ms,
+            net_saved_ms,
+            draft_hist,
+            accept_hist);
+}
+#endif
 
 int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
     if (!out || !e || ctx_size <= 0) return 1;
@@ -26125,8 +30175,15 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
         free(s);
         return 1;
     }
+    const char *dspark_enable = getenv("DS4_DSPARK_ENABLE");
+    const bool dspark_runtime_enabled =
+        dspark_enable && dspark_enable[0] && strcmp(dspark_enable, "0") != 0;
+    const bool need_spec_verifier =
+        e->mtp_ready ||
+        (e->support_kind == DS4_SUPPORT_DSPARK && dspark_runtime_enabled);
     if (!metal_graph_alloc_raw_cap(&s->graph, &e->weights, shape_layer,
-                                   raw_cap, (uint32_t)ctx_size, s->prefill_cap, e->mtp_ready))
+                                   raw_cap, (uint32_t)ctx_size, s->prefill_cap,
+                                   need_spec_verifier))
     {
         free(s);
         return 1;
@@ -26144,7 +30201,43 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
         free(s);
         return 1;
     }
+    if (e->support_kind == DS4_SUPPORT_DSPARK) {
+        if (!metal_graph_configure_dspark_capture(&s->graph,
+                                                  &e->dspark_weights)) {
+            fprintf(stderr, "ds4: failed to configure DSpark target-hidden capture\n");
+            metal_graph_free(&s->graph);
+            free(s);
+            return 1;
+        }
+        if (s->graph.dspark_capture_enabled) {
+            fprintf(stderr, "ds4: DSpark target-hidden capture enabled: layers=");
+            for (uint32_t i = 0; i < s->graph.dspark_target_layer_count; i++) {
+                fprintf(stderr,
+                        "%s%u",
+                        i == 0 ? "" : ",",
+                        s->graph.dspark_target_layers[i]);
+            }
+            fprintf(stderr, "\n");
+        }
+    }
     s->logits = xmalloc((size_t)DS4_N_VOCAB * sizeof(s->logits[0]));
+    if (need_spec_verifier) {
+        s->spec_row_logits =
+            xmalloc((size_t)DS4_N_VOCAB * sizeof(s->spec_row_logits[0]));
+    }
+    if (e->support_kind == DS4_SUPPORT_DSPARK && dspark_runtime_enabled) {
+        const uint64_t dspark_feature_count =
+            (uint64_t)DS4_N_EMBD + (uint64_t)e->dspark_weights.markov_rank;
+        if (dspark_feature_count <= (uint64_t)SIZE_MAX / sizeof(float)) {
+            s->dspark_markov_bias =
+                xmalloc((size_t)DS4_N_VOCAB *
+                        sizeof(s->dspark_markov_bias[0]));
+            s->dspark_conf_features =
+                xmalloc((size_t)dspark_feature_count *
+                        sizeof(s->dspark_conf_features[0]));
+            s->dspark_conf_features_cap = (size_t)dspark_feature_count;
+        }
+    }
     if (e->mtp_ready) {
         s->mtp_logits = xmalloc((size_t)DS4_N_VOCAB * sizeof(s->mtp_logits[0]));
         s->mtp_draft_token = -1;
@@ -26164,6 +30257,9 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
             metal_graph_free(&s->graph);
             free(s->logits);
             free(s->mtp_logits);
+            free(s->spec_row_logits);
+            free(s->dspark_markov_bias);
+            free(s->dspark_conf_features);
             free(s);
             return 1;
         }
@@ -26175,6 +30271,9 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
 
 void ds4_session_free(ds4_session *s) {
     if (!s) return;
+#ifndef DS4_NO_GPU
+    ds4_session_print_dspark_stats(s);
+#endif
     ds4_dist_session_free(s->distributed);
     if (ds4_session_is_cpu(s)) {
         kv_cache_free(&s->cpu_cache);
@@ -26188,6 +30287,11 @@ void ds4_session_free(ds4_session *s) {
     token_vec_free(&s->checkpoint);
     free(s->logits);
     free(s->mtp_logits);
+#ifndef DS4_NO_GPU
+    free(s->spec_row_logits);
+    free(s->dspark_markov_bias);
+    free(s->dspark_conf_features);
+#endif
     free(s);
 }
 
@@ -26363,6 +30467,7 @@ static DS4_MAYBE_UNUSED void ds4_session_slice_commit_timeline(ds4_session *s, c
     for (uint32_t i = 0; i < n_tokens; i++) token_vec_push(&s->checkpoint, tokens[i]);
     s->checkpoint_valid = true;
     s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_note_checkpoint(s);
 }
 
 int ds4_session_eval_layer_slice(ds4_session *s,
@@ -26729,6 +30834,7 @@ static void ds4_session_note_prefill_progress(void *ud, const char *event, int c
         for (int i = 0; i < current; i++) token_vec_push(&p->session->checkpoint, p->prompt->v[i]);
         p->session->checkpoint_valid = true;
         p->session->mtp_draft_valid = false;
+        ds4_session_dspark_capture_note_checkpoint(p->session);
     }
     if (p->user) p->user(p->user_ud, event, current, total);
 }
@@ -26811,6 +30917,7 @@ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t
         ds4_tokens_copy(&s->checkpoint, prompt);
         s->checkpoint_valid = true;
         s->mtp_draft_valid = false;
+        ds4_session_dspark_capture_note_checkpoint(s);
         if (s->progress) s->progress(s->progress_ud, "prefill_chunk", prompt->len, prompt->len);
         return 0;
     }
@@ -26867,6 +30974,7 @@ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t
             }
             ds4_tokens_copy(&s->checkpoint, prompt);
             s->checkpoint_valid = true;
+            ds4_session_dspark_capture_note_checkpoint(s);
             return 0;
         }
 
@@ -26887,6 +30995,8 @@ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t
                 return 1;
             }
             token_vec_push(&s->checkpoint, prompt->v[i]);
+            s->checkpoint_valid = true;
+            ds4_session_dspark_capture_note_checkpoint(s);
         }
         return 0;
     }
@@ -26895,6 +31005,7 @@ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t
     s->checkpoint_valid = false;
     s->checkpoint.len = 0;
     s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_invalidate(s);
     if (!metal_graph_reset_prefill_state(&s->graph)) {
         snprintf(err, errlen, "%s prefill state reset failed", backend_name);
         return 1;
@@ -26943,6 +31054,7 @@ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t
     ds4_tokens_copy(&s->checkpoint, prompt);
     s->checkpoint_valid = true;
     s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_note_checkpoint(s);
     s->graph.mtp_n_raw = 0;
     return 0;
 #endif
@@ -27116,6 +31228,591 @@ int ds4_session_set_logits(ds4_session *s, const float *logits, int n) {
     return 0;
 }
 
+#ifndef DS4_NO_GPU
+static bool ds4_session_dspark_capture_current(const ds4_session *s) {
+    if (!s || ds4_session_is_cpu(s) || !s->checkpoint_valid) return false;
+    const ds4_gpu_graph *g = &s->graph;
+    return g->dspark_capture_enabled &&
+           g->dspark_capture_valid &&
+           g->dspark_capture_checkpoint_len == (uint32_t)s->checkpoint.len;
+}
+
+static bool ds4_session_dspark_capture_batch_current(const ds4_session *s) {
+    if (!s || ds4_session_is_cpu(s) || !s->checkpoint_valid) return false;
+    const ds4_gpu_graph *g = &s->graph;
+    if (!g->dspark_capture_enabled || !g->dspark_capture_batch_valid) {
+        return false;
+    }
+    if (g->dspark_capture_batch_tokens == 0 ||
+        g->dspark_capture_batch_start > (uint32_t)s->checkpoint.len) {
+        return false;
+    }
+    const uint32_t batch_end =
+        g->dspark_capture_batch_start + g->dspark_capture_batch_tokens;
+    return batch_end >= g->dspark_capture_batch_start &&
+           batch_end <= (uint32_t)s->checkpoint.len;
+}
+
+static void ds4_session_note_legacy_mtp_probe(ds4_session *s,
+                                              int token,
+                                              bool mtp_probe_log) {
+    if (!s || !s->mtp_draft_valid) return;
+    if (mtp_probe_log) {
+        s->mtp_probe_total++;
+        if (s->mtp_draft_token == token) s->mtp_probe_hit++;
+        fprintf(stderr,
+                "ds4: mtp probe token=%d draft=%d hit=%llu/%llu\n",
+                token,
+                s->mtp_draft_token,
+                (unsigned long long)s->mtp_probe_hit,
+                (unsigned long long)s->mtp_probe_total);
+    }
+    s->mtp_draft_valid = false;
+}
+
+static bool ds4_session_prepare_legacy_mtp_draft(ds4_session *s,
+                                                 int token,
+                                                 uint32_t pos,
+                                                 bool mtp_probe_log) {
+    ds4_engine *e = s->engine;
+    if (!e->mtp_ready || !s->mtp_logits ||
+        (e->mtp_draft_tokens <= 1 && !mtp_probe_log)) {
+        return false;
+    }
+
+    int mtp_top = -1;
+    if (metal_graph_eval_mtp_draft(&s->graph,
+                                   &e->model,
+                                   &e->weights,
+                                   &e->mtp_model,
+                                   &e->mtp_weights,
+                                   token,
+                                   pos,
+                                   getenv("DS4_MTP_FULL_LOGITS") ? s->mtp_logits : NULL,
+                                   &mtp_top)) {
+        s->mtp_draft_token = mtp_top >= 0 ? mtp_top : sample_argmax(s->mtp_logits, DS4_N_VOCAB);
+        s->mtp_draft_valid = true;
+        return true;
+    }
+    if (mtp_probe_log) {
+        fprintf(stderr, "ds4: mtp probe draft failed\n");
+    }
+    return false;
+}
+
+static bool ds4_session_prepare_dspark_draft(ds4_session *s,
+                                             int token,
+                                             uint32_t pos) {
+    const char *probe = getenv("DS4_DSPARK_PROBE");
+    const bool probe_log = probe && probe[0];
+    const char *enable = getenv("DS4_DSPARK_ENABLE");
+    const bool enabled =
+        enable && enable[0] && strcmp(enable, "0") != 0;
+    const char *fake_argmax = getenv("DS4_DSPARK_FAKE_ARGMAX_PROPOSAL");
+    const bool fake_argmax_enabled =
+        enabled &&
+        fake_argmax && fake_argmax[0] && strcmp(fake_argmax, "0") != 0;
+    const float confidence_threshold = dspark_confidence_threshold();
+    const bool stats_enabled = ds4_dspark_stats_enabled();
+    const bool scheduler_enabled = ds4_dspark_scheduler_enabled();
+    const bool time_enabled = stats_enabled || scheduler_enabled;
+    const double stats_t0 = time_enabled ? now_sec() : 0.0;
+#define DS4_DSPARK_PROP_T0() (stats_enabled ? now_sec() : 0.0)
+#define DS4_DSPARK_PROP_ADD(field_, t0_) do {                              \
+        if (stats_enabled) {                                                \
+            s->dspark_stats.field_ += (now_sec() - (t0_)) * 1000.0;         \
+        }                                                                   \
+    } while (0)
+    s->dspark_draft_valid = false;
+    s->dspark_draft_len = 0;
+    s->dspark_last_confidence0 = 0.0f;
+    s->dspark_last_confidence0_valid = false;
+    if (scheduler_enabled) s->dspark_last_propose_ms = 0.0;
+    if (enabled && !fake_argmax_enabled &&
+        ds4_session_dspark_scheduler_should_skip(s)) {
+        const double propose_ms =
+            time_enabled ? (now_sec() - stats_t0) * 1000.0 : 0.0;
+        if (scheduler_enabled) s->dspark_last_propose_ms = propose_ms;
+        if (stats_enabled) {
+            s->dspark_stats.propose_ms += propose_ms;
+        }
+        return false;
+    }
+    if (probe_log || enabled) {
+        const bool capture_ok = ds4_session_dspark_capture_current(s);
+        const bool batch_capture_ok =
+            ds4_session_dspark_capture_batch_current(s);
+        const ds4_dspark_weights *dw = &s->engine->dspark_weights;
+        const bool stage0_ready = dspark_stage0_weights_ready(&s->graph, dw);
+        const bool runtime_fused_stage0_setup =
+            enabled && !fake_argmax_enabled && !probe_log;
+        const double stage0_t0 = DS4_DSPARK_PROP_T0();
+        bool stage0_ok = false;
+        if (capture_ok && stage0_ready && !runtime_fused_stage0_setup) {
+            stage0_ok =
+                metal_graph_eval_dspark_stage0(&s->graph,
+                                               &s->engine->mtp_model,
+                                               dw);
+        } else if (capture_ok && stage0_ready && runtime_fused_stage0_setup) {
+            stage0_ok = true;
+        }
+        DS4_DSPARK_PROP_ADD(propose_stage0_ms, stage0_t0);
+        const double setup_t0 = DS4_DSPARK_PROP_T0();
+        const bool draft_block_ready =
+            dspark_draft_block_ready(&s->graph, &s->engine->weights, dw, token);
+        const bool stage_input_ready =
+            dspark_stage_input_ready(&s->graph, dw);
+        bool stage_input_ok = false;
+        if (stage0_ok && draft_block_ready && stage_input_ready) {
+            if (runtime_fused_stage0_setup) {
+                stage_input_ok =
+                    metal_graph_prepare_dspark_stage0_setup_block(
+                            &s->graph,
+                            &s->engine->model,
+                            &s->engine->weights,
+                            &s->engine->mtp_model,
+                            dw,
+                            token,
+                            pos);
+                stage0_ok = stage_input_ok;
+            } else {
+                stage_input_ok =
+                    metal_graph_prepare_dspark_setup_block(&s->graph,
+                                                          &s->engine->model,
+                                                          &s->engine->weights,
+                                                          dw,
+                                                          token,
+                                                          pos);
+            }
+        }
+        DS4_DSPARK_PROP_ADD(propose_setup_ms, setup_t0);
+        const bool draft_cache_ready =
+            dspark_stage_cache_ready(&s->graph, dw);
+        uint32_t initial_cache_rows = 0;
+        const uint64_t captured_batch_end =
+            (uint64_t)s->graph.dspark_capture_batch_start +
+            s->graph.dspark_capture_batch_tokens;
+        const bool captured_batch_end_ok =
+            s->graph.dspark_capture_batch_tokens != 0 &&
+            captured_batch_end <= UINT32_MAX;
+        const bool initial_cache_ready =
+            batch_capture_ok &&
+            draft_cache_ready &&
+            captured_batch_end_ok &&
+            (uint32_t)captured_batch_end == pos;
+        const double cache_t0 = DS4_DSPARK_PROP_T0();
+        bool initial_cache_ok = false;
+        if (initial_cache_ready) {
+            initial_cache_ok =
+                metal_graph_seed_dspark_initial_cache_from_prefill(
+                    &s->graph,
+                    &s->engine->mtp_model,
+                    dw,
+                    s->graph.dspark_capture_batch_start,
+                    s->graph.dspark_capture_batch_tokens,
+                    &initial_cache_rows);
+        }
+        bool cache_window_ok = draft_cache_ready;
+        if (draft_cache_ready) {
+            if (initial_cache_ready) {
+                if (!initial_cache_ok) metal_graph_dspark_cache_reset(&s->graph);
+                cache_window_ok = initial_cache_ok;
+            } else {
+                cache_window_ok =
+                    metal_graph_dspark_cache_crop_to_prefix(&s->graph, pos) &&
+                    metal_graph_dspark_cache_ends_at(&s->graph, pos);
+            }
+        }
+        DS4_DSPARK_PROP_ADD(propose_cache_ms, cache_t0);
+        const bool noncausal_attn_ready =
+            probe_log &&
+            stage_input_ok &&
+            draft_cache_ready &&
+            dspark_noncausal_attention_probe_ready(&s->graph, dw);
+        const bool noncausal_attn_ok =
+            noncausal_attn_ready &&
+            metal_graph_probe_dspark_noncausal_attention(&s->graph,
+                                                         &s->engine->mtp_model,
+                                                         dw);
+        const bool stage_block_ready =
+            stage_input_ok &&
+            draft_cache_ready &&
+            dspark_stage_block_ready(&s->graph, dw, 0);
+        uint32_t stage_chain_done = 0;
+        const bool stage_chain_ready =
+            stage_input_ok &&
+            draft_cache_ready &&
+            cache_window_ok &&
+            dw->n_stages != 0 &&
+            dw->n_stages <= DS4_DSPARK_MAX_STAGES;
+        uint32_t stage_cache_start = 0;
+        uint32_t stage_cache_rows = 0;
+        const double chain_t0 = DS4_DSPARK_PROP_T0();
+        bool stage_chain_ok = false;
+        if (stage_chain_ready) {
+            stage_chain_ok =
+                metal_graph_eval_dspark_stage_chain(&s->graph,
+                                                &s->engine->mtp_model,
+                                                dw,
+                                                pos,
+                                                &stage_chain_done,
+                                                &stage_cache_start,
+                                                &stage_cache_rows);
+        }
+        DS4_DSPARK_PROP_ADD(propose_chain_ms, chain_t0);
+        const bool stage_block_ok = stage_chain_done >= 1u;
+        const bool base_logits_ready =
+            stage_chain_ok &&
+            dspark_final_head_ready(&s->graph, &s->engine->weights, dw);
+        int32_t markov_proposal[DS4_DSPARK_MAX_BLOCK_SIZE];
+        for (uint32_t i = 0; i < DS4_DSPARK_MAX_BLOCK_SIZE; i++) {
+            markov_proposal[i] = -1;
+        }
+        uint32_t markov_proposal_len = 0;
+        bool markov_ok = false;
+        uint32_t confidence_len = 0;
+        uint32_t confidence_prefix_len = 0;
+        float confidence0 = 0.0f;
+        bool confidence_ok = false;
+        bool reuse_confidence0_markov = false;
+        const bool runtime_confidence_precheck =
+            base_logits_ready &&
+            !probe_log &&
+            confidence_threshold > 0.0f &&
+            dspark_confidence_probe_ready(dw);
+        bool base_logits_ok = false;
+        if (runtime_confidence_precheck) {
+            const double hidden_t0 = DS4_DSPARK_PROP_T0();
+            const bool hidden_ok =
+                metal_graph_eval_dspark_final_hidden(&s->graph,
+                                                     &s->engine->mtp_model,
+                                                     dw);
+            DS4_DSPARK_PROP_ADD(propose_hidden_ms, hidden_t0);
+            bool conf0_ok = false;
+            if (hidden_ok) {
+                const double conf0_t0 = DS4_DSPARK_PROP_T0();
+                conf0_ok =
+                    dspark_eval_confidence0_runtime(&s->graph,
+                                                    &s->engine->mtp_model,
+                                                    dw,
+                                                    token,
+                                                    s->dspark_conf_features,
+                                                    s->dspark_conf_features_cap,
+                                                    &confidence0);
+                DS4_DSPARK_PROP_ADD(propose_conf0_ms, conf0_t0);
+            }
+            if (conf0_ok) {
+                confidence_ok = true;
+                confidence_len = 1;
+                if (sigmoid_stable(confidence0) >= confidence_threshold) {
+                    confidence_prefix_len = 1;
+                    const double logits_t0 = DS4_DSPARK_PROP_T0();
+                    base_logits_ok =
+                        metal_graph_eval_dspark_base_logits_from_hidden(
+                                &s->graph,
+                                &s->engine->model,
+                                &s->engine->weights,
+                                dw);
+                    DS4_DSPARK_PROP_ADD(propose_logits_ms, logits_t0);
+                    reuse_confidence0_markov =
+                        base_logits_ok &&
+                        !dspark_disable_reuse_confidence0_markov();
+                }
+            }
+        } else if (base_logits_ready) {
+            const double logits_t0 = DS4_DSPARK_PROP_T0();
+            base_logits_ok =
+                metal_graph_eval_dspark_base_logits(&s->graph,
+                                                    &s->engine->model,
+                                                    &s->engine->weights,
+                                                    &s->engine->mtp_model,
+                                                    dw);
+            DS4_DSPARK_PROP_ADD(propose_logits_ms, logits_t0);
+        }
+        const bool markov_ready =
+            base_logits_ok && dspark_markov_probe_ready(dw);
+        const bool lazy_runtime_confidence =
+            markov_ready && !probe_log && confidence_threshold > 0.0f;
+        if (lazy_runtime_confidence) {
+            const double markov_t0 = DS4_DSPARK_PROP_T0();
+            markov_ok =
+                dspark_apply_markov_confidence_lazy_runtime(
+                        &s->graph,
+                        &s->engine->mtp_model,
+                        dw,
+                        token,
+                        confidence_threshold,
+                        s->spec_row_logits,
+                        s->dspark_markov_bias,
+                        s->dspark_conf_features,
+                        s->dspark_conf_features_cap,
+                        markov_proposal,
+                        &markov_proposal_len,
+                        &confidence_len,
+                        &confidence_prefix_len,
+                        reuse_confidence0_markov,
+                        &confidence0);
+            DS4_DSPARK_PROP_ADD(propose_markov_ms, markov_t0);
+            confidence_ok = markov_ok;
+        } else if (markov_ready) {
+            const uint64_t logits_count =
+                (uint64_t)dw->block_size * (uint64_t)DS4_N_VOCAB;
+            if (logits_count != 0 &&
+                logits_count <= (uint64_t)SIZE_MAX / sizeof(float)) {
+                const double markov_t0 = DS4_DSPARK_PROP_T0();
+                const uint64_t logits_bytes = logits_count * sizeof(float);
+                float *logits = xmalloc((size_t)logits_bytes);
+                float *markov_state =
+                    xmalloc((size_t)dw->markov_rank * sizeof(markov_state[0]));
+                float *markov_bias =
+                    xmalloc((size_t)DS4_N_VOCAB * sizeof(markov_bias[0]));
+                markov_ok =
+                    ds4_gpu_tensor_read(s->graph.spec_logits,
+                                        0,
+                                        logits,
+                                        logits_bytes) != 0 &&
+                    dspark_apply_markov_greedy_probe(logits,
+                                                     &s->engine->mtp_model,
+                                                     dw,
+                                                     token,
+                                                     markov_state,
+                                                     markov_bias,
+                                                     markov_proposal,
+                                                     &markov_proposal_len);
+                if (markov_ok && probe_log) {
+                    /* Runtime only needs the greedy proposal. Keep the GPU
+                     * writeback for probe mode, where spec_logits may be
+                     * inspected after Markov correction. */
+                    markov_ok =
+                        ds4_gpu_tensor_write(s->graph.spec_logits,
+                                             0,
+                                             logits,
+                                             logits_bytes) != 0;
+                }
+                free(markov_bias);
+                free(markov_state);
+                free(logits);
+                DS4_DSPARK_PROP_ADD(propose_markov_ms, markov_t0);
+            }
+        }
+        const bool confidence_ready =
+            !lazy_runtime_confidence &&
+            markov_ok &&
+            dspark_confidence_probe_ready(dw);
+        if (confidence_ready) {
+            const uint64_t hidden_count =
+                (uint64_t)dw->block_size * (uint64_t)DS4_N_EMBD;
+            const uint64_t feature_count =
+                (uint64_t)DS4_N_EMBD + (uint64_t)dw->markov_rank;
+            if (hidden_count != 0 &&
+                hidden_count <= (uint64_t)SIZE_MAX / sizeof(float) &&
+                feature_count <= (uint64_t)SIZE_MAX / sizeof(float)) {
+                const double confidence_t0 = DS4_DSPARK_PROP_T0();
+                const uint64_t hidden_bytes = hidden_count * sizeof(float);
+                float *hidden_rows = xmalloc((size_t)hidden_bytes);
+                float *markov_state =
+                    xmalloc((size_t)dw->markov_rank * sizeof(markov_state[0]));
+                float *features =
+                    xmalloc((size_t)feature_count * sizeof(features[0]));
+                float *confidence_logits =
+                    xmalloc((size_t)dw->block_size * sizeof(confidence_logits[0]));
+                confidence_ok =
+                    ds4_gpu_tensor_read(s->graph.batch_ffn_norm,
+                                        0,
+                                        hidden_rows,
+                                        hidden_bytes) != 0 &&
+                    dspark_eval_confidence_probe(confidence_logits,
+                                                 hidden_rows,
+                                                 &s->engine->mtp_model,
+                                                 dw,
+                                                 token,
+                                                 markov_proposal,
+                                                 markov_state,
+                                                 features,
+                                                 &confidence_len);
+                if (confidence_ok && confidence_len != 0) {
+                    confidence0 = confidence_logits[0];
+                    confidence_prefix_len =
+                        dspark_confident_prefix_len(confidence_logits,
+                                                    confidence_len,
+                                                    confidence_threshold);
+                }
+                free(confidence_logits);
+                free(features);
+                free(markov_state);
+                free(hidden_rows);
+                DS4_DSPARK_PROP_ADD(propose_confidence_ms, confidence_t0);
+            }
+        }
+        if (markov_ok && markov_proposal_len != 0) {
+            uint32_t proposal_len = markov_proposal_len;
+            if (confidence_threshold > 0.0f) {
+                proposal_len = confidence_ok ? confidence_prefix_len : 0;
+            }
+            s->dspark_draft_len = proposal_len;
+            if (s->dspark_draft_len > DS4_DSPARK_MAX_BLOCK_SIZE) {
+                s->dspark_draft_len = DS4_DSPARK_MAX_BLOCK_SIZE;
+            }
+            for (uint32_t i = 0; i < s->dspark_draft_len; i++) {
+                s->dspark_draft_tokens[i] = markov_proposal[i];
+            }
+            s->dspark_draft_valid = s->dspark_draft_len != 0;
+        }
+        if (confidence_ok && confidence_len != 0) {
+            s->dspark_last_confidence0 = confidence0;
+            s->dspark_last_confidence0_valid = true;
+        }
+        bool fake_argmax_ok = false;
+        if (!s->dspark_draft_valid && fake_argmax_enabled) {
+            s->dspark_draft_tokens[0] = sample_argmax(s->logits, DS4_N_VOCAB);
+            s->dspark_draft_len = 1;
+            s->dspark_draft_valid = true;
+            fake_argmax_ok = true;
+        }
+        if (probe_log) {
+            const char *stage0_status =
+                stage0_ok ? "ok" :
+                !capture_ok ? "capture-invalid" :
+                !stage0_ready ? "unavailable" : "failed";
+            const char *draft_block_status =
+                stage_input_ok ? "ok" :
+                !stage0_ok ? "stage0-not-ready" :
+                !draft_block_ready ? "unavailable" :
+                !stage_input_ready ? "stage-input-not-ready" : "failed";
+            const char *stage_input_status =
+                stage_input_ok ? "ok" :
+                !stage0_ok ? "stage0-not-ready" :
+                !draft_block_ready ? "draft-block-not-ready" :
+                !stage_input_ready ? "unavailable" : "failed";
+            const char *draft_cache_status =
+                draft_cache_ready ? "ok" : "unavailable";
+            const char *cache_window_status =
+                !draft_cache_ready ? "draft-cache-not-ready" :
+                cache_window_ok ? "ok" :
+                initial_cache_ready ? "seed-failed" : "invalid";
+            const char *initial_cache_status =
+                initial_cache_ok ? "ok" :
+                !batch_capture_ok ? "batch-capture-invalid" :
+                !draft_cache_ready ? "draft-cache-not-ready" :
+                !initial_cache_ready ? "unsupported-window" : "failed";
+            const char *noncausal_attn_status =
+                noncausal_attn_ok ? "ok" :
+                !stage_input_ok ? "stage-input-not-ready" :
+                !draft_cache_ready ? "draft-cache-not-ready" :
+                !noncausal_attn_ready ? "unavailable" : "failed";
+            const char *stage_block_status =
+                stage_block_ok ? "ok" :
+                !stage_input_ok ? "stage-input-not-ready" :
+                !draft_cache_ready ? "draft-cache-not-ready" :
+                !stage_block_ready ? "unavailable" : "failed";
+            const char *stage_chain_status =
+                stage_chain_ok ? "ok" :
+                !stage_input_ok ? "stage-input-not-ready" :
+                !draft_cache_ready ? "draft-cache-not-ready" :
+                !cache_window_ok ? "cache-window-not-ready" :
+                !stage_chain_ready ? "unavailable" :
+                stage_chain_done != 0 ? "partial" : "failed";
+            const char *base_logits_status =
+                base_logits_ok ? "ok" :
+                !stage_chain_ok ? "stage-chain-not-ready" :
+                !base_logits_ready ? "unavailable" : "failed";
+            const char *markov_status =
+                markov_ok ? "ok" :
+                !base_logits_ok ? "base-logits-not-ready" :
+                !markov_ready ? "unavailable" : "failed";
+            const char *confidence_status =
+                confidence_ok ? "ok" :
+                !markov_ok ? "markov-not-ready" :
+                !confidence_ready ? "unavailable" : "failed";
+            const char *fake_argmax_status =
+                fake_argmax_ok ? "ok" :
+                !fake_argmax_enabled ? "disabled" :
+                s->dspark_draft_valid ? "real-proposal-present" : "skipped";
+            fprintf(stderr,
+                    "ds4: DSpark proposer pending token=%d pos=%u capture=%s "
+                    "batch_capture=%s batch_start=%u batch_tokens=%u "
+                    "stage0=%s draft_block=%s stage_input=%s draft_cache=%s "
+                    "initial_cache=%s initial_cache_rows=%u "
+                    "cache_window=%s cache_token_start=%u "
+                    "cache_raw_start=%u cache_len=%u "
+                    "noncausal_attn=%s stage_block=%s stage_chain=%s "
+                    "stage_chain_done=%u/%u stage_raw_start=%u cache_rows=%u "
+                    "base_logits=%s markov=%s "
+                    "proposal_len=%u proposal0=%d fake_argmax=%s confidence=%s "
+                    "confidence_len=%u confidence_prefix=%u "
+                    "confidence_threshold=%.3f confidence0=%.3f block=%u "
+                    "tensors=%u missing=%u invalid=%u metadata_errors=%u\n",
+                    token,
+                    pos,
+                    capture_ok ? "current" : "invalid",
+                    batch_capture_ok ? "current" : "invalid",
+                    s->graph.dspark_capture_batch_start,
+                    s->graph.dspark_capture_batch_tokens,
+                    stage0_status,
+                    draft_block_status,
+                    stage_input_status,
+                    draft_cache_status,
+                    initial_cache_status,
+                    initial_cache_rows,
+                    cache_window_status,
+                    s->graph.dspark_cache_token_start,
+                    s->graph.dspark_cache_start,
+                    s->graph.dspark_cache_len,
+                    noncausal_attn_status,
+                    stage_block_status,
+                    stage_chain_status,
+                    stage_chain_done,
+                    dw->n_stages,
+                    stage_cache_start,
+                    stage_cache_rows,
+                    base_logits_status,
+                    markov_status,
+                    s->dspark_draft_len,
+                    s->dspark_draft_len ? s->dspark_draft_tokens[0] : -1,
+                    fake_argmax_status,
+                    confidence_status,
+                    confidence_len,
+                    confidence_prefix_len,
+                    confidence_threshold,
+                    confidence0,
+                    dw->block_size,
+                    dw->present_tensors,
+                    dw->missing_tensors,
+                    dw->invalid_tensors,
+                    dw->metadata_errors);
+        }
+    }
+    if (time_enabled) {
+        const double propose_ms = (now_sec() - stats_t0) * 1000.0;
+        if (scheduler_enabled) s->dspark_last_propose_ms = propose_ms;
+        if (stats_enabled) s->dspark_stats.propose_ms += propose_ms;
+    }
+#undef DS4_DSPARK_PROP_ADD
+#undef DS4_DSPARK_PROP_T0
+    return s->dspark_draft_valid;
+}
+
+static void ds4_session_prepare_support_draft(ds4_session *s,
+                                              int token,
+                                              uint32_t pos,
+                                              bool probe_mtp,
+                                              bool mtp_probe_log) {
+    if (!s || !probe_mtp || !s->engine) return;
+
+    switch (s->engine->support_kind) {
+    case DS4_SUPPORT_MTP_LEGACY:
+        (void)ds4_session_prepare_legacy_mtp_draft(s, token, pos, mtp_probe_log);
+        break;
+    case DS4_SUPPORT_DSPARK:
+        (void)ds4_session_prepare_dspark_draft(s, token, pos);
+        break;
+    case DS4_SUPPORT_NONE:
+    default:
+        break;
+    }
+}
+#endif
+
 static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
                                      char *err, size_t errlen) {
     if (!s) return 1;
@@ -27148,6 +31845,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
         token_vec_push(&s->checkpoint, token);
         s->checkpoint_valid = true;
         s->mtp_draft_valid = false;
+        ds4_session_dspark_capture_note_checkpoint(s);
         (void)probe_mtp;
         return 0;
     }
@@ -27160,22 +31858,13 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
 #else
     ds4_engine *e = s->engine;
     const bool mtp_probe_log = getenv("DS4_MTP_PROBE") != NULL;
-    const bool mtp_should_draft =
-        probe_mtp && e->mtp_ready && s->mtp_logits &&
-        (e->mtp_draft_tokens > 1 || mtp_probe_log);
-    if (probe_mtp && s->mtp_draft_valid) {
-        if (mtp_probe_log) {
-            s->mtp_probe_total++;
-            if (s->mtp_draft_token == token) s->mtp_probe_hit++;
-            fprintf(stderr,
-                    "ds4: mtp probe token=%d draft=%d hit=%llu/%llu\n",
-                    token,
-                    s->mtp_draft_token,
-                    (unsigned long long)s->mtp_probe_hit,
-                    (unsigned long long)s->mtp_probe_total);
-        }
-        s->mtp_draft_valid = false;
+    if (probe_mtp && e->support_kind == DS4_SUPPORT_MTP_LEGACY) {
+        ds4_session_note_legacy_mtp_probe(s, token, mtp_probe_log);
     }
+    const bool dspark_target_timing =
+        e->support_kind == DS4_SUPPORT_DSPARK &&
+        (ds4_dspark_stats_enabled() || ds4_dspark_scheduler_enabled());
+    const double target_t0 = dspark_target_timing ? now_sec() : 0.0;
     if (!metal_graph_eval_token_raw_swa(&s->graph, &e->model, &e->weights,
                                         (uint32_t)token,
                                         (uint32_t)s->checkpoint.len,
@@ -27185,31 +31874,344 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
         s->checkpoint_valid = false;
         return 1;
     }
-    token_vec_push(&s->checkpoint, token);
-    if (mtp_should_draft) {
-        int mtp_top = -1;
-        if (metal_graph_eval_mtp_draft(&s->graph,
-                                       &e->model,
-                                       &e->weights,
-                                       &e->mtp_model,
-                                       &e->mtp_weights,
-                                       token,
-                                       (uint32_t)(s->checkpoint.len - 1),
-                                       getenv("DS4_MTP_FULL_LOGITS") ? s->mtp_logits : NULL,
-                                       &mtp_top)) {
-            s->mtp_draft_token = mtp_top >= 0 ? mtp_top : sample_argmax(s->mtp_logits, DS4_N_VOCAB);
-            s->mtp_draft_valid = true;
-        } else if (getenv("DS4_MTP_PROBE")) {
-            fprintf(stderr, "ds4: mtp probe draft failed\n");
+    if (dspark_target_timing) {
+        const double target_ms = (now_sec() - target_t0) * 1000.0;
+        s->dspark_last_target_eval_ms = target_ms;
+        if (ds4_dspark_stats_enabled()) {
+            s->dspark_stats.target_ms += target_ms;
         }
     }
+    token_vec_push(&s->checkpoint, token);
+    s->checkpoint_valid = true;
+    ds4_session_dspark_capture_note_checkpoint(s);
+    ds4_session_prepare_support_draft(s,
+                                      token,
+                                      (uint32_t)(s->checkpoint.len - 1),
+                                      probe_mtp,
+                                      mtp_probe_log);
     return 0;
 #endif
 }
 
 int ds4_session_eval(ds4_session *s, int token, char *err, size_t errlen) {
-    return ds4_session_eval_internal(s, token, true, err, errlen);
+    bool probe_mtp = true;
+#ifndef DS4_NO_GPU
+    if (s && s->engine && s->engine->support_kind == DS4_SUPPORT_DSPARK) {
+        probe_mtp = false;
+    }
+#endif
+    return ds4_session_eval_internal(s, token, probe_mtp, err, errlen);
 }
+
+#ifndef DS4_NO_GPU
+static int ds4_session_eval_dspark_speculative_argmax(
+        ds4_session *s,
+        int          n_accept,
+        int          max_tokens,
+        int          eos_token,
+        int         *accepted,
+        int          accepted_cap,
+        char        *err,
+        size_t       errlen) {
+    const bool spec_log = getenv("DS4_DSPARK_SPEC_LOG") != NULL;
+    const bool stats_enabled = s && ds4_dspark_stats_enabled();
+    const bool scheduler_enabled = s && ds4_dspark_scheduler_enabled();
+    const double stats_t0 =
+        (stats_enabled || scheduler_enabled) ? now_sec() : 0.0;
+#define DS4_DSPARK_STATS_FINISH() do {                                      \
+        if (stats_enabled) {                                                \
+            s->dspark_stats.total_ms += (now_sec() - stats_t0) * 1000.0;    \
+        }                                                                   \
+    } while (0)
+#define DS4_DSPARK_SCHED_EXTRA_MS()                                         \
+    ((scheduler_enabled && stats_t0 != 0.0) ?                                \
+     s->dspark_last_propose_ms + (now_sec() - stats_t0) * 1000.0 : 0.0)
+    if (stats_enabled) {
+        s->dspark_stats.cycles++;
+        if (n_accept > 0) s->dspark_stats.first_tokens++;
+    }
+    if (spec_log) {
+        fprintf(stderr,
+                "ds4: DSpark spec enter accepted=%d max=%d valid=%d len=%u pos=%d\n",
+                n_accept,
+                max_tokens,
+                s ? (s->dspark_draft_valid ? 1 : 0) : 0,
+                s ? s->dspark_draft_len : 0,
+                s ? s->checkpoint.len : -1);
+    }
+    if (!s || !s->dspark_draft_valid || s->dspark_draft_len == 0) {
+        if (stats_enabled) {
+            s->dspark_stats.no_draft++;
+            ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist, 0);
+        }
+        if (s) {
+            ds4_session_dspark_scheduler_note(
+                    s, 0, true, DS4_DSPARK_SCHED_EXTRA_MS());
+        }
+        if (spec_log) {
+            fprintf(stderr, "ds4: DSpark spec skip no-draft\n");
+        }
+        DS4_DSPARK_STATS_FINISH();
+        return n_accept;
+    }
+
+    int draft_n = (int)s->dspark_draft_len;
+    if (draft_n > max_tokens - n_accept) draft_n = max_tokens - n_accept;
+    if (draft_n > accepted_cap - n_accept) draft_n = accepted_cap - n_accept;
+    int room = s->ctx_size - s->checkpoint.len;
+    if (draft_n > room - 1) draft_n = room - 1;
+    if (draft_n <= 0) {
+        s->dspark_draft_valid = false;
+        s->dspark_draft_len = 0;
+        if (stats_enabled) {
+            s->dspark_stats.no_room++;
+            ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist, 0);
+        }
+        if (spec_log) {
+            fprintf(stderr, "ds4: DSpark spec skip no-room\n");
+        }
+        DS4_DSPARK_STATS_FINISH();
+        return n_accept;
+    }
+
+    int drafts[DS4_DSPARK_MAX_BLOCK_SIZE];
+    for (int i = 0; i < draft_n; i++) {
+        drafts[i] = s->dspark_draft_tokens[i];
+        if (drafts[i] < 0 || drafts[i] >= (int)DS4_N_VOCAB) {
+            s->dspark_draft_valid = false;
+            s->dspark_draft_len = 0;
+            if (stats_enabled) {
+                s->dspark_stats.invalid_draft++;
+                ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist, 0);
+            }
+            if (spec_log) {
+                fprintf(stderr,
+                        "ds4: DSpark spec skip invalid-draft index=%d token=%d\n",
+                        i,
+                        drafts[i]);
+            }
+            DS4_DSPARK_STATS_FINISH();
+            return n_accept;
+        }
+    }
+    if (stats_enabled) {
+        s->dspark_stats.proposed_tokens += (uint64_t)draft_n;
+        ds4_dspark_stats_note_len(s->dspark_stats.draft_len_hist,
+                                  (uint32_t)draft_n);
+    }
+    s->dspark_draft_valid = false;
+    s->dspark_draft_len = 0;
+
+    const int target_top = sample_argmax(s->logits, DS4_N_VOCAB);
+    if (target_top != drafts[0]) {
+        if (stats_enabled) {
+            s->dspark_stats.first_misses++;
+            ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist, 0);
+        }
+        ds4_session_dspark_scheduler_note(
+                s, 0, false, DS4_DSPARK_SCHED_EXTRA_MS());
+        if (spec_log) {
+            fprintf(stderr,
+                    "ds4: DSpark spec miss first draft=%d base=%d\n",
+                    drafts[0],
+                    target_top);
+        }
+        DS4_DSPARK_STATS_FINISH();
+        return n_accept;
+    }
+    if (drafts[0] == eos_token) draft_n = 1;
+
+    ds4_engine *e = s->engine;
+    ds4_spec_frontier frontier;
+    memset(&frontier, 0, sizeof(frontier));
+    int row_tops_buf[DS4_DSPARK_MAX_BLOCK_SIZE];
+    int *row_tops = draft_n > 1 ? row_tops_buf : NULL;
+    float *row_logits = s->spec_row_logits;
+    const int start = s->checkpoint.len;
+    const double snapshot_t0 = stats_enabled ? now_sec() : 0.0;
+    bool have_frontier = spec_frontier_snapshot(&frontier, s);
+    if (stats_enabled) {
+        s->dspark_stats.snapshot_ms += (now_sec() - snapshot_t0) * 1000.0;
+    }
+    bool ok = have_frontier && row_logits && (draft_n <= 1 || row_tops);
+    bool verifier_may_have_mutated = false;
+    if (ok) {
+        for (int i = 0; i < draft_n; i++) token_vec_push(&s->checkpoint, drafts[i]);
+        verifier_may_have_mutated = true;
+        ds4_verify_suffix_timing verify_timing;
+        const double verify_t0 = stats_enabled ? now_sec() : 0.0;
+        ok = metal_graph_verify_suffix_tops(&s->graph,
+                                            &e->model,
+                                            &e->weights,
+                                            &s->checkpoint,
+                                            (uint32_t)start,
+                                            (uint32_t)draft_n,
+                                            false,
+                                            true,
+                                            row_tops,
+                                            NULL,
+                                            stats_enabled ? &verify_timing : NULL);
+        if (stats_enabled) {
+            s->dspark_stats.verify_ms += (now_sec() - verify_t0) * 1000.0;
+            s->dspark_stats.verify_upload_ms += verify_timing.upload_ms;
+            s->dspark_stats.verify_layer_ms += verify_timing.layer_ms;
+            s->dspark_stats.verify_head_ms += verify_timing.head_ms;
+            s->dspark_stats.verify_read_ms += verify_timing.read_ms;
+            if (verify_timing.fused_head) {
+                s->dspark_stats.verifier_fused_head++;
+            }
+        }
+    }
+
+    int commit_drafts = 0;
+    if (ok) {
+        commit_drafts = 1;
+        for (int i = 1; i < draft_n; i++) {
+            if (row_tops[i - 1] != drafts[i]) break;
+            commit_drafts++;
+        }
+    }
+
+    bool final_logits_ok = false;
+    if (ok && commit_drafts == draft_n) {
+        const double read_t0 = stats_enabled ? now_sec() : 0.0;
+        final_logits_ok =
+            metal_graph_read_spec_logits_row(&s->graph,
+                                             (uint32_t)(draft_n - 1),
+                                             row_logits);
+        if (stats_enabled) {
+            s->dspark_stats.verify_read_ms += (now_sec() - read_t0) * 1000.0;
+        }
+    }
+
+    if (ok && commit_drafts == draft_n && final_logits_ok) {
+        memcpy(s->logits, row_logits, (size_t)DS4_N_VOCAB * sizeof(s->logits[0]));
+        int emitted_drafts = 0;
+        for (int i = 0; i < draft_n && n_accept < accepted_cap; i++) {
+            accepted[n_accept++] = drafts[i];
+            emitted_drafts++;
+            if (drafts[i] == eos_token) break;
+        }
+        s->checkpoint_valid = true;
+        ds4_session_dspark_capture_note_checkpoint(s);
+        if (stats_enabled) {
+            s->dspark_stats.full_accepts++;
+            s->dspark_stats.accepted_draft_tokens += (uint64_t)emitted_drafts;
+            ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist,
+                                      (uint32_t)emitted_drafts);
+        }
+        ds4_session_dspark_scheduler_note(
+                s,
+                (uint32_t)emitted_drafts,
+                false,
+                DS4_DSPARK_SCHED_EXTRA_MS());
+        if (spec_log) {
+            fprintf(stderr,
+                    "ds4: DSpark spec accept drafted=%d accepted=%d\n",
+                    draft_n,
+                    n_accept);
+        }
+        spec_frontier_free(&frontier);
+        DS4_DSPARK_STATS_FINISH();
+        return n_accept;
+    }
+
+    if (verifier_may_have_mutated) {
+        s->checkpoint.len = start;
+        ds4_session_dspark_capture_invalidate(s);
+        if (!have_frontier || !spec_frontier_restore(&frontier, s)) {
+            snprintf(err, errlen, "DSpark verifier rollback failed");
+            s->checkpoint_valid = false;
+            if (stats_enabled) {
+                s->dspark_stats.verifier_errors++;
+                ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist, 0);
+            }
+            spec_frontier_free(&frontier);
+            DS4_DSPARK_STATS_FINISH();
+            return -1;
+        }
+    }
+
+    if (!ok) {
+        if (stats_enabled) {
+            s->dspark_stats.verifier_unavailable++;
+            ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist, 0);
+        }
+        if (spec_log) {
+            fprintf(stderr,
+                    "ds4: DSpark spec verifier unavailable frontier=%d row_logits=%d row_tops=%d mutated=%d\n",
+                    have_frontier ? 1 : 0,
+                    row_logits ? 1 : 0,
+                    row_tops || draft_n <= 1 ? 1 : 0,
+                    verifier_may_have_mutated ? 1 : 0);
+        }
+        spec_frontier_free(&frontier);
+        DS4_DSPARK_STATS_FINISH();
+        return n_accept;
+    }
+
+    const double replay_t0 = stats_enabled ? now_sec() : 0.0;
+    int replayed_drafts = 0;
+    for (int i = 0; i < commit_drafts && n_accept < accepted_cap; i++) {
+        ok = metal_graph_eval_token_raw_swa(&s->graph,
+                                            &e->model,
+                                            &e->weights,
+                                            drafts[i],
+                                            (uint32_t)s->checkpoint.len,
+                                            row_logits);
+        if (!ok) {
+            snprintf(err, errlen, "%s decode failed", ds4_backend_name(e->backend));
+            s->checkpoint_valid = false;
+            if (stats_enabled) {
+                s->dspark_stats.verifier_errors++;
+                s->dspark_stats.replay_ms += (now_sec() - replay_t0) * 1000.0;
+                ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist, 0);
+            }
+            spec_frontier_free(&frontier);
+            DS4_DSPARK_STATS_FINISH();
+            return -1;
+        }
+        token_vec_push(&s->checkpoint, drafts[i]);
+        accepted[n_accept++] = drafts[i];
+        replayed_drafts++;
+        if (drafts[i] == eos_token) break;
+    }
+    if (stats_enabled) {
+        s->dspark_stats.replay_ms += (now_sec() - replay_t0) * 1000.0;
+    }
+    if (replayed_drafts > 0) {
+        memcpy(s->logits, row_logits, (size_t)DS4_N_VOCAB * sizeof(s->logits[0]));
+        s->checkpoint_valid = true;
+        ds4_session_dspark_capture_note_checkpoint(s);
+        if (stats_enabled) {
+            if (replayed_drafts == draft_n) s->dspark_stats.full_accepts++;
+            else s->dspark_stats.partial_accepts++;
+            s->dspark_stats.accepted_draft_tokens += (uint64_t)replayed_drafts;
+            ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist,
+                                      (uint32_t)replayed_drafts);
+        }
+    } else if (stats_enabled) {
+        ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist, 0);
+    }
+    ds4_session_dspark_scheduler_note(
+            s,
+            (uint32_t)replayed_drafts,
+            false,
+            DS4_DSPARK_SCHED_EXTRA_MS());
+    if (spec_log) {
+        fprintf(stderr,
+                "ds4: DSpark spec partial drafted=%d verified=%d accepted=%d\n",
+                draft_n,
+                commit_drafts,
+                n_accept);
+    }
+    spec_frontier_free(&frontier);
+    DS4_DSPARK_STATS_FINISH();
+#undef DS4_DSPARK_SCHED_EXTRA_MS
+#undef DS4_DSPARK_STATS_FINISH
+    return n_accept;
+}
+#endif
 
 /* Speculative decode state machine:
  * 1. commit the normal target token and use its logits to validate draft[0];
@@ -27253,10 +32255,53 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
      * several proposed positions together; running ordinary decode once per
      * draft token is correctness-safe but cannot be faster than baseline.
      */
-    if (ds4_session_eval(s, first_token, err, errlen) != 0) return -1;
+    const char *dspark_strict_env = getenv("DS4_DSPARK_STRICT");
+    const bool strict_dspark =
+        e->support_kind == DS4_SUPPORT_DSPARK &&
+        (e->quality ||
+         (dspark_strict_env &&
+          dspark_strict_env[0] &&
+          strcmp(dspark_strict_env, "0") != 0));
+    bool can_prepare_support_draft =
+        !strict_dspark &&
+        first_token != eos_token && max_tokens > 1 && accepted_cap > 1;
+    bool dspark_tail_skip = false;
+    if (can_prepare_support_draft && e->support_kind == DS4_SUPPORT_DSPARK &&
+        ds4_dspark_scheduler_enabled()) {
+        const uint32_t tail_min = ds4_dspark_scheduler_tail_min_tokens();
+        if (tail_min != 0 && (uint32_t)max_tokens < tail_min) {
+            can_prepare_support_draft = false;
+            dspark_tail_skip = true;
+            if (ds4_dspark_stats_enabled()) s->dspark_stats.tail_skips++;
+            if (getenv("DS4_DSPARK_SPEC_LOG") != NULL) {
+                fprintf(stderr,
+                        "ds4: DSpark scheduler tail skip max=%d min=%u\n",
+                        max_tokens,
+                        tail_min);
+            }
+        }
+    }
+    if (ds4_session_eval_internal(s,
+                                  first_token,
+                                  can_prepare_support_draft,
+                                  err,
+                                  errlen) != 0) return -1;
     int n_accept = 0;
     accepted[n_accept++] = first_token;
     if (first_token == eos_token || max_tokens == 1 || n_accept >= accepted_cap) return n_accept;
+    if (strict_dspark) return n_accept;
+    if (dspark_tail_skip) return n_accept;
+
+    if (e->support_kind == DS4_SUPPORT_DSPARK) {
+        return ds4_session_eval_dspark_speculative_argmax(s,
+                                                          n_accept,
+                                                          max_tokens,
+                                                          eos_token,
+                                                          accepted,
+                                                          accepted_cap,
+                                                          err,
+                                                          errlen);
+    }
 
     if (!e->mtp_ready || !s->mtp_draft_valid || e->mtp_draft_tokens <= 1) return n_accept;
 
@@ -27375,6 +32420,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
             s->checkpoint_valid = true;
             s->mtp_draft_valid = false;
             DS4_MTP_KEEP_ACCEPTED(1);
+            ds4_session_dspark_capture_note_checkpoint(s);
             if (mtp_timing) {
                 const double done = now_sec();
                 fprintf(stderr,
@@ -27431,6 +32477,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
             s->checkpoint_valid = true;
             s->mtp_draft_valid = false;
             DS4_MTP_KEEP_ACCEPTED(2);
+            ds4_session_dspark_capture_note_checkpoint(s);
             if (mtp_timing) {
                 fprintf(stderr,
                         "ds4: mtp timing decode2 drafted=2 committed=2 draft=%.3f ms snapshot=%.3f ms verify=%.3f ms total=%.3f ms\n",
@@ -27447,6 +32494,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
 
         if (ok) {
             s->checkpoint.len = start;
+            ds4_session_dspark_capture_invalidate(s);
             ok = spec_frontier_commit_prefix1(s);
         }
         if (ok) memcpy(s->logits, row0_logits, (size_t)DS4_N_VOCAB * sizeof(s->logits[0]));
@@ -27456,6 +32504,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
             s->checkpoint_valid = true;
             s->mtp_draft_valid = false;
             DS4_MTP_KEEP_ACCEPTED(1);
+            ds4_session_dspark_capture_note_checkpoint(s);
             if (mtp_timing) {
                 const double replay_done = now_sec();
                 fprintf(stderr,
@@ -27473,6 +32522,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
         }
         if (have_frontier) {
             s->checkpoint.len = start;
+            ds4_session_dspark_capture_invalidate(s);
             (void)spec_frontier_restore(&frontier, s);
         }
         spec_frontier_free(&frontier);
@@ -27524,7 +32574,9 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                                                 (uint32_t)start,
                                                 (uint32_t)draft_n,
                                                 capture_prefix1,
+                                                false,
                                                 row_tops,
+                                                NULL,
                                                 NULL);
         }
         const double micro_verify_done = mtp_timing ? now_sec() : 0.0;
@@ -27547,6 +32599,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
             }
             if (exact_replay_debug && have_frontier) {
                 s->checkpoint.len = start;
+                ds4_session_dspark_capture_invalidate(s);
                 ok = spec_frontier_restore(&frontier, s);
                 if (ok) {
                     int replayed = 0;
@@ -27568,6 +32621,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                         s->checkpoint_valid = true;
                         s->mtp_draft_valid = false;
                         DS4_MTP_KEEP_ACCEPTED(replayed);
+                        ds4_session_dspark_capture_note_checkpoint(s);
                         spec_frontier_free(&frontier);
                         free(row_logits);
                         free(row_tops);
@@ -27589,6 +32643,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                     s->checkpoint_valid = true;
                     s->mtp_draft_valid = false;
                     DS4_MTP_KEEP_ACCEPTED(draft_n);
+                    ds4_session_dspark_capture_note_checkpoint(s);
                     if (mtp_timing) {
                         fprintf(stderr,
                                 "ds4: mtp timing micro drafted=%d committed=%d draft=%.3f ms snapshot=%.3f ms verify=%.3f ms total=%.3f ms\n",
@@ -27608,6 +32663,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
 
             if (draft_n == 2 && commit_drafts == 1 && capture_prefix1) {
                 s->checkpoint.len = start;
+                ds4_session_dspark_capture_invalidate(s);
                 const double prefix_t0 = mtp_timing ? now_sec() : 0.0;
                 ok = spec_frontier_commit_prefix1(s);
                 const double prefix_done = mtp_timing ? now_sec() : 0.0;
@@ -27619,6 +32675,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                     s->mtp_draft_valid = false;
                     DS4_MTP_KEEP_ACCEPTED(1);
                     token_vec_push(&s->checkpoint, drafts[0]);
+                    ds4_session_dspark_capture_note_checkpoint(s);
                     if (mtp_timing) {
                         fprintf(stderr,
                                 "ds4: mtp timing micro drafted=%d committed=%d draft=%.3f ms snapshot=%.3f ms verify=%.3f ms prefix=%.3f ms total=%.3f ms noreplay=1\n",
@@ -27637,6 +32694,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                 }
             } else {
                 s->checkpoint.len = start;
+                ds4_session_dspark_capture_invalidate(s);
                 ok = have_frontier && spec_frontier_restore(&frontier, s);
             }
             if (ok && draft_n == 2 && commit_drafts == 1) {
@@ -27653,6 +32711,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                     s->mtp_draft_valid = false;
                     DS4_MTP_KEEP_ACCEPTED(1);
                     token_vec_push(&s->checkpoint, drafts[0]);
+                    ds4_session_dspark_capture_note_checkpoint(s);
                     if (mtp_timing) {
                         const double replay_done = now_sec();
                         fprintf(stderr,
@@ -27680,7 +32739,9 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                                                     (uint32_t)start,
                                                     (uint32_t)commit_drafts,
                                                     false,
+                                                    false,
                                                     row_tops,
+                                                    NULL,
                                                     NULL);
                 if (ok) ok = metal_graph_read_spec_logits_row(&s->graph,
                                                               (uint32_t)(commit_drafts - 1),
@@ -27694,6 +32755,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                     s->checkpoint_valid = true;
                     s->mtp_draft_valid = false;
                     DS4_MTP_KEEP_ACCEPTED(commit_drafts);
+                    ds4_session_dspark_capture_note_checkpoint(s);
                     if (mtp_timing) {
                         const double replay_done = now_sec();
                         fprintf(stderr,
@@ -27714,6 +32776,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
             }
         }
         s->checkpoint.len = start;
+        ds4_session_dspark_capture_invalidate(s);
         if (have_frontier) {
             (void)spec_frontier_restore(&frontier, s);
         } else if (!verifier_may_have_mutated) {
@@ -27791,6 +32854,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
     }
     (void)logits_on_host;
     DS4_MTP_KEEP_ACCEPTED(verified);
+    if (verified > 0) ds4_session_dspark_capture_note_checkpoint(s);
 #undef DS4_MTP_KEEP_ACCEPTED
     if (mtp_timing) {
         fprintf(stderr,
@@ -27823,6 +32887,7 @@ void ds4_session_invalidate(ds4_session *s) {
     s->checkpoint_valid = false;
     s->checkpoint.len = 0;
     s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_invalidate(s);
 }
 
 void ds4_session_rewind(ds4_session *s, int pos) {
@@ -27830,6 +32895,7 @@ void ds4_session_rewind(ds4_session *s, int pos) {
     if (pos > s->checkpoint.len) pos = s->checkpoint.len;
     s->checkpoint.len = pos;
     s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_invalidate(s);
 }
 
 int ds4_session_pos(ds4_session *s) {

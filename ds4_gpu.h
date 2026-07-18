@@ -37,6 +37,13 @@ int ds4_gpu_tensor_copy(ds4_gpu_tensor *dst, uint64_t dst_offset,
 int ds4_gpu_tensor_copy_f32_to_f16(ds4_gpu_tensor *dst, uint64_t dst_offset,
                                    const ds4_gpu_tensor *src, uint64_t src_offset,
                                    uint64_t count);
+int ds4_gpu_pack_slot_rows_f32_tensor(
+        ds4_gpu_tensor       *out,
+        const ds4_gpu_tensor *slots,
+        uint32_t                n_rows,
+        uint32_t                width,
+        uint32_t                n_slots,
+        uint32_t                slot_cap);
 
 int ds4_gpu_begin_commands(void);
 int ds4_gpu_flush_commands(void);
@@ -316,6 +323,13 @@ int ds4_gpu_matmul_f32_tensor(
 int ds4_gpu_repeat_hc_tensor(
         ds4_gpu_tensor       *out,
         const ds4_gpu_tensor *row,
+        uint32_t                n_embd,
+        uint32_t                n_hc);
+
+int ds4_gpu_repeat_hc_rows_tensor(
+        ds4_gpu_tensor       *out,
+        const ds4_gpu_tensor *rows,
+        uint32_t                n_tokens,
         uint32_t                n_embd,
         uint32_t                n_hc);
 
@@ -626,6 +640,20 @@ int ds4_gpu_attention_decode_raw_batch_heads_tensor(
         uint32_t                raw_cap,
         uint32_t                raw_start,
         uint32_t                window,
+        uint32_t                n_head,
+        uint32_t                head_dim);
+
+int ds4_gpu_attention_noncausal_raw_batch_heads_tensor(
+        ds4_gpu_tensor       *heads,
+        const void             *model_map,
+        uint64_t                model_size,
+        uint64_t                sinks_offset,
+        const ds4_gpu_tensor *q,
+        const ds4_gpu_tensor *raw_kv,
+        uint32_t                n_tokens,
+        uint32_t                n_raw,
+        uint32_t                raw_cap,
+        uint32_t                raw_start,
         uint32_t                n_head,
         uint32_t                head_dim);
 

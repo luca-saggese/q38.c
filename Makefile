@@ -14,6 +14,10 @@ OBJCFLAGS ?= -O3 -ffast-math $(DEBUG_FLAGS) $(NATIVE_CPU_FLAG) -Wall -Wextra -fo
 LDLIBS ?= -lm -pthread
 METAL_SRCS := $(wildcard metal/*.metal)
 ROCM_SRCS := $(wildcard rocm/*.cuh)
+DS4_TEST_MODEL ?= ds4flash.gguf
+DS4_TEST_MTP ?= gguf/DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf
+DS4_DSPARK_MODEL ?= $(DS4_TEST_MODEL)
+DS4_DSPARK_SUPPORT ?= gguf/DeepSeek-V4-Flash-DSpark-support.gguf
 
 ifeq ($(UNAME_S),Darwin)
 METAL_LDLIBS := $(LDLIBS) -framework Foundation -framework Metal
@@ -40,7 +44,7 @@ DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
 endif
 
-.PHONY: all help clean test cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+.PHONY: all help clean test dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
 
 ifeq ($(UNAME_S),Darwin)
 all: ds4 ds4-server ds4-bench ds4-eval ds4-agent
@@ -50,6 +54,8 @@ help:
 	@echo "  make              Build Metal ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make cpu          Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make test         Build and run tests"
+	@echo "  make dspark-verify-depth  Run DSpark speculative verification smoke if support GGUF is present"
+	@echo "  make mtp-verify-depth  Run legacy MTP speculative verification smoke if MTP GGUF is present"
 	@echo "  make clean        Remove build outputs"
 
 ds4: ds4_cli.o ds4_help.o linenoise.o $(CORE_OBJS)
@@ -88,6 +94,8 @@ help:
 	@echo "  make rocm                Alias for make strix-halo"
 	@echo "  make cpu                 Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make test                Build and run tests"
+	@echo "  make dspark-verify-depth Run DSpark speculative verification smoke if support GGUF is present"
+	@echo "  make mtp-verify-depth    Run legacy MTP speculative verification smoke if MTP GGUF is present"
 	@echo "  make clean               Remove build outputs"
 
 cuda-spark:
@@ -235,6 +243,31 @@ test: ds4_test ds4_agent_test ds4-eval q4k-dot-test
 	./ds4-eval --self-test-extractors
 	./ds4_agent_test
 	./ds4_test
+
+dspark-acceptance: ds4
+	DS4_DSPARK_MODEL="$(DS4_DSPARK_MODEL)" \
+	DS4_DSPARK_SUPPORT="$(DS4_DSPARK_SUPPORT)" \
+	sh tests/dspark_acceptance_fixture.sh
+
+dspark-verify-depth: ds4_test
+	@if [ ! -f "$(DS4_TEST_MODEL)" ]; then \
+		echo "dspark-verify-depth: skipped, missing model $(DS4_TEST_MODEL)"; \
+	elif [ ! -f "$(DS4_DSPARK_SUPPORT)" ]; then \
+		echo "dspark-verify-depth: skipped, missing DSpark support $(DS4_DSPARK_SUPPORT)"; \
+		echo "dspark-verify-depth: run make dspark-support or set DS4_DSPARK_SUPPORT=FILE"; \
+	else \
+		DS4_TEST_MODEL="$(DS4_TEST_MODEL)" DS4_TEST_DSPARK="$(DS4_DSPARK_SUPPORT)" ./ds4_test --dspark-verify-depth; \
+	fi
+
+mtp-verify-depth: ds4_test
+	@if [ ! -f "$(DS4_TEST_MODEL)" ]; then \
+		echo "mtp-verify-depth: skipped, missing model $(DS4_TEST_MODEL)"; \
+	elif [ ! -f "$(DS4_TEST_MTP)" ]; then \
+		echo "mtp-verify-depth: skipped, missing MTP support $(DS4_TEST_MTP)"; \
+		echo "mtp-verify-depth: run ./download_model.sh mtp or set DS4_TEST_MTP=FILE"; \
+	else \
+		DS4_TEST_MODEL="$(DS4_TEST_MODEL)" DS4_TEST_MTP="$(DS4_TEST_MTP)" ./ds4_test --mtp-verify-depth; \
+	fi
 
 q4k-dot-test: tests/test_q4k_dot.c
 	$(CC) -O2 -Wall -Wextra -std=c99 -o tests/test_q4k_dot tests/test_q4k_dot.c -lm -pthread

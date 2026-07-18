@@ -5,6 +5,8 @@
 #include "../ds4_gpu.h"
 #include <math.h>
 
+bool ds4_test_dspark_cache_window_crop(void);
+
 static ds4_engine *test_engine_fast;
 static ds4_engine *test_engine_quality;
 
@@ -486,10 +488,142 @@ static void test_metal_q8_0_prefill_matmul(void) {
     free(weights_raw);
 }
 
+static void test_metal_pack_slot_rows_f32(void) {
+    const uint32_t n_rows = 3;
+    const uint32_t width = 5;
+    const uint32_t n_slots = 4;
+    const uint32_t slot_cap = 6;
+    const uint64_t slot_count = (uint64_t)n_slots * slot_cap * width;
+    const uint64_t out_count = (uint64_t)n_rows * n_slots * width;
+    const uint64_t slot_bytes = slot_count * sizeof(float);
+    const uint64_t out_bytes = out_count * sizeof(float);
+
+    ds4_gpu_tensor *slots = ds4_gpu_tensor_alloc(slot_bytes);
+    ds4_gpu_tensor *out = ds4_gpu_tensor_alloc(out_bytes);
+    TEST_ASSERT(slots != NULL);
+    TEST_ASSERT(out != NULL);
+    if (!slots || !out) {
+        ds4_gpu_tensor_free(slots);
+        ds4_gpu_tensor_free(out);
+        return;
+    }
+
+    float *slot_host = malloc((size_t)slot_bytes);
+    float *out_host = malloc((size_t)out_bytes);
+    TEST_ASSERT(slot_host != NULL);
+    TEST_ASSERT(out_host != NULL);
+    if (!slot_host || !out_host) {
+        free(slot_host);
+        free(out_host);
+        ds4_gpu_tensor_free(slots);
+        ds4_gpu_tensor_free(out);
+        return;
+    }
+
+    for (uint32_t slot = 0; slot < n_slots; slot++) {
+        for (uint32_t row = 0; row < slot_cap; row++) {
+            for (uint32_t col = 0; col < width; col++) {
+                slot_host[((uint64_t)slot * slot_cap + row) * width + col] =
+                    (float)(slot * 1000u + row * 100u + col);
+            }
+        }
+    }
+    for (uint64_t i = 0; i < out_count; i++) out_host[i] = -1.0f;
+
+    TEST_ASSERT(ds4_gpu_tensor_write(slots, 0, slot_host, slot_bytes) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_write(out, 0, out_host, out_bytes) != 0);
+    TEST_ASSERT(ds4_gpu_pack_slot_rows_f32_tensor(out,
+                                                  slots,
+                                                  n_rows,
+                                                  width,
+                                                  n_slots,
+                                                  slot_cap) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_read(out, 0, out_host, out_bytes) != 0);
+
+    for (uint32_t row = 0; row < n_rows; row++) {
+        for (uint32_t slot = 0; slot < n_slots; slot++) {
+            for (uint32_t col = 0; col < width; col++) {
+                const float ref =
+                    slot_host[((uint64_t)slot * slot_cap + row) * width + col];
+                const float got =
+                    out_host[((uint64_t)row * n_slots + slot) * width + col];
+                TEST_ASSERT(got == ref);
+            }
+        }
+    }
+
+    free(slot_host);
+    free(out_host);
+    ds4_gpu_tensor_free(slots);
+    ds4_gpu_tensor_free(out);
+}
+
+static void test_metal_store_raw_kv_batch_wrap(void) {
+    const uint32_t raw_cap = 5;
+    const uint32_t head_dim = 3;
+    const uint32_t n_tokens = 4;
+    const uint32_t pos0 = 3;
+    const uint64_t kv_count = (uint64_t)n_tokens * head_dim;
+    const uint64_t raw_count = (uint64_t)raw_cap * head_dim;
+    const uint64_t kv_bytes = kv_count * sizeof(float);
+    const uint64_t raw_bytes = raw_count * sizeof(float);
+
+    ds4_gpu_tensor *kv = ds4_gpu_tensor_alloc(kv_bytes);
+    ds4_gpu_tensor *raw = ds4_gpu_tensor_alloc(raw_bytes);
+    TEST_ASSERT(kv != NULL);
+    TEST_ASSERT(raw != NULL);
+    if (!kv || !raw) {
+        ds4_gpu_tensor_free(kv);
+        ds4_gpu_tensor_free(raw);
+        return;
+    }
+
+    float kv_host[12];
+    float raw_host[15];
+    for (uint32_t t = 0; t < n_tokens; t++) {
+        for (uint32_t d = 0; d < head_dim; d++) {
+            kv_host[(uint64_t)t * head_dim + d] = (float)(100u * t + d);
+        }
+    }
+    for (uint64_t i = 0; i < raw_count; i++) raw_host[i] = -1.0f;
+
+    TEST_ASSERT(ds4_gpu_tensor_write(kv, 0, kv_host, kv_bytes) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_write(raw, 0, raw_host, raw_bytes) != 0);
+    TEST_ASSERT(ds4_gpu_store_raw_kv_batch_tensor(raw,
+                                                  kv,
+                                                  raw_cap,
+                                                  pos0,
+                                                  n_tokens,
+                                                  head_dim) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_read(raw, 0, raw_host, raw_bytes) != 0);
+
+    for (uint32_t t = 0; t < n_tokens; t++) {
+        const uint32_t row = (pos0 + t) % raw_cap;
+        for (uint32_t d = 0; d < head_dim; d++) {
+            const float ref = kv_host[(uint64_t)t * head_dim + d];
+            const float got = raw_host[(uint64_t)row * head_dim + d];
+            TEST_ASSERT(got == ref);
+        }
+    }
+    for (uint32_t d = 0; d < head_dim; d++) {
+        TEST_ASSERT(raw_host[(uint64_t)2u * head_dim + d] == -1.0f);
+    }
+
+    ds4_gpu_tensor_free(kv);
+    ds4_gpu_tensor_free(raw);
+}
+
+static void test_dspark_cache_window_crop(void) {
+    TEST_ASSERT(ds4_test_dspark_cache_window_crop());
+}
+
 static void test_metal_kernel_group(void) {
     test_metal_f16_matvec_fast_nr0_4();
     test_metal_f16_prefill_matmul();
     test_metal_q8_0_prefill_matmul();
+    test_metal_pack_slot_rows_f32();
+    test_metal_store_raw_kv_batch_wrap();
+    test_dspark_cache_window_crop();
 }
 
 static void test_metal_short_prefill_ratio4(void) {
@@ -2131,6 +2265,33 @@ static const char *test_mtp_copy_prompt(void) {
 }
 
 #define TEST_MTP_MAXGEN 256
+#define TEST_DSPARK_MAXGEN 128
+
+static ds4_engine *test_open_dspark_engine(const char *support_path) {
+    ds4_engine *engine = NULL;
+    ds4_engine_options opt = {
+        .model_path = test_model_path(),
+#ifdef __APPLE__
+        .backend = DS4_BACKEND_METAL,
+#else
+        .backend = DS4_BACKEND_CUDA,
+#endif
+        .quality = false,
+        .ssd_streaming = test_env_bool("DS4_TEST_SSD_STREAMING"),
+        .ssd_streaming_cold = test_env_bool("DS4_TEST_SSD_STREAMING_COLD"),
+        .ssd_streaming_cache_experts =
+            test_env_u32("DS4_TEST_SSD_STREAMING_CACHE_EXPERTS"),
+        .ssd_streaming_cache_bytes =
+            test_env_gib("DS4_TEST_SSD_STREAMING_CACHE_GB"),
+        .ssd_streaming_preload_experts =
+            test_env_u32("DS4_TEST_SSD_STREAMING_PRELOAD_EXPERTS"),
+        .mtp_path = support_path,
+        .mtp_draft_tokens = 0,
+    };
+    const int rc = ds4_engine_open(&engine, &opt);
+    TEST_ASSERT(rc == 0);
+    return rc == 0 ? engine : NULL;
+}
 
 /* Regression for the swapped top-k arguments in metal_graph_verify_suffix_tops
  * at draft depth > 2.  Replays the committed speculative tokens through plain
@@ -2174,6 +2335,74 @@ static void test_mtp_verify_depth(void) {
     free(spec);
     ds4_tokens_free(&prompt);
 }
+
+/* Same invariant as the MTP depth smoke, but for the DSpark support model.  This
+ * is separate from the fixture because it teacher-forces every committed token
+ * through normal decode and directly checks that DSpark never commits a token
+ * that was not near the target argmax. */
+static void test_dspark_verify_depth(void) {
+    const char *support = getenv("DS4_TEST_DSPARK");
+    if (!support || !support[0]) {
+        fprintf(stderr, "ds4-test: dspark-verify-depth skipped (set DS4_TEST_DSPARK to a DSpark support GGUF)\n");
+        return;
+    }
+
+    char *saved_enable = test_save_env("DS4_DSPARK_ENABLE");
+    char *saved_strict = test_save_env("DS4_DSPARK_STRICT");
+    char *saved_scheduler = test_save_env("DS4_DSPARK_SCHEDULER");
+    char *saved_confidence = test_save_env("DS4_DSPARK_CONFIDENCE_THRESHOLD");
+    setenv("DS4_DSPARK_ENABLE", "1", 1);
+    setenv("DS4_DSPARK_STRICT", "0", 1);
+    setenv("DS4_DSPARK_SCHEDULER", "0", 1);
+    setenv("DS4_DSPARK_CONFIDENCE_THRESHOLD", "0.9", 1);
+
+    ds4_engine *engine = test_open_dspark_engine(support);
+    ds4_tokens prompt = {0};
+    int *spec = NULL;
+
+    if (engine) {
+        const int draft_depth = ds4_engine_mtp_draft_tokens(engine);
+        TEST_ASSERT(draft_depth > 2);
+
+        ds4_chat_begin(engine, &prompt);
+        ds4_chat_append_message(engine, &prompt, "user", test_mtp_copy_prompt());
+        ds4_chat_append_assistant_prefix(engine, &prompt, DS4_THINK_NONE);
+        TEST_ASSERT(prompt.len > 0);
+
+        spec = malloc((size_t)TEST_DSPARK_MAXGEN * sizeof(*spec));
+        TEST_ASSERT(spec != NULL);
+        if (draft_depth > 2 && spec && prompt.len > 0) {
+            int nspec = 0, max_chunk = 0;
+            const bool ok_spec = test_mtp_capture_speculative(engine, &prompt,
+                                                              TEST_DSPARK_MAXGEN,
+                                                              spec, &nspec,
+                                                              &max_chunk);
+            TEST_ASSERT(ok_spec);
+            TEST_ASSERT(max_chunk > 1);
+            TEST_ASSERT(nspec > 64);
+
+            float worst_gap = 0.0f;
+            int worst_at = -1;
+            const bool ok_check = test_mtp_worst_argmax_gap(engine, &prompt,
+                                                            spec, nspec,
+                                                            &worst_gap,
+                                                            &worst_at);
+            TEST_ASSERT(ok_check);
+            fprintf(stderr,
+                    "ds4-test: dspark-verify-depth nspec=%d max_chunk=%d draft_depth=%d worst_argmax_gap=%.3f at=%d\n",
+                    nspec, max_chunk, draft_depth, worst_gap, worst_at);
+            TEST_ASSERT(worst_gap <= 2.0f);
+        }
+    }
+
+    free(spec);
+    ds4_tokens_free(&prompt);
+    ds4_engine_close(engine);
+    test_restore_env("DS4_DSPARK_CONFIDENCE_THRESHOLD", saved_confidence);
+    test_restore_env("DS4_DSPARK_SCHEDULER", saved_scheduler);
+    test_restore_env("DS4_DSPARK_STRICT", saved_strict);
+    test_restore_env("DS4_DSPARK_ENABLE", saved_enable);
+}
 #endif
 
 static void test_server_unit_group(void) {
@@ -2202,6 +2431,7 @@ static const ds4_test_entry test_entries[] = {
     {"--metal-tensor-equivalence", "metal-tensor-equivalence", "fast/quality Metal prompt-logit and greedy equivalence", test_metal_mpp_equivalence},
     {"--streaming-decode-prefill-correctness", "streaming-decode-prefill-correctness", "streaming decode-style cold prefill drift and repeatability", test_streaming_decode_prefill_correctness},
     {"--mtp-verify-depth", "mtp-verify-depth", "MTP speculative verify commits autoregressive-identical tokens at draft depth > 2", test_mtp_verify_depth},
+    {"--dspark-verify-depth", "dspark-verify-depth", "DSpark speculative verify commits autoregressive-identical tokens at draft depth > 2", test_dspark_verify_depth},
 #endif
     {"--server", "server", "server parser/rendering/cache unit tests", test_server_unit_group},
 };
@@ -2233,6 +2463,8 @@ static void test_print_help(const char *prog) {
     puts("  DS4_TEST_VECTOR_FILE=FILE  Simple official-vector fixture.");
     puts("  DS4_TEST_LOCAL_GOLDEN_FILE=FILE  Local top-k golden-vector fixture.");
     puts("  DS4_TEST_MPP_EQ_CASE=NAME  Run only Tensor equivalence cases whose id contains NAME.");
+    puts("  DS4_TEST_MTP=FILE         Legacy MTP support GGUF for --mtp-verify-depth.");
+    puts("  DS4_TEST_DSPARK=FILE      DSpark support GGUF for --dspark-verify-depth.");
 }
 
 static const ds4_test_entry *test_find_entry(const char *arg) {

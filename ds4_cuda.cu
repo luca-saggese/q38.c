@@ -2476,6 +2476,43 @@ extern "C" int ds4_gpu_tensor_copy(ds4_gpu_tensor *dst, uint64_t dst_offset,
                    "tensor copy");
 }
 
+__global__ static void pack_slot_rows_f32_kernel(float *out, const float *slots, uint32_t n_rows, uint32_t width, uint32_t n_slots, uint32_t slot_cap);
+
+extern "C" int ds4_gpu_pack_slot_rows_f32_tensor(
+        ds4_gpu_tensor       *out,
+        const ds4_gpu_tensor *slots,
+        uint32_t                n_rows,
+        uint32_t                width,
+        uint32_t                n_slots,
+        uint32_t                slot_cap) {
+    uint64_t slot_rows = 0;
+    uint64_t slot_elems = 0;
+    uint64_t out_rows = 0;
+    uint64_t out_elems = 0;
+    if (!out || !slots || n_rows == 0 || width == 0 || n_slots == 0 ||
+        slot_cap == 0 || n_rows > slot_cap ||
+        (uint64_t)n_slots > UINT64_MAX / slot_cap ||
+        (slot_rows = (uint64_t)n_slots * slot_cap) > UINT64_MAX / width ||
+        (slot_elems = slot_rows * width) > UINT64_MAX / sizeof(float) ||
+        (uint64_t)n_rows > UINT64_MAX / n_slots ||
+        (out_rows = (uint64_t)n_rows * n_slots) > UINT64_MAX / width ||
+        (out_elems = out_rows * width) > UINT64_MAX / sizeof(float) ||
+        slots->bytes < slot_elems * sizeof(float) ||
+        out->bytes < out_elems * sizeof(float)) {
+        return 0;
+    }
+    const uint64_t blocks = (out_elems + 255u) / 256u;
+    if (blocks > UINT32_MAX) return 0;
+    pack_slot_rows_f32_kernel<<<(unsigned)blocks, 256>>>(
+            (float *)out->ptr,
+            (const float *)slots->ptr,
+            n_rows,
+            width,
+            n_slots,
+            slot_cap);
+    return cuda_ok(cudaGetLastError(), "pack_slot_rows_f32 launch");
+}
+
 extern "C" int ds4_gpu_begin_commands(void) { return 1; }
 extern "C" int ds4_gpu_flush_commands(void) { return cuda_ok(cudaDeviceSynchronize(), "flush"); }
 extern "C" int ds4_gpu_signal_selected_readback_ready(uint64_t *event_value) {
@@ -3528,6 +3565,28 @@ __global__ static void repeat_hc_kernel(float *out, const float *row, uint32_t n
     uint64_t n = (uint64_t)n_embd * n_hc;
     if (i >= n) return;
     out[i] = row[i % n_embd];
+}
+
+__global__ static void repeat_hc_rows_kernel(float *out, const float *rows, uint32_t n_tokens, uint32_t n_embd, uint32_t n_hc) {
+    uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t n = (uint64_t)n_tokens * n_hc * n_embd;
+    if (i >= n) return;
+
+    uint64_t hc_row = (uint64_t)n_hc * n_embd;
+    uint64_t tok = i / hc_row;
+    uint64_t embd = i % n_embd;
+    out[i] = rows[tok * n_embd + embd];
+}
+
+__global__ static void pack_slot_rows_f32_kernel(float *out, const float *slots, uint32_t n_rows, uint32_t width, uint32_t n_slots, uint32_t slot_cap) {
+    uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t n = (uint64_t)n_rows * n_slots * width;
+    if (i >= n) return;
+
+    uint64_t col = i % width;
+    uint64_t slot = (i / width) % n_slots;
+    uint64_t row = i / ((uint64_t)n_slots * width);
+    out[i] = slots[((slot * slot_cap) + row) * width + col];
 }
 
 __global__ static void f32_to_f16_kernel(__half *out, const float *x, uint64_t n) {
@@ -8085,6 +8144,24 @@ extern "C" int ds4_gpu_repeat_hc_tensor(ds4_gpu_tensor *out, const ds4_gpu_tenso
     uint64_t n = (uint64_t)n_embd * n_hc;
     repeat_hc_kernel<<<(n + 255) / 256, 256>>>((float *)out->ptr, (const float *)row->ptr, n_embd, n_hc);
     return cuda_ok(cudaGetLastError(), "repeat_hc launch");
+}
+
+extern "C" int ds4_gpu_repeat_hc_rows_tensor(ds4_gpu_tensor *out, const ds4_gpu_tensor *rows, uint32_t n_tokens, uint32_t n_embd, uint32_t n_hc) {
+    uint64_t rows_elems = 0;
+    uint64_t out_elems = 0;
+    if (!out || !rows || n_tokens == 0 || n_embd == 0 || n_hc == 0 ||
+        (uint64_t)n_tokens > UINT64_MAX / n_embd ||
+        (rows_elems = (uint64_t)n_tokens * n_embd) > UINT64_MAX / n_hc ||
+        (out_elems = rows_elems * n_hc) > UINT64_MAX / sizeof(float) ||
+        rows_elems > UINT64_MAX / sizeof(float) ||
+        rows->bytes < rows_elems * sizeof(float) ||
+        out->bytes < out_elems * sizeof(float)) {
+        return 0;
+    }
+    const uint64_t blocks = (out_elems + 255u) / 256u;
+    if (blocks > UINT32_MAX) return 0;
+    repeat_hc_rows_kernel<<<(unsigned)blocks, 256>>>((float *)out->ptr, (const float *)rows->ptr, n_tokens, n_embd, n_hc);
+    return cuda_ok(cudaGetLastError(), "repeat_hc_rows launch");
 }
 
 extern "C" int ds4_gpu_rms_norm_plain_tensor(ds4_gpu_tensor *out, const ds4_gpu_tensor *x, uint32_t n, float eps) {

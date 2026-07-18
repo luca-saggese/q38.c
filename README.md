@@ -139,6 +139,31 @@ but must be enabled explicitly with `--mtp`. The current MTP/speculative
 decoding path is still experimental: it is correctness-gated and currently
 provides at most a slight speedup, not a meaningful generation-speed win.
 
+DSpark support is built from DeepSeek's official Flash DSpark safetensors. The
+source checkpoint is large, but the standalone support GGUF is much smaller:
+
+```sh
+./download_model.sh dspark-source
+./download_model.sh dspark-support-dry-run
+./download_model.sh dspark-support
+```
+
+The resulting support GGUF is used with the normal Flash GGUF and remains
+explicitly opt-in:
+
+```sh
+DS4_DSPARK_ENABLE=1 ./ds4 -m ./ds4flash.gguf --mtp ./gguf/DeepSeek-V4-Flash-DSpark-support.gguf --temp 0
+```
+
+DSpark uses confidence pruning by default with threshold `0.9`, which avoids
+replay-heavy low-confidence blocks while preserving the target-verified greedy
+stream. Set `DS4_DSPARK_CONFIDENCE_THRESHOLD=0` only for fixed-block diagnostic
+measurements. `--quality` disables DSpark suffix drafting and keeps the exact
+target-only continuation path; set `DS4_DSPARK_STRICT=1` for the same behavior
+without enabling all quality-mode kernels. Plain sampled and non-speculative
+session eval also skips DSpark draft preparation; DSpark speculation is
+currently a greedy argmax-only path.
+
 Then build:
 
 ```sh

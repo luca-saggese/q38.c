@@ -73,6 +73,31 @@ Use the normal Flash GGUF that 128 GB users run.
   generation speed, and KV bytes with the last known good numbers for the same
   machine.
 
+### DSpark / DeepSpec Runtime
+
+DSpark is opt-in, but it mutates the verifier, target-hidden capture, support
+model loading, and scheduler paths.  Run these whenever DSpark support,
+speculative verification, confidence/scheduler policy, target hidden capture,
+tiny routed-MoE verifier kernels, or shared `--mtp` support-model code changes:
+
+- Default greedy acceptance fixture:
+  `DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
+- 64-token guardrail:
+  `DS4_DSPARK_FIXTURE_TOKENS=64 DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
+- Fixed-block partial-accept fallback:
+  `DS4_DSPARK_CONFIDENCE_THRESHOLD=0 DS4_DSPARK_FIXTURE_TOKENS=8 DS4_DSPARK_FIXTURE_REQUIRE_PARTIAL=1 DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
+- DSpark verifier invariant smoke:
+  `DS4_TEST_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-verify-depth`.
+- If shared support-model or verifier structures changed, also run legacy MTP:
+  `make mtp-verify-depth` with `DS4_TEST_MTP` set to a one-stage MTP support
+  GGUF, or confirm the target skips only because the optional file is missing.
+- Record `c_add` `accepted_draft`, `errors=0`, `verify_layer`, and `net_saved`
+  for both 32-token and 64-token runs.  A faster run with lower proposal
+  quality is a regression unless it was an intentional scheduler change.
+- If verifier MoE kernels changed, run one diagnostic `c_add` profile with
+  `DS4_DSPARK_VERIFY_SELECTED_PROFILE=1` or the Metal MoE stage profiler and
+  record the selected-expert footprint or stage timing in the DSpark log.
+
 ## 4. Metal PRO Path
 
 PRO support is experimental, but release builds must not break it silently.
