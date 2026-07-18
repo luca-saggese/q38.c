@@ -683,22 +683,67 @@ from the Mac-to-Mac mode above: it does not use `--role`, RDMA, or the
 distributed layer pipeline. GPU placement and memory budgets are selected with
 the normal `--gpu-devices` and `--gpu-vram` options.
 
-This is the layout used on the tested eight-L40S server:
+The device order is significant. With `N` devices, the first `N/2` logical
+tiers are contiguous layer-pipeline homes and the second `N/2` tiers are their
+tensor-parallel partners. Specify all homes first and then all partners, with
+the closest P2P pair at matching positions. For example, the tested L40S host
+uses physical pairs `(0,1)`, `(2,3)`, `(4,5)`, and `(6,7)`, expressed as
+`0,2,4,6,1,3,5,7`. Each pair stores a 50/50 split of the routed experts, and
+the vocabulary head is row-sharded across the participating output tiers.
+Those large tensors are not duplicated. Dense attention, router, and shared
+expert weights are replicated within each pair.
+
+For maximum throughput on eight 48 GB L40S cards, use the imatrix Q4 model.
+Its routed `Q4_K` layout has the native grouped multi-session kernels; the Q2
+model is the lower-memory choice (including tested four-card runs), but its
+unsupported grouped routed shapes use the exact fallback and have lower
+aggregate serving throughput. Download and build the L40S target with:
 
 ```sh
-MODEL=gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf
-
-./ds4 -m "$MODEL" --cuda-tensor-parallel \
-  --gpu-vram auto \
-  --gpu-devices 0,2,4,6,1,3,5,7 \
-  --ctx 32768 \
-  -p "Hello"
+./download_model.sh q4-imatrix
+make cuda CUDA_ARCH=sm_89
 ```
 
-The same placement flags work with `ds4-server`, where `--batched-session N`
-can use the native CUDA multi-session decode and mixed prefill/decode paths.
-Choose the session count and context size so every resident KV cache fits in
-the remaining GPU memory.
+This is the interactive-agent setup used on the eight-L40S server:
+
+```sh
+MODEL=gguf/DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix.gguf
+
+./ds4-agent --cuda --cuda-tensor-parallel \
+  --gpu-vram auto \
+  --gpu-devices 0,2,4,6,1,3,5,7 \
+  --model "$MODEL" \
+  --ctx 100000
+```
+
+For serving, keep multiple KV sessions resident so decode rows can be grouped
+across requests. The tested host is configured for up to 16 resident sessions:
+
+```sh
+./ds4-server --cuda --cuda-tensor-parallel \
+  --gpu-vram auto \
+  --gpu-devices 0,2,4,6,1,3,5,7 \
+  --model "$MODEL" \
+  --ctx 100000 \
+  --batched-session 16 \
+  --host 0.0.0.0
+```
+
+The equivalent local launchers are `./run-nvidia-tp-agent.sh` and
+`./run-nvidia-tp-server.sh`. The server launcher also enables the on-disk KV
+cache. Reduce the session count or context size if the requested resident KV
+caches do not fit after model loading. CUDA TP, half-resident expert ownership,
+output sharding, pipelined prefill, and compatible grouped decode are selected
+by `--cuda-tensor-parallel`; no `DS4_CUDA_*` environment tuning is required.
+Without an explicit `--prefill-chunk`, this mode uses 2048-token chunks so the
+tested 16-session, 100k-context layout retains enough VRAM for resident KV
+caches. An explicit `--prefill-chunk` remains an override for other topologies.
+
+Any even card count that can hold the selected model and graph scratch is a
+valid topology. On this class of 48 GB card, the useful measured endpoints are
+Q2 on four cards (two pipeline stages) and Q4 on eight cards (four stages).
+For a four-card PIX-paired subset such as physical GPUs `0,1,4,5`, the ordered
+list is `0,4,1,5`. Two cards do not have enough memory for these Flash models.
 
 This mode currently requires DeepSeek V4 Flash and an even multi-GPU
 placement. GLM 5.2 instead uses normal layer placement across the selected
@@ -943,7 +988,7 @@ session evaluations. The current backend behavior is:
 
 | Backend and model | Session execution |
 | --- | --- |
-| Metal, resident DeepSeek Flash | Native shared-expert and QKV batching for supported 4- and 8-row batches; ordered fallback otherwise. |
+| Metal, resident DeepSeek Flash | Native shared-expert and QKV batching from two rows upward when supported; ordered fallback otherwise. |
 | Metal, GLM 5.2 | Ordered exact fallback. |
 | CUDA, DeepSeek Flash on a supported multi-GPU TP/EP layout | Native decode and mixed prefill/decode, with exact fallbacks for unsupported kernel shapes. |
 | CUDA single GPU, including DGX Spark | Ordered exact fallback. |
@@ -1499,7 +1544,7 @@ make test                  # ./ds4-eval --self-test-extractors && ./ds4_test --a
 The batching tests are model-backed and must run on the matching GPU backend:
 
 ```sh
-# Metal, with DS4_TEST_SESSION_COUNT set to 2, 4, and 8.
+# Metal, with DS4_TEST_SESSION_COUNT set to 2, 4, 8, and 16.
 DS4_TEST_MODEL=/path/to/model.gguf DS4_TEST_SESSION_COUNT=4 \
   make test-metal-session-batch
 

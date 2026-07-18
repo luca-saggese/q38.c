@@ -12570,8 +12570,14 @@ static const char *need_arg(int *i, int argc, char **argv, const char *opt) {
 }
 
 static void log_context_memory(ds4_backend backend, int ctx_size,
+                               uint32_t prefill_chunk,
+                               bool ssd_streaming,
                                int session_count) {
-    ds4_context_memory m = ds4_context_memory_estimate(backend, ctx_size);
+    ds4_context_memory m =
+        ds4_context_memory_estimate_with_prefill_mode(backend,
+                                                      ctx_size,
+                                                      prefill_chunk,
+                                                      ssd_streaming);
     server_log(DS4_LOG_DEFAULT,
                "ds4-server: context buffers %.2f MiB (ctx=%d, backend=%s, prefill_chunk=%u, raw_kv_rows=%u, compressed_kv_rows=%u)",
                (double)m.total_bytes / (1024.0 * 1024.0),
@@ -12934,7 +12940,11 @@ int main(int argc, char **argv) {
     }
 
     const int slot_count = cfg.batched_sessions > 0 ? cfg.batched_sessions : 1;
-    log_context_memory(cfg.engine.backend, cfg.ctx_size, slot_count);
+    log_context_memory(cfg.engine.backend,
+                       cfg.ctx_size,
+                       ds4_engine_prefill_chunk(engine),
+                       cfg.engine.ssd_streaming,
+                       slot_count);
 
     server s = {0};
     s.engine = engine;

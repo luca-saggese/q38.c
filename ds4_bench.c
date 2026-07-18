@@ -618,7 +618,7 @@ int main(int argc, char **argv) {
     }
     log_context_memory(opt.backend,
                        cfg.ctx_alloc,
-                       cfg.prefill_chunk,
+                       ds4_engine_prefill_chunk(engine),
                        cfg.ssd_streaming);
 
     char *text = read_file(cfg.prompt_path ? cfg.prompt_path : cfg.chat_prompt_path);

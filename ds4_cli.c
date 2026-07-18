@@ -1660,7 +1660,7 @@ static int run_repl(ds4_engine *engine, cli_config *cfg) {
                 cfg->gen.ctx_size = parse_int(arg, "/ctx");
                 log_context_memory(cfg->engine.backend,
                                    cfg->gen.ctx_size,
-                                   cfg->engine.prefill_chunk,
+                                   ds4_engine_prefill_chunk(engine),
                                    cfg->engine.ssd_streaming);
                 rc = repl_chat_set_ctx(engine, &chat, cfg->gen.ctx_size);
                 if (rc != 0) {
@@ -2175,7 +2175,7 @@ int main(int argc, char **argv) {
     if (!cfg.inspect) {
         log_context_memory(cfg.engine.backend,
                            cfg.gen.ctx_size,
-                           cfg.engine.prefill_chunk,
+                           ds4_engine_prefill_chunk(engine),
                            cfg.engine.ssd_streaming);
         cli_warn_think_max_downgraded(&cfg.gen, "--think-max");
     }

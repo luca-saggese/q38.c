@@ -59,9 +59,22 @@ int ds4_test_classify_multi_tier_with_ctx_cuda_tp(
 void   ds4_test_seed_compress_ratios(void);
 void   ds4_test_clear_compress_ratios(void);
 size_t ds4_test_per_tier_graph_overhead_bytes(int placement_ctx_hint);
+size_t ds4_test_per_tier_graph_overhead_bytes_with_prefill(
+                                         int placement_ctx_hint,
+                                         uint32_t prefill_chunk);
 size_t ds4_test_compute_entry_bytes_sum(const ds4_test_fake_tensor *tensors,
                                          int n_tensors,
                                          int placement_ctx_hint);
+size_t ds4_test_compute_entry_bytes_sum_with_prefill(
+                                         const ds4_test_fake_tensor *tensors,
+                                         int n_tensors,
+                                         int placement_ctx_hint,
+                                         uint32_t prefill_chunk);
+uint32_t ds4_test_effective_prefill_chunk(bool cuda_tensor_parallel,
+                                          uint32_t requested_chunk);
+uint32_t ds4_test_planner_prefill_cap(int prompt_len,
+                                      uint32_t prefill_chunk);
+uint32_t ds4_test_planner_raw_cap(int ctx_size, uint32_t prefill_cap);
 size_t ds4_test_glm_per_layer_kv_bytes(uint32_t layer, int ctx_size);
 
 /* DS4_N_LAYER constant is private to ds4.c; for the test we use
@@ -505,6 +518,56 @@ static void restore_env_value(const char *name, char *saved) {
     }
 }
 
+static void test_cuda_tp_prefill_default_accounting(void) {
+    fprintf(stderr, "RUN: test_cuda_tp_prefill_default_accounting\n");
+
+    CHECK(ds4_test_effective_prefill_chunk(true, 0) == 2048,
+          "CUDA TP defaults to a 2048-token prefill chunk");
+    CHECK(ds4_test_effective_prefill_chunk(true, 4096) == 4096,
+          "CUDA TP preserves an explicit prefill chunk");
+    CHECK(ds4_test_effective_prefill_chunk(false, 0) == 0,
+          "ordinary inference retains its model-specific default");
+
+    ds4_test_fake_tensor tensors[256];
+    const int n = build_synthetic_model(tensors, 256);
+    if (n <= 0) return;
+
+    char *old_chunk = save_env_value("DS4_METAL_PREFILL_CHUNK");
+    char *old_raw = save_env_value("DS4_METAL_GRAPH_RAW_CAP");
+    unsetenv("DS4_METAL_PREFILL_CHUNK");
+    unsetenv("DS4_METAL_GRAPH_RAW_CAP");
+    ds4_test_seed_compress_ratios();
+
+    const uint32_t ordinary_prefill =
+        ds4_test_planner_prefill_cap(100000, 0);
+    const uint32_t cuda_tp_prefill =
+        ds4_test_planner_prefill_cap(100000, 2048);
+    CHECK(ordinary_prefill == 4096,
+          "ordinary long-context prefill cap remains 4096");
+    CHECK(cuda_tp_prefill == 2048,
+          "CUDA TP long-context prefill cap is 2048");
+    CHECK(ds4_test_planner_raw_cap(100000, cuda_tp_prefill) <
+          ds4_test_planner_raw_cap(100000, ordinary_prefill),
+          "CUDA TP prefill default reduces raw KV allocation");
+
+    const size_t ordinary_entries =
+        ds4_test_compute_entry_bytes_sum_with_prefill(tensors, n, 100000, 0);
+    const size_t cuda_tp_entries =
+        ds4_test_compute_entry_bytes_sum_with_prefill(tensors, n, 100000, 2048);
+    const size_t ordinary_scratch =
+        ds4_test_per_tier_graph_overhead_bytes_with_prefill(100000, 0);
+    const size_t cuda_tp_scratch =
+        ds4_test_per_tier_graph_overhead_bytes_with_prefill(100000, 2048);
+    CHECK(cuda_tp_entries < ordinary_entries,
+          "placement KV accounting uses the effective CUDA TP chunk");
+    CHECK(cuda_tp_scratch < ordinary_scratch,
+          "placement scratch accounting uses the effective CUDA TP chunk");
+
+    ds4_test_clear_compress_ratios();
+    restore_env_value("DS4_METAL_PREFILL_CHUNK", old_chunk);
+    restore_env_value("DS4_METAL_GRAPH_RAW_CAP", old_raw);
+}
+
 static int build_output_tp_head_move_model(ds4_test_fake_tensor *out, int cap) {
     if (cap < DS4_N_LAYER_LOCAL + 2) return -1;
     int n = 0;
@@ -586,6 +649,7 @@ int main(void) {
     test_pertier_overhead_pushes_to_spill();
     test_no_per_layer_scratch_double_count();
     test_glm_per_layer_cache_accounting();
+    test_cuda_tp_prefill_default_accounting();
     test_cuda_tp_output_head_moves_to_lower_half();
 
     fprintf(stderr, "\ntest_engine_mgpu_placement: %d/%d checks passed (%d failed)\n",

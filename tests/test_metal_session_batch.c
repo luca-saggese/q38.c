@@ -14,7 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define MAX_SESSION_COUNT 8
+#define MAX_SESSION_COUNT 16
 #define DECODE_STEPS 6
 #define MIXED_SUFFIX_TOKENS 8
 #define TEST_CTX 512
@@ -185,7 +185,7 @@ int main(void) {
     ds4_session *batched[MAX_SESSION_COUNT] = {0};
     char err[256] = {0};
     for (int i = 0; i < session_count; i++) {
-        ds4_encode_chat_prompt(engine, NULL, prompts[i], DS4_THINK_NONE,
+        ds4_encode_chat_prompt(engine, NULL, prompts[i % 8], DS4_THINK_NONE,
                                &prompt[i]);
         if (ds4_session_create(&batched[i], engine, TEST_CTX) != 0) {
             fail("session create", i, -1);

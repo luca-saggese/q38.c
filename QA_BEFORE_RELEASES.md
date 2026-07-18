@@ -148,10 +148,11 @@ prefill/decode, QKV projection, shared or routed experts, tensor parallelism,
 or backend fallback selection changes.
 
 - On a single Metal machine, run the full-vocabulary exact-logit oracle with
-  2, 4, and 8 sessions:
+  2, 4, 8, and 16 sessions:
   `DS4_TEST_MODEL=/path/to/ds4flash.gguf DS4_TEST_SESSION_COUNT=N make test-metal-session-batch`.
-  The two-session run must report `native_shared=0 native_qkv=0`; the four- and
-  eight-session resident Q8 runs must report `native_shared=1 native_qkv=1`.
+  Compatible resident Q8 runs must report `native_shared=1 native_qkv=1` at
+  every tested count. The 16-session run covers row counts above the old
+  artificial eight-row limit.
 - Repeat the four-session oracle with
   `DS4_METAL_SESSION_BATCH_SHARED=0` and with
   `DS4_METAL_SESSION_BATCH_QKV=0`. The first run must use the complete fallback;
@@ -159,12 +160,12 @@ or backend fallback selection changes.
 - The oracle must cover reversed row ordering, at least six decode steps, and a
   mixed prefill/decode call. Any nonzero differing-logit count is a blocker;
   argmax-only agreement is insufficient.
-- Benchmark one, four, and eight simultaneous resident sessions on the same
-  host and model. Record model-step latency and aggregate decode tokens/second,
-  not only request completion speed. Four and eight rows must not regress by
-  more than normal run-to-run variance from the previous release, and the
-  eight-row aggregate should exceed the one-row aggregate when native batching
-  is enabled.
+- Benchmark 1, 2, 4, 8, and 16 simultaneous resident sessions on the same host
+  and model. Record model-step latency and aggregate decode tokens/second, not
+  only request completion speed. The current Metal path batches QKV and part of
+  the shared expert, but still runs attention, routed experts, shared down, and
+  the output head per session. Treat flat aggregate scaling as unfinished
+  implementation work, not evidence that Metal cannot benefit from batching.
 - On `mac-m5max-it` and `mac-m5max-us`, run the same oracle in physical TP mode
   over explicit `tcp` and `rdma` transports. Set `DS4_TEST_TP_MODE=leader` on
   the leader and `DS4_TEST_TP_MODE=worker DS4_TEST_TP_LEADER_HOST=HOST` on the
@@ -298,11 +299,12 @@ release-ready without this pass.
   `nonexact_logits=0`. Run the released Q4 file and the reduced-precision Q2
   file: Q4 exercises grouped routed/shared stages, while unsupported Q2 native
   MoE shapes must retain the ordered exact fallback.
-- With CUDA TP attention enabled, grouped attention-core, QKV, KV-store, and
-  attention-post stages must stay disabled until they reproduce the TP control
-  arithmetic. The session oracle must still batch the compatible pre-router,
-  routed, and shared stages and remain exact. Repeat once with
-  `DS4_CUDA_TP_ATTN=0` to cover the grouped attention-core implementation.
+- With CUDA TP attention enabled, compatible Q4 runs must use grouped
+  attention-core, QKV, KV-store, and attention-post by default and remain
+  full-vocabulary exact against isolated decode. On the eight-L40S host, the
+  16-row decode step must remain above 110 aggregate tokens/s. Repeat once with
+  `DS4_CUDA_TP_ATTN=0` only as rollback coverage; it is not the production
+  configuration.
 - Run native mixed prefill/decode at the default frontier and at compressed
   context:
   `DS4_TEST_MODEL=/path/to/flash.gguf make test-cuda-mixed-batch` and
@@ -310,9 +312,9 @@ release-ready without this pass.
   DS4_TEST_MODEL=/path/to/flash.gguf make test-cuda-mixed-batch`.
   Every round must report exact logits and `mode=native`; a serialized fallback
   is a failure for the eight-GPU TP/EP topology. Under CUDA TP attention, the
-  native mixed step keeps decode attention session-specific and coordinates the
-  prefill plus exact routed decode batch; record correctness and speedup
-  separately. Also force an 800-row prefill quantum with
+  native mixed step must use the same exact grouped decode stages when their
+  capability checks pass; record correctness and speedup separately. Also
+  force an 800-row prefill quantum with
   `DS4_TEST_ALLOW_FALLBACK=1`; it must report the serialized safety fallback.
 - Start `ds4-server` with 8 and 16 batched sessions and issue at least that many
   simultaneous requests with mixed prompt lengths. Verify no session mix-up,
@@ -400,6 +402,9 @@ clients.
 - Test OpenAI chat completion, OpenAI Responses, and Anthropic messages.
 - Test SSE streaming with thinking enabled and disabled.
 - Test keepalive during long prefill and confirm clients do not time out.
+- On the eight-L40S CUDA TP target, start `./run-nvidia-tp-server.sh` unchanged
+  and verify all 16 100k-context sessions allocate. Startup must report a
+  2048-token prefill cap; a silent fallback to 4096 is an OOM regression.
 - Test `--trace` and confirm rendered prompts, cache decisions, generated text,
   and tool-parser events are useful without leaking unrelated state.
 
@@ -469,7 +474,7 @@ Do not sign off until:
 - Server API streaming was exercised.
 - Agent interruption and tool loops were exercised manually.
 - Speed is within expected variance for the same hardware and model.
-- Metal 2/4/8-session exactness and forced fallback gates passed.
+- Metal 2/4/8/16-session exactness and forced fallback gates passed.
 - Physical Metal TP batching and CUDA native decode/mixed batching passed when
   those backends are part of the release.
 - Any skipped item is written down with the reason.

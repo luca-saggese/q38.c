@@ -12022,6 +12022,14 @@ static uint32_t ds4_default_raw_cap(uint32_t ctx_size) {
     return raw_cap;
 }
 
+#define DS4_CUDA_TP_DEFAULT_PREFILL_CHUNK 2048u
+
+static uint32_t ds4_effective_prefill_chunk(bool cuda_tensor_parallel,
+                                            uint32_t requested_chunk) {
+    if (requested_chunk != 0) return requested_chunk;
+    return cuda_tensor_parallel ? DS4_CUDA_TP_DEFAULT_PREFILL_CHUNK : 0;
+}
+
 static uint32_t ds4_prefill_cap_for_prompt(int prompt_len,
                                            uint32_t requested_chunk) {
     if (prompt_len <= 0) return 1;
@@ -22581,6 +22589,16 @@ static bool metal_graph_encode_decode_layer_phase(
             ok = ds4_gpu_hc_expand_add_tensor(metal_graph_after_attn_hc(g), tp_attn_a, tp_attn_b,
                                                 metal_graph_cur_hc(g), metal_graph_hc_post(g), metal_graph_hc_comb(g),
                                                 DS4_N_EMBD, DS4_N_HC) != 0;
+        } else if (cuda_tp_attn_peer) {
+            ok = ds4_gpu_hc_expand_add_tensor(
+                    metal_graph_after_attn_hc(g),
+                    metal_graph_attn_out(g),
+                    cuda_tp_attn_peer,
+                    metal_graph_cur_hc(g),
+                    metal_graph_hc_post(g),
+                    metal_graph_hc_comb(g),
+                    DS4_N_EMBD,
+                    DS4_N_HC) != 0;
         } else {
             ok = ds4_gpu_hc_expand_tensor(metal_graph_after_attn_hc(g), metal_graph_attn_out(g), metal_graph_cur_hc(g),
                                             metal_graph_hc_post(g), metal_graph_hc_comb(g), DS4_N_EMBD, DS4_N_HC) != 0;
@@ -46783,23 +46801,24 @@ ds4_context_memory ds4_context_memory_estimate(ds4_backend backend,
  * layer here would double-count them once per layer.
  *
  * Invariant (by construction): sum over il of
- * engine_per_layer_kv_bytes_planner(il, ctx) ==
+ * engine_per_layer_kv_bytes_planner(il, ctx, prefill_chunk) ==
  *   DS4_N_LAYER * raw_cap * DS4_N_HEAD_DIM * sizeof(float)
  *   + sum_over_ratio_layers(compressed_per_layer)
  */
 /* Planner equivalents of metal_graph_prefill_cap_for_prompt and
  * metal_graph_raw_cap_for_context. The graph variants live inside
- * `#ifndef DS4_NO_GPU` blocks (they share the env knob plumbing with
- * the GPU execution path); these inline copies replicate the same
- * numeric math so the planner can be called from both build flavors.
+ * `#ifndef DS4_NO_GPU` blocks; these inline copies replicate the same numeric
+ * math so the planner can be called from both build flavors.
  *
  * If the env-knob behavior in the graph helpers ever changes, update
  * these two helpers in lockstep. Tested via:
- *   sum(engine_per_layer_kv_bytes_planner(il, ctx) for il in 0..N) ==
+ *   sum(engine_per_layer_kv_bytes_planner(il, ctx, prefill_chunk)
+ *       for il in 0..N) ==
  *   F32-sized ds4_context_memory_estimate(CUDA, ctx).total_bytes.
  */
-static uint32_t engine_planner_prefill_cap(int prompt_len) {
-    return ds4_prefill_cap_for_prompt(prompt_len, 0);
+static uint32_t engine_planner_prefill_cap(int prompt_len,
+                                           uint32_t requested_chunk) {
+    return ds4_prefill_cap_for_prompt(prompt_len, requested_chunk);
 }
 
 static uint32_t engine_planner_raw_cap(int ctx_size, uint32_t prefill_cap) {
@@ -46866,7 +46885,9 @@ static size_t engine_glm_per_layer_kv_bytes_planner(uint32_t il,
     return bytes > SIZE_MAX ? SIZE_MAX : (size_t)bytes;
 }
 
-static size_t engine_per_layer_kv_bytes_planner(uint32_t il, int ctx_size) {
+static size_t engine_per_layer_kv_bytes_planner(uint32_t il,
+                                                int ctx_size,
+                                                uint32_t prefill_chunk) {
     if (ctx_size <= 0) return 0;
     if (il >= DS4_N_LAYER) return 0;
     const uint32_t ctx = (uint32_t)ctx_size;
@@ -46876,7 +46897,8 @@ static size_t engine_per_layer_kv_bytes_planner(uint32_t il, int ctx_size) {
      * metal_graph_alloc_kv_cache_tensor_on(. , raw_cap * DS4_N_HEAD_DIM *
      * sizeof(float)). raw_cap factors in raw_window padding + prefill_cap
      * and clamps to [raw_window, 8192]. */
-    const uint32_t prefill_cap = engine_planner_prefill_cap((int)ctx);
+    const uint32_t prefill_cap =
+        engine_planner_prefill_cap((int)ctx, prefill_chunk);
     const uint32_t raw_cap = engine_planner_raw_cap((int)ctx, prefill_cap);
     size_t bytes = (size_t)raw_cap * DS4_N_HEAD_DIM * sizeof(float);
 
@@ -47009,13 +47031,12 @@ static size_t engine_per_tier_graph_overhead_bytes(const ds4_engine *e) {
         (uint64_t)DS4_N_INDEXER_HEAD * DS4_N_INDEXER_HEAD_DIM;
 
     /* ctx-derived caps. The runtime uses prefill_cap derived from the
-     * chunked-prefill batch size; the planner has no prompt yet, so we
-     * drive prefill_cap from the same env-knob path the GPU helper uses
-     * (engine_planner_prefill_cap, with the same DS4_METAL_PREFILL_CHUNK
-     * override). */
+     * chunked-prefill batch size. The planner has no prompt yet, so it uses the
+     * placement context and the engine's effective chunk setting. */
     const int est_ctx = (e->placement_ctx_hint > 0) ? e->placement_ctx_hint
                                                     : 4096;
-    const uint32_t prefill_cap = engine_planner_prefill_cap(est_ctx);
+    const uint32_t prefill_cap =
+        engine_planner_prefill_cap(est_ctx, e ? e->prefill_chunk : 0);
 
     /* comp_cap and attn_comp_stage_cap: same formula as runtime line 10597.
      * If no layer has a compression ratio set (test path, where
@@ -54016,7 +54037,10 @@ static int engine_compute_entry_bytes(const ds4_engine *e, size_t *out) {
      * is accounted separately (see engine_per_tier_graph_overhead_bytes
      * and its pre-subtract in engine_classify_multi_tier). */
     const int est_ctx = (e->placement_ctx_hint > 0) ? e->placement_ctx_hint : 4096;
-    ds4_context_memory mem = ds4_context_memory_estimate(DS4_BACKEND_CUDA, est_ctx);
+    ds4_context_memory mem =
+        ds4_context_memory_estimate_with_prefill(DS4_BACKEND_CUDA,
+                                                 est_ctx,
+                                                 e->prefill_chunk);
     if (mem.total_bytes > 0) {
         /* mem.total_bytes is used only as a sentinel; cache values are
          * re-derived per layer so placement follows the active model's
@@ -54025,7 +54049,8 @@ static int engine_compute_entry_bytes(const ds4_engine *e, size_t *out) {
             out[il + 1] +=
                 DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA ?
                 engine_glm_per_layer_kv_bytes_planner(il, est_ctx) :
-                engine_per_layer_kv_bytes_planner(il, est_ctx);
+                engine_per_layer_kv_bytes_planner(il, est_ctx,
+                                                  e->prefill_chunk);
         }
     } else {
         /* Fallback: 128 MiB per layer as a static estimate. */
@@ -54908,6 +54933,8 @@ static int ds4_test_classify_multi_tier_impl(
         return -1;
     }
     eng.cuda_tensor_parallel = cuda_tensor_parallel;
+    eng.prefill_chunk =
+        ds4_effective_prefill_chunk(cuda_tensor_parallel, 0);
     const int rc = engine_classify_multi_tier(&eng, cfg);
     if (rc == 0) {
         if (out_multi_tier) *out_multi_tier = eng.multi_tier;
@@ -54970,23 +54997,47 @@ void ds4_test_clear_compress_ratios(void) {
     memset(g_ds4_compress_ratios, 0, sizeof(g_ds4_compress_ratios));
 }
 
-size_t ds4_test_per_tier_graph_overhead_bytes(int placement_ctx_hint) {
+uint32_t ds4_test_effective_prefill_chunk(bool cuda_tensor_parallel,
+                                          uint32_t requested_chunk) {
+    return ds4_effective_prefill_chunk(cuda_tensor_parallel, requested_chunk);
+}
+
+uint32_t ds4_test_planner_prefill_cap(int prompt_len,
+                                      uint32_t prefill_chunk) {
+    return engine_planner_prefill_cap(prompt_len, prefill_chunk);
+}
+
+uint32_t ds4_test_planner_raw_cap(int ctx_size, uint32_t prefill_cap) {
+    return engine_planner_raw_cap(ctx_size, prefill_cap);
+}
+
+size_t ds4_test_per_tier_graph_overhead_bytes_with_prefill(
+        int placement_ctx_hint,
+        uint32_t prefill_chunk) {
     ds4_engine eng;
     memset(&eng, 0, sizeof(eng));
     eng.model.fd = -1;
     eng.placement_ctx_hint = placement_ctx_hint;
+    eng.prefill_chunk = prefill_chunk;
     return engine_per_tier_graph_overhead_bytes(&eng);
 }
 
-size_t ds4_test_compute_entry_bytes_sum(
+size_t ds4_test_per_tier_graph_overhead_bytes(int placement_ctx_hint) {
+    return ds4_test_per_tier_graph_overhead_bytes_with_prefill(
+            placement_ctx_hint, 0);
+}
+
+size_t ds4_test_compute_entry_bytes_sum_with_prefill(
         const ds4_test_fake_tensor *tensors,
         int n_tensors,
-        int placement_ctx_hint) {
+        int placement_ctx_hint,
+        uint32_t prefill_chunk) {
     ds4_engine eng;
     if (ds4_test_make_engine(&eng, tensors, n_tensors,
                              placement_ctx_hint) != 0) {
         return 0;
     }
+    eng.prefill_chunk = prefill_chunk;
     size_t entry_bytes[DS4_MAX_LAYER + 2];
     size_t sum = 0;
     if (engine_compute_entry_bytes(&eng, entry_bytes) == 0) {
@@ -54996,6 +55047,14 @@ size_t ds4_test_compute_entry_bytes_sum(
     }
     free(eng.model.tensors);
     return sum;
+}
+
+size_t ds4_test_compute_entry_bytes_sum(
+        const ds4_test_fake_tensor *tensors,
+        int n_tensors,
+        int placement_ctx_hint) {
+    return ds4_test_compute_entry_bytes_sum_with_prefill(
+            tensors, n_tensors, placement_ctx_hint, 0);
 }
 
 size_t ds4_test_glm_per_layer_kv_bytes(uint32_t layer, int ctx_size) {
@@ -55057,7 +55116,9 @@ static int ds4_engine_open_internal(ds4_engine **out,
     e->ssd_streaming_full_layers_set = opt->ssd_streaming_full_layers_set;
     e->distributed = opt->distributed;
     e->power_percent = opt->power_percent > 0 ? opt->power_percent : 100;
-    e->prefill_chunk = opt->prefill_chunk;
+    e->prefill_chunk =
+        ds4_effective_prefill_chunk(opt->cuda_tensor_parallel,
+                                    opt->prefill_chunk);
     e->ssd_streaming_cache_experts = opt->ssd_streaming_cache_experts;
     e->ssd_streaming_cache_bytes = opt->ssd_streaming_cache_bytes;
     e->ssd_streaming_full_layers = opt->ssd_streaming_full_layers;
@@ -55898,6 +55959,10 @@ void ds4_engine_summary(ds4_engine *e) {
 
 int ds4_engine_vocab_size(ds4_engine *e) {
     return e ? e->vocab.n_vocab : 0;
+}
+
+uint32_t ds4_engine_prefill_chunk(ds4_engine *e) {
+    return e ? e->prefill_chunk : 0;
 }
 
 
@@ -59490,7 +59555,7 @@ static bool metal_graph_native_session_batch_shared_supported(
         const ds4_engine *e) {
     const char *enabled = getenv("DS4_METAL_SESSION_BATCH_SHARED");
     if ((enabled && enabled[0] && strcmp(enabled, "0") == 0) ||
-        !items || count < 3 || count > 8 || !e || e->tp.active ||
+        !items || count < 2 || !e || e->tp.active ||
         e->support_kind != DS4_SUPPORT_NONE ||
         metal_graph_use_reference_shared_down_hc() ||
         metal_graph_use_q4_selected_shared_overlap() ||
@@ -59541,7 +59606,7 @@ static bool metal_graph_native_session_batch_qkv_supported(
         const ds4_engine *e) {
     const char *enabled = getenv("DS4_METAL_SESSION_BATCH_QKV");
     if ((enabled && enabled[0] && strcmp(enabled, "0") == 0) ||
-        !items || count < 3 || count > 8 || !e || e->tp.active ||
+        !items || count < 2 || !e || e->tp.active ||
         metal_graph_use_reference_qkv_norm() ||
         getenv("DS4_METAL_Q8_DECODE_MPP") != NULL) {
         return false;
@@ -61017,7 +61082,7 @@ static bool metal_graph_session_batch_attn_core_supported(
     }
 
     ds4_gpu_graph *first = &items[0].session->graph;
-    if (!first->placement || first->quality || first->cuda_tp_attn ||
+    if (!first->placement || first->quality ||
         first->cuda_tp_attn_heads || first->cuda_tp_q ||
         first->decode_stage_profile ||
         first->decode_index_stage_profile ||
@@ -61027,7 +61092,7 @@ static bool metal_graph_session_batch_attn_core_supported(
     for (int i = 0; i < count; i++) {
         ds4_session *s = items[i].session;
         ds4_gpu_graph *g = &s->graph;
-        if (!g->placement || g->quality || g->cuda_tp_attn ||
+        if (!g->placement || g->quality ||
             g->cuda_tp_attn_heads || g->cuda_tp_q ||
             g->decode_stage_profile ||
             g->decode_index_stage_profile ||
