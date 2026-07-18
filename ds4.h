@@ -91,6 +91,33 @@ typedef struct {
     bool debug;
 } ds4_distributed_options;
 
+/* Tensor parallelism: two identical machines run the full model in lockstep
+ * and split the heavy per-layer matvecs, exchanging 16KB partial sums at two
+ * gates per layer (see misc/METAL_TENSOR_PARALLELISM.md).  The leader owns
+ * prompt/sampling/output and listens; the worker dials in and mirrors every
+ * session sync/eval. */
+typedef enum {
+    DS4_TP_NONE = 0,
+    DS4_TP_LEADER,
+    DS4_TP_WORKER,
+} ds4_tp_role;
+
+typedef enum {
+    DS4_TP_TRANSPORT_AUTO = 0,
+    DS4_TP_TRANSPORT_RDMA,
+    DS4_TP_TRANSPORT_TCP,
+} ds4_tp_transport;
+
+typedef struct {
+    ds4_tp_role role;
+    const char *listen_host;    /* leader listens here for the worker */
+    int listen_port;
+    const char *leader_host;    /* worker dials the leader */
+    int leader_port;
+    ds4_tp_transport transport;
+    int debug_hash;             /* cross-check hidden state every N tokens */
+} ds4_tp_options;
+
 typedef struct {
     const char *model_path;
     const char *mtp_path;
@@ -118,6 +145,7 @@ typedef struct {
     uint32_t load_layer_end;
     bool load_output;
     ds4_distributed_options distributed;
+    ds4_tp_options tp;
 } ds4_engine_options;
 
 typedef void (*ds4_token_emit_fn)(void *ud, int token);
@@ -154,6 +182,8 @@ const char *ds4_engine_model_name(ds4_engine *e);
 int ds4_engine_layer_count(ds4_engine *e);
 uint32_t ds4_engine_layer_compress_ratio(ds4_engine *e, uint32_t layer);
 uint64_t ds4_engine_hidden_f32_values(ds4_engine *e);
+int ds4_engine_embd_dim(ds4_engine *e);
+uint64_t ds4_engine_model_bytes(ds4_engine *e);
 /* Stable id for cache compatibility.  0 is the original Flash shape, so old
  * KV files with the previously-zero reserved byte remain Flash-compatible;
  * Pro and later shapes must use nonzero ids. */
@@ -217,6 +247,13 @@ int ds4_token_eos(ds4_engine *e);
 int ds4_token_user(ds4_engine *e);
 int ds4_token_assistant(ds4_engine *e);
 
+/* Tensor-parallel binding: allocates the GPU gate slab, registers it with
+ * the transport and arms the per-layer gate machinery.  Call once, after
+ * ds4_tp_create() and before any session work.  Transport lifecycle stays
+ * with the caller. */
+struct ds4_tp;
+int ds4_engine_tp_bind(ds4_engine *e, struct ds4_tp *tp, char *err, size_t errlen);
+
 int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size);
 void ds4_session_free(ds4_session *s);
 int ds4_session_power(ds4_session *s);
@@ -266,6 +303,11 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                                         int max_tokens, int eos_token,
                                         int *accepted, int accepted_cap,
                                         char *err, size_t errlen);
+/* TP worker side of a mirrored speculative-verify block: run the replicated
+ * batch verify for its KV side effects, then obey the leader's commit frame
+ * (keep, or roll back and replay). Only called from ds4_tp_worker_run. */
+int ds4_session_tp_spec_cycle(ds4_session *s, const int *drafts, int draft_n,
+                              char *err, size_t errlen);
 void ds4_session_invalidate(ds4_session *s);
 void ds4_session_rewind(ds4_session *s, int pos);
 int ds4_session_pos(ds4_session *s);

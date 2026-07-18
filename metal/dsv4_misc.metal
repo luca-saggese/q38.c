@@ -1325,3 +1325,36 @@ kernel void kernel_dsv4_softmax_pool(
 
     *((device float *) (dst + id*args.nb0 + ic*args.nb1)) = acc/sum;
 }
+
+
+
+// Tensor-parallel keep-alive: a few threadgroups of FMAs dispatched
+// back-to-back on a side queue while TP decode runs.  The per-layer gate
+// stalls make the real workload look idle to the GPU power manager, which
+// otherwise halves the clocks within a second (~2x decode regression);
+// this holds them up for negligible bandwidth and a few watts.
+kernel void kernel_dsv4_tp_keepalive(
+        device float * out,
+        constant uint & iters,
+        uint tid [[thread_position_in_grid]]) {
+    float a = out[tid];
+    const float b = 1.000001f;
+    for (uint i = 0; i < iters; i++) {
+        a = fma(a, b, 0.000001f);
+        a = fma(a, b, -0.000001f);
+    }
+    out[tid] = a;
+}
+
+// Tensor-parallel gate flag: publishes a sequence number to a slab slot the
+// CPU service thread spin-reads, replacing the much slower shared-event
+// signal for the GPU->CPU direction.  Ordering against the partial-output
+// kernels comes from the buffer hazard on the shared slab.
+kernel void kernel_dsv4_tp_flag_set(
+        device atomic_uint & flag,
+        constant uint & value,
+        uint tid [[thread_position_in_grid]]) {
+    if (tid == 0) {
+        atomic_store_explicit(&flag, value, memory_order_relaxed);
+    }
+}

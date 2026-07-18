@@ -12994,7 +12994,11 @@ extern "C" int ds4_gpu_routed_moe_set_selected_override(const int32_t *selected,
     return 1;
 }
 
-extern "C" int ds4_gpu_routed_moe_one_tensor(ds4_gpu_tensor *out, ds4_gpu_tensor *gate, ds4_gpu_tensor *up, ds4_gpu_tensor *mid, ds4_gpu_tensor *down, const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset, uint64_t down_offset, uint32_t gate_type, uint32_t down_type, uint64_t gate_expert_bytes, uint64_t gate_row_bytes, uint64_t down_expert_bytes, uint64_t down_row_bytes, uint32_t expert_in_dim, uint32_t expert_mid_dim, uint32_t out_dim, const ds4_gpu_tensor *selected, const ds4_gpu_tensor *weights, uint32_t n_total_expert, uint32_t n_expert, float clamp, const ds4_gpu_tensor *x, uint32_t layer_index) {
+extern "C" int ds4_gpu_routed_moe_one_tensor(ds4_gpu_tensor *out, ds4_gpu_tensor *gate, ds4_gpu_tensor *up, ds4_gpu_tensor *mid, ds4_gpu_tensor *down, const void *model_map, uint64_t model_size, uint64_t gate_offset, uint64_t up_offset, uint64_t down_offset, uint32_t gate_type, uint32_t down_type, uint64_t gate_expert_bytes, uint64_t gate_row_bytes, uint64_t down_expert_bytes, uint64_t down_row_bytes, uint32_t expert_in_dim, uint32_t expert_mid_dim, uint32_t out_dim, const ds4_gpu_tensor *selected, const ds4_gpu_tensor *weights, uint32_t n_total_expert, uint32_t n_expert, float clamp, const ds4_gpu_tensor *x, const ds4_gpu_tensor *add_in, uint32_t layer_index) {
+    if (add_in) {
+        fprintf(stderr, "ds4: routed MoE addend fold is Metal-only\n");
+        return 0;
+    }
     return routed_moe_launch(out, gate, up, mid, down, model_map, model_size,
                              gate_offset, up_offset, down_offset,
                              gate_type, down_type,
@@ -13330,4 +13334,64 @@ extern "C" int ds4_gpu_matmul_q8_0_hc_expand_tensor(
                                         weight_offset, in_dim, out_dim, x, 1) &&
            ds4_gpu_hc_expand_split_tensor(out_hc, block_out, residual_hc,
                                             split, n_embd, n_hc);
+}
+
+/* Tensor-parallel gates are Metal-only (see misc/METAL_TENSOR_PARALLELISM.md);
+ * these stubs keep shared graph code linkable.  TP option validation rejects
+ * non-Metal backends long before any of these could run. */
+extern "C" int ds4_gpu_tp_gate_encode(uint32_t layer, uint32_t gate) {
+    (void)layer; (void)gate;
+    fprintf(stderr, "ds4: tensor parallelism is Metal-only\n");
+    return 0;
+}
+
+extern "C" void ds4_gpu_tp_set_batch_exchange(ds4_gpu_tp_batch_exchange_fn fn) {
+    (void)fn;
+}
+
+extern "C" void ds4_gpu_tp_keepalive_pause(int paused) {
+    (void)paused;
+}
+
+extern "C" int ds4_gpu_tp_batch_gate_encode(uint32_t layer, uint32_t rows) {
+    (void)layer; (void)rows;
+    fprintf(stderr, "ds4: tensor parallelism is Metal-only\n");
+    return 0;
+}
+
+extern "C" int ds4_gpu_matmul_q8_0_kslice_tensor(
+        ds4_gpu_tensor *out, const void *model_map, uint64_t model_size,
+        uint64_t weight_offset, uint64_t full_in_dim, uint64_t k_off,
+        uint64_t k_cnt, uint64_t out_dim, const ds4_gpu_tensor *x,
+        uint64_t x_elem_off) {
+    (void)out; (void)model_map; (void)model_size; (void)weight_offset;
+    (void)full_in_dim; (void)k_off; (void)k_cnt; (void)out_dim; (void)x;
+    (void)x_elem_off;
+    fprintf(stderr, "ds4: tensor parallelism is Metal-only\n");
+    return 0;
+}
+
+extern "C" int ds4_gpu_attention_output_q8_tp_tensor(
+        ds4_gpu_tensor *out, ds4_gpu_tensor *low, const void *model_map,
+        uint64_t model_size, uint64_t out_a_offset, uint64_t out_b_offset,
+        uint64_t group_dim, uint64_t rank, uint32_t n_groups_total,
+        uint32_t group0, uint32_t group_cnt, uint64_t out_dim,
+        const ds4_gpu_tensor *heads) {
+    (void)out; (void)low; (void)model_map; (void)model_size;
+    (void)out_a_offset; (void)out_b_offset; (void)group_dim; (void)rank;
+    (void)n_groups_total; (void)group0; (void)group_cnt; (void)out_dim;
+    (void)heads;
+    fprintf(stderr, "ds4: tensor parallelism is Metal-only\n");
+    return 0;
+}
+
+extern "C" int ds4_gpu_hc_expand_add_tensor(
+        ds4_gpu_tensor *out_hc, const ds4_gpu_tensor *block_out,
+        const ds4_gpu_tensor *block_add, const ds4_gpu_tensor *residual_hc,
+        const ds4_gpu_tensor *post, const ds4_gpu_tensor *comb,
+        uint32_t n_embd, uint32_t n_hc) {
+    (void)out_hc; (void)block_out; (void)block_add; (void)residual_hc;
+    (void)post; (void)comb; (void)n_embd; (void)n_hc;
+    fprintf(stderr, "ds4: tensor parallelism is Metal-only\n");
+    return 0;
 }

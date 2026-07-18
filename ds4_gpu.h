@@ -141,6 +141,76 @@ int ds4_gpu_stream_expert_cache_seed_experts(
         uint32_t                           n_experts);
 void ds4_gpu_print_memory_report(const char *label);
 
+/* Tensor-parallel per-layer gates (Metal only).  The encoder calls
+ * ds4_gpu_tp_gate_encode() right after the kernels that produce a partial
+ * block output in the TP slab: it closes the current encoder, makes the GPU
+ * signal a shared event, queues the exchange on a service thread, and makes
+ * the GPU wait for the CPU-signaled release before the combine kernel runs.
+ * Sequence values are assigned internally and increase monotonically; both
+ * ranks encode the identical gate sequence so values pair up by
+ * construction.  The exchange callback runs on the service thread and must
+ * return nonzero on success. */
+typedef int (*ds4_gpu_tp_exchange_fn)(void *ud, uint32_t layer, uint32_t gate, uint64_t seq);
+/* split_world 1 keeps kernels computing full outputs (null-split bring-up);
+ * split_world 2 arms the expert-ownership and slice splits.  slab is the
+ * transport slab tensor and gpu_flags_off the offset of its GPU-written
+ * gate-ready flag words (used by the flag-gate arrival path). */
+int ds4_gpu_tp_init(uint32_t rank, uint32_t split_world,
+                    ds4_gpu_tensor *slab, uint64_t gpu_flags_off,
+                    ds4_gpu_tp_exchange_fn fn, void *ud);
+void ds4_gpu_tp_shutdown(void);
+int ds4_gpu_tp_gate_encode(uint32_t layer, uint32_t gate);
+/* Verify-block batch gates: one exchange per layer moving `rows` partial
+ * rows at once (speculative verify).  The callback runs on the gate service
+ * thread with the same ud as the row-gate exchange fn. */
+typedef int (*ds4_gpu_tp_batch_exchange_fn)(void *ud, uint32_t layer,
+                                            uint32_t rows, uint64_t seq);
+void ds4_gpu_tp_set_batch_exchange(ds4_gpu_tp_batch_exchange_fn fn);
+int ds4_gpu_tp_batch_gate_encode(uint32_t layer, uint32_t rows);
+/* Pause/resume the DVFS keep-alive around work that keeps the GPU busy
+ * anyway (the replicated verify blocks). No-op when TP is not bound. */
+void ds4_gpu_tp_keepalive_pause(int paused);
+/* Nonzero after any gate exchange failed; the eval must abort. */
+int ds4_gpu_tp_failed(void);
+
+/* Tensor-parallel sliced projections (Metal decode path only).
+ *
+ * ds4_gpu_matmul_q8_0_kslice_tensor computes a k-range partial matvec:
+ * out[out_dim] = W[:, k_off : k_off + k_cnt] @ x[x_elem_off : +k_cnt] where
+ * W rows span full_in_dim quantized Q8_0 elements.  k offsets/counts must be
+ * multiples of 32 (Q8_0 block).  Partial results from both ranks sum to the
+ * full projection.
+ *
+ * ds4_gpu_attention_output_q8_tp_tensor is the group-sliced attention output
+ * pair: low projection for groups [group0, group0+group_cnt) plus the
+ * matching k-slice of the expand projection, producing this rank's partial
+ * attention block output (n_tokens == 1 only). */
+int ds4_gpu_matmul_q8_0_kslice_tensor(
+        ds4_gpu_tensor       *out,
+        const void             *model_map,
+        uint64_t                model_size,
+        uint64_t                weight_offset,
+        uint64_t                full_in_dim,
+        uint64_t                k_off,
+        uint64_t                k_cnt,
+        uint64_t                out_dim,
+        const ds4_gpu_tensor *x,
+        uint64_t                x_elem_off);
+int ds4_gpu_attention_output_q8_tp_tensor(
+        ds4_gpu_tensor       *out,
+        ds4_gpu_tensor       *low,
+        const void             *model_map,
+        uint64_t                model_size,
+        uint64_t                out_a_offset,
+        uint64_t                out_b_offset,
+        uint64_t                group_dim,
+        uint64_t                rank,
+        uint32_t                n_groups_total,
+        uint32_t                group0,
+        uint32_t                group_cnt,
+        uint64_t                out_dim,
+        const ds4_gpu_tensor *heads);
+
 /* =========================================================================
  * Embeddings and Indexer Helpers.
  * =========================================================================
@@ -871,6 +941,7 @@ int ds4_gpu_routed_moe_one_tensor(
         uint32_t                n_expert,
         float                   clamp,
         const ds4_gpu_tensor *x,
+        const ds4_gpu_tensor *add_in,
         uint32_t                layer_index);
 
 int ds4_gpu_routed_moe_batch_tensor(
@@ -987,6 +1058,16 @@ int ds4_gpu_hc_expand_tensor(
         const ds4_gpu_tensor *comb,
         uint32_t                n_embd,
         uint32_t                n_hc);
+int ds4_gpu_hc_expand_add_tensor(
+        ds4_gpu_tensor       *out_hc,
+        const ds4_gpu_tensor *block_out,
+        const ds4_gpu_tensor *block_add,
+        const ds4_gpu_tensor *residual_hc,
+        const ds4_gpu_tensor *post,
+        const ds4_gpu_tensor *comb,
+        uint32_t                n_embd,
+        uint32_t                n_hc);
+
 
 int ds4_gpu_hc_expand_split_tensor(
         ds4_gpu_tensor       *out_hc,

@@ -317,6 +317,15 @@ struct ds4_metal_args_mul_mv_id {
     int32_t  ne1;
     uint64_t nb1;
     int32_t  nr0;
+    /* Tensor-parallel expert ownership: when tp_world > 1, routed-MoE
+     * kernels skip experts whose (id % tp_world) != tp_rank so this rank
+     * never touches their weights.  Zero-initialized (tp_world 0) means
+     * no split; only the routed id kernels read these. */
+    int32_t  tp_rank;
+    int32_t  tp_world;
+    /* When set, the sum6 kernels add this per-row vector (the shared-expert
+     * partial) into their accumulation, folding the TP local-add. */
+    int32_t  tp_addend;
 };
 
 struct ds4_metal_moe_expert_group_args {
@@ -1042,6 +1051,7 @@ kernel void kernel_mul_mv_id_iq2_xxs_pair_swiglu_f32(
     tgpig.z = 0;
 
     const int32_t i02 = ((device const int32_t *) (ids + iid1 * args.nbi1))[idx];
+    if (args.tp_world > 1 && (i02 % args.tp_world) != args.tp_rank) return;
     const int64_t i11 = idx % args.ne11;
     const int64_t i12 = iid1;
 
@@ -1560,6 +1570,7 @@ kernel void kernel_mul_mv_id_q4_K_pair_swiglu_f32(
     tgpig.z = 0;
 
     const int32_t i02 = ((device const int32_t *)(ids + iid1 * args.nbi1))[idx];
+    if (args.tp_world > 1 && (i02 % args.tp_world) != args.tp_rank) return;
     const int64_t i11 = idx % args.ne11;
     const int64_t i12 = iid1;
 
@@ -2602,6 +2613,7 @@ kernel void kernel_mul_mv_id_q2_K_sum6_f32(
         device const char * src1,
         device       char * dst,
         device const char * ids,
+        device const char * add_in,
         threadgroup  char * shmem [[threadgroup(0)]],
         uint3  tgpig[[threadgroup_position_in_grid]],
         ushort tiitg[[thread_index_in_threadgroup]],
@@ -2625,6 +2637,7 @@ kernel void kernel_mul_mv_id_q2_K_sum6_f32(
 
     for (int expert_slot = 0; expert_slot < 6; expert_slot++) {
         const int32_t expert = token_ids[expert_slot];
+        if (args.tp_world > 1 && (expert % args.tp_world) != args.tp_rank) continue;
         device const block_q2_K * x = (device const block_q2_K *)(src0s + expert*args.nb02 + first_row*args.nb01);
         device const float * y = (device const float *)(token_src1 + expert_slot*args.nb11);
         device const float * y4 = y + ix * QK_K + 128 * iq + 8 * ir;
@@ -2679,7 +2692,13 @@ kernel void kernel_mul_mv_id_q2_K_sum6_f32(
     device float * dst_f32 = (device float *)(dst + (uint64_t)token * args.nb1);
     for (int row = 0; row < nr0 && first_row + row < args.ne0; row++) {
         const float sum_all = simd_sum(sumf[row]);
-        if (tiisg == 0) dst_f32[first_row + row] = sum_all;
+        if (tiisg == 0) {
+            float outv = sum_all;
+            if (args.tp_addend) {
+                outv += ((device const float *) add_in)[first_row + row];
+            }
+            dst_f32[first_row + row] = outv;
+        }
     }
 
     (void)shmem;
@@ -3006,6 +3025,7 @@ kernel void kernel_mul_mv_id_q4_K_sum6_f32(
         device const char * src1,
         device       char * dst,
         device const char * ids,
+        device const char * add_in,
         threadgroup  char * shmem [[threadgroup(0)]],
         uint3  tgpig[[threadgroup_position_in_grid]],
         ushort tiitg[[thread_index_in_threadgroup]],
@@ -3034,6 +3054,7 @@ kernel void kernel_mul_mv_id_q4_K_sum6_f32(
 
     for (int expert_slot = 0; expert_slot < 6; expert_slot++) {
         const int32_t expert = token_ids[expert_slot];
+        if (args.tp_world > 1 && (expert % args.tp_world) != args.tp_rank) continue;
         device const block_q4_K *x =
             (device const block_q4_K *)(src0s + expert * args.nb02 + first_row * args.nb01);
         device const float *y = (device const float *)(token_src1 + expert_slot * args.nb11);
@@ -3098,7 +3119,13 @@ kernel void kernel_mul_mv_id_q4_K_sum6_f32(
     device float *dst_f32 = (device float *)(dst + (uint64_t)token * args.nb1);
     for (int row = 0; row < nr0 && first_row + row < args.ne0; row++) {
         const float sum_all = simd_sum(sumf[row]);
-        if (tiisg == 0) dst_f32[first_row + row] = sum_all;
+        if (tiisg == 0) {
+            float outv = sum_all;
+            if (args.tp_addend) {
+                outv += ((device const float *) add_in)[first_row + row];
+            }
+            dst_f32[first_row + row] = outv;
+        }
     }
 
     (void)shmem;
