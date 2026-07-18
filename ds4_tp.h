@@ -101,6 +101,8 @@ void ds4_tp_free(ds4_tp *tp);
 int ds4_tp_rank(const ds4_tp *tp);
 bool ds4_tp_is_rdma(const ds4_tp *tp);
 uint32_t ds4_tp_peer_ctx(const ds4_tp *tp);
+bool ds4_tp_failed(const ds4_tp *tp);
+void ds4_tp_mark_failed(ds4_tp *tp);
 
 /* Gate slab.  The engine allocates one shared GPU-visible block and hands
  * its base VA here; ds4_tp registers it with the NIC (RDMA) and exchanges

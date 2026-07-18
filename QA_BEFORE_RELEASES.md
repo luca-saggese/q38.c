@@ -247,6 +247,11 @@ substitute for this matrix.
   `--cuda-tensor-parallel` option. Multi-tier GLM prefill must
   report progress through the tier-switching token-major path, and decode,
   cache updates, and output-head/logit assembly must complete without CPU spill.
+  Auto-placement must reserve each layer's compact DSA/indexer cache and the
+  graph workspace before loading weights; a late graph-allocation failure is a
+  release blocker. Confirm the long-context layout stays within every device's
+  budget and uses additional tiers when the cache no longer fits on the earlier
+  ones.
   The long-context harness can select this backend with
   `DS4_GLM_BACKEND=cuda` and pass placement flags through
   `DS4_GLM_EXTRA_ARGS="--gpu-vram auto --gpu-devices 0,2,4,6,1,3,5,7"`.
@@ -339,6 +344,17 @@ a substitute for CUDA or Metal release testing.
   `./ds4 -m gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf --ctx 4096 --nothink -p "Reply with exactly: OK"`.
 - Run one longer prompt if ROCm kernels, backend hooks, tensor loading, model
   cache, KV cache, or graph prefill code changed.
+- Run the GLM Q2 release model through ROCm SSD streaming with at least four
+  generated tokens:
+  `./ds4 --rocm -m gguf/GLM-5.2-UD-Q2_K_RoutedQ2K.gguf --ssd-streaming --ctx 4096 --nothink --tokens 4 -p "Reply with exactly: OK"`.
+  Startup must select a cache budget that passes the memory guard without an
+  override, and both compact indexed prefill and decode must complete.
+- Run one longer GLM prompt with the release-advertised Strix context after
+  changes to GLM attention, typed quantized projections, streaming expert
+  caches, or memory budgeting. Record the context, cache split, and whether
+  the continuation stays free of token-corruption markers.
+- Run the same GLM model with `--glm-mtp-timing --temp 0`. At least one draft
+  verification cycle must complete without a `glm mtp step failed` message.
 - Record startup memory/cache messages, prefill speed, generation speed, and
   whether the backend reports `ROCm backend initialized`.
 

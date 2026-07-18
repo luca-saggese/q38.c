@@ -34,6 +34,27 @@ extern "C" int ds4_gpu_pack_slot_rows_f32_tensor(
     return cuda_ok(cudaGetLastError(), "pack_slot_rows_f32 launch");
 }
 
+extern "C" int ds4_gpu_add3_tensor(
+        ds4_gpu_tensor       *out,
+        const ds4_gpu_tensor *a,
+        const ds4_gpu_tensor *b,
+        const ds4_gpu_tensor *c,
+        uint32_t              n) {
+    if (!cuda_tensor_has_f32(out, n) ||
+        !cuda_tensor_has_f32(a, n) ||
+        !cuda_tensor_has_f32(b, n) ||
+        !cuda_tensor_has_f32(c, n)) {
+        return 0;
+    }
+    if (n == 0u) return 1;
+    add3_kernel<<<(n + 255) / 256, 256>>>((float *)out->ptr,
+                                          (const float *)a->ptr,
+                                          (const float *)b->ptr,
+                                          (const float *)c->ptr,
+                                          n);
+    return cuda_ok(cudaGetLastError(), "add3 launch");
+}
+
 extern "C" int ds4_gpu_directional_steering_project_tensor(
         ds4_gpu_tensor       *x,
         const ds4_gpu_tensor *directions,

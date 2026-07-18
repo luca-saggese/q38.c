@@ -177,6 +177,7 @@ struct ds4_tp {
     uint64_t batch_out_off;     /* [layer][row] verify-block local partials */
     uint64_t batch_in_off;      /* [layer][row] verify-block peer partials */
     uint64_t timeout_sec;
+    atomic_bool failed;
 #ifdef DS4_TP_HAVE_VERBS
     ds4_tp_rdma rdma;
 #endif
@@ -246,6 +247,20 @@ static void tp_socket_tune(int fd) {
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof(sz));
     setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sz, sizeof(sz));
 }
+
+#ifdef DS4_TP_HAVE_VERBS
+/* UC queue pairs do not report a dead remote reliably.  The control socket
+ * does, so sample it while polling an RDMA completion and abort before the
+ * Metal command-buffer watchdog fires. */
+static int tp_peer_closed(const ds4_tp *tp) {
+    char byte;
+    const ssize_t n = recv(tp->control_fd, &byte, 1,
+                           MSG_PEEK | MSG_DONTWAIT);
+    if (n == 0) return 1;
+    if (n > 0) return 0;
+    return errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR;
+}
+#endif
 
 static int tp_listen(const char *host, int port, char *err, size_t errlen) {
     char portbuf[16];
@@ -935,8 +950,13 @@ static int tp_rdma_gate_exchange(ds4_tp *tp, uint32_t layer, uint32_t gate, uint
     }
 
     double deadline = 0.0;
+    uint32_t peer_poll = 0;
     while (ok && r->recv_done < seq) {
         ok = tp_rdma_drain_cq(tp);
+        if (ok && (peer_poll++ & 0x3fffu) == 0 && tp_peer_closed(tp)) {
+            fprintf(stderr, "ds4-tp: peer disconnected during RDMA gate\n");
+            ok = 0;
+        }
         if (deadline == 0.0) deadline = tp_now_sec() + (double)tp->timeout_sec;
         else if (tp_now_sec() > deadline) {
             fprintf(stderr, "ds4-tp: timeout waiting gate seq %llu (recv_done %llu)\n",
@@ -1007,6 +1027,7 @@ static int tp_rdma_drain_decode_window(ds4_tp *tp) {
     uint32_t recv_done = 0;
     int send_done = 0;
     const double deadline = tp_now_sec() + (double)tp->timeout_sec;
+    uint32_t peer_poll = 0;
     while (recv_done < nwr || !send_done) {
         struct ibv_wc wc[DS4_TP_RDMA_RECV_WINDOW * 2u + 1u];
         int n = ibv_poll_cq(r->cq,
@@ -1029,6 +1050,12 @@ static int tp_rdma_drain_decode_window(ds4_tp *tp) {
             } else if (r->send_outstanding > 0) {
                 r->send_outstanding--;
             }
+        }
+        if ((peer_poll++ & 0x3fffu) == 0 && tp_peer_closed(tp)) {
+            fprintf(stderr,
+                    "ds4-tp: peer disconnected while draining RDMA receives\n");
+            pthread_mutex_unlock(&r->post_lock);
+            return 0;
         }
         if (tp_now_sec() > deadline) {
             fprintf(stderr,
@@ -1141,6 +1168,7 @@ static int tp_rdma_big_gate_exchange(ds4_tp *tp,
         uint32_t recv_done = 0;
         int send_done = 0;
         const double deadline = tp_now_sec() + (double)tp->timeout_sec;
+        uint32_t peer_poll = 0;
         while (recv_done < chunks || !send_done) {
             struct ibv_wc wc[DS4_TP_RDMA_BULK_SLOTS + 1u];
             int n = ibv_poll_cq(r->cq,
@@ -1166,6 +1194,11 @@ static int tp_rdma_big_gate_exchange(ds4_tp *tp,
                 }
                 if (wc[i].opcode & IBV_WC_RECV) recv_done++;
                 else send_done = 1;
+            }
+            if ((peer_poll++ & 0x3fffu) == 0 && tp_peer_closed(tp)) {
+                fprintf(stderr,
+                        "ds4-tp: peer disconnected during bulk RDMA gate\n");
+                return 0;
             }
             if (tp_now_sec() > deadline) {
                 fprintf(stderr,
@@ -1381,6 +1414,12 @@ void ds4_tp_free(ds4_tp *tp) {
 int ds4_tp_rank(const ds4_tp *tp) { return tp->rank; }
 bool ds4_tp_is_rdma(const ds4_tp *tp) { return tp->rdma_active; }
 uint32_t ds4_tp_peer_ctx(const ds4_tp *tp) { return tp->peer_ctx; }
+bool ds4_tp_failed(const ds4_tp *tp) {
+    return tp && atomic_load_explicit(&tp->failed, memory_order_acquire);
+}
+void ds4_tp_mark_failed(ds4_tp *tp) {
+    if (tp) atomic_store_explicit(&tp->failed, true, memory_order_release);
+}
 
 /* ------------------------------------------------------------------------
  * Gate exchange.
@@ -1692,6 +1731,7 @@ int ds4_tp_wait_command_ack(ds4_tp *tp, uint64_t session_id,
     if (!tp_read_frame_header(tp->control_fd, &type, &bytes) ||
         type != DS4_TP_FRAME_COMMAND_ACK || bytes != sizeof(ack) ||
         !tp_read_full(tp->control_fd, &ack, sizeof(ack))) {
+        ds4_tp_mark_failed(tp);
         tp_set_err(err, errlen, "tp: worker failed during %s",
                    operation ? operation : "command");
         return 0;

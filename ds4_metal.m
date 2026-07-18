@@ -32696,7 +32696,9 @@ int ds4_gpu_glm_routed_moe_batch_tensor(
         uint32_t                layer_index,
         const ds4_gpu_tensor *x,
         uint32_t                n_tokens,
-        uint32_t                mid_token_stride) {
+        uint32_t                mid_token_stride,
+        bool                    force_resident) {
+    (void)force_resident;
     return ds4_gpu_glm_routed_moe_batch_tensor_impl(out,
                                                     mid,
                                                     model_map,
@@ -35433,7 +35435,9 @@ int ds4_gpu_routed_moe_batch_tensor(
         const ds4_gpu_tensor *x,
         uint32_t                layer_index,
         uint32_t                n_tokens,
-        bool                   *mid_is_f16) {
+        bool                   *mid_is_f16,
+        bool                    force_resident) {
+    (void)force_resident;
     if (!g_initialized && !ds4_gpu_init()) return 0;
     /* TP sharding (see ds4_gpu_routed_moe_one_tensor): bind from the owned
      * expert range and rebase ids in the kernels. */

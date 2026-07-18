@@ -2128,7 +2128,8 @@ int ds4_gpu_glm_routed_moe_batch_tensor(
         uint32_t                layer_index,
         const ds4_gpu_tensor *x,
         uint32_t                n_tokens,
-        uint32_t                mid_token_stride);
+        uint32_t                mid_token_stride,
+        bool                    force_resident);
 
 int ds4_gpu_glm_routed_moe_batch_direct_scalar_q4_tensor(
         ds4_gpu_tensor       *out,
@@ -2326,7 +2327,8 @@ int ds4_gpu_routed_moe_batch_tensor(
         const ds4_gpu_tensor *x,
         uint32_t                layer_index,
         uint32_t                n_tokens,
-        bool                   *mid_is_f16);
+        bool                   *mid_is_f16,
+        bool                    force_resident);
 
 /* =========================================================================
  * Hyper-Connection Kernels.

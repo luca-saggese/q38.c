@@ -12,7 +12,8 @@
  *     transition without CPU spill. multi_tier == 1, monotonic, both
  *     tiers used.
  *  4. CPU-spill placement: 2 GPUs with tiny budgets so some layers
- *     spill. multi_tier == 1 and at least one DS4_LAYER_PACK_CPU entry. */
+ *     spill. multi_tier == 1 and at least one DS4_LAYER_PACK_CPU entry.
+ *  5. GLM compact-cache accounting: ordinary, indexed, and NextN layers. */
 
 #define DS4_TEST_HOOKS
 #include "../ds4.h"
@@ -61,6 +62,7 @@ size_t ds4_test_per_tier_graph_overhead_bytes(int placement_ctx_hint);
 size_t ds4_test_compute_entry_bytes_sum(const ds4_test_fake_tensor *tensors,
                                          int n_tensors,
                                          int placement_ctx_hint);
+size_t ds4_test_glm_per_layer_kv_bytes(uint32_t layer, int ctx_size);
 
 /* DS4_N_LAYER constant is private to ds4.c; for the test we use
  * the same value. (The packer header doesn't expose it.) */
@@ -464,6 +466,27 @@ static void test_no_per_layer_scratch_double_count(void) {
     ds4_test_clear_compress_ratios();
 }
 
+static void test_glm_per_layer_cache_accounting(void) {
+    fprintf(stderr, "RUN: test_glm_per_layer_cache_accounting\n");
+    const uint64_t ctx = 100000u;
+#if defined(__APPLE__)
+    const uint64_t elem_bytes = sizeof(uint16_t);
+#else
+    const uint64_t elem_bytes = sizeof(float);
+#endif
+    const size_t base =
+        (size_t)(ctx * (512u + 64u) * elem_bytes);
+    const size_t indexed =
+        (size_t)(ctx * (512u + 64u + 128u) * elem_bytes);
+
+    CHECK(ds4_test_glm_per_layer_kv_bytes(4, (int)ctx) == base,
+          "GLM normal layer includes compact KV and RoPE cache");
+    CHECK(ds4_test_glm_per_layer_kv_bytes(6, (int)ctx) == indexed,
+          "GLM indexed layer also includes compact indexer cache");
+    CHECK(ds4_test_glm_per_layer_kv_bytes(78, (int)ctx) == 0,
+          "GLM NextN layer has no generation cache");
+}
+
 static char *save_env_value(const char *name) {
     const char *v = getenv(name);
     if (!v) return NULL;
@@ -562,6 +585,7 @@ int main(void) {
     test_placement_ctx_hint_scales();
     test_pertier_overhead_pushes_to_spill();
     test_no_per_layer_scratch_double_count();
+    test_glm_per_layer_cache_accounting();
     test_cuda_tp_output_head_moves_to_lower_half();
 
     fprintf(stderr, "\ntest_engine_mgpu_placement: %d/%d checks passed (%d failed)\n",

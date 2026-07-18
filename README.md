@@ -164,7 +164,7 @@ and timing counters:
   --glm-mtp-timing --temp 0
 ```
 
-GLM inference uses the Metal or CUDA graph backend. Directional steering,
+GLM inference uses the Metal, CUDA, or ROCm graph backend. Directional steering,
 `--power` below 100, an explicit `--prefill-chunk`, and the external `--mtp`
 file are not supported for GLM yet.
 
@@ -174,6 +174,7 @@ Then build:
 make                  # macOS Metal
 make cuda-spark       # Linux CUDA, DGX Spark / GB10
 make cuda-generic     # Linux CUDA, other local CUDA GPUs
+make strix-halo       # Linux ROCm, AMD Strix Halo
 make cpu              # CPU-only diagnostics build
 ```
 
@@ -258,8 +259,8 @@ Q4 requires the larger-memory machine class, so M3 Max Q4 numbers are `N/A`.
 
 The normal Metal path tries to make the model resident in GPU-addressable
 memory. This is the fastest path and should remain your default when the model
-fits. When it does not fit, DwarfStar also has a Metal-only **SSD streaming**
-capacity mode. In this mode the non-routed model weights stay resident, while
+fits. DwarfStar also has an **SSD streaming** capacity mode on Metal and for
+GLM 5.2 on ROCm. In this mode the non-routed model weights stay resident, while
 routed MoE experts are kept in an in-memory cache and loaded from the GGUF file
 on cache misses.
 
@@ -287,12 +288,12 @@ The `32GB` value is a routed-expert memory budget, not a generic byte cache.
 DwarfStar first reserves headroom for the two full routed layers used by
 overlapped streaming prefill, then converts the remaining bytes to the number of
 dynamic cached experts that fit for the current GGUF. Explicit `NGB` budgets may
-also be capped after context/KV accounting so the Metal working set stays out of
+also be capped after context/KV accounting so the backend working set stays out of
 the slow pressure zone. A plain number such as
 `--ssd-streaming-cache-experts 4000` is different: it means exactly 4000 dynamic
 expert slots, with no extra accounting. Non-routed weights, KV cache, graph
 scratch, and activations need additional memory. The automatic cache budget takes
-80% of the Metal recommended working set, subtracts non-routed weights, then
+80% of the backend's recommended working set, subtracts non-routed weights, then
 applies the same routed-prefill headroom before sizing the dynamic cache. Leave
 the hot expert preload enabled for normal use; use `--ssd-streaming-cold` and
 `--ssd-streaming-preload-experts N` only for measurements.
@@ -355,6 +356,17 @@ cache. Start with the automatic budget:
 
 The important startup line is the cache report. Start conservative, then
 increase the cache if the machine has headroom.
+
+On a 128GB Strix Halo, use the routed Q2_K model and a 4096-token context as the
+starting point. The automatic cache budget leaves room for the GLM graph and KV
+state:
+
+```sh
+./download_model.sh glm-antirez-q2
+make strix-halo
+./ds4 --rocm -m gguf/GLM-5.2-UD-Q2_K_RoutedQ2K.gguf \
+  --ssd-streaming --ctx 4096
+```
 
 ## Distributed inference with pipeline parallelism
 
