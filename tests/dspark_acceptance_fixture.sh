@@ -8,6 +8,7 @@ TOKENS=${DS4_DSPARK_FIXTURE_TOKENS:-32}
 REQUIRE_PARTIAL=${DS4_DSPARK_FIXTURE_REQUIRE_PARTIAL:-0}
 PROPOSAL_QUALITY_GUARD=${DS4_DSPARK_FIXTURE_REQUIRE_PROPOSAL_QUALITY:-auto}
 C_ADD_MIN_ACCEPTED=${DS4_DSPARK_FIXTURE_C_ADD_MIN_ACCEPTED:-8}
+CONFIDENCE=${DS4_DSPARK_FIXTURE_CONFIDENCE:-}
 partial_cases=0
 
 proposal_quality_guard_enabled() {
@@ -20,7 +21,7 @@ proposal_quality_guard_enabled() {
         ;;
     auto|"")
         [ "$REQUIRE_PARTIAL" = 0 ] || return 1
-        [ "${DS4_DSPARK_CONFIDENCE_THRESHOLD+x}" != x ] || return 1
+        [ -z "$CONFIDENCE" ] || return 1
         [ "$TOKENS" -ge 32 ] 2>/dev/null || return 1
         return 0
         ;;
@@ -74,7 +75,7 @@ print_metadata() {
     hw_os=$(uname -sm 2>/dev/null || echo unknown)
     hw_model=$(sysctl -n hw.model 2>/dev/null || true)
     hw_cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)
-    confidence=${DS4_DSPARK_CONFIDENCE_THRESHOLD:-default}
+    confidence=${CONFIDENCE:-default}
     scheduler=${DS4_DSPARK_SCHEDULER:-default}
     no_draft_skip=${DS4_DSPARK_SCHEDULER_NO_DRAFT_SKIP:-default}
     short_accept_skip=${DS4_DSPARK_SCHEDULER_SHORT_ACCEPT_NO_DRAFT_SKIP:-default}
@@ -95,8 +96,9 @@ print_metadata() {
         "$PROPOSAL_QUALITY_GUARD_ACTIVE" "$C_ADD_MIN_ACCEPTED"
     printf '# baseline_command=%s -m %s --tokens %s --temp 0 --nothink -p <fixture-prompt>\n' \
         "$DS4_BIN" "$MODEL" "$TOKENS"
-    printf '# dspark_command=DS4_DSPARK_ENABLE=1 DS4_DSPARK_STATS=1 %s -m %s --mtp %s --tokens %s --temp 0 --nothink -p <fixture-prompt>\n' \
-        "$DS4_BIN" "$MODEL" "$SUPPORT" "$TOKENS"
+    printf '# dspark_command=DS4_DSPARK_STATS=1 %s --dspark%s -m %s --mtp %s --tokens %s --temp 0 --nothink -p <fixture-prompt>\n' \
+        "$DS4_BIN" "${CONFIDENCE:+ --dspark-confidence $CONFIDENCE}" \
+        "$MODEL" "$SUPPORT" "$TOKENS"
 }
 
 if [ ! -x "$DS4_BIN" ]; then
@@ -127,17 +129,15 @@ run_case() {
         --tokens "$TOKENS" --temp 0 --nothink -p "$prompt" \
         >"$base_out" 2>"$base_err"
 
-    if [ "${DS4_DSPARK_CONFIDENCE_THRESHOLD+x}" = x ]; then
-        DS4_DSPARK_ENABLE=1 \
+    if [ -n "$CONFIDENCE" ]; then
         DS4_DSPARK_STATS=1 \
-        DS4_DSPARK_CONFIDENCE_THRESHOLD="$DS4_DSPARK_CONFIDENCE_THRESHOLD" \
-        "$DS4_BIN" -m "$MODEL" --mtp "$SUPPORT" \
+        "$DS4_BIN" --dspark --dspark-confidence "$CONFIDENCE" \
+            -m "$MODEL" --mtp "$SUPPORT" \
             --tokens "$TOKENS" --temp 0 --nothink -p "$prompt" \
             >"$dspark_out" 2>"$dspark_err"
     else
-        DS4_DSPARK_ENABLE=1 \
         DS4_DSPARK_STATS=1 \
-        "$DS4_BIN" -m "$MODEL" --mtp "$SUPPORT" \
+        "$DS4_BIN" --dspark -m "$MODEL" --mtp "$SUPPORT" \
             --tokens "$TOKENS" --temp 0 --nothink -p "$prompt" \
             >"$dspark_out" 2>"$dspark_err"
     fi

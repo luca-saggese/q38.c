@@ -2300,6 +2300,9 @@ static ds4_engine *test_open_dspark_engine(const char *support_path) {
             test_env_u32("DS4_TEST_SSD_STREAMING_PRELOAD_EXPERTS"),
         .mtp_path = support_path,
         .mtp_draft_tokens = 0,
+        .dspark = true,
+        .dspark_confidence_threshold = 0.9f,
+        .dspark_confidence_threshold_set = true,
     };
     const int rc = ds4_engine_open(&engine, &opt);
     TEST_ASSERT(rc == 0);
@@ -2360,14 +2363,8 @@ static void test_dspark_verify_depth(void) {
         return;
     }
 
-    char *saved_enable = test_save_env("DS4_DSPARK_ENABLE");
-    char *saved_strict = test_save_env("DS4_DSPARK_STRICT");
     char *saved_scheduler = test_save_env("DS4_DSPARK_SCHEDULER");
-    char *saved_confidence = test_save_env("DS4_DSPARK_CONFIDENCE_THRESHOLD");
-    setenv("DS4_DSPARK_ENABLE", "1", 1);
-    setenv("DS4_DSPARK_STRICT", "0", 1);
     setenv("DS4_DSPARK_SCHEDULER", "0", 1);
-    setenv("DS4_DSPARK_CONFIDENCE_THRESHOLD", "0.9", 1);
 
     ds4_engine *engine = test_open_dspark_engine(support);
     ds4_tokens prompt = {0};
@@ -2411,10 +2408,7 @@ static void test_dspark_verify_depth(void) {
     free(spec);
     ds4_tokens_free(&prompt);
     ds4_engine_close(engine);
-    test_restore_env("DS4_DSPARK_CONFIDENCE_THRESHOLD", saved_confidence);
     test_restore_env("DS4_DSPARK_SCHEDULER", saved_scheduler);
-    test_restore_env("DS4_DSPARK_STRICT", saved_strict);
-    test_restore_env("DS4_DSPARK_ENABLE", saved_enable);
 }
 #endif
 

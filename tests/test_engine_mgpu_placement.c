@@ -47,6 +47,14 @@ int ds4_test_classify_multi_tier_with_ctx(const ds4_test_fake_tensor *tensors,
                                            int placement_out[],
                                            int *out_multi_tier,
                                            int *out_n_entries);
+int ds4_test_classify_multi_tier_with_ctx_cuda_tp(
+                                           const ds4_test_fake_tensor *tensors,
+                                           int n_tensors,
+                                           const ds4_gpu_config *cfg,
+                                           int placement_ctx_hint,
+                                           int placement_out[],
+                                           int *out_multi_tier,
+                                           int *out_n_entries);
 void   ds4_test_seed_compress_ratios(void);
 void   ds4_test_clear_compress_ratios(void);
 size_t ds4_test_per_tier_graph_overhead_bytes(int placement_ctx_hint);
@@ -57,6 +65,7 @@ size_t ds4_test_compute_entry_bytes_sum(const ds4_test_fake_tensor *tensors,
 /* DS4_N_LAYER constant is private to ds4.c; for the test we use
  * the same value. (The packer header doesn't expose it.) */
 #define DS4_N_LAYER_LOCAL 43
+#define DS4_N_VOCAB_LOCAL 129280
 #define DS4_N_ENTRIES (DS4_N_LAYER_LOCAL + 2)
 
 static int g_failures = 0;
@@ -485,7 +494,7 @@ static int build_output_tp_head_move_model(ds4_test_fake_tensor *out, int cap) {
     n++;
 
     for (int il = 0; il < DS4_N_LAYER_LOCAL; il++) {
-        snprintf(names[n], sizeof(names[n]), "blk.%d.synthetic.weight", il);
+        snprintf(names[n], sizeof(names[n]), "blk.%d.ffn_gate_exps.weight", il);
         out[n].name = names[n];
         out[n].bytes = 3550ull * mib;
         n++;
@@ -493,7 +502,7 @@ static int build_output_tp_head_move_model(ds4_test_fake_tensor *out, int cap) {
 
     snprintf(names[n], sizeof(names[n]), "output.weight");
     out[n].name = names[n];
-    out[n].bytes = 1536ull * mib;
+    out[n].bytes = ((1536ull * mib) / DS4_N_VOCAB_LOCAL) * DS4_N_VOCAB_LOCAL;
     n++;
     return n;
 }
@@ -506,10 +515,8 @@ static void test_cuda_tp_output_head_moves_to_lower_half(void) {
     CHECK(n > 0, "output-head synthetic model built");
     if (n <= 0) return;
 
-    char *old_tp = save_env_value("DS4_CUDA_TP_DECODE");
     char *old_pipe = save_env_value("DS4_CUDA_PREFILL_PIPELINE");
     char *old_chunk = save_env_value("DS4_METAL_PREFILL_CHUNK");
-    setenv("DS4_CUDA_TP_DECODE", "1", 1);
     unsetenv("DS4_CUDA_PREFILL_PIPELINE");
     unsetenv("DS4_METAL_PREFILL_CHUNK");
 
@@ -525,13 +532,13 @@ static void test_cuda_tp_output_head_moves_to_lower_half(void) {
     int placement[DS4_N_ENTRIES] = {0};
     int multi_tier = 0;
     int n_entries = 0;
-    int rc = ds4_test_classify_multi_tier_with_ctx(tensors,
-                                                   n,
-                                                   &cfg,
-                                                   4096,
-                                                   placement,
-                                                   &multi_tier,
-                                                   &n_entries);
+    int rc = ds4_test_classify_multi_tier_with_ctx_cuda_tp(tensors,
+                                                           n,
+                                                           &cfg,
+                                                           4096,
+                                                           placement,
+                                                           &multi_tier,
+                                                           &n_entries);
     CHECK(rc == 0, "CUDA TP output-head classify succeeds");
     CHECK(multi_tier == 1, "CUDA TP output-head model is multi-tier");
     CHECK(n_entries == DS4_N_ENTRIES, "CUDA TP output-head n_entries");
@@ -542,7 +549,6 @@ static void test_cuda_tp_output_head_moves_to_lower_half(void) {
           placement[DS4_N_LAYER_LOCAL + 1] < cfg.n_gpus / 2,
           "output head moved to a lower-half tier for output TP");
 
-    restore_env_value("DS4_CUDA_TP_DECODE", old_tp);
     restore_env_value("DS4_CUDA_PREFILL_PIPELINE", old_pipe);
     restore_env_value("DS4_METAL_PREFILL_CHUNK", old_chunk);
 }

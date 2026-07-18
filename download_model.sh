@@ -1,12 +1,9 @@
 #!/bin/sh
 set -e
 
-REPO="antirez/deepseek-v4-gguf"
-DSPARK_REPO="deepseek-ai/DeepSeek-V4-Flash-DSpark"
-DEEPSEEK_REPO="antirez/deepseek-v4-gguf"
 GLM_UNSLOTH_REPO="unsloth/GLM-5.2-GGUF"
 GLM_ANTIREZ_REPO="antirez/GLM-5.2-GGUF"
-REPO=$DEEPSEEK_REPO
+REPO="antirez/deepseek-v4-gguf"
 Q2_IMATRIX_FILE="DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf"
 Q4_IMATRIX_FILE="DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix.gguf"
 Q2_Q4_IMATRIX_FILE="DeepSeek-V4-Flash-Layers37-42Q4KExperts-OtherExpertLayersIQ2XXSGateUp-Q2KDown-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-fixed.gguf"
@@ -28,11 +25,6 @@ case "$OUT_DIR" in
     /*) ;;
     *) OUT_DIR="$ROOT/$OUT_DIR" ;;
 esac
-DSPARK_HF_DIR=${DS4_DSPARK_HF_DIR:-"$ROOT/../deepseek-v4-quants/hf/DeepSeek-V4-Flash-DSpark"}
-case "$DSPARK_HF_DIR" in
-    /*) ;;
-    *) DSPARK_HF_DIR="$ROOT/$DSPARK_HF_DIR" ;;
-esac
 TOKEN=${HF_TOKEN:-}
 
 usage() {
@@ -48,9 +40,7 @@ Usage:
   ./download_model.sh pro-q4-layers31-output [--token TOKEN]
   ./download_model.sh pro-q4-split [--token TOKEN]
   ./download_model.sh mtp [--token TOKEN]
-  ./download_model.sh dspark-source [--token TOKEN]
-  ./download_model.sh dspark-support-dry-run
-  ./download_model.sh dspark-support
+  ./download_model.sh dspark-support [--token TOKEN]
   ./download_model.sh glm-unsloth-q4 [--token TOKEN]
   ./download_model.sh glm-antirez-iq2xxs [--token TOKEN]
   ./download_model.sh glm-antirez-q2 [--token TOKEN]
@@ -89,28 +79,14 @@ Targets:
        Downloads both PRO Q4 split files into the download directory. About
        838 GB total. This target does not update ./ds4flash.gguf.
 
-  pro  DeepSeek V4 PRO non-imatrix quant, as a single GGUF file. About 430 GB
-       on disk; intended for 512 GB RAM machines. Prefer pro-imatrix unless you
-       specifically need the legacy quant.
-
   mtp  Optional speculative decoding component, about 3.5 GB on disk.
        It is useful with q2-imatrix, q2-q4-imatrix, and q4-imatrix, but must be
        enabled explicitly with --mtp when running ds4 or ds4-server.
 
-  dspark-source
-       Official DeepSeek V4 Flash DSpark safetensors source checkpoint.
-       Downloads into DS4_DSPARK_HF_DIR. About 167 GB. Requires the Hugging
-       Face CLI and hf_xet for resumable Xet-backed downloads.
-
-  dspark-support-dry-run
-       Validates the local DSpark source or header-only checkout and prints the
-       planned standalone support GGUF shape/type summary. Does not read tensor
-       payload bytes.
-
   dspark-support
-       Converts the local DSpark source checkpoint into a standalone support
-       GGUF for ds4 --mtp. Output is written under DS4_GGUF_DIR and is about
-       6 GB. Requires the full DSpark source payloads.
+       Optional DSpark speculative decoding support GGUF, about 6 GB. Enable it
+       with --dspark and --mtp when running ds4 or ds4-server.
+
   glm-unsloth-q4
        GLM 5.2 Unsloth UD-Q4_K_XL quant from unsloth/GLM-5.2-GGUF.
        Downloads all 11 shards and links ./ds4flash.gguf to the first shard.
@@ -134,9 +110,6 @@ Options:
 Environment:
   DS4_GGUF_DIR   Directory used for downloaded GGUF files.
                  Default: ./gguf
-  DS4_DSPARK_HF_DIR
-                 Directory used for the official DSpark safetensors source.
-                 Default: ../deepseek-v4-quants/hf/DeepSeek-V4-Flash-DSpark
 
 After main-model downloads the script updates:
   ./ds4flash.gguf -> <download directory>/<selected model>
@@ -148,11 +121,9 @@ Then the default commands work:
 After downloading mtp, enable it explicitly, for example:
   ./ds4 --mtp <download directory>/$MTP_FILE --mtp-draft 2
 
-After building DSpark support, enable it explicitly in greedy mode:
-  DS4_DSPARK_ENABLE=1 ./ds4 --mtp <download directory>/$DSPARK_SUPPORT_FILE --temp 0
+After downloading DSpark support, enable it explicitly in greedy mode:
+  ./ds4 --dspark --mtp <download directory>/$DSPARK_SUPPORT_FILE --temp 0
 
-PRO files are downloaded with the official Hugging Face downloader because
-they are too large for the curl path used by the smaller GGUF files.
 PRO and GLM files are downloaded with the official Hugging Face downloader
 because they are too large, sharded, or nested for the curl path used by the
 smaller DeepSeek Flash GGUF files.
@@ -168,9 +139,6 @@ MODEL=$1
 shift
 MODEL_FILES=
 LINK_MODEL=1
-DSPARK_SOURCE=0
-DSPARK_SUPPORT_DRY_RUN=0
-DSPARK_SUPPORT=0
 FORCE_HF_DOWNLOAD=0
 FLATTEN_DOWNLOADS=0
 
@@ -186,17 +154,7 @@ case "$MODEL" in
         LINK_MODEL=0
         ;;
     mtp) MODEL_FILE=$MTP_FILE; LINK_MODEL=0 ;;
-    dspark-source)
-        DSPARK_SOURCE=1
-        LINK_MODEL=0
-        ;;
-    dspark-support-dry-run)
-        DSPARK_SUPPORT_DRY_RUN=1
-        LINK_MODEL=0
-        ;;
-    dspark-support)
-        DSPARK_SUPPORT=1
-        LINK_MODEL=0
+    dspark-support) MODEL_FILE=$DSPARK_SUPPORT_FILE; LINK_MODEL=0 ;;
     glm-unsloth-q4)
         REPO=$GLM_UNSLOTH_REPO
         MODEL_FILE=$GLM_UNSLOTH_Q4_FIRST_FILE
@@ -309,7 +267,7 @@ download_one_hf() {
     if [ -e "$part" ]; then
         echo "Found curl partial download: $part" >&2
         echo "The Hugging Face downloader cannot resume curl .part files." >&2
-        echo "Move or remove that partial download before retrying this PRO target." >&2
+        echo "Move or remove that partial download before retrying this target." >&2
         exit 1
     fi
 
@@ -341,117 +299,6 @@ download_one_hf() {
         echo "Hugging Face download finished but expected file is missing: $out" >&2
         exit 1
     fi
-}
-
-download_hf_repo_file() {
-    repo=$1
-    file=$2
-    dir=$3
-    out="$dir/$file"
-
-    mkdir -p "$dir"
-
-    if [ -s "$out" ]; then
-        echo "Already downloaded: $out"
-        return
-    fi
-
-    HF_CMD=$(find_hf_command || true)
-    if [ -z "$HF_CMD" ]; then
-        echo "This download requires the official Hugging Face CLI." >&2
-        echo "Install it with:" >&2
-        echo "  python3 -m pip install -U huggingface_hub hf_xet" >&2
-        exit 1
-    fi
-
-    echo "Downloading $file"
-    echo "from https://huggingface.co/$repo"
-    echo "using $HF_CMD download"
-    echo "If the download stops, run the same command again to resume it."
-
-    if [ -n "$TOKEN" ]; then
-        "$HF_CMD" download "$repo" "$file" --repo-type model --local-dir "$dir" --token "$TOKEN"
-    else
-        "$HF_CMD" download "$repo" "$file" --repo-type model --local-dir "$dir"
-    fi
-
-    if [ ! -s "$out" ]; then
-        echo "Hugging Face download finished but expected file is missing: $out" >&2
-        exit 1
-    fi
-}
-
-download_dspark_source() {
-    echo "Downloading official DSpark source shards into $DSPARK_HF_DIR"
-    echo "This is about 167 GB and is resumable with the Hugging Face CLI."
-
-    for file in \
-        LICENSE \
-        README.md \
-        config.json \
-        generation_config.json \
-        model.safetensors.index.json
-    do
-        download_hf_repo_file "$DSPARK_REPO" "$file" "$DSPARK_HF_DIR"
-    done
-
-    i=1
-    while [ "$i" -le 48 ]; do
-        file=$(printf 'model-%05d-of-00048.safetensors' "$i")
-        download_hf_repo_file "$DSPARK_REPO" "$file" "$DSPARK_HF_DIR"
-        i=$((i + 1))
-    done
-
-    echo
-    echo "DSpark source download complete."
-    echo "Next:"
-    echo "  ./download_model.sh dspark-support-dry-run"
-    echo "  ./download_model.sh dspark-support"
-}
-
-run_dspark_support_dry_run() {
-    if [ ! -x "$ROOT/gguf-tools/deepseek4-quantize" ]; then
-        echo "Missing converter: $ROOT/gguf-tools/deepseek4-quantize" >&2
-        exit 1
-    fi
-    if [ ! -s "$DSPARK_HF_DIR/model.safetensors.index.json" ]; then
-        echo "Missing DSpark safetensors index in $DSPARK_HF_DIR" >&2
-        echo "Run ./download_model.sh dspark-source first, or set DS4_DSPARK_HF_DIR." >&2
-        exit 1
-    fi
-
-    "$ROOT/gguf-tools/deepseek4-quantize" \
-        --hf "$DSPARK_HF_DIR" \
-        --dspark-support \
-        --dry-run
-}
-
-build_dspark_support() {
-    out="$OUT_DIR/$DSPARK_SUPPORT_FILE"
-    if [ ! -x "$ROOT/gguf-tools/deepseek4-quantize" ]; then
-        echo "Missing converter: $ROOT/gguf-tools/deepseek4-quantize" >&2
-        exit 1
-    fi
-    if [ ! -s "$DSPARK_HF_DIR/model.safetensors.index.json" ]; then
-        echo "Missing DSpark safetensors index in $DSPARK_HF_DIR" >&2
-        echo "Run ./download_model.sh dspark-source first, or set DS4_DSPARK_HF_DIR." >&2
-        exit 1
-    fi
-    if [ -s "$out" ]; then
-        echo "Already built: $out"
-        return
-    fi
-
-    mkdir -p "$OUT_DIR"
-    "$ROOT/gguf-tools/deepseek4-quantize" \
-        --hf "$DSPARK_HF_DIR" \
-        --dspark-support \
-        --out "$out"
-
-    echo
-    echo "Built DSpark support GGUF: $out"
-    echo "Enable it explicitly in greedy mode, for example:"
-    echo "  DS4_DSPARK_ENABLE=1 ./ds4 -m ./ds4flash.gguf --mtp $out --temp 0"
 }
 
 download_one() {
@@ -493,13 +340,7 @@ download_one() {
     mv "$part" "$out"
 }
 
-if [ "$DSPARK_SOURCE" -eq 1 ]; then
-    download_dspark_source
-elif [ "$DSPARK_SUPPORT_DRY_RUN" -eq 1 ]; then
-    run_dspark_support_dry_run
-elif [ "$DSPARK_SUPPORT" -eq 1 ]; then
-    build_dspark_support
-elif [ -n "$MODEL_FILES" ]; then
+if [ -n "$MODEL_FILES" ]; then
     for file in $MODEL_FILES; do
         download_one "$file"
     done
@@ -512,6 +353,10 @@ if [ "$MODEL" = "mtp" ]; then
     echo "MTP is an optional component for q2-imatrix, q2-q4-imatrix, and q4-imatrix."
     echo "Enable it explicitly, for example:"
     echo "  ./ds4 --mtp $OUT_DIR/$MTP_FILE --mtp-draft 2"
+elif [ "$MODEL" = "dspark-support" ]; then
+    echo
+    echo "DSpark support downloaded. Enable it explicitly in greedy mode:"
+    echo "  ./ds4 --dspark -m ./ds4flash.gguf --mtp $OUT_DIR/$DSPARK_SUPPORT_FILE --temp 0"
 elif [ "$MODEL" = "pro-q4-layers00-30" ] || [ "$MODEL" = "pro-q4-layers31-output" ] || [ "$MODEL" = "pro-q4-split" ]; then
     echo
     echo "Downloaded PRO Q4 distributed split file(s). Use them with --layers,"

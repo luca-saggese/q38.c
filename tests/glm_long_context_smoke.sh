@@ -12,6 +12,8 @@ with ">" instead of corrupting the token stream.
 Environment:
   DS4_BIN=./ds4
   DS4_GLM_MODEL=models/GLM-5.2-UD-Q4_K_XL.gguf
+  DS4_GLM_BACKEND=metal
+  DS4_GLM_EXTRA_ARGS="--gpu-vram auto --gpu-devices 0,1"
   DS4_GLM_LONG_CONTEXT_CTX=100000
   DS4_GLM_LONG_CONTEXT_REPEATS=130
   DS4_GLM_LONG_CONTEXT_GEN=32
@@ -24,6 +26,11 @@ model=${1:-${DS4_GLM_MODEL:-models/GLM-5.2-UD-Q4_K_XL.gguf}}
 ctx=${DS4_GLM_LONG_CONTEXT_CTX:-100000}
 repeats=${DS4_GLM_LONG_CONTEXT_REPEATS:-130}
 gen=${DS4_GLM_LONG_CONTEXT_GEN:-32}
+backend=${DS4_GLM_BACKEND:-metal}
+case "$backend" in
+    metal|cuda|cpu) ;;
+    *) echo "invalid DS4_GLM_BACKEND: $backend" >&2; exit 1 ;;
+esac
 
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/ds4-glm-long-context.XXXXXX")
 trap 'rm -rf "$tmpdir"' EXIT INT HUP TERM
@@ -75,31 +82,38 @@ PROMPT
 for repeat in $repeats; do
     prompt="$tmpdir/prompt-$repeat.txt"
     stdout="$tmpdir/stdout-$repeat.txt"
+    generated="$tmpdir/generated-$repeat.txt"
     stderr="$tmpdir/stderr-$repeat.txt"
     make_prompt "$repeat" "$prompt"
 
     echo "glm-long-context-smoke: repeat=$repeat ctx=$ctx gen=$gen"
-    if ! "$bin" -m "$model" --metal --ctx "$ctx" --nothink --temp 0 -n "$gen" \
+    # DS4_GLM_EXTRA_ARGS is intentionally shell-split into backend options.
+    if ! "$bin" -m "$model" "--$backend" ${DS4_GLM_EXTRA_ARGS:-} \
+        --ctx "$ctx" --nothink --temp 0 -n "$gen" \
         --prompt-file "$prompt" >"$stdout" 2>"$stderr"; then
         cat "$stderr" >&2
         exit 1
     fi
 
     tokens=$(sed -n 's/.*processing \([0-9][0-9]*\) input tokens.*/\1/p' "$stderr" | tail -n 1)
-    first=$(LC_ALL=C dd if="$stdout" bs=1 count=1 2>/dev/null || true)
+    # CUDA multi-GPU selection reports its resolved layout on stdout before
+    # generation. Keep that diagnostic in the raw evidence but exclude it from
+    # checks over model text.
+    sed '/^ds4: GPU config: .*$/d' "$stdout" > "$generated"
+    first=$(LC_ALL=C dd if="$generated" bs=1 count=1 2>/dev/null || true)
     if [ "$first" != ">" ]; then
         echo "glm-long-context-smoke: FAIL repeat=$repeat tokens=${tokens:-unknown}: first byte was not '>'" >&2
         echo "stdout preview:" >&2
-        LC_ALL=C head -c 240 "$stdout" >&2 || true
+        LC_ALL=C head -c 240 "$generated" >&2 || true
         echo >&2
         echo "stderr tail:" >&2
         tail -n 40 "$stderr" >&2 || true
         exit 1
     fi
 
-    if LC_ALL=C grep -aE 'unistdFlush|stdiint|stdintFlush|stdioFlush|errnoFlush' "$stdout" >/dev/null; then
+    if LC_ALL=C grep -aE 'unistdFlush|stdiint|stdintFlush|stdioFlush|errnoFlush' "$generated" >/dev/null; then
         echo "glm-long-context-smoke: FAIL repeat=$repeat tokens=${tokens:-unknown}: known corruption marker found" >&2
-        LC_ALL=C grep -aE 'unistdFlush|stdiint|stdintFlush|stdioFlush|errnoFlush' "$stdout" >&2 || true
+        LC_ALL=C grep -aE 'unistdFlush|stdiint|stdintFlush|stdioFlush|errnoFlush' "$generated" >&2 || true
         exit 1
     fi
 

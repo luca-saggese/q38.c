@@ -1,5 +1,6 @@
 #include "ds4.h"
 #include "ds4_distributed.h"
+#include "ds4_gpu_args.h"
 #include "ds4_help.h"
 #include "ds4_kvstore.h"
 #include "rax.h"
@@ -12512,6 +12513,8 @@ static void set_client_socket_nonblocking(int fd) {
 
 typedef struct {
     ds4_engine_options engine;
+    const char *gpu_vram_arg;
+    const char *gpu_devices_arg;
     const char *host;
     int port;
     int ctx_size;
@@ -12695,6 +12698,21 @@ static server_config parse_options(int argc, char **argv) {
             c.engine.mtp_draft_tokens = parse_int_arg(need_arg(&i, argc, argv, arg), arg);
         } else if (!strcmp(arg, "--mtp-margin")) {
             c.engine.mtp_margin = parse_float_arg(need_arg(&i, argc, argv, arg), arg, 0.0f, 1000.0f);
+        } else if (!strcmp(arg, "--glm-mtp")) {
+            c.engine.glm_mtp = true;
+        } else if (!strcmp(arg, "--glm-mtp-timing")) {
+            c.engine.glm_mtp = true;
+            c.engine.glm_mtp_timing = true;
+        } else if (!strcmp(arg, "--dspark")) {
+            c.engine.dspark = true;
+        } else if (!strcmp(arg, "--dspark-confidence")) {
+            c.engine.dspark = true;
+            c.engine.dspark_confidence_threshold =
+                parse_float_arg(need_arg(&i, argc, argv, arg), arg, 0.0f, 1.0f);
+            c.engine.dspark_confidence_threshold_set = true;
+        } else if (!strcmp(arg, "--dspark-strict")) {
+            c.engine.dspark = true;
+            c.engine.dspark_strict = true;
         } else if (!strcmp(arg, "-c") || !strcmp(arg, "--ctx")) {
             c.ctx_size = parse_int_arg(need_arg(&i, argc, argv, arg), arg);
         } else if (!strcmp(arg, "-n") || !strcmp(arg, "--tokens")) {
@@ -12802,6 +12820,12 @@ static server_config parse_options(int argc, char **argv) {
         } else if (!strcmp(arg, "--cuda")) {
             c.engine.backend = DS4_BACKEND_CUDA;
 #endif
+        } else if (!strcmp(arg, "--gpu-vram")) {
+            c.gpu_vram_arg = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--gpu-devices")) {
+            c.gpu_devices_arg = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--cuda-tensor-parallel")) {
+            c.engine.cuda_tensor_parallel = true;
         } else if (!strcmp(arg, "--backend")) {
             c.engine.backend = parse_backend_arg(need_arg(&i, argc, argv, arg), arg);
         } else if (!strcmp(arg, "--cpu")) {
@@ -12870,7 +12894,35 @@ int main(int argc, char **argv) {
     cfg.engine.placement_ctx_hint = cfg.ctx_size;
     cfg.engine.share_session_prefill_workspace = cfg.batched_sessions > 0;
     ds4_engine *engine = NULL;
-    if (ds4_engine_open(&engine, &cfg.engine) != 0) return 1;
+    if (cfg.gpu_vram_arg || cfg.gpu_devices_arg) {
+        ds4_gpu_config gpu_cfg = {0};
+        bool skip_cuda = false;
+        char gpu_err[256];
+        if (parse_gpu_vram_arg(cfg.gpu_vram_arg, cfg.gpu_devices_arg,
+                               &gpu_cfg, &skip_cuda,
+                               gpu_err, sizeof(gpu_err)) != 0) {
+            fprintf(stderr, "ds4-server: %s\n", gpu_err);
+            return 2;
+        }
+        cfg.engine.backend = skip_cuda ? DS4_BACKEND_CPU : DS4_BACKEND_CUDA;
+        if (skip_cuda) {
+            if (ds4_engine_open(&engine, &cfg.engine) != 0) return 1;
+        } else {
+            const bool was_auto =
+                (cfg.gpu_vram_arg && !strcmp(cfg.gpu_vram_arg, "auto")) ||
+                (!cfg.gpu_vram_arg && cfg.gpu_devices_arg);
+            char layout[256];
+            if (format_gpu_layout_line(&gpu_cfg, was_auto,
+                                       layout, sizeof(layout)) > 0) {
+                fprintf(stdout, "%s\n", layout);
+                fflush(stdout);
+            }
+            if (ds4_engine_create_with_gpu_config(
+                    &engine, &cfg.engine, &gpu_cfg) != 0) return 1;
+        }
+    } else if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+        return 1;
+    }
 
     if (cfg.engine.distributed.role == DS4_DISTRIBUTED_WORKER) {
         ds4_dist_generation_options gen = {

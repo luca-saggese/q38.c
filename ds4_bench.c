@@ -1,5 +1,6 @@
 #include "ds4.h"
 #include "ds4_distributed.h"
+#include "ds4_gpu_args.h"
 #include "ds4_help.h"
 
 /* Purpose-built throughput benchmark.
@@ -31,6 +32,8 @@ typedef struct {
     const char *system;
     const char *csv_path;
     const char *expert_profile_path;
+    const char *gpu_vram_arg;
+    const char *gpu_devices_arg;
     ds4_backend backend;
     int threads;
     int ctx_start;
@@ -53,6 +56,7 @@ typedef struct {
     bool ssd_streaming;
     bool ssd_streaming_cold;
     bool ssd_streaming_full_layers_set;
+    bool cuda_tensor_parallel;
     bool show_output;
 } bench_config;
 
@@ -269,6 +273,12 @@ static bench_config parse_options(int argc, char **argv) {
         } else if (!strcmp(arg, "--cuda")) {
             c.backend = DS4_BACKEND_CUDA;
 #endif
+        } else if (!strcmp(arg, "--gpu-vram")) {
+            c.gpu_vram_arg = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--gpu-devices")) {
+            c.gpu_devices_arg = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--cuda-tensor-parallel")) {
+            c.cuda_tensor_parallel = true;
         } else if (!strcmp(arg, "--cpu")) {
             c.backend = DS4_BACKEND_CPU;
         } else if (!strcmp(arg, "--quality")) {
@@ -550,6 +560,20 @@ int main(int argc, char **argv) {
     int placement_ctx_hint = cfg.ctx_max;
     if (cfg.ctx_alloc > placement_ctx_hint) placement_ctx_hint = cfg.ctx_alloc;
 
+    ds4_gpu_config gpu_cfg = {0};
+    bool skip_cuda = false;
+    const bool have_gpu_config = cfg.gpu_vram_arg || cfg.gpu_devices_arg;
+    if (have_gpu_config) {
+        char gpu_err[256];
+        if (parse_gpu_vram_arg(cfg.gpu_vram_arg, cfg.gpu_devices_arg,
+                               &gpu_cfg, &skip_cuda,
+                               gpu_err, sizeof(gpu_err)) != 0) {
+            fprintf(stderr, "ds4-bench: %s\n", gpu_err);
+            return 2;
+        }
+        cfg.backend = skip_cuda ? DS4_BACKEND_CPU : DS4_BACKEND_CUDA;
+    }
+
     ds4_engine_options opt = {
         .model_path = cfg.model_path,
         .backend = cfg.backend,
@@ -564,6 +588,7 @@ int main(int argc, char **argv) {
         .power_percent = cfg.power_percent,
         .warm_weights = cfg.warm_weights,
         .quality = cfg.quality,
+        .cuda_tensor_parallel = cfg.cuda_tensor_parallel,
         .ssd_streaming = cfg.ssd_streaming,
         .ssd_streaming_cold = cfg.ssd_streaming_cold,
         .ssd_streaming_full_layers_set = cfg.ssd_streaming_full_layers_set,
@@ -576,8 +601,22 @@ int main(int argc, char **argv) {
         return 2;
     }
     ds4_engine *engine = NULL;
-    if (ds4_engine_open(&engine, &opt) != 0) return 1;
-    log_context_memory(cfg.backend,
+    if (have_gpu_config && !skip_cuda) {
+        const bool was_auto =
+            (cfg.gpu_vram_arg && !strcmp(cfg.gpu_vram_arg, "auto")) ||
+            (!cfg.gpu_vram_arg && cfg.gpu_devices_arg);
+        char layout[256];
+        if (format_gpu_layout_line(&gpu_cfg, was_auto,
+                                   layout, sizeof(layout)) > 0) {
+            fprintf(stdout, "%s\n", layout);
+            fflush(stdout);
+        }
+        if (ds4_engine_create_with_gpu_config(
+                &engine, &opt, &gpu_cfg) != 0) return 1;
+    } else if (ds4_engine_open(&engine, &opt) != 0) {
+        return 1;
+    }
+    log_context_memory(opt.backend,
                        cfg.ctx_alloc,
                        cfg.prefill_chunk,
                        cfg.ssd_streaming);

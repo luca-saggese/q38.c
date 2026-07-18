@@ -73,6 +73,11 @@ int ds4_tp_parse_cli_arg(
         ds4_tp_options *opt,
         char *err,
         size_t errlen);
+int ds4_tp_adopt_distributed_options(
+        ds4_tp_options *tp,
+        ds4_distributed_options *dist,
+        char *err,
+        size_t errlen);
 void ds4_tp_usage(FILE *fp);
 
 /* Validates option combinations that TP cannot run with (SSD streaming,
@@ -220,8 +225,8 @@ int ds4_tp_send_verify(ds4_tp *tp, uint64_t session_id,
 int ds4_tp_send_verify_commit(ds4_tp *tp, int32_t full_accept, int32_t replay_n);
 int ds4_tp_recv_verify_commit(ds4_tp *tp, int32_t *full_accept, int32_t *replay_n);
 
-/* Standalone worker mode entry (called from the CLI when --tp-worker is
- * given).  Loads nothing itself: the engine is already open. */
+/* Standalone worker mode entry. Loads nothing itself: the engine is already
+ * open. */
 int ds4_tp_worker_run(ds4_engine *engine, const ds4_tp_options *opt);
 
 #endif

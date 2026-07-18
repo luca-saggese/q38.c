@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netdb.h>
 #include <stdarg.h>
 #include <sys/uio.h>
@@ -338,12 +339,13 @@ bool ds4_tp_enabled(const ds4_tp_options *opt) {
 void ds4_tp_usage(FILE *fp) {
     fprintf(fp,
         "Tensor parallelism (two identical machines):\n"
-        "  --tp-coordinator <port>     Coordinate a TP pair: listen for the\n"
-        "                              worker, then run the normal CLI flow.\n"
-        "  --tp-coordinator-host <h>   Coordinator listen address (default 0.0.0.0).\n"
-        "  --tp-worker <host> <port>   Dial the coordinator and mirror its session.\n"
-        "  --tp-transport <auto|rdma|tcp>  Gate transport (default auto).\n"
-        "  --tp-debug-hash <n>         Cross-check hidden state every n tokens.\n");
+        "  --tensor-parallel           Use --role/--listen/--coordinator for a 50/50 TP pair.\n"
+        "  --transport <auto|rdma|tcp> Gate transport (default auto).\n"
+        "  --rdma-device <name>        Select a verbs device such as rdma_en1.\n"
+        "  --rdma-gid-index <n>        Select the local verbs GID index.\n"
+        "  --tensor-parallel-token-prefill\n"
+        "                              GLM diagnostic: prefill one token at a time.\n"
+        "  --debug-hash <n>            Cross-check hidden state every n tokens.\n");
 }
 
 int ds4_tp_parse_cli_arg(
@@ -356,41 +358,35 @@ int ds4_tp_parse_cli_arg(
         size_t errlen)
 {
     int i = *index;
-    if (!strcmp(arg, "--tp-coordinator") || !strcmp(arg, "--tp-lead")) {
-        /* --tp-lead is the legacy spelling; --tp-coordinator matches the
-         * pipelined distributed mode's coordinator/worker vocabulary. */
-        if (i + 1 >= argc) goto missing;
-        opt->role = DS4_TP_LEADER;
-        opt->listen_port = atoi(argv[++i]);
-        if (opt->listen_port <= 0 || opt->listen_port > 65535) {
-            tp_set_err(err, errlen, "invalid %s port", arg);
-            return DS4_TP_CLI_ERROR;
-        }
-        if (!opt->listen_host) opt->listen_host = "0.0.0.0";
-    } else if (!strcmp(arg, "--tp-coordinator-host") ||
-               !strcmp(arg, "--tp-lead-host")) {
-        if (i + 1 >= argc) goto missing;
-        opt->listen_host = argv[++i];
-    } else if (!strcmp(arg, "--tp-worker")) {
-        if (i + 2 >= argc) goto missing;
-        opt->role = DS4_TP_WORKER;
-        opt->leader_host = argv[++i];
-        opt->leader_port = atoi(argv[++i]);
-        if (opt->leader_port <= 0 || opt->leader_port > 65535) {
-            tp_set_err(err, errlen, "invalid --tp-worker port");
-            return DS4_TP_CLI_ERROR;
-        }
-    } else if (!strcmp(arg, "--tp-transport")) {
+    if (!strcmp(arg, "--tensor-parallel")) {
+        opt->requested = true;
+    } else if (!strcmp(arg, "--transport")) {
         if (i + 1 >= argc) goto missing;
         const char *v = argv[++i];
         if (!strcmp(v, "auto")) opt->transport = DS4_TP_TRANSPORT_AUTO;
         else if (!strcmp(v, "rdma")) opt->transport = DS4_TP_TRANSPORT_RDMA;
         else if (!strcmp(v, "tcp")) opt->transport = DS4_TP_TRANSPORT_TCP;
         else {
-            tp_set_err(err, errlen, "invalid --tp-transport %s", v);
+            tp_set_err(err, errlen, "invalid %s value: %s", arg, v);
             return DS4_TP_CLI_ERROR;
         }
-    } else if (!strcmp(arg, "--tp-debug-hash")) {
+    } else if (!strcmp(arg, "--rdma-device")) {
+        if (i + 1 >= argc) goto missing;
+        opt->rdma_device = argv[++i];
+    } else if (!strcmp(arg, "--rdma-gid-index")) {
+        if (i + 1 >= argc) goto missing;
+        char *end = NULL;
+        errno = 0;
+        long value = strtol(argv[++i], &end, 10);
+        if (errno != 0 || !end || *end != '\0' || value < 0 || value > INT_MAX) {
+            tp_set_err(err, errlen, "invalid --rdma-gid-index %s", argv[i]);
+            return DS4_TP_CLI_ERROR;
+        }
+        opt->rdma_gid_index = (int)value;
+        opt->rdma_gid_index_set = true;
+    } else if (!strcmp(arg, "--tensor-parallel-token-prefill")) {
+        opt->glm_token_prefill = true;
+    } else if (!strcmp(arg, "--debug-hash")) {
         if (i + 1 >= argc) goto missing;
         opt->debug_hash = atoi(argv[++i]);
     } else {
@@ -403,12 +399,87 @@ missing:
     return DS4_TP_CLI_ERROR;
 }
 
+int ds4_tp_adopt_distributed_options(
+        ds4_tp_options *tp,
+        ds4_distributed_options *dist,
+        char *err,
+        size_t errlen)
+{
+    if (!tp || !dist || !tp->requested) return 1;
+    if (tp->role != DS4_TP_NONE) {
+        tp_set_err(err, errlen,
+                   "--tensor-parallel selects its role through --role");
+        return 0;
+    }
+    if (dist->role == DS4_DISTRIBUTED_NONE) {
+        tp_set_err(err, errlen,
+                   "--tensor-parallel requires --role coordinator or --role worker");
+        return 0;
+    }
+    if (dist->layers.set) {
+        tp_set_err(err, errlen,
+                   "tensor parallelism always uses one 50/50 worker; omit --layers");
+        return 0;
+    }
+    if (dist->prefill_chunk || dist->prefill_window || dist->activation_bits ||
+        dist->replay_check || dist->debug) {
+        tp_set_err(err, errlen,
+                   "--dist-* and distributed debug options cannot be used with --tensor-parallel");
+        return 0;
+    }
+
+    if (dist->role == DS4_DISTRIBUTED_COORDINATOR) {
+        if (!dist->listen_host || dist->listen_port <= 0) {
+            tp_set_err(err, errlen,
+                       "--role coordinator --tensor-parallel requires --listen HOST PORT");
+            return 0;
+        }
+        if (dist->coordinator_host || dist->coordinator_port) {
+            tp_set_err(err, errlen,
+                       "--role coordinator must not use --coordinator");
+            return 0;
+        }
+        tp->role = DS4_TP_LEADER;
+        tp->listen_host = dist->listen_host;
+        tp->listen_port = dist->listen_port;
+    } else if (dist->role == DS4_DISTRIBUTED_WORKER) {
+        if (!dist->coordinator_host || dist->coordinator_port <= 0) {
+            tp_set_err(err, errlen,
+                       "--role worker --tensor-parallel requires --coordinator HOST PORT");
+            return 0;
+        }
+        if (dist->listen_host || dist->listen_port) {
+            tp_set_err(err, errlen,
+                       "--role worker --tensor-parallel must not use --listen");
+            return 0;
+        }
+        tp->role = DS4_TP_WORKER;
+        tp->leader_host = dist->coordinator_host;
+        tp->leader_port = dist->coordinator_port;
+    } else {
+        tp_set_err(err, errlen, "invalid tensor-parallel role");
+        return 0;
+    }
+
+    memset(dist, 0, sizeof(*dist));
+    return 1;
+}
+
 int ds4_tp_validate_engine_options(
         const ds4_engine_options *opt,
         char *err,
         size_t errlen)
 {
-    if (!ds4_tp_enabled(&opt->tp)) return 1;
+    if (!ds4_tp_enabled(&opt->tp)) {
+        if (opt->tp.requested || opt->tp.transport != DS4_TP_TRANSPORT_AUTO ||
+            opt->tp.rdma_device || opt->tp.rdma_gid_index_set ||
+            opt->tp.glm_token_prefill || opt->tp.debug_hash != 0) {
+            tp_set_err(err, errlen,
+                       "tensor-parallel options require --tensor-parallel and --role");
+            return 0;
+        }
+        return 1;
+    }
     if (opt->backend != DS4_BACKEND_METAL) {
         tp_set_err(err, errlen, "tensor parallelism requires the Metal backend");
         return 0;
@@ -545,9 +616,9 @@ static int tp_rdma_open(ds4_tp *tp, char *err, size_t errlen) {
         if (devs) r->api.free_device_list(devs);
         return 0;
     }
-    /* One verbs device per Thunderbolt port (rdma_enN); pick the one whose
-     * port is up — that is the cabled link.  DS4_TP_RDMA_DEV overrides. */
-    const char *want_name = getenv("DS4_TP_RDMA_DEV");
+    /* One verbs device per Thunderbolt port (rdma_enN); pick the active one
+     * unless the caller selected a device explicitly. */
+    const char *want_name = tp->opt.rdma_device;
     char states[256] = "";
     for (int i = 0; i < num && !r->ctx; i++) {
         const char *name = r->api.get_device_name(devs[i]);
@@ -577,11 +648,10 @@ static int tp_rdma_open(ds4_tp *tp, char *err, size_t errlen) {
     /* The driver only connects through the IPv4-mapped GID
      * (::ffff:a.b.c.d), which exists only when the Thunderbolt member
      * interface carries an IPv4 address (the bridge's address does not
-     * count).  DS4_TP_GID_INDEX overrides the search. */
+     * count). */
     r->gid_index = -1;
-    const char *gid_env = getenv("DS4_TP_GID_INDEX");
-    if (gid_env) {
-        r->gid_index = atoi(gid_env);
+    if (tp->opt.rdma_gid_index_set) {
+        r->gid_index = tp->opt.rdma_gid_index;
         if (r->api.query_gid(r->ctx, 1, r->gid_index, &r->gid) != 0) {
             tp_set_err(err, errlen, "tp rdma: query_gid(%d): %s",
                        r->gid_index, strerror(errno));
@@ -1198,7 +1268,7 @@ static int tp_hello_exchange(ds4_tp *tp, const ds4_tp_identity *id, int rdma_ok,
     int want_rdma = tp->opt.transport != DS4_TP_TRANSPORT_TCP;
     tp->rdma_active = want_rdma && rdma_ok && theirs.rdma_ok;
     if (tp->opt.transport == DS4_TP_TRANSPORT_RDMA && !tp->rdma_active) {
-        tp_set_err(err, errlen, "tp: --tp-transport rdma but %s side has no active device",
+        tp_set_err(err, errlen, "tp: --transport rdma but %s side has no active device",
                    rdma_ok ? "the peer" : "this");
         return 0;
     }

@@ -111,11 +111,16 @@ typedef enum {
 
 typedef struct {
     ds4_tp_role role;
+    bool requested;             /* --tensor-parallel with shared role options */
     const char *listen_host;    /* leader listens here for the worker */
     int listen_port;
     const char *leader_host;    /* worker dials the leader */
     int leader_port;
     ds4_tp_transport transport;
+    const char *rdma_device;
+    int rdma_gid_index;
+    bool rdma_gid_index_set;
+    bool glm_token_prefill;
     int debug_hash;             /* cross-check hidden state every N tokens */
 } ds4_tp_options;
 
@@ -128,6 +133,7 @@ typedef struct {
     uint32_t prefill_chunk;
     int mtp_draft_tokens;
     float mtp_margin;
+    float dspark_confidence_threshold;
     const char *directional_steering_file;
     const char *expert_profile_path;
     float directional_steering_attn;
@@ -140,6 +146,12 @@ typedef struct {
     uint64_t simulate_used_memory_bytes;
     bool warm_weights;
     bool quality;
+    bool glm_mtp;
+    bool glm_mtp_timing;
+    bool dspark;
+    bool dspark_strict;
+    bool dspark_confidence_threshold_set;
+    bool cuda_tensor_parallel;
     bool ssd_streaming;
     bool ssd_streaming_cold;
     bool ssd_streaming_full_layers_set;

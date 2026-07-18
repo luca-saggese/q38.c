@@ -155,6 +155,9 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
     opt(fp, c, "--backend NAME", "Backend name: metal, cuda, or cpu.");
     opt(fp, c, "--gpu-vram N[,N,...]|auto", "CUDA VRAM budgets per device, in GiB, or auto-detect free VRAM.");
     opt(fp, c, "--gpu-devices N[,N,...]", "CUDA device indices used by multi-GPU placement.");
+    if (tool != DS4_HELP_EVAL) {
+        opt(fp, c, "--cuda-tensor-parallel", "Enable the paired DeepSeek tensor/expert path on an even multi-GPU CUDA placement.");
+    }
 #endif
     if (tool != DS4_HELP_BENCH) {
         opt(fp, c, "-c, --ctx N", "Allocated context tokens.");
@@ -178,6 +181,11 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
         if (tool == DS4_HELP_DS4 || tool == DS4_HELP_AGENT || tool == DS4_HELP_SERVER) {
             opt(fp, c, "--mtp-draft N", "Maximum autoregressive MTP draft tokens. Default: 1");
             opt(fp, c, "--mtp-margin F", "Verifier confidence margin for fast MTP acceptance. Default: 3");
+            opt(fp, c, "--glm-mtp", "Enable integrated greedy GLM MTP speculation.");
+            opt(fp, c, "--glm-mtp-timing", "Enable GLM MTP and print acceptance/timing counters.");
+            opt(fp, c, "--dspark", "Enable DSpark using the support GGUF passed with --mtp.");
+            opt(fp, c, "--dspark-confidence F", "Enable DSpark with confidence pruning threshold 0..1. Default: 0.9");
+            opt(fp, c, "--dspark-strict", "Load DSpark support but keep target-only decode.");
         }
         opt(fp, c, "--quality", "Prefer exact kernels where faster approximate paths exist.");
         opt(fp, c, "--warm-weights", "Touch mapped tensor pages at startup to reduce first-use stalls.");
@@ -233,13 +241,14 @@ static void print_distributed(FILE *fp, const help_colors *c) {
     fputc('\n', fp);
     title(fp, c, "Tensor Parallelism");
     fputc('\n', fp);
-    para(fp, c, "Tensor parallelism runs one token at a time across two Macs. Each rank keeps one contiguous half of the routed experts resident while dense and shared weights remain replicated. Start the worker first, then the coordinator.");
+    para(fp, c, "Tensor parallelism uses the same coordinator/worker addresses as distributed mode, but always runs one 50/50 worker. Add --tensor-parallel, omit --layers, start the worker, then start the coordinator.");
     fputc('\n', fp);
-    opt(fp, c, "--tp-coordinator PORT", "Coordinate a TP pair and listen for one worker.");
-    opt(fp, c, "--tp-coordinator-host HOST", "Coordinator listen address. Default: 0.0.0.0");
-    opt(fp, c, "--tp-worker HOST PORT", "Dial the coordinator and mirror its session.");
-    opt(fp, c, "--tp-transport auto|rdma|tcp", "Gate transport. Default: auto");
-    opt(fp, c, "--tp-debug-hash N", "Cross-check hidden state every N tokens.");
+    opt(fp, c, "--tensor-parallel", "Switch --role/--listen/--coordinator to two-machine tensor parallelism.");
+    opt(fp, c, "--transport auto|rdma|tcp", "Tensor gate transport. Default: auto");
+    opt(fp, c, "--rdma-device NAME", "Select a verbs device when auto-detection is ambiguous.");
+    opt(fp, c, "--rdma-gid-index N", "Select the local verbs GID index.");
+    opt(fp, c, "--tensor-parallel-token-prefill", "GLM diagnostic: prefill one token at a time for exact arithmetic.");
+    opt(fp, c, "--debug-hash N", "Cross-check hidden state every N tokens.");
     fputc('\n', fp);
 }
 

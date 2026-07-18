@@ -117,8 +117,6 @@ int main(void) {
         fail("mixed test frontier reaches context limit", NULL, -1, -1);
     }
 
-    setenv("DS4_CUDA_TP_DECODE", "1", 1);
-    setenv("DS4_CUDA_TP_EP", "1", 1);
     setenv("DS4_CUDA_MIXED_PREFILL_DECODE", "1", 1);
 
     const char *gpu_devices = getenv("DS4_TEST_GPU_DEVICES");
@@ -135,6 +133,7 @@ int main(void) {
         .model_path = model,
         .backend = DS4_BACKEND_CUDA,
         .n_threads = 1,
+        .cuda_tensor_parallel = true,
         .share_session_prefill_workspace = true,
         .placement_ctx_hint = (uint32_t)context,
     };

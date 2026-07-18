@@ -12,7 +12,7 @@ run.
 
 Preferred release test hosts:
 
-- CUDA / DGX Spark: `toor@192.168.0.180`.
+- CUDA / DGX Spark: `toor@192.168.60.184`.
 - Metal / distributed Mac testing: `mac-m5max-it` and `mac-m5max-us`.
 - ROCm: The Strix Halo system at antirez@strixhalo (Framework Desktop).
 
@@ -45,6 +45,13 @@ in this system.
 
 - Run the default suite:
   `make test`.
+- Run `tests/test_gpu_args_cli.sh` explicitly after changing executable option
+  parsing or multi-GPU placement. Invalid values and device/budget count
+  mismatches must reach the shared GPU parser in all four binaries; an
+  `unknown option` response from a binary that advertises the flag is a
+  release blocker. On CUDA, also start `ds4-server` once with
+  `--gpu-vram auto` and the intended `--gpu-devices` list and preserve the
+  resolved layout line.
 - Run the vector checks explicitly after any tokenizer, template, KV, kernel,
   quantization, or prompt-rendering change:
   `./ds4_test --logprob-vectors`
@@ -121,7 +128,7 @@ tiny routed-MoE verifier kernels, or shared `--mtp` support-model code changes:
 - 64-token guardrail:
   `DS4_DSPARK_FIXTURE_TOKENS=64 DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
 - Fixed-block partial-accept fallback:
-  `DS4_DSPARK_CONFIDENCE_THRESHOLD=0 DS4_DSPARK_FIXTURE_TOKENS=8 DS4_DSPARK_FIXTURE_REQUIRE_PARTIAL=1 DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
+  `DS4_DSPARK_FIXTURE_CONFIDENCE=0 DS4_DSPARK_FIXTURE_TOKENS=8 DS4_DSPARK_FIXTURE_REQUIRE_PARTIAL=1 DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
 - DSpark verifier invariant smoke:
   `DS4_TEST_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-verify-depth`.
 - If shared support-model or verifier structures changed, also run legacy MTP:
@@ -134,7 +141,51 @@ tiny routed-MoE verifier kernels, or shared `--mtp` support-model code changes:
   `DS4_DSPARK_VERIFY_SELECTED_PROFILE=1` or the Metal MoE stage profiler and
   record the selected-expert footprint or stage timing in the DSpark log.
 
-## 4. Metal PRO Path
+### Session Microbatching And Metal TP
+
+Run these gates whenever session scheduling, batched decode, mixed
+prefill/decode, QKV projection, shared or routed experts, tensor parallelism,
+or backend fallback selection changes.
+
+- On a single Metal machine, run the full-vocabulary exact-logit oracle with
+  2, 4, and 8 sessions:
+  `DS4_TEST_MODEL=/path/to/ds4flash.gguf DS4_TEST_SESSION_COUNT=N make test-metal-session-batch`.
+  The two-session run must report `native_shared=0 native_qkv=0`; the four- and
+  eight-session resident Q8 runs must report `native_shared=1 native_qkv=1`.
+- Repeat the four-session oracle with
+  `DS4_METAL_SESSION_BATCH_SHARED=0` and with
+  `DS4_METAL_SESSION_BATCH_QKV=0`. The first run must use the complete fallback;
+  the second may batch the shared expert only. Both must remain bit-exact.
+- The oracle must cover reversed row ordering, at least six decode steps, and a
+  mixed prefill/decode call. Any nonzero differing-logit count is a blocker;
+  argmax-only agreement is insufficient.
+- Benchmark one, four, and eight simultaneous resident sessions on the same
+  host and model. Record model-step latency and aggregate decode tokens/second,
+  not only request completion speed. Four and eight rows must not regress by
+  more than normal run-to-run variance from the previous release, and the
+  eight-row aggregate should exceed the one-row aggregate when native batching
+  is enabled.
+- On `mac-m5max-it` and `mac-m5max-us`, run the same oracle in physical TP mode
+  over explicit `tcp` and `rdma` transports. Set `DS4_TEST_TP_MODE=leader` on
+  the leader and `DS4_TEST_TP_MODE=worker DS4_TEST_TP_LEADER_HOST=HOST` on the
+  worker, with a unique `DS4_TEST_TP_PORT`. Run at least 2 and 4 sessions and
+  preserve both logs. TP currently uses the ordered per-session fallback, so
+  native single-machine row-grid flags must remain off in the TP logs.
+- For the current TB5 MacBook link, US is `10.99.0.2` on `en1`/`rdma_en1` and
+  IT is `10.99.0.1` on `en6`/`rdma_en6`; both use GID index 1. Before testing,
+  require `rdma_ctl status` to report `enabled` and `ibv_devinfo -v` to show
+  `PORT_ACTIVE` plus the corresponding `::ffff:10.99.0.x` GID. Force the
+  device and GID with `--rdma-device NAME --rdma-gid-index 1` if automatic
+  selection is ambiguous. A working TB IP ping alone is not RDMA evidence.
+- Kill the TP worker during one batch with `DS4_TEST_TP_DISCONNECT=1` on the
+  leader. The operation must fail cleanly, invalidate every affected session,
+  and return control without hanging.
+- Verify unsupported combinations explicitly: GLM, DSpark/MTP support models,
+  SSD streaming, quality/reference modes, steering, resident Q4 expert
+  overlap, and CPU-router modes must use the established exact fallback or
+  reject the combination before evaluation. They must not partially activate
+  native batching.
+
 ## 5. Metal PRO Path
 
 PRO support is experimental, but release builds must not break it silently.
@@ -146,7 +197,65 @@ PRO support is experimental, but release builds must not break it silently.
   touching model shape, tensor lookup, routed expert mapping, template logic,
   and KV payload compatibility.
 
-## 6. SSD Streaming
+## 6. GLM 5.2
+
+GLM has a different template, model shape, MTP block, attention layout,
+tensor-parallel gate width, and streaming policy. Flash or PRO success does not
+substitute for this matrix.
+
+- On a 512 GB Metal machine, run short greedy prompts with both the Q4 XL and
+  reduced-precision Q2 release GGUFs. Cover thinking and no-thinking templates,
+  and verify the server reports the GLM model family rather than a DeepSeek
+  alias internally.
+- Run the OpenRouter smoke vectors explicitly:
+  `DS4_TEST_MODEL=/path/to/glm.gguf
+  DS4_TEST_VECTOR_FILE=tests/test-vectors/glm-openrouter/official.vec
+  ./ds4_test --logprob-vectors`.
+  Preserve the report as a diagnostic. The hosted vectors include very
+  low-probability top-20 tails whose membership is not stable after GLM routed
+  expert quantization, so an individual `official top token missing locally`
+  assertion is not by itself a release blocker. Selected-token mismatches must
+  remain consistent with the model's 100-case first-token band, and the
+  section 3 scorer is the release gate for aggregate GLM quality.
+- Run the 100-case Q4 XL and Q2 official fixtures from section 3 and preserve
+  both `summary` and `api_summary` lines. Compare against the documented Q4 and
+  Q2 reference bands independently.
+- Run `tests/glm_long_context_smoke.sh` with the release-advertised context on
+  the 512 GB Metal host. The generated continuation must begin with `>` and
+  contain none of the known token-corruption markers.
+- Exercise integrated GLM MTP with `--glm-mtp-timing` on a deterministic
+  prompt. Compare the greedy text to
+  a non-MTP run, require clean speculative cycles, and record acceptance and
+  timing. Also run once with MTP disabled to prove ordinary decode remains the
+  default.
+- Run the Metal session oracle with 2 and 4 GLM sessions. It must report
+  `family=glm native_shared=0 native_qkv=0` and remain exact, including mixed
+  prefill/decode; the DeepSeek-only row-grid kernels must not activate.
+- Run resident and SSD-streaming GLM Q2 prompts with the same greedy input.
+  Compare first token and top-logprob sanity, and record the selected full-layer
+  prefix and dynamic expert-cache budget.
+- Run physical two-machine GLM TP over TCP and RDMA with short and long prompts.
+  Record prefill/decode speed, transport, rank residency, and clean shutdown.
+  Repeat one run with `--tensor-parallel-token-prefill` as the exact-arithmetic
+  diagnostic. Use a GGUF whose routed-expert type has ownership-aware GLM TP
+  kernels. Also test a Q4-routed GLM file as a negative gate: until Q4 ownership
+  kernels are implemented, both ranks must reject it clearly before evaluation
+  rather than loading a partial split or hanging.
+- On the eight-GPU CUDA host, run one resident GLM Q2 prompt, a long-context
+  prompt, integrated GLM MTP, and concurrent server requests. Use ordinary
+  eight-GPU layer placement for GLM; do not pass the Flash-specific
+  `--cuda-tensor-parallel` option. Multi-tier GLM prefill must
+  report progress through the tier-switching token-major path, and decode,
+  cache updates, and output-head/logit assembly must complete without CPU spill.
+  The long-context harness can select this backend with
+  `DS4_GLM_BACKEND=cuda` and pass placement flags through
+  `DS4_GLM_EXTRA_ARGS="--gpu-vram auto --gpu-devices 0,2,4,6,1,3,5,7"`.
+- Through `ds4-server`, exercise OpenAI chat, Responses, and Anthropic requests
+  against GLM, including thinking and SSE. DeepSeek compatibility endpoint
+  aliases may resolve to the loaded model, but rendered prompts and generated
+  text must use the GLM template.
+
+## 7. SSD Streaming
 
 SSD streaming is a capacity path, so test both correctness and user experience.
 
@@ -165,10 +274,10 @@ SSD streaming is a capacity path, so test both correctness and user experience.
 - If streaming cache internals changed, test the same prompt twice and compare
   first-token/logprob sanity between runs.
 
-## 7. CUDA / DGX Spark
+## 8. CUDA / DGX Spark
 
 Before a release, ask the user for CUDA access if it is not already configured.
-Use the DGX Spark / GB10 host `toor@192.168.0.180`.  Do not claim CUDA is
+Use the DGX Spark / GB10 host `toor@192.168.60.184`.  Do not claim CUDA is
 release-ready without this pass.
 
 - Fetch or push the exact release commit to the CUDA machine.
@@ -178,12 +287,41 @@ release-ready without this pass.
   `make cuda-regression`.
 - Run a short CLI prompt with the Flash GGUF and record generation t/s.
 - Run a longer prompt that exercises routed experts past a few thousand tokens.
+- On the eight-GPU CUDA host, run the full-vocabulary decode oracle:
+  `DS4_TEST_MODEL=/path/to/flash.gguf make test-cuda-session-batch`.
+  Preserve the per-batch timing for 2, 4, and 8 rows and require
+  `nonexact_logits=0`. Run the released Q4 file and the reduced-precision Q2
+  file: Q4 exercises grouped routed/shared stages, while unsupported Q2 native
+  MoE shapes must retain the ordered exact fallback.
+- With CUDA TP attention enabled, grouped attention-core, QKV, KV-store, and
+  attention-post stages must stay disabled until they reproduce the TP control
+  arithmetic. The session oracle must still batch the compatible pre-router,
+  routed, and shared stages and remain exact. Repeat once with
+  `DS4_CUDA_TP_ATTN=0` to cover the grouped attention-core implementation.
+- Run native mixed prefill/decode at the default frontier and at compressed
+  context:
+  `DS4_TEST_MODEL=/path/to/flash.gguf make test-cuda-mixed-batch` and
+  `DS4_TEST_CONTEXT=4096 DS4_TEST_MIXED_INITIAL=2048 DS4_TEST_MIXED_ROUNDS=8
+  DS4_TEST_MODEL=/path/to/flash.gguf make test-cuda-mixed-batch`.
+  Every round must report exact logits and `mode=native`; a serialized fallback
+  is a failure for the eight-GPU TP/EP topology. Under CUDA TP attention, the
+  native mixed step keeps decode attention session-specific and coordinates the
+  prefill plus exact routed decode batch; record correctness and speedup
+  separately. Also force an 800-row prefill quantum with
+  `DS4_TEST_ALLOW_FALLBACK=1`; it must report the serialized safety fallback.
+- Start `ds4-server` with 8 and 16 batched sessions and issue at least that many
+  simultaneous requests with mixed prompt lengths. Verify no session mix-up,
+  deadlock, or starvation and record aggregate generation throughput.
+- On DGX Spark, verify the same public batch API and server concurrency use the
+  single-GPU fallback without creating peer-only TP/EP state. The eight-GPU
+  native oracle is not a valid Spark test because its topology is intentionally
+  unavailable there.
 - If CUDA Q4, distributed, streaming hooks, tensor span loading, or model cache
   code changed, test the specific GGUF and split mode that uses that path.
 - Verify that any CUDA-only warning fixes are also clean on macOS and do not
   change Metal behavior.
 
-## 8. ROCm / Strix Halo
+## 9. ROCm / Strix Halo
 
 Use the Strix Halo Framework Desktop via the VPN hostname `strixhalo`
 (`antirez@strixhalo`).  This host validates the ROCm backend; do not use it as
@@ -204,7 +342,7 @@ a substitute for CUDA or Metal release testing.
 - Record startup memory/cache messages, prefill speed, generation speed, and
   whether the backend reports `ROCm backend initialized`.
 
-## 9. Distributed Inference
+## 10. Distributed Inference
 
 Distributed code has regressed around route setup, KV snapshots, request IDs,
 and split model loading.  Test it whenever distributed, KV, session, or model
@@ -222,7 +360,7 @@ loading code changes.
 - If CUDA distributed is relevant, test across the CUDA hosts and record
   generation speed, not just "it works".
 
-## 10. Disk KV Cache
+## 11. Disk KV Cache
 
 Disk KV cache bugs are high impact for server users.
 
@@ -236,7 +374,7 @@ Disk KV cache bugs are high impact for server users.
 - Test stripped agent sessions: `/strip <id>` then `/switch <id>` should rebuild
   by prefill and render sane history.
 
-## 11. Server APIs
+## 12. Server APIs
 
 The server must keep compatibility across OpenAI, Responses, and Anthropic
 clients.
@@ -249,7 +387,7 @@ clients.
 - Test `--trace` and confirm rendered prompts, cache decisions, generated text,
   and tool-parser events are useful without leaking unrelated state.
 
-## 12. ds4-agent
+## 13. ds4-agent
 
 The agent is the most stateful component.  Test it manually, not only by build.
 
@@ -281,7 +419,7 @@ The agent is the most stateful component.  Test it manually, not only by build.
   status bar fill to terminal width, syntax highlighting in Markdown/code blocks,
   and SSH/remote terminal flicker.
 
-## 13. Download Script And Model Files
+## 14. Download Script And Model Files
 
 - Test `download_model.sh` in a temporary directory so local weights are not
   overwritten.
@@ -290,7 +428,7 @@ The agent is the most stateful component.  Test it manually, not only by build.
 - Verify legacy removed targets fail clearly.
 - Verify README model names match the script and Hugging Face repository.
 
-## 14. Performance And Power
+## 15. Performance And Power
 
 - Run `ds4-bench` on the release machine and compare with tracked CSV baselines.
 - Test `--power 100` is not throttled.
@@ -299,11 +437,13 @@ The agent is the most stateful component.  Test it manually, not only by build.
 - Confirm context buffer size, raw KV rows, compressed KV rows, and mmap behavior
   match expectations for 32k, 100k, and any release-advertised context size.
 
-## 15. Release Sign-off
+## 16. Release Sign-off
 
 Do not sign off until:
 
 - macOS Metal Flash passed.
+- GLM 5.2 Metal, official-quality, MTP, batching-fallback, and applicable TP or
+  CUDA gates passed.
 - Official continuation quality gates passed for every released model family.
 - CUDA was tested on the CUDA machine or the release notes explicitly say CUDA
   was not validated.
@@ -313,4 +453,7 @@ Do not sign off until:
 - Server API streaming was exercised.
 - Agent interruption and tool loops were exercised manually.
 - Speed is within expected variance for the same hardware and model.
+- Metal 2/4/8-session exactness and forced fallback gates passed.
+- Physical Metal TP batching and CUDA native decode/mixed batching passed when
+  those backends are part of the release.
 - Any skipped item is written down with the reason.

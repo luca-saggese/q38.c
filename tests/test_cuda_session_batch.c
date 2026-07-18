@@ -142,8 +142,6 @@ int main(void) {
         *dst = '\0';
     }
 
-    setenv("DS4_CUDA_TP_DECODE", "1", 1);
-    setenv("DS4_CUDA_TP_EP", "1", 1);
     setenv("DS4_CUDA_SESSION_BATCH_MOE", "1", 1);
 
     ds4_gpu_config gpu_cfg = {0};
@@ -160,6 +158,7 @@ int main(void) {
         .model_path = model,
         .backend = DS4_BACKEND_CUDA,
         .n_threads = 1,
+        .cuda_tensor_parallel = true,
         .share_session_prefill_workspace = true,
         .placement_ctx_hint = (uint32_t)test_ctx,
     };

@@ -11137,16 +11137,10 @@ static int ds4_gpu_stream_prefill_batch_selected_addr_enabled(
         getenv("DS4_METAL_DISABLE_ROUTED_PAIR_SWIGLU_FUSION") != NULL) {
         return 0;
     }
-    /*
-     * The addr path must stay reachable at ANY cache budget: unique selected
-     * experts that do not fit the cache are addressed into mapped model views
-     * by ds4_gpu_stream_expert_cache_prepare_selected_batch, so the computed
-     * logits never depend on the budget.  Gating this path on the budget (the
-     * old `configured_count < n_total_expert` check) silently switched small
-     * caches to the mm_id fallback, whose different accumulation order
-     * changed the streamed prefill logits with no warning.
-     */
-    if (ds4_gpu_stream_expert_cache_configured_count() == 0) {
+    /* All unique experts for one layer must fit simultaneously because the
+     * address-table kernels consume them in one dispatch. Once the global
+     * cache fills, preparation reuses entries owned by other layers. */
+    if (ds4_gpu_stream_expert_cache_configured_count() < n_total_expert) {
         return 0;
     }
     if (getenv("DS4_METAL_ENABLE_STREAMING_PREFILL_BATCH_SELECTED_ADDR") != NULL) {
@@ -13943,12 +13937,8 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
                 continue;
             }
 
-            if (cache_budget != 0 && reserved_entries >= cache_budget) {
-                unique_entries[u] = NULL;
-                continue;
-            }
-
-            const int force_reuse = 0;
+            const int force_reuse =
+                cache_budget != 0 && reserved_entries >= cache_budget;
             ds4_gpu_stream_expert_readahead_range(unique_gate_offsets[u],
                                                   gate_expert_bytes);
             ds4_gpu_stream_expert_readahead_range(unique_up_offsets[u],
@@ -13979,7 +13969,7 @@ static int ds4_gpu_stream_expert_cache_prepare_selected_batch(
                 ok = 0;
                 break;
             }
-            if (reserved_entries < UINT32_MAX) {
+            if (!force_reuse && reserved_entries < UINT32_MAX) {
                 reserved_entries++;
             }
             if (!gate_bufs[n_loads] ||

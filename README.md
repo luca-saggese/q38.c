@@ -1,51 +1,44 @@
 # DwarfStar
 
 **DwarfStar** is a small native inference engine optimized first for
-**DeepSeek V4 Flash**, with support for **DeepSeek V4 PRO** on very high-memory
-machines. It is
-intentionally narrow: not a generic GGUF runner, not a wrapper around another
-runtime: it is completely self-contained. Other than running the model in a
-correct and fast way, the project goal is to provide DeepSeek specific loading,
-prompt rendering, tool calling, KV state handling (RAM and on-disk), server
-API and integrated coding agent, all ready to work with coding agents or with
-the provided CLI interface. There are also tools for GGUF and imatrix generation,
-and for quality and speed testing.
+**DeepSeek V4 Flash**. It also supports **GLM 5.2** and, on very high-memory
+machines, **DeepSeek V4 PRO**. It is self-contained and deliberately narrow,
+not a general GGUF runner. Model loading, prompt rendering, tool calls, KV
+state, the HTTP server, and the coding agent are built and tested together.
+The repository also includes tools and data for GGUF, imatrix, quality, and speed.
 
-We support the following backends:
-* **Metal** is our primary target. Starting from MacBooks with 96GB of RAM (or less, using SSD streaming).
-* **NVIDIA CUDA / DGX Spark**, CUDA with special care for the DGX Spark.
-* **Strix Halo (ROCm)**, systems like the Framework Desktop and other systems based on the same GPU and unified RAM design.
+Supported backends:
+
+* **Metal**, the primary target, on Macs with 96 GB or more. Smaller machines
+  can use SSD streaming.
+* **NVIDIA CUDA**, including multi-GPU systems and DGX Spark.
+* **ROCm** on Strix Halo systems such as the Framework Desktop.
 
 This project would not exist without **llama.cpp and GGML**, make sure to read
 the acknowledgements section, a big thank you to Georgi Gerganov and all the
 other contributors.
 
-**Note that DeepSeek v4** is not our only target. Right now Flash and PRO are the
-perfect fit because of capabilities, size, KV cache efficiency. If tomorrow a
-better open weight model is released for the 128GB size, we could switch, the same
-for other important size classes like 512GB of RAM. The project is stictly
-opportunistic depending on what open weight models exist in a given moment.
-If a new model will be supported, the old one may be removed completely and
-no longer supported, unless there is some kind of overlap of abilities.
+Model support is intentionally opportunistic. The project follows the best open
+weights for useful local machine sizes, especially 128 GB laptops and 512 GB
+workstations. A model may be removed when a better replacement arrives.
+
+# So, what can I do with this software?
+
+* You can run a very capable models in your consumer hardware, a MacBook, a DGX Spark, or a Strix Halo for example. Even if you have not enough RAM, with SSD streaming, you can run it at a decent speed.
+* Using the CUDA multi-GPU support and with ds4-server micro batching of decoding and generation, you can turn a server with old-ish CUDA cards (Ada Lovelace architecture), no longer supported for new models by vLLM, into a multi-user LLM server for your company. We tested this setup with 8xL40S NVIDIA cards and multiple sessions with very good results. 120 t/s aggreated generation, 2000 t/s prefill.
+* Using two MacBook M5 Max / M3 Ultra RDMA, you can run 4 bit DeepSeek Flash or GLM 5.2 with tensor parallelism.
+* You can also use pipeline paralellism to glue together multiple systems to sum their RAM and run larger models.
 
 ## Motivations
 
-* Very capable open weight models finally exist. DeepSeek v4 Flash feels quasi-frontier. The PRO is even better. Both resist 2 bit quantization very well.
-* Very capable computers like MacBooks, the DGX Spark now exist.
-* DeepSeek v4 kv cache design makes it pratical to run very big contexts. Other vendors are using this approach.
-* This few hundred billions models are strictly better than smaller (even if dense) models, regardless of what benchmarks say.
+* Capable open-weight models now fit on high-end personal machines.
+* DeepSeek V4 Flash and PRO, GLM 5.2, tolerate aggressive routed-expert quantization.
+* Compressed KV caches and fast local SSDs make long contexts practical.
+* The idea of an inference system specialized for a few models.
 
-That said, a few important things about this project:
+# AI full disclosure
 
-* The local inference landscape contains many excellent projects, but new models are released continuously, and the attention immediately gets captured by the next model to implement. This project takes a deliberately narrow bet: one model at a time, official-vector validation (logits obtained with the official implementation), long-context tests, and enough agent integration to know if it really works. The exact model may change as the landscape evolves, but the constraint remains: local inference credible on high end personal machines or Mac Studios, starting from 96/128GB of memory.
 * This software is developed with **strong assistance from GPT 5.5** and with humans leading the ideas, testing, and debugging. We say this openly because it shaped how the project was built. If you are not happy with AI-developed code, this software is not for you. The acknowledgement below is equally important: this would not exist without `llama.cpp` and GGML, largely written by hand.
-* This implementation is based on the idea that compressed KV caches like the one of DeepSeek v4 and the fast SSD disks of modern MacBooks should change our idea that KV cache belongs to RAM. **The KV cache is actually a first-class disk citizen**. Fast SSD disks also changed the inference game from the point of view of "model needs to fit RAM": while having more RAM the the model size is still preferred, SSD streaming allows to turn the available amount of RAM from a hard cutoff (can I run this model or not?) to continuous spectrum of speed levels.
-* Our vision is that local inference should be a set of three things working well together, out of the box: A) inference engine with HTTP API + B) GGUF specially crafted to run well under a given engine and given assumptions + C) testing and validation with coding agents implementations. D) Purpose built agents for specific models and execution environments. DwarfStar only runs with the GGUF files provided. It gets tested against officially obtained logits at different context sizes. This project exists because we wanted to make one local model feel finished end to end, not just runnable. However this is beta quality code, so probably we are not still there, especially since recently we introduced large new features: distributed inference, SSD streaming, and other minor improvements.
-* The optimized graph path targets **Metal on macOS** and **CUDA on Linux**. The CPU path is only for correctness checks and model/tokenizer diagnostics. For CPU-only Linux builds, use `make cpu`; it builds the normal `./ds4` and `./ds4-server` binaries without CUDA or Metal. On macOS, **warning: current macOS versions have a bug in the virtual memory implementation that will crash the kernel** if you try to run the CPU code. Remember? Software sucks. It was not possible to fix the CPU inference to avoid crashing, since each time you have to restart the computer, which is not funny. Help us, if you have the guts.
-* The project supports both Flash and PRO variants, but Flash remains the main
-  focus because it is the model that makes sense on 96/128GB personal machines.
-  **PRO support is experimental**: it is useful and welcome, but today it is
-  naturally limited to people with 512GB Mac Studio class hardware.
 
 ## Acknowledgements to llama.cpp and GGML
 
@@ -62,14 +55,9 @@ notice in our `LICENSE` file.
 
 ## Status
 
-The code and GGUF files are to be considered of **beta quality** because
-inference and model serving is a complicated matter and all this exists
-only for a few days. It will take months to reach a more stable form.
-However, we try to keep the project in a usable state, and we are making
-progress. If you have issues, make sure to use `--trace` to log the
-sessions, and open issues including the full trace.
-
-The `ds4-agent` is alpha quality, the project was later added.
+The software is currently very fast changing. Consider it beta quality.
+Before each release, a big QA run is executed, however instabilities
+are definitely possible.
 
 ## More Documentation
 
@@ -79,6 +67,8 @@ next sections.
 
 - [CONTRIBUTING.md](CONTRIBUTING.md): correctness and speed regression testing
   guide for contributors. **Read this before sending a pull request**.
+- [QA_BEFORE_RELEASES.md](QA_BEFORE_RELEASES.md): the complete release test
+  matrix, including the remote Metal, CUDA, and ROCm machines.
 - [gguf-tools/README.md](gguf-tools/README.md): offline GGUF generation,
   imatrix collection, quantization tooling, and quality checks.
 - [gguf-tools/imatrix/README.md](gguf-tools/imatrix/README.md): how the
@@ -96,11 +86,12 @@ next sections.
 
 ## Model Weights
 
-This implementation only works with the DeepSeek V4 Flash and PRO GGUFs published for
-this project. It is not a general GGUF loader, and arbitrary DeepSeek/GGUF files
-will not have the tensor layout, quantization mix, metadata, or optional MTP
-state expected by the engine. The 2 bit quantizations provided here are not
-a joke: they behave well, work under coding agents, call tools in a reliable way.
+This implementation only works with the DeepSeek V4 and GLM 5.2 GGUFs listed
+below. It is not a general GGUF loader, and arbitrary GGUF files will not have
+the tensor layout, quantization mix, metadata, or optional MTP state expected by
+the engine. The 2 bit quantizations provided here are verified to be actually
+high quality: they behave well, work under coding agents, call tools in a reliable way.
+
 The 2 bit quants use a very asymmetrical quantization: only the routed MoE
 experts are quantized, up/gate at `IQ2_XXS`, down at `Q2_K`. They are the
 majority of all the model space: the other components (shared experts,
@@ -143,34 +134,11 @@ but must be enabled explicitly with `--mtp`. The current MTP/speculative
 decoding path is still experimental: it is correctness-gated and currently
 provides at most a slight speedup, not a meaningful generation-speed win.
 
-DSpark support is built from DeepSeek's official Flash DSpark safetensors. The
-source checkpoint is large, but the standalone support GGUF is much smaller:
-
-```sh
-./download_model.sh dspark-source
-./download_model.sh dspark-support-dry-run
-./download_model.sh dspark-support
-```
-
-The resulting support GGUF is used with the normal Flash GGUF and remains
-explicitly opt-in:
-
-```sh
-DS4_DSPARK_ENABLE=1 ./ds4 -m ./ds4flash.gguf --mtp ./gguf/DeepSeek-V4-Flash-DSpark-support.gguf --temp 0
-```
-
-DSpark uses confidence pruning by default with threshold `0.9`, which avoids
-replay-heavy low-confidence blocks while preserving the target-verified greedy
-stream. Set `DS4_DSPARK_CONFIDENCE_THRESHOLD=0` only for fixed-block diagnostic
-measurements. `--quality` disables DSpark suffix drafting and keeps the exact
-target-only continuation path; set `DS4_DSPARK_STRICT=1` for the same behavior
-without enabling all quality-mode kernels. Plain sampled and non-speculative
-session eval also skips DSpark draft preparation; DSpark speculation is
-currently a greedy argmax-only path.
-GLM 5.2 support is currently limited to the GGUF files tested by this branch:
+GLM 5.2 support is limited to the GGUF files tested by this branch:
 
 ```sh
 ./download_model.sh glm-unsloth-q4  # Unsloth UD-Q4_K_XL, 11 shards
+./download_model.sh glm-antirez-iq2xxs  # antirez routed IQ2_XXS single-file GGUF
 ./download_model.sh glm-antirez-q2  # antirez routed Q2_K single-file GGUF
 ./download_model.sh glm-antirez-q4  # antirez routed Q4_K single-file GGUF
 ```
@@ -180,6 +148,25 @@ Q8/F32 paths and supports routed expert gate/up tensors in `Q2_K`, `Q4_K`, or
 `Q5_K`; routed expert down tensors are supported in `Q2_K`, `Q4_K`, `Q5_K`, or
 `Q6_K`. Other GLM GGUF quant layouts should be treated as unsupported until they
 are added deliberately and scored against the official 100-case fixture.
+
+These formats do not all support the same execution modes. The Q4 files work
+for normal Metal and CUDA inference. Two-Mac tensor parallelism currently
+requires an ownership-aware IQ2_XXS or Q2_K routed layout; a routed Q4 GLM
+must be rejected before evaluation.
+
+GLM's MTP block is part of the main GGUF; it does not use the separate Flash
+MTP file. Ordinary decode remains the default. `--glm-mtp` enables experimental
+greedy speculation. `--glm-mtp-timing` also enables it and prints acceptance
+and timing counters:
+
+```sh
+./ds4 -m gguf/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K.gguf \
+  --glm-mtp-timing --temp 0
+```
+
+GLM inference uses the Metal or CUDA graph backend. Directional steering,
+`--power` below 100, an explicit `--prefill-chunk`, and the external `--mtp`
+file are not supported for GLM yet.
 
 Then build:
 
@@ -194,7 +181,55 @@ make cpu              # CPU-only diagnostics build
 select another supported GGUF from `./gguf/`. Run `./ds4 --help` and
 `./ds4-server --help` for the full flag list.
 
+## DSpark Speculative Decoding
+
+DSpark is an auxiliary draft model released by DeepSeek for DeepSeek V4 Flash.
+It reads hidden states from the main model and proposes up to five future
+tokens. DwarfStar checks those proposals with the main Flash model and commits
+only the accepted prefix. The main model remains authoritative; a rejected or
+low-confidence suffix falls back to ordinary target decoding.
+
+The possible gain is faster generation: when several proposed tokens are
+accepted, one target verification pass advances the stream by several tokens.
+It does not accelerate prefill, and the draft and verification work is not
+free. Predictable continuations, especially code, tend to benefit most;
+low-yield prompts can be no faster or even slower. DSpark is therefore still
+experimental and explicitly opt-in.
+
+The released DSpark checkpoint is packaged here as a separate support GGUF of
+about 5.6 GiB. It is not a standalone model. Download it once:
+
+```sh
+./download_model.sh dspark-support
+```
+
+The same support file can be used with the Flash `q2-imatrix`,
+`q2-q4-imatrix`, and `q4-imatrix` models listed above. For now **DeepSeek
+V4 PRO** is not supported. On Metal, the main model may be resident or use
+`--ssd-streaming`; the support model still adds its own weights and runtime
+state to the memory requirement. DSpark replaces the legacy one-stage MTP
+support model for that run rather than stacking with it.
+
+Run it with greedy decoding:
+
+```sh
+./ds4 -m ds4flash.gguf \
+  --mtp gguf/DeepSeek-V4-Flash-DSpark-support.gguf \
+  --dspark --temp 0
+```
+
+`--mtp` supplies the support GGUF, while `--dspark` selects the DSpark runtime.
+The default confidence threshold is `0.9`; it prunes suffixes that are unlikely
+to repay their verification cost. `--dspark-confidence 0` forces fixed
+five-token blocks and is intended for diagnostics. Sampled decoding does not
+use DSpark proposals. `--quality` and `--dspark-strict` also keep target-only
+decoding, which is useful for comparisons and correctness checks.
+
 ## Speed
+
+*Warning: some of those numbers may no longer be updated, because of the optimization
+efforts that improved the runtime speed without updating the benchmark
+results.*
 
 These are single-run Metal CLI numbers with `--ctx 32768`, `--nothink`, greedy
 decoding, and `-n 256`. The short prompt is a normal small Italian story
@@ -307,18 +342,29 @@ re-enable thinking with a conservative generation limit:
   --tokens 1500
 ```
 
+GLM 5.2 uses the same option. Its streaming path keeps the largest full-layer
+prefix that fits resident, then uses the remaining budget for a dynamic expert
+cache. Start with the automatic budget:
+
+```sh
+./ds4 \
+  -m gguf/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K.gguf \
+  --ssd-streaming \
+  --ctx 32768
+```
+
 The important startup line is the cache report. Start conservative, then
 increase the cache if the machine has headroom.
 
-## Distributed Inference
+## Distributed inference with pipeline parallelism
 
-Distributed inference lets DwarfStar **run a model that is too large for one machine** by
+Pipeline parallelism lets DwarfStar **run a model that is too large for one machine** by
 splitting transformer layers across multiple machines. The main example is the
 full 4-bit Flash quant across two 128 GB MacBooks: each process maps only its
 own layer slice, activations are sent over TCP, and the coordinator keeps normal
 CLI/API behavior.
 
-Distributed inference also allows to **speed up prefill** by
+Pipeline parallelism can also **speed up prefill** by
 using multiple GPUs at the same time to process different micro-batches at
 different layers, like in an assembly line. Only prefill can be accelerated this
 way. Generation is purely autoregressive: each token must finish across the
@@ -527,7 +573,7 @@ encryption or authentication, and is not release-stable yet; coordinator and
 workers should be built from the same commit and used on trusted machines and
 trusted networks.
 
-## Tensor Parallelism
+## Tensor Parallelism over RDMA
 
 Tensor parallelism runs a single decode across two Macs connected with a
 Thunderbolt 5 cable, splitting the heavy per-layer work between the two
@@ -546,7 +592,7 @@ resident across the pair; routed kernels never touch the peer's expert half.
 
 One-time setup per boot, on **both** machines:
 
-```
+```sh
 # Let the GPU wire ~117 GB (default cap is ~75% of RAM; the resident
 # expert shard needs ~97.5 GiB plus KV/scratch).
 sudo sysctl iogpu.wired_limit_mb=120000
@@ -559,20 +605,40 @@ sudo ifconfig en1 inet 10.99.0.2/30 alias     # machine A
 sudo ifconfig en6 inet 10.99.0.1/30 alias     # machine B
 ```
 
-Both machines need the same tree, the same commit, and the same GGUF
-path. Start the worker first (machine B, dialing the coordinator's
-Thunderbolt bridge address), then the coordinator (machine A):
+Check the verbs device before loading the model:
 
+```sh
+rdma_ctl status
+ibv_devinfo -v
 ```
-# Machine B: worker. Computes its expert half in lockstep; never
-# tokenizes or samples.
-./ds4 -m models/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K-DenseQ4.gguf \
-      --tp-worker 172.31.255.2 9911
 
-# Machine A: coordinator. Owns the prompt, sampling, and output.
-./ds4 -m models/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K-DenseQ4.gguf \
-      -c 8192 --tp-coordinator 9911 -p "Tell me something about the sea."
+The device must be active and expose the IPv4-mapped GID for the address above,
+for example `::ffff:10.99.0.2`. A working IP ping does not prove that RDMA is
+active.
+
+Both machines need the same tree, commit, and GGUF path. Tensor parallelism is
+always a 50/50 split with one worker, so do not pass `--layers`. Start the worker
+first; it retries while the coordinator loads. The worker must dial the address
+on the Thunderbolt member interface, not the bridge address:
+
+```sh
+MODEL=gguf/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K.gguf
+
+# Machine B: worker.
+./ds4 -m "$MODEL" --tensor-parallel --role worker \
+  --coordinator 10.99.0.2 9911 --transport rdma
+
+# Machine A: coordinator.
+./ds4 -m "$MODEL" --tensor-parallel --role coordinator \
+  --listen 10.99.0.2 9911 --transport rdma -c 8192 \
+  -p "Tell me something about the sea."
 ```
+
+The active verbs device and IPv4-mapped GID are selected automatically. If that
+is ambiguous, add `--rdma-device rdma_en6 --rdma-gid-index 1` on the worker and
+the matching `rdma_en1` flags on the coordinator. Use `--transport tcp` on both
+sides to force TCP. Tensor parallel roles are currently exposed by the `ds4`
+CLI, not by `ds4-server` or `ds4-agent`.
 
 Startup takes about 9 seconds per machine: each rank pre-faults its
 ~100 GiB shard from SSD and pins it through a Metal residency set.
@@ -592,11 +658,40 @@ Notes: the coordinator mirrors every prompt sync and eval to the worker, so
 both KV caches stay in lockstep; prompt processing splits both the
 routed-expert GEMMs (by expert ownership) and the attention heads (a
 contiguous half per machine) with one bulk partial-sum exchange per
-layer per stage (`DS4_GLM_TP_TOKEN_PREFILL=1` selects a slower
+layer per stage (`--tensor-parallel-token-prefill` selects a slower
 token-by-token prefill that exactly matches the single-machine arithmetic).
 The split graph is deterministic, but its changed floating-point reduction
-order is not generally byte-identical to single-machine execution. Design
-notes and the full bring-up log live in `misc/METAL_TENSOR_PARALLELISM.md`.
+order is not generally byte-identical to single-machine execution.
+
+## Tensor Parallelism across CUDA GPUs
+
+On a single CUDA server, `--cuda-tensor-parallel` splits DeepSeek V4 Flash
+tensor and routed-expert work across an even number of GPUs. This is separate
+from the Mac-to-Mac mode above: it does not use `--role`, RDMA, or the
+distributed layer pipeline. GPU placement and memory budgets are selected with
+the normal `--gpu-devices` and `--gpu-vram` options.
+
+This is the layout used on the tested eight-L40S server:
+
+```sh
+MODEL=gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf
+
+./ds4 -m "$MODEL" --cuda-tensor-parallel \
+  --gpu-vram auto \
+  --gpu-devices 0,2,4,6,1,3,5,7 \
+  --ctx 32768 \
+  -p "Hello"
+```
+
+The same placement flags work with `ds4-server`, where `--batched-session N`
+can use the native CUDA multi-session decode and mixed prefill/decode paths.
+Choose the session count and context size so every resident KV cache fits in
+the remaining GPU memory.
+
+This mode currently requires DeepSeek V4 Flash and an even multi-GPU
+placement. GLM 5.2 instead uses normal layer placement across the selected
+CUDA devices. DGX Spark is a single-GPU target and must not be started with
+`--cuda-tensor-parallel`.
 
 ## Reducing heat, power usage and fan noise
 
@@ -611,8 +706,8 @@ and inserting small sleeps between work units: during prefill it sleeps between
 layers, and during generation it sleeps between decoded tokens. This reduces
 sustained load without changing model output.
 
-The option is available on the CLI, server, agent, eval, and benchmark tools,
-for example:
+The option is available on the CLI, server, agent, eval, and benchmark tools
+for DeepSeek models. GLM 5.2 currently accepts only `--power 100`. For example:
 
 ```sh
 ./ds4 --power 50
@@ -680,12 +775,10 @@ exponential sweeps. Output is CSV with one row per frontier: latest prefill
 interval tokens/sec, generation tokens/sec at that frontier, and
 `kvcache_bytes`.
 
-Sessions prefill long prompts in 4096-token chunks by default. Set
-`DS4_METAL_PREFILL_CHUNK=N` to compare another chunk size, for example `2048`
-to match the strict official-vector checkpoint path, or
-`DS4_METAL_PREFILL_CHUNK=0` to prefill a prompt as one whole batch when memory
-allows. Changing the chunk changes the KV checkpoint/logit path, so compare it
-as an explicit run configuration.
+Sessions prefill long prompts in 4096-token chunks by default. Use
+`--prefill-chunk 2048`, for example, to match the strict official-vector
+checkpoint path. Changing the chunk changes the KV checkpoint/logit path, so
+compare it as an explicit run configuration.
 Chunked Metal prefill reuses the same range-capable layer-major graph for each
 chunk, preserving absolute compressor/indexer boundaries while avoiding the old
 per-layer chunk dispatch path.
@@ -831,6 +924,22 @@ before reuse and can be restored when that conversation returns; an active
 request is never evicted. Choose `N` and `--ctx` so all resident KV allocations
 fit in GPU memory. Without this option, inference retains the original
 single-session behavior.
+
+Batching is exact: when a native batched kernel is unavailable, DwarfStar runs
+the affected rows in a fixed order and returns the same full logits as separate
+session evaluations. The current backend behavior is:
+
+| Backend and model | Session execution |
+| --- | --- |
+| Metal, resident DeepSeek Flash | Native shared-expert and QKV batching for supported 4- and 8-row batches; ordered fallback otherwise. |
+| Metal, GLM 5.2 | Ordered exact fallback. |
+| CUDA, DeepSeek Flash on a supported multi-GPU TP/EP layout | Native decode and mixed prefill/decode, with exact fallbacks for unsupported kernel shapes. |
+| CUDA single GPU, including DGX Spark | Ordered exact fallback. |
+
+`N` resident sessions allocate `N` KV states, so a context size that fits once
+may not fit eight times. Native batching can improve aggregate throughput; an
+ordered fallback provides concurrency and fairness, but not the same speedup.
+MTP speculative decoding is disabled while native session batching is active.
 
 Supported endpoints:
 
@@ -1072,8 +1181,8 @@ matches the local `~/bin/claude-ds4` setup:
 #!/bin/sh
 unset ANTHROPIC_API_KEY
 
-export ANTHROPIC_BASE_URL="${DS4_ANTHROPIC_BASE_URL:-http://127.0.0.1:8000}"
-export ANTHROPIC_AUTH_TOKEN="${DS4_API_KEY:-dsv4-local}"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8000"
+export ANTHROPIC_AUTH_TOKEN="dsv4-local"
 export ANTHROPIC_MODEL="deepseek-v4-flash"
 
 export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-v4-flash"
@@ -1312,6 +1421,25 @@ make cuda CUDA_ARCH=sm_120
 make cuda CUDA_ARCH=native
 ```
 
+CUDA builds accept `--gpu-vram N[,N,...]` and `--gpu-devices N[,N,...]` in the
+CLI, server, agent, and benchmark. VRAM values are per-device GiB budgets;
+`--gpu-vram auto` uses the free memory reported by CUDA. The device list controls
+the placement order and must have the same number of entries as an explicit
+budget list. Placement reserves graph and KV memory for the requested context
+and refuses to start if model layers would spill to the CPU.
+
+Without `--cuda-tensor-parallel`, CUDA uses normal layer placement across the
+listed devices. This is also the supported multi-GPU layout for GLM 5.2:
+
+```sh
+./ds4 -m gguf/GLM-5.2-UD-Q2_K_RoutedQ2K.gguf \
+  --gpu-vram auto --gpu-devices 0,2,4,6,1,3,5,7 \
+  --ctx 32768 -p "Hello"
+```
+
+For the DeepSeek Flash tensor/expert-parallel layout, see
+"Tensor Parallelism across CUDA GPUs" above.
+
 There is also a CPU reference/debug path:
 
 ```sh
@@ -1345,10 +1473,9 @@ captured from the official DeepSeek V4 Flash API. The requests use
 `top_logprobs` slice exposed by the API. Local vectors are generated with
 `./ds4 --dump-logprobs` and compared by token bytes, so tokenizer/template or
 attention regressions show up before they become long generation failures. The
-C runner pins `DS4_METAL_PREFILL_CHUNK=2048` for this strict API-vector
-comparison.
+C runner pins a 2048-token prefill chunk for this strict API-vector comparison.
 
-All project tests are driven by the C runner, with a small `ds4-eval`
+The core local tests are driven by the C runner, with a small `ds4-eval`
 extractor self-test run first:
 
 ```sh
@@ -1356,6 +1483,24 @@ make test                  # ./ds4-eval --self-test-extractors && ./ds4_test --a
 ./ds4_test --logprob-vectors
 ./ds4_test --server
 ```
+
+The batching tests are model-backed and must run on the matching GPU backend:
+
+```sh
+# Metal, with DS4_TEST_SESSION_COUNT set to 2, 4, and 8.
+DS4_TEST_MODEL=/path/to/model.gguf DS4_TEST_SESSION_COUNT=4 \
+  make test-metal-session-batch
+
+# CUDA multi-GPU Flash.
+DS4_TEST_MODEL=/path/to/model.gguf make test-cuda-session-batch
+DS4_TEST_MODEL=/path/to/model.gguf make test-cuda-mixed-batch
+```
+
+For GLM, run the same Metal session test with a GLM GGUF and run
+`tests/glm_long_context_smoke.sh /path/to/model.gguf`. The official 100-case
+quality scorers, two-Mac TCP/RDMA tests, CUDA matrix, and manual agent checks are
+release gates rather than quick local tests; follow
+[QA_BEFORE_RELEASES.md](QA_BEFORE_RELEASES.md).
 
 ## Debugging Notes
 
