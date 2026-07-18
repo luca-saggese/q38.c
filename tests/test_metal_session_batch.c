@@ -5,15 +5,18 @@
  */
 
 #include "ds4.h"
+#include "ds4_tp.h"
 
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define MAX_SESSION_COUNT 8
 #define DECODE_STEPS 6
+#define MIXED_SUFFIX_TOKENS 8
 #define TEST_CTX 512
 
 static const char *prompts[MAX_SESSION_COUNT] = {
@@ -81,8 +84,14 @@ static void compare_logits(ds4_session *session, const float *expected,
     archive_logits(session, actual, vocab, session_id, step);
     float max_abs = 0.0f;
     int different = 0;
+    int low_different = 0;
+    int high_different = 0;
     for (int i = 0; i < vocab; i++) {
-        if (memcmp(&actual[i], &expected[i], sizeof(float)) != 0) different++;
+        if (memcmp(&actual[i], &expected[i], sizeof(float)) != 0) {
+            different++;
+            if (i < vocab / 2) low_different++;
+            else high_different++;
+        }
         float d = fabsf(actual[i] - expected[i]);
         if (!isfinite(d)) d = FLT_MAX;
         if (d > max_abs) max_abs = d;
@@ -91,9 +100,9 @@ static void compare_logits(ds4_session *session, const float *expected,
     if (different != 0 || actual_argmax != expected_argmax) {
         fprintf(stderr,
                 "FAIL: logits mismatch session=%d step=%d expected_top=%d "
-                "actual_top=%d differing=%d max_abs=%g\n",
+                "actual_top=%d differing=%d low=%d high=%d max_abs=%g\n",
                 session_id, step, expected_argmax, actual_argmax,
-                different, max_abs);
+                different, low_different, high_different, max_abs);
         exit(1);
     }
 }
@@ -107,12 +116,38 @@ int main(void) {
     setenv("DS4_METAL_SESSION_BATCH_LOG", "1", 1);
     const int session_count = session_count_from_env();
 
+    const char *tp_mode = getenv("DS4_TEST_TP_MODE");
+    const bool tp_leader = tp_mode && strcmp(tp_mode, "leader") == 0;
+    const bool tp_worker = tp_mode && strcmp(tp_mode, "worker") == 0;
+    if (tp_mode && tp_mode[0] && !tp_leader && !tp_worker) {
+        fprintf(stderr, "FAIL: invalid DS4_TEST_TP_MODE=%s\n", tp_mode);
+        return 1;
+    }
+    const int tp_port = tp_port_from_env();
     ds4_engine_options opt = {
         .model_path = model,
         .backend = DS4_BACKEND_METAL,
         .n_threads = 1,
         .context_size = TEST_CTX,
     };
+    if (tp_leader) {
+        opt.tp.role = DS4_TP_LEADER;
+        opt.tp.listen_host = getenv("DS4_TEST_TP_LISTEN_HOST");
+        if (!opt.tp.listen_host || !opt.tp.listen_host[0]) {
+            opt.tp.listen_host = "0.0.0.0";
+        }
+        opt.tp.listen_port = tp_port;
+        opt.tp.transport = tp_transport_from_env();
+    } else if (tp_worker) {
+        opt.tp.role = DS4_TP_WORKER;
+        opt.tp.leader_host = getenv("DS4_TEST_TP_LEADER_HOST");
+        if (!opt.tp.leader_host || !opt.tp.leader_host[0]) {
+            fprintf(stderr, "FAIL: DS4_TEST_TP_LEADER_HOST is required for worker mode\n");
+            return 1;
+        }
+        opt.tp.leader_port = tp_port;
+        opt.tp.transport = tp_transport_from_env();
+    }
     ds4_engine *engine = NULL;
     if (ds4_engine_open(&engine, &opt) != 0) fail("engine open", -1, -1);
 
@@ -360,7 +395,9 @@ int main(void) {
     free(argmax);
     free(actual);
     free(expected);
+    if (tp) (void)ds4_tp_send_stop(tp);
     ds4_engine_close(engine);
+    ds4_tp_free(tp);
     fprintf(stderr,
             "test_metal_session_batch PASS sessions=%d steps=%d mixed_suffix=%d exact_logits=1\n",
             session_count, DECODE_STEPS, MIXED_SUFFIX_TOKENS);

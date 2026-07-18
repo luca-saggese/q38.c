@@ -1,5 +1,6 @@
 #include "ds4.h"
 #include "ds4_distributed.h"
+#include "ds4_gpu_args.h"
 #include "ds4_help.h"
 #include "ds4_kvstore.h"
 #include "ds4_web.h"
@@ -67,6 +68,8 @@ typedef struct {
 typedef struct {
     ds4_engine_options engine;
     agent_generation_options gen;
+    const char *gpu_vram_arg;
+    const char *gpu_devices_arg;
     const char *chdir_path;
     bool non_interactive;
 } agent_config;
@@ -143,6 +146,7 @@ typedef struct {
     bool queued_user_drain_answered;
     char *queued_user_drain_text;
     bool datetime_context_injected;
+    int last_system_prompt_reminder_at;
     char more_path[PATH_MAX];
     int more_next_line;
     bool more_bare;
@@ -645,6 +649,10 @@ static agent_config parse_options(int argc, char **argv) {
             c.engine.backend = DS4_BACKEND_METAL;
         } else if (!strcmp(arg, "--cuda")) {
             c.engine.backend = DS4_BACKEND_CUDA;
+        } else if (!strcmp(arg, "--gpu-vram")) {
+            c.gpu_vram_arg = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--gpu-devices")) {
+            c.gpu_devices_arg = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--cpu")) {
             c.engine.backend = DS4_BACKEND_CPU;
         } else if (!strcmp(arg, "-t") || !strcmp(arg, "--threads")) {
@@ -1083,6 +1091,19 @@ static const char agent_glm_syntax_reminder[] =
     "<tool_call>$TOOL_NAME<arg_key>$PARAMETER_NAME</arg_key>"
     "<arg_value>$PARAMETER_VALUE</arg_value></tool_call>\n";
 
+#define AGENT_SYSTEM_PROMPT_REMINDER_TOKENS 50000
+
+static char *agent_build_system_prompt_reminder(ds4_engine *engine) {
+    char *tools = agent_build_tools_prompt(engine);
+    const char *start = "\n\n[System prompt reminder follows.]\n";
+    const char *end = "[End system prompt reminder.]\n\n";
+    const size_t len = strlen(start) + strlen(tools) + strlen(end) + 1;
+    char *out = xmalloc(len);
+    snprintf(out, len, "%s%s%s", start, tools, end);
+    free(tools);
+    return out;
+}
+
 static void agent_append_system_prompt(ds4_engine *engine, ds4_tokens *tokens,
                                        const char *extra) {
     /* The built-in tool prompt is trusted DS4 control text.  Tokenize it like a
@@ -1106,6 +1127,10 @@ static void agent_append_system_prompt(ds4_engine *engine, ds4_tokens *tokens,
     free(plain);
 }
 
+static void agent_worker_note_system_prompt_seen(agent_worker *w) {
+    w->last_system_prompt_reminder_at = w->transcript.len;
+}
+
 static void agent_worker_maybe_append_datetime_context(agent_worker *w) {
     if (w->datetime_context_injected) return;
 
@@ -1124,6 +1149,34 @@ static void agent_worker_maybe_append_datetime_context(agent_worker *w) {
     ds4_chat_append_message(w->engine, &w->transcript, "system", msg);
     agent_trace_text(w, "datetime-context", msg, strlen(msg));
     w->datetime_context_injected = true;
+}
+
+static void agent_worker_maybe_append_system_prompt_reminder(agent_worker *w) {
+    if (w->last_system_prompt_reminder_at <= 0) {
+        agent_worker_note_system_prompt_seen(w);
+        return;
+    }
+    if (w->transcript.len - w->last_system_prompt_reminder_at <
+        AGENT_SYSTEM_PROMPT_REMINDER_TOKENS) {
+        return;
+    }
+
+    char *reminder = agent_build_system_prompt_reminder(w->engine);
+    agent_publish_system_status(w, "Re-injecting system prompt reminder...");
+    agent_trace(w, "system prompt reminder injected at transcript=%d",
+                w->transcript.len);
+    if (agent_tool_syntax_for_engine(w->engine) == AGENT_TOOL_SYNTAX_GLM) {
+        ds4_chat_append_message(w->engine, &w->transcript, "system", reminder);
+    } else {
+        ds4_tokenize_rendered_chat(w->engine, reminder, &w->transcript);
+    }
+    free(reminder);
+
+    if (w->cfg->gen.system && w->cfg->gen.system[0]) {
+        ds4_chat_append_message(w->engine, &w->transcript, "system",
+                                w->cfg->gen.system);
+    }
+    agent_worker_note_system_prompt_seen(w);
 }
 
 /* Wake the UI thread after changing worker-visible state.  The byte in
@@ -4578,6 +4631,7 @@ static bool agent_worker_reset_to_sysprompt(agent_worker *w, char *err, size_t e
         }
     }
 
+    agent_worker_note_system_prompt_seen(w);
     pthread_mutex_lock(&w->mu);
     w->user_activity = false;
     w->session_dirty = false;
@@ -8196,6 +8250,7 @@ static bool agent_worker_compact(agent_worker *w, const char *reason,
         ds4_tokens_free(&sys);
         return false;
     }
+    agent_worker_note_system_prompt_seen(w);
     ds4_tokens_free(&old_transcript);
     ds4_tokens_free(&sys);
     char *bash_update = agent_bash_jobs_compaction_observation(w);
@@ -8393,6 +8448,7 @@ static int worker_run_turn(agent_worker *w, const char *user_text) {
             agent_set_error(w, compact_err[0] ? compact_err : "context compaction failed");
             return 1;
         }
+        agent_worker_maybe_append_system_prompt_reminder(w);
         ds4_chat_append_assistant_prefix(w->engine, &w->transcript, think_mode);
 
         const ds4_tokens *prompt_for_sync = &w->transcript;
@@ -11053,8 +11109,44 @@ int main(int argc, char **argv) {
         return 1;
     }
     cfg.engine.context_size = cfg.gen.ctx_size;
+    cfg.engine.placement_ctx_hint = cfg.gen.ctx_size;
+    if (cfg.gpu_vram_arg || cfg.gpu_devices_arg) {
+        cfg.engine.backend = cfg.gpu_vram_arg &&
+                             !strcmp(cfg.gpu_vram_arg, "0")
+            ? DS4_BACKEND_CPU
+            : DS4_BACKEND_CUDA;
+    }
     ds4_engine *engine = NULL;
-    if (ds4_engine_open(&engine, &cfg.engine) != 0) return 1;
+    if (cfg.gpu_vram_arg || cfg.gpu_devices_arg) {
+        ds4_gpu_config gpu_cfg = {0};
+        bool skip_cuda = false;
+        char gpu_err[256];
+        if (parse_gpu_vram_arg(cfg.gpu_vram_arg, cfg.gpu_devices_arg,
+                               &gpu_cfg, &skip_cuda,
+                               gpu_err, sizeof(gpu_err)) != 0) {
+            fprintf(stderr, "ds4-agent: %s\n", gpu_err);
+            return 2;
+        }
+        if (skip_cuda) {
+            cfg.engine.backend = DS4_BACKEND_CPU;
+            if (ds4_engine_open(&engine, &cfg.engine) != 0) return 1;
+        } else {
+            const bool was_auto =
+                (cfg.gpu_vram_arg && !strcmp(cfg.gpu_vram_arg, "auto")) ||
+                (!cfg.gpu_vram_arg && cfg.gpu_devices_arg);
+            char layout[256];
+            if (format_gpu_layout_line(&gpu_cfg, was_auto,
+                                       layout, sizeof(layout)) > 0) {
+                fprintf(stdout, "%s\n", layout);
+                fflush(stdout);
+            }
+            cfg.engine.backend = DS4_BACKEND_CUDA;
+            if (ds4_engine_create_with_gpu_config(
+                    &engine, &cfg.engine, &gpu_cfg) != 0) return 1;
+        }
+    } else if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+        return 1;
+    }
     agent_apply_model_sampling_defaults(engine, &cfg.gen);
 
     struct sigaction old_int;

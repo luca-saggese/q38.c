@@ -1,5 +1,6 @@
 #include "ds4.h"
 #include "ds4_distributed.h"
+#include "ds4_gpu_args.h"
 #include "ds4_tp.h"
 #include "ds4_help.h"
 #include "linenoise.h"
@@ -25,6 +26,37 @@
 #include <stdarg.h>
 #include <time.h>
 #include <unistd.h>
+
+static bool cli_env_flag_enabled(const char *name, bool defval) {
+    const char *v = getenv(name);
+    if (!v || !v[0]) return defval;
+    return strcmp(v, "0") != 0;
+}
+
+static bool cli_splitkv_spec_requested(void) {
+    if (cli_env_flag_enabled("DS4_CUDA_NO_SPLITKV_SPEC", false)) return false;
+    return cli_env_flag_enabled("DS4_CUDA_SPLITKV_SPEC", false);
+}
+
+static bool cli_greedy_fast_attention_requested(void) {
+    if (!cli_env_flag_enabled("DS4_CUDA_NO_GREEDY_SPLITKV", false) &&
+        cli_env_flag_enabled("DS4_CUDA_GREEDY_SPLITKV", false))
+    {
+        return true;
+    }
+    if (!cli_env_flag_enabled("DS4_CUDA_NO_GREEDY_VEC4", false) &&
+        cli_env_flag_enabled("DS4_CUDA_GREEDY_VEC4", false))
+    {
+        return true;
+    }
+    return false;
+}
+
+static bool cli_greedy_argmax_requested(bool speculative_requested) {
+    if (cli_greedy_fast_attention_requested()) return true;
+    if (speculative_requested) return false;
+    return cli_env_flag_enabled("DS4_CUDA_GREEDY_TOP1", true);
+}
 
 typedef struct {
     const char *prompt;
@@ -63,6 +95,10 @@ typedef struct {
     cli_generation_options gen;
     char *prompt_owned;
     bool inspect;
+    /* CLI flag wiring: raw argv values for --gpu-vram and --gpu-devices.
+     * Resolved post-parse via parse_gpu_vram_arg(). */
+    const char *gpu_vram_arg;
+    const char *gpu_devices_arg;
 } cli_config;
 
 static volatile sig_atomic_t cli_interrupted;
@@ -539,10 +575,24 @@ static int run_sampled_generation(ds4_engine *engine, const cli_config *cfg, con
     uint64_t rng = cfg->gen.seed ? cfg->gen.seed :
         ((uint64_t)time(NULL) ^ ((uint64_t)getpid() << 32) ^ (uint64_t)clock());
     int generated = 0;
+    const bool speculative_argmax = cfg->gen.temperature <= 0.0f &&
+        ((ds4_engine_mtp_draft_tokens(engine) > 1 &&
+          getenv("DS4_MTP_SPEC_DISABLE") == NULL) ||
+         cli_splitkv_spec_requested());
+    const bool greedy_argmax = cfg->gen.temperature <= 0.0f &&
+        cli_greedy_argmax_requested(speculative_argmax);
+    bool have_greedy_next = false;
+    int greedy_next = -1;
     const double t_decode0 = cli_now_sec();
     while (generated < max_tokens && !cli_interrupt_requested()) {
-        int token = ds4_session_sample(session, cfg->gen.temperature, 0,
+        int token;
+        if (greedy_argmax && have_greedy_next) {
+            token = greedy_next;
+            have_greedy_next = false;
+        } else {
+            token = ds4_session_sample(session, cfg->gen.temperature, 0,
                                        cfg->gen.top_p, cfg->gen.min_p, &rng);
+        }
         if (ds4_token_is_stop_for_think_mode(engine, token, think_mode)) break;
 
         int toks[17];
@@ -1429,14 +1479,28 @@ static int run_chat_turn(ds4_engine *engine, cli_config *cfg, repl_chat *chat, c
     uint64_t rng = cfg->gen.seed ? cfg->gen.seed :
         ((uint64_t)time(NULL) ^ ((uint64_t)getpid() << 32) ^ (uint64_t)clock());
     int generated = 0;
+    const bool speculative_argmax = cfg->gen.temperature <= 0.0f &&
+        ((ds4_engine_mtp_draft_tokens(engine) > 1 &&
+          getenv("DS4_MTP_SPEC_DISABLE") == NULL) ||
+         cli_splitkv_spec_requested());
+    const bool greedy_argmax = cfg->gen.temperature <= 0.0f &&
+        cli_greedy_argmax_requested(speculative_argmax);
+    bool have_greedy_next = false;
+    int greedy_next = -1;
     const double t_decode0 = cli_now_sec();
     while (generated < max_tokens && !cli_interrupt_requested()) {
-        int token = ds4_session_sample(chat->session,
+        int token;
+        if (greedy_argmax && have_greedy_next) {
+            token = greedy_next;
+            have_greedy_next = false;
+        } else {
+            token = ds4_session_sample(chat->session,
                                        cfg->gen.temperature,
                                        0,
                                        cfg->gen.top_p,
                                        cfg->gen.min_p,
                                        &rng);
+        }
         if (ds4_token_is_stop_for_think_mode(engine, token, think_mode)) break;
 
         int toks[17];
@@ -1867,6 +1931,10 @@ static cli_config parse_options(int argc, char **argv) {
         } else if (!strcmp(arg, "--cuda")) {
             c.engine.backend = DS4_BACKEND_CUDA;
 #endif
+        } else if (!strcmp(arg, "--gpu-vram")) {
+            c.gpu_vram_arg = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--gpu-devices")) {
+            c.gpu_devices_arg = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--dump-tokens")) {
             c.gen.dump_tokens = true;
         } else if (!strcmp(arg, "--dump-logits")) {
@@ -1984,8 +2052,45 @@ int main(int argc, char **argv) {
     cfg.engine.first_token_test = cfg.gen.first_token_test;
     cfg.engine.metal_graph_test = cfg.gen.metal_graph_test;
     cfg.engine.context_size = cfg.gen.ctx_size;
+    cfg.engine.placement_ctx_hint = cfg.gen.ctx_size;
     ds4_engine *engine = NULL;
-    if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+    if (cfg.gpu_vram_arg || cfg.gpu_devices_arg) {
+        ds4_gpu_config gpu_cfg = {0};
+        bool skip_cuda = false;
+        char errbuf[256];
+        if (parse_gpu_vram_arg(cfg.gpu_vram_arg, cfg.gpu_devices_arg,
+                               &gpu_cfg, &skip_cuda,
+                               errbuf, sizeof(errbuf)) != 0) {
+            fprintf(stderr, "ds4: %s\n", errbuf);
+            ds4_dist_options_free(cfg.dist);
+            free(cfg.prompt_owned);
+            return 2;
+        }
+        cfg.engine.backend = skip_cuda ? DS4_BACKEND_CPU : DS4_BACKEND_CUDA;
+        if (skip_cuda) {
+            if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+                ds4_dist_options_free(cfg.dist);
+                free(cfg.prompt_owned);
+                return 1;
+            }
+        } else {
+            const bool was_auto =
+                (cfg.gpu_vram_arg && !strcmp(cfg.gpu_vram_arg, "auto")) ||
+                (!cfg.gpu_vram_arg && cfg.gpu_devices_arg);
+            char layout[256];
+            if (format_gpu_layout_line(&gpu_cfg, was_auto,
+                                       layout, sizeof(layout)) > 0) {
+                fprintf(stdout, "%s\n", layout);
+                fflush(stdout);
+            }
+            if (ds4_engine_create_with_gpu_config(&engine, &cfg.engine,
+                                                   &gpu_cfg) != 0) {
+                ds4_dist_options_free(cfg.dist);
+                free(cfg.prompt_owned);
+                return 1;
+            }
+        }
+    } else if (ds4_engine_open(&engine, &cfg.engine) != 0) {
         ds4_dist_options_free(cfg.dist);
         free(cfg.prompt_owned);
         return 1;
@@ -2046,6 +2151,10 @@ int main(int argc, char **argv) {
         return rc;
     }
     if (!cfg.inspect) {
+        log_context_memory(cfg.engine.backend,
+                           cfg.gen.ctx_size,
+                           cfg.engine.prefill_chunk,
+                           cfg.engine.ssd_streaming);
         cli_warn_think_max_downgraded(&cfg.gen, "--think-max");
     }
     int rc = 0;

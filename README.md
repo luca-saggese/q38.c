@@ -42,6 +42,10 @@ That said, a few important things about this project:
 * This implementation is based on the idea that compressed KV caches like the one of DeepSeek v4 and the fast SSD disks of modern MacBooks should change our idea that KV cache belongs to RAM. **The KV cache is actually a first-class disk citizen**. Fast SSD disks also changed the inference game from the point of view of "model needs to fit RAM": while having more RAM the the model size is still preferred, SSD streaming allows to turn the available amount of RAM from a hard cutoff (can I run this model or not?) to continuous spectrum of speed levels.
 * Our vision is that local inference should be a set of three things working well together, out of the box: A) inference engine with HTTP API + B) GGUF specially crafted to run well under a given engine and given assumptions + C) testing and validation with coding agents implementations. D) Purpose built agents for specific models and execution environments. DwarfStar only runs with the GGUF files provided. It gets tested against officially obtained logits at different context sizes. This project exists because we wanted to make one local model feel finished end to end, not just runnable. However this is beta quality code, so probably we are not still there, especially since recently we introduced large new features: distributed inference, SSD streaming, and other minor improvements.
 * The optimized graph path targets **Metal on macOS** and **CUDA on Linux**. The CPU path is only for correctness checks and model/tokenizer diagnostics. For CPU-only Linux builds, use `make cpu`; it builds the normal `./ds4` and `./ds4-server` binaries without CUDA or Metal. On macOS, **warning: current macOS versions have a bug in the virtual memory implementation that will crash the kernel** if you try to run the CPU code. Remember? Software sucks. It was not possible to fix the CPU inference to avoid crashing, since each time you have to restart the computer, which is not funny. Help us, if you have the guts.
+* The project supports both Flash and PRO variants, but Flash remains the main
+  focus because it is the model that makes sense on 96/128GB personal machines.
+  **PRO support is experimental**: it is useful and welcome, but today it is
+  naturally limited to people with 512GB Mac Studio class hardware.
 
 ## Acknowledgements to llama.cpp and GGML
 
@@ -815,14 +819,18 @@ Start a local OpenAI/Anthropic-compatible server:
 Use `--chdir /path/to/ds4` when launching `ds4-server` from another directory,
 so relative runtime files such as `metal/*.metal` resolve from the project tree.
 
-The server keeps one mutable backend/KV checkpoint in memory,
-so stateless clients that resend a longer version of the same prompt can reuse
-the shared prefix instead of pre-filling from token zero.
+By default the server keeps one mutable backend/KV checkpoint in memory, so
+stateless clients that resend a longer version of the same prompt can reuse the
+shared prefix instead of pre-filling from token zero.
 
-Request parsing and sockets run in client threads, but inference itself is
-serialized through one graph worker. The current server does not batch multiple
-independent requests together; concurrent requests wait their turn on the single
-live graph/session.
+`--batched-session N` preallocates `N` independent resident KV sessions. Ready
+decode steps are evaluated together, while long prefills alternate in bounded
+chunks so one request does not block every decoder. Requests beyond `N` wait
+for a resident slot. If disk KV caching is enabled, an idle slot is persisted
+before reuse and can be restored when that conversation returns; an active
+request is never evicted. Choose `N` and `--ctx` so all resident KV allocations
+fit in GPU memory. Without this option, inference retains the original
+single-session behavior.
 
 Supported endpoints:
 

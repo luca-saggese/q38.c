@@ -89,6 +89,10 @@ Targets:
        Downloads both PRO Q4 split files into the download directory. About
        838 GB total. This target does not update ./ds4flash.gguf.
 
+  pro  DeepSeek V4 PRO non-imatrix quant, as a single GGUF file. About 430 GB
+       on disk; intended for 512 GB RAM machines. Prefer pro-imatrix unless you
+       specifically need the legacy quant.
+
   mtp  Optional speculative decoding component, about 3.5 GB on disk.
        It is useful with q2-imatrix, q2-q4-imatrix, and q4-imatrix, but must be
        enabled explicitly with --mtp when running ds4 or ds4-server.

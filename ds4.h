@@ -144,6 +144,10 @@ typedef struct {
     bool ssd_streaming_cold;
     bool ssd_streaming_full_layers_set;
     bool inspect_only;
+    /* Multi-GPU placement uses this to price per-layer KV storage. */
+    int placement_ctx_hint;
+    /* Server batch mode serializes execution and can share prefill scratch. */
+    bool share_session_prefill_workspace;
     bool first_token_test;
     bool metal_graph_test;
     bool load_slice;
@@ -179,6 +183,27 @@ typedef struct {
 } ds4_session_payload_file;
 
 int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt);
+
+/* Multi-GPU pipeline-parallel entry point (wave 2).
+ *
+ * Accepts an optional ds4_gpu_config (defined in ds4_gpu_mgpu.h) that
+ * lets callers describe a multi-GPU placement target. Passing NULL is
+ * back-compatible with ds4_engine_open and produces identical engine
+ * state — bit-equivalent execution at runtime.
+ *
+ * When a non-NULL config is supplied AND the computed placement spans
+ * more than one tier (either multiple GPUs or any CPU-spill), this
+ * wave-2 implementation prints the layout and refuses to open: full
+ * multi-tier execution wiring lands in a follow-up task
+ * (mgpu-graph-session-execution). Callers receive a non-zero return
+ * and a documented stderr notice. */
+/* ds4_gpu_config is declared in ds4_gpu_mgpu.h, which callers should
+ * include separately. We forward-declare it here so this header can be
+ * used as-is (callers passing NULL don't need the struct definition). */
+struct ds4_gpu_config;
+int ds4_engine_create_with_gpu_config(ds4_engine **out,
+                                       const ds4_engine_options *opt,
+                                       const struct ds4_gpu_config *gpu_cfg);
 void ds4_engine_close(ds4_engine *e);
 void ds4_engine_summary(ds4_engine *e);
 int ds4_engine_vocab_size(ds4_engine *e);
@@ -246,6 +271,7 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
 void ds4_engine_dump_tokens(ds4_engine *e, const ds4_tokens *tokens);
 int ds4_dump_text_tokenization(const char *model_path, const char *text, FILE *fp);
 int ds4_engine_head_test(ds4_engine *e, const ds4_tokens *prompt);
+bool ds4_engine_is_glm_dsa(ds4_engine *e);
 int ds4_engine_first_token_test(ds4_engine *e, const ds4_tokens *prompt);
 int ds4_engine_metal_graph_test(ds4_engine *e, const ds4_tokens *prompt);
 int ds4_engine_metal_graph_full_test(ds4_engine *e, const ds4_tokens *prompt);
@@ -315,6 +341,7 @@ typedef enum {
 /* Synchronize the live session to a full prompt token prefix.  If the current
  * checkpoint is a prefix, only the suffix is evaluated; otherwise the backend
  * state is refilled from scratch. */
+#define DS4_SESSION_SYNC_INTERRUPTED 2
 int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen);
 bool ds4_session_rewrite_requires_rebuild(int live_len, int canonical_len, int common);
 ds4_session_rewrite_result ds4_session_rewrite_from_common(
@@ -326,6 +353,13 @@ int ds4_session_argmax_excluding(ds4_session *s, int excluded_id);
 int ds4_sample_logits(const float *logits, int n_vocab, float temperature,
                       int top_k, float top_p, float min_p, uint64_t *rng);
 int ds4_session_sample(ds4_session *s, float temperature, int top_k, float top_p, float min_p, uint64_t *rng);
+#ifdef DS4_TEST_HOOKS
+int ds4_test_sample_logits(const float *logits, uint32_t n_vocab,
+                           float temperature, int top_k,
+                           float top_p, float min_p, uint64_t *rng,
+                           float *prob_scratch);
+uint64_t ds4_test_mixed_native_count(void);
+#endif
 int ds4_session_top_logprobs(ds4_session *s, ds4_token_score *out, int k);
 int ds4_session_token_logprob(ds4_session *s, int token, ds4_token_score *out);
 int ds4_session_copy_logits(ds4_session *s, float *out, int cap);

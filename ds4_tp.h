@@ -134,12 +134,29 @@ int ds4_tp_big_gate_exchange(ds4_tp *tp, uint32_t layer, uint64_t seq,
                              const void *out, void *in, uint64_t bytes);
 
 /* Lockstep mirroring (leader side) and worker loop primitives. */
-int ds4_tp_send_sync(ds4_tp *tp, const int *tokens, uint32_t n_tokens);
-int ds4_tp_wait_sync_ack(ds4_tp *tp, char *err, size_t errlen);
-int ds4_tp_send_sync_ack(ds4_tp *tp);
-int ds4_tp_send_eval(ds4_tp *tp, uint64_t seq, int token);
-int ds4_tp_send_rewind(ds4_tp *tp, int pos);
-int ds4_tp_send_invalidate(ds4_tp *tp);
+typedef struct {
+    uint64_t session_id;
+    int32_t token;
+    uint32_t reserved;
+} ds4_tp_batch_item;
+
+int ds4_tp_send_session_create(ds4_tp *tp, uint64_t session_id, int ctx_size);
+int ds4_tp_send_session_destroy(ds4_tp *tp, uint64_t session_id);
+int ds4_tp_send_sync(ds4_tp *tp, uint64_t session_id,
+                     const int *tokens, uint32_t n_tokens);
+int ds4_tp_send_eval(ds4_tp *tp, uint64_t session_id,
+                     uint64_t seq, int token);
+int ds4_tp_send_rewind(ds4_tp *tp, uint64_t session_id, int pos);
+int ds4_tp_send_invalidate(ds4_tp *tp, uint64_t session_id);
+int ds4_tp_send_eval_batch(ds4_tp *tp, const ds4_tp_batch_item *items,
+                           uint32_t count);
+int ds4_tp_send_mixed_batch(ds4_tp *tp, uint64_t prefill_session_id,
+                            const int *prompt, uint32_t prompt_count,
+                            const ds4_tp_batch_item *items,
+                            uint32_t count);
+int ds4_tp_send_command_ack(ds4_tp *tp, uint64_t session_id, int status);
+int ds4_tp_wait_command_ack(ds4_tp *tp, uint64_t session_id,
+                            const char *operation, char *err, size_t errlen);
 int ds4_tp_send_stop(ds4_tp *tp);
 
 /* Worker: blocks for the next mirrored command.  Frame types below; for
@@ -159,17 +176,30 @@ typedef enum {
     DS4_TP_FRAME_LOGITS = 10,
     DS4_TP_FRAME_VERIFY = 11,
     DS4_TP_FRAME_VERIFY_COMMIT = 12,
+    DS4_TP_FRAME_SESSION_CREATE = 13,
+    DS4_TP_FRAME_SESSION_DESTROY = 14,
+    DS4_TP_FRAME_EVAL_BATCH = 15,
+    DS4_TP_FRAME_MIXED_BATCH = 16,
+    DS4_TP_FRAME_COMMAND_ACK = 17,
 } ds4_tp_frame_type;
+
+typedef struct {
+    ds4_tp_frame_type type;
+    uint64_t session_id;
+    uint64_t seq;
+    int value;
+    int *tokens;
+    uint32_t n_tokens;
+    ds4_tp_batch_item *items;
+    uint32_t n_items;
+} ds4_tp_command;
 
 int ds4_tp_recv_command(
         ds4_tp *tp,
-        ds4_tp_frame_type *type,
-        int **tokens,
-        uint32_t *n_tokens,
-        uint64_t *seq,
-        int *token,
+        ds4_tp_command *command,
         char *err,
         size_t errlen);
+void ds4_tp_command_free(ds4_tp_command *command);
 
 /* Debug lockstep check: both sides send their hidden-state hash for a token
  * and compare.  Returns 0 on transport failure, -1 on hash mismatch. */
@@ -185,7 +215,8 @@ int ds4_tp_recv_logits_half(ds4_tp *tp, float *half, uint32_t count);
  * on the commit frame, which carries the leader's decision: full_accept keeps
  * the pushed rows, otherwise both sides roll back and replay replay_n tokens
  * through the gated single-token decode in lockstep. */
-int ds4_tp_send_verify(ds4_tp *tp, const int *drafts, uint32_t n);
+int ds4_tp_send_verify(ds4_tp *tp, uint64_t session_id,
+                       const int *drafts, uint32_t n);
 int ds4_tp_send_verify_commit(ds4_tp *tp, int32_t full_accept, int32_t replay_n);
 int ds4_tp_recv_verify_commit(ds4_tp *tp, int32_t *full_accept, int32_t *replay_n);
 

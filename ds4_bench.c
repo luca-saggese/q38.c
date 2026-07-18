@@ -53,6 +53,7 @@ typedef struct {
     bool ssd_streaming;
     bool ssd_streaming_cold;
     bool ssd_streaming_full_layers_set;
+    bool show_output;
 } bench_config;
 
 static double bench_now_sec(void) {
@@ -315,6 +316,8 @@ static bench_config parse_options(int argc, char **argv) {
             }
         } else if (!strcmp(arg, "--warm-weights")) {
             c.warm_weights = true;
+        } else if (!strcmp(arg, "--show-output")) {
+            c.show_output = true;
         } else {
             fprintf(stderr, "ds4-bench: unknown option: %s\n", arg);
             usage(stderr, NULL);
@@ -541,6 +544,12 @@ static void maybe_warn_distributed_step_shape(const bench_config *cfg, ds4_sessi
 int main(int argc, char **argv) {
     bench_config cfg = parse_options(argc, argv);
 
+    /* Hint the packer at the largest ctx this bench run will exercise
+     * so per-layer KV bytes are priced for the real session size, not
+     * a stale 4096 default. Single-tier and CPU paths ignore this. */
+    int placement_ctx_hint = cfg.ctx_max;
+    if (cfg.ctx_alloc > placement_ctx_hint) placement_ctx_hint = cfg.ctx_alloc;
+
     ds4_engine_options opt = {
         .model_path = cfg.model_path,
         .backend = cfg.backend,
@@ -685,6 +694,10 @@ int main(int argc, char **argv) {
         double gen_first_sec = 0.0;
         double gen_steady_sec = 0.0;
         int gen_done = 0;
+        int *gen_token_buf = cfg.show_output && cfg.gen_tokens > 0
+            ? malloc((size_t)cfg.gen_tokens * sizeof(gen_token_buf[0]))
+            : NULL;
+        int gen_token_count = 0;
         for (int i = 0; i < cfg.gen_tokens; i++) {
             if (ds4_session_pos(session) + 1 >= ds4_session_ctx(session)) {
                 fprintf(stderr, "ds4-bench: generation would exceed allocated context at frontier %d\n", frontier);
@@ -706,9 +719,24 @@ int main(int argc, char **argv) {
             const double token_t1 = bench_now_sec();
             if (i == 0) gen_first_sec = token_t1 - token_t0;
             else gen_steady_sec += token_t1 - token_t0;
+            if (gen_token_buf) gen_token_buf[gen_token_count++] = token;
             gen_done++;
         }
         const double gen_t1 = bench_now_sec();
+        if (cfg.show_output && gen_token_buf && gen_token_count > 0) {
+            fprintf(stderr, "ds4-bench: gen[ctx=%d] decoded text: \"", frontier);
+            for (int i = 0; i < gen_token_count; i++) {
+                size_t tlen = 0;
+                char *txt = ds4_token_text(engine, gen_token_buf[i], &tlen);
+                if (txt) {
+                    fwrite(txt, 1, tlen, stderr);
+                    free(txt);
+                }
+            }
+            fprintf(stderr, "\"\n");
+            fflush(stderr);
+        }
+        free(gen_token_buf);
         if (rc != 0) break;
 
         if (!need_restore_after_generation) {

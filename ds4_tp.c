@@ -38,7 +38,7 @@
 
 #define DS4_TP_MAGIC UINT32_C(0x44533454) /* "DS4T" */
 #define DS4_TP_BATCH_MAGIC UINT32_C(0x44533442) /* "DS4B" */
-#define DS4_TP_PROTOCOL_VERSION 6u
+#define DS4_TP_PROTOCOL_VERSION 7u
 
 /* Default gate timeout is generous: the first gate after a sync waits for
  * the peer's whole (possibly cold page cache) prefill. */
@@ -202,7 +202,11 @@ static void tp_set_err(char *err, size_t errlen, const char *fmt, ...) {
 static int tp_write_full(int fd, const void *buf, size_t len) {
     const char *p = buf;
     while (len) {
-        ssize_t w = write(fd, p, len);
+#ifdef MSG_NOSIGNAL
+        ssize_t w = send(fd, p, len, MSG_NOSIGNAL);
+#else
+        ssize_t w = send(fd, p, len, 0);
+#endif
         if (w < 0) {
             if (errno == EINTR) continue;
             return 0;
@@ -231,6 +235,9 @@ static int tp_read_full(int fd, void *buf, size_t len) {
 
 static void tp_socket_tune(int fd) {
     int one = 1;
+#ifdef SO_NOSIGPIPE
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     /* Gate exchanges are latency-critical 16KB messages; large socket
      * buffers only matter for the TCP fallback's pipelining. */
@@ -1469,119 +1476,311 @@ int ds4_tp_big_gate_exchange(ds4_tp *tp, uint32_t layer, uint64_t seq,
  * Lockstep control plane.
  * --------------------------------------------------------------------- */
 
-int ds4_tp_send_sync(ds4_tp *tp, const int *tokens, uint32_t n_tokens) {
-    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_SYNC,
-                         tokens, n_tokens * sizeof(int));
+typedef struct {
+    uint64_t session_id;
+    uint32_t count;
+    uint32_t reserved;
+} ds4_tp_token_command_header;
+
+typedef struct {
+    uint64_t session_id;
+    int32_t value;
+    uint32_t reserved;
+} ds4_tp_value_command;
+
+typedef struct {
+    uint64_t session_id;
+    uint64_t seq;
+    int32_t token;
+    uint32_t reserved;
+} ds4_tp_eval_command;
+
+typedef struct {
+    uint32_t count;
+    uint32_t reserved;
+} ds4_tp_batch_command_header;
+
+typedef struct {
+    uint64_t prefill_session_id;
+    uint32_t prompt_count;
+    uint32_t item_count;
+} ds4_tp_mixed_command_header;
+
+typedef struct {
+    uint64_t session_id;
+    int32_t status;
+    uint32_t reserved;
+} ds4_tp_command_ack;
+
+static int tp_send_token_command(ds4_tp *tp, uint32_t type,
+                                 uint64_t session_id, const int *tokens,
+                                 uint32_t count) {
+    const uint64_t bytes64 = sizeof(ds4_tp_token_command_header) +
+                             (uint64_t)count * sizeof(int32_t);
+    if (!tp || (!tokens && count != 0) || bytes64 > UINT32_MAX) return 0;
+    const uint32_t bytes = (uint32_t)bytes64;
+    uint8_t *payload = malloc(bytes ? bytes : 1u);
+    if (!payload) return 0;
+    ds4_tp_token_command_header h = { session_id, count, 0 };
+    memcpy(payload, &h, sizeof(h));
+    int32_t *wire_tokens = (int32_t *)(payload + sizeof(h));
+    for (uint32_t i = 0; i < count; i++) wire_tokens[i] = (int32_t)tokens[i];
+    const int ok = tp_send_frame(tp->control_fd, type, payload, bytes);
+    free(payload);
+    return ok;
 }
 
-int ds4_tp_send_sync_ack(ds4_tp *tp) {
-    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_SYNC_ACK, NULL, 0);
+int ds4_tp_send_session_create(ds4_tp *tp, uint64_t session_id, int ctx_size) {
+    ds4_tp_value_command msg = { session_id, (int32_t)ctx_size, 0 };
+    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_SESSION_CREATE,
+                         &msg, sizeof(msg));
 }
 
-int ds4_tp_wait_sync_ack(ds4_tp *tp, char *err, size_t errlen) {
-    uint32_t type = 0, bytes = 0;
-    if (!tp_read_frame_header(tp->control_fd, &type, &bytes) ||
-        type != DS4_TP_FRAME_SYNC_ACK || bytes != 0) {
-        tp_set_err(err, errlen, "tp: worker failed during prefill sync");
-        return 0;
-    }
-    return 1;
+int ds4_tp_send_session_destroy(ds4_tp *tp, uint64_t session_id) {
+    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_SESSION_DESTROY,
+                         &session_id, sizeof(session_id));
 }
 
-int ds4_tp_send_eval(ds4_tp *tp, uint64_t seq, int token) {
-    struct { uint64_t seq; int32_t token; } msg = { seq, token };
+int ds4_tp_send_sync(ds4_tp *tp, uint64_t session_id,
+                     const int *tokens, uint32_t n_tokens) {
+    return tp_send_token_command(tp, DS4_TP_FRAME_SYNC, session_id,
+                                 tokens, n_tokens);
+}
+
+int ds4_tp_send_eval(ds4_tp *tp, uint64_t session_id,
+                     uint64_t seq, int token) {
+    ds4_tp_eval_command msg = { session_id, seq, (int32_t)token, 0 };
     return tp_send_frame(tp->control_fd, DS4_TP_FRAME_EVAL, &msg, sizeof(msg));
 }
 
-int ds4_tp_send_rewind(ds4_tp *tp, int pos) {
-    int32_t v = pos;
-    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_REWIND, &v, sizeof(v));
+int ds4_tp_send_rewind(ds4_tp *tp, uint64_t session_id, int pos) {
+    ds4_tp_value_command msg = { session_id, (int32_t)pos, 0 };
+    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_REWIND,
+                         &msg, sizeof(msg));
 }
 
-int ds4_tp_send_invalidate(ds4_tp *tp) {
-    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_INVALIDATE, NULL, 0);
+int ds4_tp_send_invalidate(ds4_tp *tp, uint64_t session_id) {
+    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_INVALIDATE,
+                         &session_id, sizeof(session_id));
+}
+
+int ds4_tp_send_eval_batch(ds4_tp *tp, const ds4_tp_batch_item *items,
+                           uint32_t count) {
+    const uint64_t bytes64 = sizeof(ds4_tp_batch_command_header) +
+                             (uint64_t)count * sizeof(*items);
+    if (!tp || !items || count == 0 || bytes64 > UINT32_MAX) return 0;
+    const uint32_t bytes = (uint32_t)bytes64;
+    uint8_t *payload = malloc(bytes);
+    if (!payload) return 0;
+    ds4_tp_batch_command_header h = { count, 0 };
+    memcpy(payload, &h, sizeof(h));
+    memcpy(payload + sizeof(h), items, (size_t)count * sizeof(*items));
+    const int ok = tp_send_frame(tp->control_fd, DS4_TP_FRAME_EVAL_BATCH,
+                                 payload, bytes);
+    free(payload);
+    return ok;
+}
+
+int ds4_tp_send_mixed_batch(ds4_tp *tp, uint64_t prefill_session_id,
+                            const int *prompt, uint32_t prompt_count,
+                            const ds4_tp_batch_item *items,
+                            uint32_t count) {
+    const uint64_t prompt_bytes = (uint64_t)prompt_count * sizeof(int32_t);
+    const uint64_t item_bytes = (uint64_t)count * sizeof(*items);
+    const uint64_t bytes64 = sizeof(ds4_tp_mixed_command_header) +
+                             prompt_bytes + item_bytes;
+    if (!tp || !prompt || prompt_count == 0 || !items || count == 0 ||
+        bytes64 > UINT32_MAX) return 0;
+    const uint32_t bytes = (uint32_t)bytes64;
+    uint8_t *payload = malloc(bytes);
+    if (!payload) return 0;
+    ds4_tp_mixed_command_header h = {
+        prefill_session_id, prompt_count, count
+    };
+    memcpy(payload, &h, sizeof(h));
+    int32_t *wire_tokens = (int32_t *)(payload + sizeof(h));
+    for (uint32_t i = 0; i < prompt_count; i++) {
+        wire_tokens[i] = (int32_t)prompt[i];
+    }
+    memcpy(payload + sizeof(h) + prompt_bytes, items, (size_t)item_bytes);
+    const int ok = tp_send_frame(tp->control_fd, DS4_TP_FRAME_MIXED_BATCH,
+                                 payload, bytes);
+    free(payload);
+    return ok;
+}
+
+int ds4_tp_send_command_ack(ds4_tp *tp, uint64_t session_id, int status) {
+    ds4_tp_command_ack ack = { session_id, (int32_t)status, 0 };
+    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_COMMAND_ACK,
+                         &ack, sizeof(ack));
+}
+
+int ds4_tp_wait_command_ack(ds4_tp *tp, uint64_t session_id,
+                            const char *operation, char *err, size_t errlen) {
+    uint32_t type = 0, bytes = 0;
+    ds4_tp_command_ack ack;
+    if (!tp_read_frame_header(tp->control_fd, &type, &bytes) ||
+        type != DS4_TP_FRAME_COMMAND_ACK || bytes != sizeof(ack) ||
+        !tp_read_full(tp->control_fd, &ack, sizeof(ack))) {
+        tp_set_err(err, errlen, "tp: worker failed during %s",
+                   operation ? operation : "command");
+        return 0;
+    }
+    if (ack.session_id != session_id || ack.status != 0) {
+        tp_set_err(err, errlen,
+                   "tp: worker %s failed (session %llu, status %d)",
+                   operation ? operation : "command",
+                   (unsigned long long)ack.session_id, (int)ack.status);
+        return 0;
+    }
+    return 1;
 }
 
 int ds4_tp_send_stop(ds4_tp *tp) {
     return tp_send_frame(tp->control_fd, DS4_TP_FRAME_STOP, NULL, 0);
 }
 
-int ds4_tp_recv_command(
-        ds4_tp *tp,
-        ds4_tp_frame_type *type,
-        int **tokens,
-        uint32_t *n_tokens,
-        uint64_t *seq,
-        int *token,
-        char *err,
-        size_t errlen)
-{
-    *type = DS4_TP_FRAME_ERROR;
-    *tokens = NULL;
-    *n_tokens = 0;
+void ds4_tp_command_free(ds4_tp_command *command) {
+    if (!command) return;
+    free(command->tokens);
+    free(command->items);
+    memset(command, 0, sizeof(*command));
+    command->type = DS4_TP_FRAME_ERROR;
+}
+
+static int tp_command_decode_tokens(ds4_tp_command *command,
+                                    const uint8_t *payload,
+                                    uint32_t bytes,
+                                    char *err, size_t errlen) {
+    if (bytes < sizeof(ds4_tp_token_command_header)) return 0;
+    ds4_tp_token_command_header h;
+    memcpy(&h, payload, sizeof(h));
+    const uint64_t want = sizeof(h) + (uint64_t)h.count * sizeof(int32_t);
+    if (want != bytes) return 0;
+    int *tokens = malloc(h.count ? (size_t)h.count * sizeof(*tokens) : 1u);
+    if (!tokens) {
+        tp_set_err(err, errlen, "tp: command token allocation failed");
+        return -1;
+    }
+    const int32_t *wire_tokens = (const int32_t *)(payload + sizeof(h));
+    for (uint32_t i = 0; i < h.count; i++) tokens[i] = wire_tokens[i];
+    command->session_id = h.session_id;
+    command->tokens = tokens;
+    command->n_tokens = h.count;
+    return 1;
+}
+
+int ds4_tp_recv_command(ds4_tp *tp, ds4_tp_command *command,
+                        char *err, size_t errlen) {
+    memset(command, 0, sizeof(*command));
+    command->type = DS4_TP_FRAME_ERROR;
     uint32_t ftype = 0, bytes = 0;
     if (!tp_read_frame_header(tp->control_fd, &ftype, &bytes)) {
         tp_set_err(err, errlen, "tp: control channel closed");
         return 0;
     }
+    uint8_t *payload = NULL;
+    if (bytes != 0) {
+        payload = malloc(bytes);
+        if (!payload || !tp_read_full(tp->control_fd, payload, bytes)) {
+            free(payload);
+            tp_set_err(err, errlen, "tp: truncated command frame");
+            return 0;
+        }
+    }
+    int ok = 1;
     switch (ftype) {
-    case DS4_TP_FRAME_SYNC: {
-        uint32_t count = bytes / sizeof(int);
-        int *arr = malloc(bytes ? bytes : 4);
-        if (!arr || (bytes && !tp_read_full(tp->control_fd, arr, bytes))) {
-            free(arr);
-            tp_set_err(err, errlen, "tp: truncated sync frame");
-            return 0;
-        }
-        *tokens = arr;
-        *n_tokens = count;
-        *type = DS4_TP_FRAME_SYNC;
-        return 1;
-    }
-    case DS4_TP_FRAME_EVAL: {
-        struct { uint64_t seq; int32_t token; } msg;
-        if (bytes != sizeof(msg) || !tp_read_full(tp->control_fd, &msg, sizeof(msg))) {
-            tp_set_err(err, errlen, "tp: truncated eval frame");
-            return 0;
-        }
-        *seq = msg.seq;
-        *token = msg.token;
-        *type = DS4_TP_FRAME_EVAL;
-        return 1;
-    }
+    case DS4_TP_FRAME_SYNC:
+    case DS4_TP_FRAME_VERIFY:
+        ok = tp_command_decode_tokens(command, payload, bytes, err, errlen);
+        break;
+    case DS4_TP_FRAME_SESSION_CREATE:
     case DS4_TP_FRAME_REWIND: {
-        int32_t v;
-        if (bytes != sizeof(v) || !tp_read_full(tp->control_fd, &v, sizeof(v))) {
-            tp_set_err(err, errlen, "tp: truncated rewind frame");
-            return 0;
-        }
-        *token = v;
-        *type = DS4_TP_FRAME_REWIND;
-        return 1;
+        ds4_tp_value_command msg;
+        if (bytes != sizeof(msg)) { ok = 0; break; }
+        memcpy(&msg, payload, sizeof(msg));
+        command->session_id = msg.session_id;
+        command->value = msg.value;
+        break;
     }
-    case DS4_TP_FRAME_VERIFY: {
-        uint32_t count = bytes / sizeof(int);
-        int *arr = malloc(bytes ? bytes : 4);
-        if (!arr || (bytes && !tp_read_full(tp->control_fd, arr, bytes))) {
-            free(arr);
-            tp_set_err(err, errlen, "tp: truncated verify frame");
-            return 0;
-        }
-        *tokens = arr;
-        *n_tokens = count;
-        *type = DS4_TP_FRAME_VERIFY;
-        return 1;
-    }
+    case DS4_TP_FRAME_SESSION_DESTROY:
     case DS4_TP_FRAME_INVALIDATE:
-        *type = DS4_TP_FRAME_INVALIDATE;
-        return 1;
+        if (bytes != sizeof(command->session_id)) { ok = 0; break; }
+        memcpy(&command->session_id, payload, sizeof(command->session_id));
+        break;
+    case DS4_TP_FRAME_EVAL: {
+        ds4_tp_eval_command msg;
+        if (bytes != sizeof(msg)) { ok = 0; break; }
+        memcpy(&msg, payload, sizeof(msg));
+        command->session_id = msg.session_id;
+        command->seq = msg.seq;
+        command->value = msg.token;
+        break;
+    }
+    case DS4_TP_FRAME_EVAL_BATCH: {
+        ds4_tp_batch_command_header h;
+        if (bytes < sizeof(h)) { ok = 0; break; }
+        memcpy(&h, payload, sizeof(h));
+        const uint64_t want = sizeof(h) +
+                              (uint64_t)h.count * sizeof(ds4_tp_batch_item);
+        if (h.count == 0 || want != bytes) { ok = 0; break; }
+        command->items = malloc((size_t)h.count * sizeof(*command->items));
+        if (!command->items) { ok = -1; break; }
+        memcpy(command->items, payload + sizeof(h),
+               (size_t)h.count * sizeof(*command->items));
+        command->n_items = h.count;
+        break;
+    }
+    case DS4_TP_FRAME_MIXED_BATCH: {
+        ds4_tp_mixed_command_header h;
+        if (bytes < sizeof(h)) { ok = 0; break; }
+        memcpy(&h, payload, sizeof(h));
+        const uint64_t token_bytes =
+            (uint64_t)h.prompt_count * sizeof(int32_t);
+        const uint64_t item_bytes =
+            (uint64_t)h.item_count * sizeof(ds4_tp_batch_item);
+        const uint64_t want = sizeof(h) + token_bytes + item_bytes;
+        if (h.prompt_count == 0 || h.item_count == 0 || want != bytes) {
+            ok = 0;
+            break;
+        }
+        command->tokens = malloc((size_t)h.prompt_count *
+                                 sizeof(*command->tokens));
+        command->items = malloc((size_t)h.item_count *
+                                sizeof(*command->items));
+        if (!command->tokens || !command->items) { ok = -1; break; }
+        const int32_t *wire_tokens =
+            (const int32_t *)(payload + sizeof(h));
+        for (uint32_t i = 0; i < h.prompt_count; i++) {
+            command->tokens[i] = wire_tokens[i];
+        }
+        memcpy(command->items, payload + sizeof(h) + token_bytes,
+               (size_t)item_bytes);
+        command->session_id = h.prefill_session_id;
+        command->n_tokens = h.prompt_count;
+        command->n_items = h.item_count;
+        break;
+    }
     case DS4_TP_FRAME_STOP:
-        *type = DS4_TP_FRAME_STOP;
-        return 1;
+        if (bytes != 0) ok = 0;
+        break;
     default:
-        tp_set_err(err, errlen, "tp: unexpected frame type %u", ftype);
+        ok = 0;
+        break;
+    }
+    free(payload);
+    if (ok <= 0) {
+        ds4_tp_command_free(command);
+        if (ok == 0) {
+            tp_set_err(err, errlen, "tp: invalid command frame type %u (%u bytes)",
+                       ftype, bytes);
+        } else if (!err || !err[0]) {
+            tp_set_err(err, errlen, "tp: command allocation failed");
+        }
         return 0;
     }
+    command->type = (ds4_tp_frame_type)ftype;
+    return 1;
 }
 
 int ds4_tp_send_logits_half(ds4_tp *tp, const float *half, uint32_t count) {
@@ -1599,9 +1798,10 @@ int ds4_tp_recv_logits_half(ds4_tp *tp, float *half, uint32_t count) {
     return tp_read_full(tp->control_fd, half, bytes);
 }
 
-int ds4_tp_send_verify(ds4_tp *tp, const int *drafts, uint32_t n) {
-    return tp_send_frame(tp->control_fd, DS4_TP_FRAME_VERIFY,
-                         drafts, n * sizeof(int));
+int ds4_tp_send_verify(ds4_tp *tp, uint64_t session_id,
+                       const int *drafts, uint32_t n) {
+    return tp_send_token_command(tp, DS4_TP_FRAME_VERIFY, session_id,
+                                 drafts, n);
 }
 
 int ds4_tp_send_verify_commit(ds4_tp *tp, int32_t full_accept, int32_t replay_n) {
@@ -1652,6 +1852,67 @@ int ds4_tp_hash_check(ds4_tp *tp, uint64_t seq, uint64_t hash, char *err, size_t
  * Worker main loop.
  * --------------------------------------------------------------------- */
 
+typedef struct {
+    uint64_t id;
+    ds4_session *session;
+} ds4_tp_worker_session;
+
+typedef struct {
+    ds4_tp_worker_session *v;
+    uint32_t len;
+    uint32_t cap;
+} ds4_tp_worker_sessions;
+
+static int tp_worker_session_index(const ds4_tp_worker_sessions *sessions,
+                                   uint64_t id) {
+    if (!sessions || id == 0) return -1;
+    for (uint32_t i = 0; i < sessions->len; i++) {
+        if (sessions->v[i].id == id) return (int)i;
+    }
+    return -1;
+}
+
+static ds4_session *tp_worker_session_find(
+        const ds4_tp_worker_sessions *sessions, uint64_t id) {
+    const int index = tp_worker_session_index(sessions, id);
+    return index >= 0 ? sessions->v[index].session : NULL;
+}
+
+static int tp_worker_session_add(ds4_tp_worker_sessions *sessions,
+                                 uint64_t id, ds4_session *session) {
+    if (!sessions || !session || id == 0 ||
+        tp_worker_session_index(sessions, id) >= 0) return 0;
+    if (sessions->len == sessions->cap) {
+        uint32_t cap = sessions->cap ? sessions->cap * 2u : 8u;
+        ds4_tp_worker_session *v =
+            realloc(sessions->v, (size_t)cap * sizeof(*v));
+        if (!v) return 0;
+        sessions->v = v;
+        sessions->cap = cap;
+    }
+    sessions->v[sessions->len++] = (ds4_tp_worker_session){ id, session };
+    return 1;
+}
+
+static void tp_worker_session_remove(ds4_tp_worker_sessions *sessions,
+                                     uint32_t index) {
+    if (!sessions || index >= sessions->len) return;
+    ds4_session_free(sessions->v[index].session);
+    if (index + 1u < sessions->len) {
+        memmove(&sessions->v[index], &sessions->v[index + 1u],
+                (size_t)(sessions->len - index - 1u) * sizeof(sessions->v[0]));
+    }
+    sessions->len--;
+}
+
+static int tp_worker_send_logits(ds4_tp *tp, ds4_session *session,
+                                 float *logits, int vocab) {
+    if (!logits || vocab <= 0 || (vocab & 1) != 0) return 0;
+    const uint32_t vhalf = (uint32_t)vocab / 2u;
+    return ds4_session_copy_logits(session, logits, vocab) == vocab &&
+           ds4_tp_send_logits_half(tp, logits + vhalf, vhalf);
+}
+
 int ds4_tp_worker_run(ds4_engine *engine, const ds4_tp_options *opt) {
     char err[256] = "";
     ds4_tp_identity id = {
@@ -1678,92 +1939,171 @@ int ds4_tp_worker_run(ds4_engine *engine, const ds4_tp_options *opt) {
         ds4_tp_free(tp);
         return 1;
     }
-    ds4_session *session = NULL;
-    int ctx = (int)ds4_tp_peer_ctx(tp);
-    if (ctx <= 0) ctx = 8192;
-    if (ds4_session_create(&session, engine, ctx) != 0) {
-        ds4_log(stderr, DS4_LOG_ERROR, "tp worker: session create failed");
+    ds4_tp_worker_sessions sessions = {0};
+    const int vocab = ds4_engine_vocab_size(engine);
+    float *logits = ds4_engine_tp_vocab_split(engine) ?
+        malloc((size_t)vocab * sizeof(*logits)) : NULL;
+    if (ds4_engine_tp_vocab_split(engine) && !logits) {
+        ds4_log(stderr, DS4_LOG_ERROR, "tp worker: logits buffer allocation failed");
         ds4_tp_free(tp);
         return 1;
     }
-    /* The worker encodes no main-queue GPU work until the first mirrored
-     * sync arrives, so its one-time first-submission cost would otherwise
-     * land inside the leader-timed prefill.  Pay it here instead. */
-    ds4_session_gpu_warmup(session);
-    ds4_log(stderr, DS4_LOG_OK, "tp worker ready (ctx %d)", ctx);
+    ds4_log(stderr, DS4_LOG_OK, "tp worker ready for mirrored sessions");
 
     int rc = 0;
     ds4_tokens prompt = {0};
     while (1) {
-        ds4_tp_frame_type type;
-        int *tokens = NULL;
-        uint32_t n_tokens = 0;
-        uint64_t seq = 0;
-        int token = 0;
-        if (!ds4_tp_recv_command(tp, &type, &tokens, &n_tokens, &seq, &token,
-                                 err, sizeof(err))) {
+        ds4_tp_command command;
+        if (!ds4_tp_recv_command(tp, &command, err, sizeof(err))) {
             ds4_log(stderr, DS4_LOG_ERROR, "tp worker: %s", err);
             rc = 1;
             break;
         }
-        if (type == DS4_TP_FRAME_STOP) {
+        if (command.type == DS4_TP_FRAME_STOP) {
             ds4_log(stderr, DS4_LOG_DEFAULT, "tp worker: leader finished");
+            ds4_tp_command_free(&command);
             break;
-        } else if (type == DS4_TP_FRAME_SYNC) {
-            prompt.len = 0;
-            for (uint32_t i = 0; i < n_tokens; i++) ds4_tokens_push(&prompt, tokens[i]);
-            free(tokens);
-            int sync_rc = ds4_session_sync(session, &prompt, err, sizeof(err));
-            if (sync_rc != 0) {
-                ds4_log(stderr, DS4_LOG_ERROR, "tp worker sync: %s", err);
+        }
+
+        if (command.type == DS4_TP_FRAME_SESSION_CREATE) {
+            ds4_session *session = NULL;
+            int status = 1;
+            if (command.session_id != 0 && command.value > 0 &&
+                tp_worker_session_index(&sessions, command.session_id) < 0 &&
+                ds4_session_create(&session, engine, command.value) == 0 &&
+                tp_worker_session_add(&sessions, command.session_id, session)) {
+                /* Pay the first-submit cost before acknowledging creation so
+                 * it cannot land in the leader's first timed prefill. */
+                ds4_session_gpu_warmup(session);
+                status = 0;
+            } else if (session) {
+                ds4_session_free(session);
+            }
+            if (!ds4_tp_send_command_ack(tp, command.session_id, status)) {
                 rc = 1;
-                break;
             }
-            if (!ds4_tp_send_sync_ack(tp)) {
-                rc = 1;
-                break;
-            }
-            if (ds4_engine_tp_vocab_split(engine)) {
-                const int vocab = ds4_engine_vocab_size(engine);
-                const uint32_t vhalf = (uint32_t)vocab / 2u;
-                float *lg = malloc((size_t)vocab * sizeof(float));
-                int sent = lg &&
-                           ds4_session_copy_logits(session, lg, vocab) == vocab &&
-                           ds4_tp_send_logits_half(tp, lg + vhalf, vhalf);
-                free(lg);
-                if (!sent) {
-                    rc = 1;
-                    break;
-                }
-            }
-        } else if (type == DS4_TP_FRAME_EVAL) {
-            if (ds4_session_eval(session, token, err, sizeof(err)) != 0) {
-                ds4_log(stderr, DS4_LOG_ERROR, "tp worker eval: %s", err);
-                rc = 1;
-                break;
-            }
-        } else if (type == DS4_TP_FRAME_VERIFY) {
-            int spec_rc = ds4_session_tp_spec_cycle(session, tokens,
-                                                    (int)n_tokens,
-                                                    err, sizeof(err));
-            free(tokens);
-            if (spec_rc != 0) {
-                ds4_log(stderr, DS4_LOG_ERROR, "tp worker verify: %s", err);
-                rc = 1;
-                break;
-            }
-        } else if (type == DS4_TP_FRAME_REWIND) {
-            ds4_session_rewind(session, token);
-        } else if (type == DS4_TP_FRAME_INVALIDATE) {
-            ds4_session_invalidate(session);
-        } else {
-            ds4_log(stderr, DS4_LOG_ERROR, "tp worker: unexpected frame %d", (int)type);
+            ds4_tp_command_free(&command);
+            if (rc != 0) break;
+            continue;
+        }
+
+        if (command.type == DS4_TP_FRAME_SESSION_DESTROY) {
+            const int index = tp_worker_session_index(&sessions,
+                                                      command.session_id);
+            const int status = index >= 0 ? 0 : 1;
+            if (index >= 0) tp_worker_session_remove(&sessions, (uint32_t)index);
+            if (!ds4_tp_send_command_ack(tp, command.session_id, status)) rc = 1;
+            ds4_tp_command_free(&command);
+            if (rc != 0) break;
+            continue;
+        }
+
+        ds4_session *session =
+            tp_worker_session_find(&sessions, command.session_id);
+        if (command.type != DS4_TP_FRAME_EVAL_BATCH &&
+            command.type != DS4_TP_FRAME_MIXED_BATCH && !session) {
+            ds4_log(stderr, DS4_LOG_ERROR,
+                    "tp worker: unknown session %llu for frame %d",
+                    (unsigned long long)command.session_id,
+                    (int)command.type);
+            ds4_tp_command_free(&command);
             rc = 1;
             break;
         }
+
+        if (command.type == DS4_TP_FRAME_SYNC) {
+            prompt.len = 0;
+            for (uint32_t i = 0; i < command.n_tokens; i++) {
+                ds4_tokens_push(&prompt, command.tokens[i]);
+            }
+            int sync_rc = ds4_session_sync(session, &prompt, err, sizeof(err));
+            if (!ds4_tp_send_command_ack(tp, command.session_id, sync_rc)) {
+                rc = 1;
+            } else if (sync_rc != 0) {
+                ds4_log(stderr, DS4_LOG_ERROR, "tp worker sync: %s", err);
+                rc = 1;
+            } else if (ds4_engine_tp_vocab_split(engine) &&
+                       !tp_worker_send_logits(tp, session, logits, vocab)) {
+                rc = 1;
+            }
+        } else if (command.type == DS4_TP_FRAME_EVAL) {
+            if (ds4_session_eval(session, command.value, err, sizeof(err)) != 0) {
+                ds4_log(stderr, DS4_LOG_ERROR, "tp worker eval: %s", err);
+                rc = 1;
+            }
+        } else if (command.type == DS4_TP_FRAME_VERIFY) {
+            int spec_rc = ds4_session_tp_spec_cycle(session, command.tokens,
+                                                    (int)command.n_tokens,
+                                                    err, sizeof(err));
+            if (spec_rc != 0) {
+                ds4_log(stderr, DS4_LOG_ERROR, "tp worker verify: %s", err);
+                rc = 1;
+            }
+        } else if (command.type == DS4_TP_FRAME_REWIND) {
+            ds4_session_rewind(session, command.value);
+        } else if (command.type == DS4_TP_FRAME_INVALIDATE) {
+            ds4_session_invalidate(session);
+        } else if (command.type == DS4_TP_FRAME_EVAL_BATCH ||
+                   command.type == DS4_TP_FRAME_MIXED_BATCH) {
+            ds4_decode_item *items =
+                calloc(command.n_items, sizeof(*items));
+            bool mapped = items != NULL;
+            for (uint32_t i = 0; mapped && i < command.n_items; i++) {
+                items[i].session = tp_worker_session_find(
+                    &sessions, command.items[i].session_id);
+                items[i].token = command.items[i].token;
+                mapped = items[i].session != NULL;
+            }
+            ds4_session *prefill = NULL;
+            if (mapped && command.type == DS4_TP_FRAME_MIXED_BATCH) {
+                prefill = tp_worker_session_find(&sessions,
+                                                 command.session_id);
+                mapped = prefill != NULL;
+                prompt.len = 0;
+                for (uint32_t i = 0; mapped && i < command.n_tokens; i++) {
+                    ds4_tokens_push(&prompt, command.tokens[i]);
+                }
+            }
+            int batch_rc = 1;
+            if (mapped && command.type == DS4_TP_FRAME_EVAL_BATCH) {
+                batch_rc = ds4_sessions_eval_batch(
+                    items, (int)command.n_items, err, sizeof(err));
+            } else if (mapped) {
+                batch_rc = ds4_sessions_eval_batch_with_prefill(
+                    items, (int)command.n_items, prefill, &prompt,
+                    err, sizeof(err));
+            }
+            if (!ds4_tp_send_command_ack(tp, command.session_id, batch_rc)) {
+                rc = 1;
+            } else if (batch_rc != 0) {
+                ds4_log(stderr, DS4_LOG_ERROR,
+                        "tp worker batch: %s", err[0] ? err : "failed");
+                rc = 1;
+            } else if (ds4_engine_tp_vocab_split(engine)) {
+                if (prefill &&
+                    !tp_worker_send_logits(tp, prefill, logits, vocab)) {
+                    rc = 1;
+                }
+                for (uint32_t i = 0; rc == 0 && i < command.n_items; i++) {
+                    if (!tp_worker_send_logits(tp, items[i].session,
+                                               logits, vocab)) rc = 1;
+                }
+            }
+            free(items);
+        } else {
+            ds4_log(stderr, DS4_LOG_ERROR, "tp worker: unexpected frame %d",
+                    (int)command.type);
+            rc = 1;
+        }
+        ds4_tp_command_free(&command);
+        if (rc != 0) break;
     }
     ds4_tokens_free(&prompt);
-    ds4_session_free(session);
+    while (sessions.len != 0) {
+        tp_worker_session_remove(&sessions, sessions.len - 1u);
+    }
+    free(sessions.v);
+    free(logits);
     ds4_tp_free(tp);
     return rc;
 }

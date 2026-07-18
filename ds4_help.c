@@ -153,6 +153,8 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
 #else
     opt(fp, c, "--metal | --cuda | --cpu", "Select the backend explicitly.");
     opt(fp, c, "--backend NAME", "Backend name: metal, cuda, or cpu.");
+    opt(fp, c, "--gpu-vram N[,N,...]|auto", "CUDA VRAM budgets per device, in GiB, or auto-detect free VRAM.");
+    opt(fp, c, "--gpu-devices N[,N,...]", "CUDA device indices used by multi-GPU placement.");
 #endif
     if (tool != DS4_HELP_BENCH) {
         opt(fp, c, "-c, --ctx N", "Allocated context tokens.");
