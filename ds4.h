@@ -334,6 +334,24 @@ int ds4_session_set_logits(ds4_session *s, const float *logits, int n);
  * used by the TP worker right after session create (no-op on CPU/GLM). */
 void ds4_session_gpu_warmup(ds4_session *s);
 int ds4_session_eval(ds4_session *s, int token, char *err, size_t errlen);
+
+typedef struct {
+    ds4_session *session;
+    int token;
+} ds4_decode_item;
+
+/* Advance independent sessions by one token each. Batch size one is exactly
+ * ds4_session_eval(). Backends without native batching use a correctness-first
+ * sequential fallback. */
+int ds4_sessions_eval_batch(ds4_decode_item *items, int count,
+                            char *err, size_t errlen);
+/* Advance one resumed prefill suffix and an independent decode batch as one
+ * scheduling step. Unsupported combinations use the ordinary serialized
+ * session operations. */
+int ds4_sessions_eval_batch_with_prefill(
+        ds4_decode_item *items, int count,
+        ds4_session *prefill_session, const ds4_tokens *prefill_prompt,
+        char *err, size_t errlen);
 int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                                         int max_tokens, int eos_token,
                                         int *accepted, int accepted_cap,
