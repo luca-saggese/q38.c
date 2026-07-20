@@ -8011,7 +8011,7 @@ static DS4_MAYBE_UNUSED void matvec_q8_0_experts_mid_prequant(
     if (gate_w->type != DS4_TENSOR_Q8_0 || up_w->type != DS4_TENSOR_Q8_0) {
         ds4_die("expected Q8_0 expert tensors");
     }
-    if (n_expert < 1 || n_expert > DS4_N_EXPERT_USED) ds4_die("unexpected routed expert count");
+    if (n_expert < 1 || (uint32_t)n_expert > DS4_N_EXPERT_USED) ds4_die("unexpected routed expert count");
 
     uint64_t in_dim0 = 0;
     uint64_t out_dim0 = 0;
@@ -8062,7 +8062,7 @@ static DS4_MAYBE_UNUSED void matvec_q8_k_experts_mid_prequant(
     if (gate_w->type != DS4_TENSOR_Q8_K || up_w->type != DS4_TENSOR_Q8_K) {
         ds4_die("expected Q8_K expert tensors");
     }
-    if (n_expert < 1 || n_expert > DS4_N_EXPERT_USED) ds4_die("unexpected routed expert count");
+    if (n_expert < 1 || (uint32_t)n_expert > DS4_N_EXPERT_USED) ds4_die("unexpected routed expert count");
 
     uint64_t in_dim0 = 0;
     uint64_t out_dim0 = 0;
@@ -8331,7 +8331,7 @@ static void matvec_q8_0_experts_accum_prequant(
         const int        *selected,
         int               n_expert) {
     if (w->type != DS4_TENSOR_Q8_0) ds4_die("expected a Q8_0 expert tensor");
-    if (n_expert < 1 || n_expert > DS4_N_EXPERT_USED) ds4_die("unexpected routed expert count");
+    if (n_expert < 1 || (uint32_t)n_expert > DS4_N_EXPERT_USED) ds4_die("unexpected routed expert count");
 
     uint64_t in_dim0 = 0;
     uint64_t out_dim0 = 0;
@@ -8396,7 +8396,7 @@ static void matvec_q8_k_experts_accum_prequant(
         const int        *selected,
         int               n_expert) {
     if (w->type != DS4_TENSOR_Q8_K) ds4_die("expected a Q8_K expert tensor");
-    if (n_expert < 1 || n_expert > DS4_N_EXPERT_USED) ds4_die("unexpected routed expert count");
+    if (n_expert < 1 || (uint32_t)n_expert > DS4_N_EXPERT_USED) ds4_die("unexpected routed expert count");
 
     uint64_t in_dim0 = 0;
     uint64_t out_dim0 = 0;
@@ -10656,7 +10656,7 @@ static void layer_topk_selected_experts(
         const ds4_model       *model,
         const ds4_layer_weights *layer,
         const float           *x) {
-    float probs[DS4_MAX_EXPERT];
+    float probs[DS4_MAX_EXPERT] = {0};
 
     layer_router_probs_one(probs, model, layer, x);
     layer_topk_selected_experts_from_probs(selected, expert_weight, model, layer, probs);
@@ -10764,7 +10764,7 @@ static void layer_routed_moe_one(
         const uint64_t mid_blocks = down_in_dim / 32u;
         int8_t *midq8 = xmalloc((size_t)DS4_N_EXPERT_USED * mid_blocks * 32u);
         float *midscale8 = xmalloc((size_t)DS4_N_EXPERT_USED * mid_blocks * sizeof(float));
-        for (int i = 0; i < DS4_N_EXPERT_USED; i++) {
+        for (uint32_t i = 0; i < DS4_N_EXPERT_USED; i++) {
             quantize_q8_0_activation(mid_all + (uint64_t)i * down_in_dim,
                                      midq8 + (uint64_t)i * mid_blocks * 32u,
                                      midscale8 + (uint64_t)i * mid_blocks,
@@ -10783,7 +10783,7 @@ static void layer_routed_moe_one(
                                          layer->ffn_up_exps,
                                          xq, selected, expert_weight,
                                          DS4_N_EXPERT_USED, clamp);
-        for (int i = 0; i < DS4_N_EXPERT_USED; i++) {
+        for (uint32_t i = 0; i < DS4_N_EXPERT_USED; i++) {
             ds4_quantize_row_q8_K(mid_all + (uint64_t)i * down_in_dim,
                                   midq + (uint64_t)i * (down_in_dim / QK_K),
                                   (int64_t)down_in_dim);
@@ -10916,7 +10916,7 @@ static void layer_routed_moe_one_prealloc(
                                          expert_weight,
                                          DS4_N_EXPERT_USED, clamp);
         const uint64_t mid_blocks = down_in_dim / 32u;
-        for (int i = 0; i < DS4_N_EXPERT_USED; i++) {
+        for (uint32_t i = 0; i < DS4_N_EXPERT_USED; i++) {
             quantize_q8_0_activation(mid_all + (uint64_t)i * down_in_dim,
                                      q8_midq + (uint64_t)i * mid_blocks * 32u,
                                      q8_midscale + (uint64_t)i * mid_blocks,
@@ -16281,7 +16281,7 @@ static bool metal_graph_cuda_tp_ep_fused_hc_reduce_requested(void) {
 #endif
 }
 
-static bool metal_graph_cuda_tp_ep_fused_shared_mid_requested(void) {
+static DS4_MAYBE_UNUSED bool metal_graph_cuda_tp_ep_fused_shared_mid_requested(void) {
 #if defined(__APPLE__)
     return false;
 #else
@@ -16289,7 +16289,7 @@ static bool metal_graph_cuda_tp_ep_fused_shared_mid_requested(void) {
 #endif
 }
 
-static bool metal_graph_cuda_tp_ep_balanced_shared_mid_requested(void) {
+static DS4_MAYBE_UNUSED bool metal_graph_cuda_tp_ep_balanced_shared_mid_requested(void) {
 #if defined(__APPLE__)
     return false;
 #else
@@ -16298,7 +16298,7 @@ static bool metal_graph_cuda_tp_ep_balanced_shared_mid_requested(void) {
 #endif
 }
 
-static bool metal_graph_cuda_tp_ep_dual_prequant_requested(void) {
+static DS4_MAYBE_UNUSED bool metal_graph_cuda_tp_ep_dual_prequant_requested(void) {
 #if defined(__APPLE__)
     return false;
 #else
@@ -16545,7 +16545,7 @@ static bool metal_graph_cuda_greedy_splitkv_pair_replay_requested(void) {
 #endif
 }
 
-static uint32_t metal_graph_cuda_greedy_max_segment(const char *name) {
+static DS4_MAYBE_UNUSED uint32_t metal_graph_cuda_greedy_max_segment(const char *name) {
     const char *env = getenv(name);
     if (env && env[0]) {
         char *end = NULL;
@@ -16619,14 +16619,6 @@ static bool metal_graph_cuda_tp_prefill_ffn_requested(void) {
 #endif
 }
 
-static bool metal_graph_cuda_tp_prefill_shared_requested(void) {
-#if defined(__APPLE__)
-    return false;
-#else
-    return metal_graph_tp_env_flag("DS4_CUDA_TP_PREFILL_SHARED", true);
-#endif
-}
-
 static bool metal_graph_cuda_tp_prefill_attn_output_requested(void) {
 #if defined(__APPLE__)
     return false;
@@ -16652,16 +16644,6 @@ static bool metal_graph_cuda_prefill_pipeline_q8_cache_requested(void) {
 #else
     return metal_graph_tp_env_flag("DS4_CUDA_PREFILL_PIPELINE_Q8_CACHE", false);
 #endif
-}
-
-static uint32_t metal_graph_cuda_tp_prefill_min_tokens(void) {
-    const char *env = getenv("DS4_CUDA_TP_PREFILL_MIN_TOKENS");
-    if (env && env[0]) {
-        char *end = NULL;
-        unsigned long v = strtoul(env, &end, 10);
-        if (end != env && v <= UINT32_MAX) return (uint32_t)v;
-    }
-    return 128;
 }
 
 static uint32_t metal_graph_cuda_prefill_pipeline_microbatch(void) {
@@ -19873,21 +19855,6 @@ static bool metal_graph_cuda_tp_attn_cache_sync_raw_row(
             row_bytes);
 }
 
-static bool metal_graph_cuda_tp_attn_cache_sync_comp_row(
-        ds4_gpu_graph *g,
-        uint32_t       il,
-        uint32_t       comp_row) {
-    if (!metal_graph_cuda_tp_attn_cache_dup_layer_ready(g, il)) return true;
-    if (ds4_layer_compress_ratio(il) == 0) return true;
-    if (comp_row >= g->layer_comp_cap[il]) return false;
-    const uint64_t row_bytes = metal_graph_attn_comp_cache_row_bytes();
-    return metal_graph_cuda_tp_attn_cache_copy_row(
-            g->layer_attn_comp_cache_tp[il],
-            g->layer_attn_comp_cache[il],
-            (uint64_t)comp_row * row_bytes,
-            row_bytes);
-}
-
 static bool metal_graph_cuda_tp_attn_cache_sync_all(ds4_gpu_graph *g) {
     if (!g || !g->cuda_tp_attn_cache_dup) return true;
     for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
@@ -22670,9 +22637,9 @@ static bool metal_graph_encode_decode_layer_phase(
         metal_graph_debug_dump_tensor("ffn_norm", metal_graph_ffn_norm(g), DS4_N_EMBD, il, pos);
     }
     const uint64_t gate_row_bytes = routed_expert_row_bytes(layer->ffn_gate_exps);
-    const uint64_t gate_expert_bytes = expert_mid_dim * gate_row_bytes;
+    const uint64_t gate_expert_bytes DS4_MAYBE_UNUSED = expert_mid_dim * gate_row_bytes;
     const uint64_t down_row_bytes = routed_expert_row_bytes(layer->ffn_down_exps);
-    const uint64_t down_expert_bytes = routed_out_dim * down_row_bytes;
+    const uint64_t down_expert_bytes DS4_MAYBE_UNUSED = routed_out_dim * down_row_bytes;
     if (ok && metal_graph_decode_cpu_router_applicable(g, layer)) {
         ok = metal_graph_decode_cpu_router(g, model, layer, il, (uint32_t)token);
     } else {
@@ -22724,12 +22691,11 @@ static bool metal_graph_encode_decode_layer_phase(
     const bool cuda_tp_moe_requested = !external_routed && g->cuda_tp_moe;
     const uint64_t shared_tp_local = shared_dim / 2u;
     const uint64_t shared_tp_peer = shared_dim - shared_tp_local;
-    const uint64_t shared_q8_row_bytes = ((uint64_t)DS4_N_EMBD + 31u) / 32u * 34u;
     const uint64_t shared_q8_blocks = ((uint64_t)DS4_N_EMBD + 31u) / 32u;
     const uint64_t shared_q8_x_bytes = shared_q8_blocks * 32u;
     const uint64_t shared_q8_scale_offset =
         (shared_q8_x_bytes + 15u) & ~15ull;
-    const uint64_t shared_q8_prequant_bytes =
+    const uint64_t shared_q8_prequant_bytes DS4_MAYBE_UNUSED =
         shared_q8_scale_offset + shared_q8_blocks * sizeof(float);
     const bool cuda_tp_shared =
         cuda_tp_shared_requested &&
@@ -22786,7 +22752,7 @@ static bool metal_graph_encode_decode_layer_phase(
     bool cuda_tp_ep_reduce_deferred = false;
     bool cuda_tp_ep_fused_hc_reduce = false;
     bool cuda_tp_ep_direct_return = false;
-    bool cuda_tp_ep_balanced_shared_mid = false;
+    bool cuda_tp_ep_balanced_shared_mid DS4_MAYBE_UNUSED = false;
     bool cuda_tp_ep_dual_prequant = false;
     uint64_t cuda_tp_ep_return_bytes = 0;
     bool cuda_tp_shared_fold_peer_tmp = false;
@@ -26111,26 +26077,6 @@ static ds4_gpu_tensor *metal_graph_tensor_row_view(
                                  row_values * sizeof(float));
 }
 
-static ds4_gpu_tensor *metal_graph_tensor_rows_view(
-        ds4_gpu_tensor *base,
-        uint32_t          row,
-        uint32_t          rows,
-        uint64_t          row_values) {
-    return ds4_gpu_tensor_view(base,
-                                 (uint64_t)row * row_values * sizeof(float),
-                                 (uint64_t)rows * row_values * sizeof(float));
-}
-
-static ds4_gpu_tensor *metal_graph_tensor_i32_rows_view(
-        ds4_gpu_tensor *base,
-        uint32_t          row,
-        uint32_t          rows,
-        uint64_t          row_values) {
-    return ds4_gpu_tensor_view(base,
-                                 (uint64_t)row * row_values * sizeof(int32_t),
-                                 (uint64_t)rows * row_values * sizeof(int32_t));
-}
-
 /* Upload prompt token ids for kernels that need token-aware hash routing. */
 static bool metal_graph_upload_prompt_tokens(
         ds4_gpu_tensor *out_tokens,
@@ -26593,7 +26539,6 @@ static bool metal_graph_encode_layer_attention_batch(
     const uint32_t group_heads = DS4_N_HEAD / n_groups;
     const uint32_t group_dim = DS4_N_HEAD_DIM * group_heads;
     const uint32_t rank = DS4_N_LORA_O;
-    const uint64_t low_dim = (uint64_t)n_groups * rank;
     const uint32_t ratio = ds4_layer_compress_ratio(il);
     const bool compressed = ratio != 0;
     const bool zero_prefix = pos0 == 0;
@@ -33811,13 +33756,11 @@ static bool metal_graph_verify_suffix_tops_impl(
     }
     const bool verify_profile = verify_profile_left > 0 && ok;
     if (verify_profile) verify_profile_left--;
-    double lay_t = 0.0;
     for (uint32_t il = 0; ok && il < DS4_N_LAYER; il++) {
         if (verify_profile) {
             ok = ds4_gpu_end_commands() != 0;
             if (ok) (void)ds4_gpu_synchronize();
             if (ok) ok = ds4_gpu_begin_commands() != 0;
-            lay_t = now_sec();
             if (!ok) break;
         }
         ok = metal_graph_encode_layer_batch(g,
@@ -34130,7 +34073,6 @@ static bool metal_graph_verify_decode2_exact(
             logits0 == NULL &&
             g->cuda_tp_output &&
             metal_graph_cuda_verify_decode2_split_top1_requested();
-        int output_tiers[DS4_MAX_GPUS] = {0};
         uint32_t output_ways = 0;
         g->cur_hc_by_tier[cur_tier] = cur0_by_tier[cur_tier];
         ok = ds4_gpu_begin_commands() != 0;
@@ -36744,7 +36686,7 @@ static int sample_full_vocab(
         if (min_rel > 0.0f && isfinite(min_rel)) {
             float cutoff = logf(min_rel);
             for (int i = 0; i < 8 && isfinite(cutoff); i++) {
-                cutoff = nextafterf(cutoff, -INFINITY);
+                cutoff = nextafterf(cutoff, -FLT_MAX);
                 if (expf(cutoff) < min_rel) {
                     reject_scaled = cutoff;
                     have_reject_scaled = true;
@@ -37760,7 +37702,7 @@ static bool glm_graph_indexed_prefill_attention_boundary(void) {
 #endif
 }
 
-static bool glm_graph_env_truthy(const char *env) {
+static DS4_MAYBE_UNUSED bool glm_graph_env_truthy(const char *env) {
     return env &&
            env[0] &&
            strcmp(env, "0") != 0 &&
@@ -39513,7 +39455,7 @@ static int glm_graph_routed_moe_one_dispatch(
 /* Post-compute visibility for GLM TP debugging: the combine stashes the
  * selected-ids contents pointer; by exchange time the router kernels have
  * completed, so the service thread sees final ids. */
-static const int32_t *g_glm_tp_debug_ids;
+static const int32_t *g_glm_tp_debug_ids DS4_MAYBE_UNUSED;
 
 /* After the TP ownership-split batch routed MoE, exchange the
  * per-token routed partial rows with the peer through shared bounce
@@ -49093,14 +49035,6 @@ static void spec_frontier_free(ds4_spec_frontier *f) {
     memset(f, 0, sizeof(*f));
 }
 
-static bool spec_frontier_trim_enabled(void) {
-    static int cached = -1;
-    if (cached < 0) {
-        cached = getenv("DS4_DSPARK_NO_TRIM") == NULL ? 1 : 0;
-    }
-    return cached == 1;
-}
-
 static bool spec_frontier_snapshot(ds4_spec_frontier *f, ds4_session *s) {
     memset(f, 0, sizeof(*f));
     ds4_gpu_graph *g = &s->graph;
@@ -54055,7 +53989,7 @@ static int engine_compute_entry_bytes(const ds4_engine *e, size_t *out) {
     } else {
         /* Fallback: 128 MiB per layer as a static estimate. */
         const size_t fallback_per_layer = (size_t)128ull * 1024ull * 1024ull;
-        for (int i = 1; i <= DS4_N_LAYER; i++) out[i] += fallback_per_layer;
+        for (uint32_t i = 1; i <= DS4_N_LAYER; i++) out[i] += fallback_per_layer;
     }
     return 0;
 }
@@ -54544,7 +54478,7 @@ static int engine_install_per_device_caches(ds4_engine *e) {
                                             home_offset, home_bytes) != 0) {
             goto cleanup;
         }
-        if (cuda_tp_decode && entry >= 1 && entry <= DS4_N_LAYER) {
+        if (cuda_tp_decode && entry >= 1 && entry <= (int)DS4_N_LAYER) {
             if (logical_tier >= tp_half) {
                 fprintf(stderr,
                         "ds4: CUDA tensor parallelism only supports layer homes in "
@@ -57147,6 +57081,7 @@ int ds4_session_eval_layer_slice(ds4_session *s,
         return 1;
     }
 #ifdef DS4_NO_GPU
+    (void)output_hc;
     if (errlen) snprintf(err, errlen, "GPU support is not compiled in");
     s->checkpoint_valid = false;
     return 1;
@@ -63094,7 +63029,7 @@ static bool metal_graph_encode_session_pipeline_batch(
     return ok;
 }
 
-static bool metal_graph_mixed_workspace_compatible(
+static DS4_MAYBE_UNUSED bool metal_graph_mixed_workspace_compatible(
         const ds4_gpu_graph *owner,
         const ds4_gpu_graph *member) {
     if (!owner || !member ||
@@ -63139,7 +63074,7 @@ static void metal_graph_align_mixed_workspace(
 /* The Q4 model-backed oracle is exact through 512 prefill rows on the
  * layer-interleaved path. Larger waves currently change prefill logits and
  * must use the serialized public-API fallback. */
-static uint32_t metal_graph_mixed_routed_max_prefill_rows(void) {
+static DS4_MAYBE_UNUSED uint32_t metal_graph_mixed_routed_max_prefill_rows(void) {
     const char *value = getenv("DS4_CUDA_MIXED_ROUTED_MAX_PREFILL");
     if (!value || !value[0]) return 512u;
     char *end = NULL;

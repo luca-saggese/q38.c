@@ -1631,9 +1631,9 @@ static void agent_glm_tool_parse(agent_dsml_parser *p) {
         const char *raw = p->raw;
         const char *end = p->raw + p->raw_len;
         if (p->state == AGENT_DSML_PARAM_VALUE) {
-            char *value_end = strstr(raw + p->param_value_start, arg_value_close);
+            const char *value_end = strstr(raw + p->param_value_start, arg_value_close);
             if (!value_end) {
-                char *call_end = strstr(raw + p->param_value_start, close);
+                const char *call_end = strstr(raw + p->param_value_start, close);
                 if (call_end) agent_dsml_set_error(p, "unterminated <arg_value> in GLM tool call");
                 return;
             }
@@ -1707,9 +1707,9 @@ static void agent_glm_tool_parse(agent_dsml_parser *p) {
             return;
         }
         cur += sizeof(arg_key) - 1;
-        char *key_end_mut = strstr(cur, arg_key_close);
+        const char *key_end_mut = strstr(cur, arg_key_close);
         if (!key_end_mut) {
-            char *call_end = strstr(cur, close);
+            const char *call_end = strstr(cur, close);
             if (call_end) agent_dsml_set_error(p, "unterminated <arg_key> in GLM tool call");
             return;
         }

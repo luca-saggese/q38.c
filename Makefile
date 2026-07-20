@@ -220,7 +220,7 @@ linenoise.o: linenoise.c linenoise.h
 	$(CC) $(CFLAGS) -c -o $@ linenoise.c
 
 ds4_cpu.o: ds4.c ds4.h ds4_ssd.h ds4_distributed.h ds4_gpu.h
-	$(CC) $(CFLAGS) -DDS4_NO_GPU -c -o $@ ds4.c
+	$(CC) $(CFLAGS) -Wno-unused-function -DDS4_NO_GPU -c -o $@ ds4.c
 
 ds4_cli_cpu.o: ds4_cli.c ds4.h ds4_ssd.h ds4_distributed.h ds4_help.h linenoise.h
 	$(CC) $(CFLAGS) -DDS4_NO_GPU -c -o $@ ds4_cli.c
@@ -271,7 +271,7 @@ tests/test_gpu_args: tests/test_gpu_args.o ds4_gpu_args_cpu.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 ds4_cpu_test_hooks.o: ds4.c ds4.h ds4_gpu.h ds4_gpu_mgpu.h ds4_layer_pack.h
-	$(CC) $(CFLAGS) -DDS4_NO_GPU -DDS4_TEST_HOOKS -c -o $@ ds4.c
+	$(CC) $(CFLAGS) -Wno-unused-function -DDS4_NO_GPU -DDS4_TEST_HOOKS -c -o $@ ds4.c
 
 tests/test_engine_mgpu_placement.o: tests/test_engine_mgpu_placement.c ds4.h ds4_gpu_mgpu.h ds4_layer_pack.h
 	$(CC) $(CFLAGS) -I. -c -o $@ $<
@@ -299,7 +299,7 @@ tests/test_gpu_lookup_cache_strict: tests/test_gpu_lookup_cache_strict.o ds4_cud
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
 
 ds4_cuda_test_hooks.o: ds4.c ds4.h ds4_gpu.h ds4_gpu_mgpu.h ds4_layer_pack.h
-	$(CC) $(CFLAGS) -DDS4_TEST_HOOKS -I$(CUDA_HOME)/include -c -o $@ ds4.c
+	$(CC) $(CFLAGS) -Wno-unused-function -DDS4_TEST_HOOKS -I$(CUDA_HOME)/include -c -o $@ ds4.c
 
 tests/test_engine_mgpu_refusal.o: tests/test_engine_mgpu_refusal.c ds4.h ds4_gpu_mgpu.h
 	$(CC) $(CFLAGS) -I. -I$(CUDA_HOME)/include -c -o $@ $<

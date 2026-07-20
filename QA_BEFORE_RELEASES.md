@@ -36,6 +36,15 @@ in this system.
   `make clean && make`.
 - Build CPU-only binaries as a compile check only:
   `make clean && make cpu`.
+- Treat compiler warnings as build failures. Save each release and test build's
+  complete output and require no `warning:` or NVCC `warning #` lines. Fix the
+  source when possible; use a narrow target-specific suppression only when a
+  test deliberately compiles a partial translation unit.
+- Repeat the warning-free build gate on the release hardware:
+  `make clean && make` on Metal,
+  `make clean && make cuda-spark` on DGX Spark,
+  `make clean && make cuda-generic CUDA_HOME=/usr` on the multi-GPU CUDA host,
+  `make clean && make strix-halo` on Strix Halo.
 - Run whitespace checks before committing:
   `git diff --check`.
 - Confirm `./ds4 --help`, `./ds4-server --help`, and `./ds4-agent --help` render
@@ -289,6 +298,8 @@ release-ready without this pass.
 - Fetch or push the exact release commit to the CUDA machine.
 - Build:
   `make clean && make cuda-spark`.
+- Require both the DGX Spark build and the eight-GPU CUDA build to complete
+  without compiler warnings.
 - Run:
   `make cuda-regression`.
 - Run a short CLI prompt with the Flash GGUF and record generation t/s.
@@ -337,6 +348,7 @@ a substitute for CUDA or Metal release testing.
 - Fetch or push the exact release commit to the Strix Halo machine.
 - Build:
   `make clean && make strix-halo`.
+- Require the ROCm build to complete without compiler warnings.
 - Use the q2 Flash imatrix GGUF for release smoke tests:
   `DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf`.
 - Do not use the mixed q2-q4 or Q4 Flash GGUFs for routine Strix Halo QA yet.
@@ -402,9 +414,9 @@ clients.
 - Test OpenAI chat completion, OpenAI Responses, and Anthropic messages.
 - Test SSE streaming with thinking enabled and disabled.
 - Test keepalive during long prefill and confirm clients do not time out.
-- On the eight-L40S CUDA TP target, start `./run-nvidia-tp-server.sh` unchanged
-  and verify all 16 100k-context sessions allocate. Startup must report a
-  2048-token prefill cap; a silent fallback to 4096 is an OOM regression.
+- On the eight-L40S CUDA TP target, start `ds4-server` with the release TP
+  options and verify all 16 100k-context sessions allocate. Startup must report
+  a 2048-token prefill cap; a silent fallback to 4096 is an OOM regression.
 - Test `--trace` and confirm rendered prompts, cache decisions, generated text,
   and tool-parser events are useful without leaking unrelated state.
 
@@ -470,6 +482,8 @@ Do not sign off until:
   was not validated.
 - ROCm was tested on Strix Halo or the release notes explicitly say ROCm was
   not validated.
+- Metal, CUDA, ROCm, CPU-only, and test builds completed without compiler
+  warnings on every release target that was validated.
 - Disk KV cache was exercised.
 - Server API streaming was exercised.
 - Agent interruption and tool loops were exercised manually.

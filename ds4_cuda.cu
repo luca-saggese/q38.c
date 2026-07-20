@@ -97,7 +97,6 @@ static uint64_t g_model_file_size;
 static int g_model_cache_full;
 static cudaStream_t g_model_prefetch_stream;
 static cudaStream_t g_model_upload_stream;
-static cublasHandle_t g_cublas;
 static int g_cublas_ready;
 static int g_quality_mode;
 static int g_decode_fast_attention;
@@ -650,10 +649,6 @@ static const char *cuda_model_range_ptr(const void *model_map, uint64_t offset, 
  * cuBLAS handle for the logical tier. The wrapper is expected to have
  * cudaSetDevice'd to that tier's physical device already (kernels and
  * cuBLAS calls ride the default stream and are naturally serialized).
- *
- * Single-tier (g_n_gpus <= 1): g_gpu[0].cublas is the same handle that the
- * legacy g_cublas alias points at (set at ds4_gpu_init_multi line 1647).
- * That preserves bit-identical N=1 behavior at every migrated callsite.
  *
  * Added for multi-GPU execution (multi-GPU execution), sub-area 1. */
 static inline cublasHandle_t cuda_cublas_for_tier(int logical_tier) {
@@ -2214,10 +2209,6 @@ extern "C" int ds4_gpu_init_multi(const ds4_gpu_config *cfg) {
         }
     }
 
-    /* Legacy alias: at N=1, g_cublas points at g_gpu[0]'s handle so every
-     * existing cuBLAS callsite continues to use the same handle (physical
-     * identity, bit-identical N=1 behavior). */
-    g_cublas = (cublasHandle_t)g_gpu[0].cublas;
     g_cublas_ready = 1;
     return 1;
 }
@@ -2272,7 +2263,6 @@ extern "C" void ds4_gpu_cleanup(void) {
     cuda_stream_selected_cache_release();
     cuda_stream_selected_stage_release();
     g_n_gpus = 0;
-    g_cublas = NULL;
     g_cublas_ready = 0;
 
     /* Per-device selective cache teardown (selective model cache). */
@@ -3814,9 +3804,7 @@ extern "C" void ds4_gpu_set_quality(bool quality) {
             ? CUBLAS_DEFAULT_MATH
             : CUBLAS_TF32_TENSOR_OP_MATH;
     /* Walk every initialized per-tier handle. Single-tier (g_n_gpus == 1)
-     * walks exactly one entry — g_gpu[0].cublas, which is the same handle
-     * the legacy g_cublas alias points at — so the SetMathMode call is
-     * bit-identical to the pre-task path. On any device-switch failure,
+     * walks exactly one entry. On any device-switch failure,
      * skip the tier and continue — the function is void and the math-mode
      * setting is advisory, but log so misconfiguration is visible. */
     for (int i = 0; i < g_n_gpus; i++) {
@@ -19564,8 +19552,6 @@ __global__ static void moe_gate_up_mid_q4K_tile8_mma_kernel(
         float sg0[8] = {0,0,0,0,0,0,0,0}, sg1[8] = {0,0,0,0,0,0,0,0};
         float su0[8] = {0,0,0,0,0,0,0,0}, su1[8] = {0,0,0,0,0,0,0,0};
         for (uint32_t b = 0; b < xq_blocks; b++) {
-            const cuda_block_q4_K *gsb = (const cuda_block_q4_K *)(grow) + b;
-            const cuda_block_q4_K *usb = (const cuda_block_q4_K *)(urow) + b;
             /* headers for this thread's two C columns */
             const uint4 ghdr0 = *(const uint4 *)((const cuda_block_q4_K *)(grow + (uint64_t)n0 * gate_row_bytes) + b);
             const uint4 ghdr1 = *(const uint4 *)((const cuda_block_q4_K *)(grow + (uint64_t)(n0 + 1u) * gate_row_bytes) + b);
@@ -19627,7 +19613,6 @@ __global__ static void moe_gate_up_mid_q4K_tile8_mma_kernel(
                        yd * dev_f16_to_f32((uint16_t)(uhdr0.x >> 16u)) * (float)us0;
             su1[sl] += yd * dev_f16_to_f32((uint16_t)(uhdr1.x & 0xffffu)) * (float)ui1 -
                        yd * dev_f16_to_f32((uint16_t)(uhdr1.x >> 16u)) * (float)us1;
-            (void)gsb; (void)usb;
         }
         /* quarter_warp_sum_f32 order: ((s0+s4)+(s2+s6)) + ((s1+s5)+(s3+s7)) */
         const uint32_t p = mtok;
@@ -19986,7 +19971,6 @@ __global__ static void moe_down_q4K_tile16_mma_kernel(
     uint32_t expert = tile_experts[tile];
     uint32_t local_start = tile_starts[tile];
     extern __shared__ unsigned char t16_sh[];
-    cuda_block_q8_K (*sxq)[16] = (cuda_block_q8_K (*)[16])t16_sh; /* [16][<=16] used as [16][midq_blocks<=16] region */
     __shared__ uint32_t s_pair[16];
     __shared__ uint32_t s_np;
     if (threadIdx.x == 0) {

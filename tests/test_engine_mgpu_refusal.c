@@ -110,7 +110,8 @@ int main(void) {
 
     /* Restore stderr so subsequent prints reach the terminal. */
     fflush(stderr);
-    (void)freopen("/dev/null", "w", stderr); /* close redir's FILE* cleanly */
+    FILE *sink = freopen("/dev/null", "w", stderr); /* close redir's FILE* cleanly */
+    CHECK(sink != NULL, "freopen stderr sink");
     int err_fd = fileno(stderr);
     if (err_fd >= 0) {
         (void)dup2(saved_stderr, err_fd);
