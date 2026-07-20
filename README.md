@@ -2,8 +2,6 @@
   <img src="logo.svg" alt="DwarfStar logo" width="220">
 </p>
 
-# DwarfStar
-
 **DwarfStar** is a small native inference engine optimized first for
 **DeepSeek V4 Flash**. It also supports **GLM 5.2** and, on very high-memory
 machines, **DeepSeek V4 PRO**. It is self-contained and deliberately narrow,
