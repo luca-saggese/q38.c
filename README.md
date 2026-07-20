@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.svg" alt="DwarfStar logo" width="220">
+</p>
+
 # DwarfStar
 
 **DwarfStar** is a small native inference engine optimized first for
@@ -1580,3 +1584,9 @@ first answer:
   logit/model issues.
 - `ds4-server --trace` writes the rendered prompts, cache decisions, generated
   text, and tool-parser events for a whole agent session.
+
+## Logo
+
+The DwarfStar logo was designed by hand by Salvatore Sanfilippo, made more
+graphical with AI, and manually reworked by Ben Gnomino, whose human touch made
+it rock.
