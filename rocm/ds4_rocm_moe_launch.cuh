@@ -742,8 +742,23 @@ static int routed_moe_launch(
     if (!q2k_path && down->bytes >= xq_bytes && gate->bytes >= midq_bytes) {
         cuda_block_q8_K *xq = (cuda_block_q8_K *)down->ptr;
         cuda_block_q8_K *midq = (cuda_block_q8_K *)gate->ptr;
-        const uint32_t use_sorted_pairs = n_tokens > 1u &&
-            (!q4k_path || n_tokens >= 32u);
+        const uint32_t disable_resident_iq2_sorted =
+            full_table_cached &&
+            iq2_gate_path &&
+            getenv("DS4_ROCM_DISABLE_RESIDENT_IQ2_SORTED") != NULL;
+        if (disable_resident_iq2_sorted) {
+            static int warned;
+            if (!warned) {
+                fprintf(stderr,
+                        DS4_GPU_LOG_PREFIX "resident IQ2 sorted routed-MoE "
+                        "disabled for correctness isolation\n");
+                warned = 1;
+            }
+        }
+        const uint32_t use_sorted_pairs =
+            n_tokens > 1u &&
+            (!q4k_path || n_tokens >= 32u) &&
+            !disable_resident_iq2_sorted;
         const uint32_t use_expert_tiles = use_sorted_pairs;
         const uint32_t expert_tile_m = 8u;
         const uint32_t write_gate_up = 0u;
