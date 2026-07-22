@@ -742,19 +742,12 @@ static int routed_moe_launch(
     if (!q2k_path && down->bytes >= xq_bytes && gate->bytes >= midq_bytes) {
         cuda_block_q8_K *xq = (cuda_block_q8_K *)down->ptr;
         cuda_block_q8_K *midq = (cuda_block_q8_K *)gate->ptr;
+        /* The ROCm resident IQ2 sorted/expert-tile batch path corrupts the
+         * routed output.  The ordinary selected-pair qwarp path below uses
+         * the same resident expert table and is correct; decode is unchanged
+         * because sorting only applies to multi-token batches. */
         const uint32_t disable_resident_iq2_sorted =
-            full_table_cached &&
-            iq2_gate_path &&
-            getenv("DS4_ROCM_DISABLE_RESIDENT_IQ2_SORTED") != NULL;
-        if (disable_resident_iq2_sorted) {
-            static int warned;
-            if (!warned) {
-                fprintf(stderr,
-                        DS4_GPU_LOG_PREFIX "resident IQ2 sorted routed-MoE "
-                        "disabled for correctness isolation\n");
-                warned = 1;
-            }
-        }
+            full_table_cached && iq2_gate_path;
         const uint32_t use_sorted_pairs =
             n_tokens > 1u &&
             (!q4k_path || n_tokens >= 32u) &&
