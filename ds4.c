@@ -41699,6 +41699,13 @@ static bool glm_graph_encode_ffn_batch(
                                                   pos0,
                                                   n_tokens,
                                                   stage_t0);
+    if (ok) {
+        metal_graph_debug_dump_tensor("glm_ffn_norm",
+                                      g->batch_ffn_norm,
+                                      (uint64_t)n_tokens * DS4_N_EMBD,
+                                      il,
+                                      pos0);
+    }
     if (!ok) return false;
 
     if (il < DS4_N_LEADING_DENSE) {
@@ -41842,6 +41849,28 @@ static bool glm_graph_encode_ffn_batch(
                                                   pos0,
                                                   n_tokens,
                                                   stage_t0);
+    if (ok) {
+        metal_graph_debug_dump_tensor("glm_ffn_router_logits",
+                                      g->batch_router_logits,
+                                      (uint64_t)n_tokens * DS4_N_EXPERT,
+                                      il,
+                                      pos0);
+        metal_graph_debug_dump_tensor("glm_ffn_router_probs",
+                                      g->batch_router_probs,
+                                      (uint64_t)n_tokens * DS4_N_EXPERT,
+                                      il,
+                                      pos0);
+        metal_graph_debug_dump_i32_tensor("glm_ffn_router_selected",
+                                          g->batch_router_selected,
+                                          (uint64_t)n_tokens * DS4_N_EXPERT_USED,
+                                          il,
+                                          pos0);
+        metal_graph_debug_dump_tensor("glm_ffn_router_weights",
+                                      g->batch_router_weights,
+                                      (uint64_t)n_tokens * DS4_N_EXPERT_USED,
+                                      il,
+                                      pos0);
+    }
     if (ok) ok = glm_graph_profile_router_selection_batch(g,
                                                           l,
                                                           il,
@@ -42016,8 +42045,22 @@ static bool glm_graph_encode_ffn_batch(
                                                   pos0,
                                                   n_tokens,
                                                   stage_t0);
+    if (ok) {
+        metal_graph_debug_dump_tensor("glm_ffn_routed_out",
+                                      g->batch_ffn_out,
+                                      (uint64_t)n_tokens * DS4_N_EMBD,
+                                      il,
+                                      pos0);
+    }
     if (ok && !shared_done) DS4_GLM_ENCODE_FFN_BATCH_SHARED();
 #undef DS4_GLM_ENCODE_FFN_BATCH_SHARED
+    if (ok) {
+        metal_graph_debug_dump_tensor("glm_ffn_shared_out",
+                                      g->batch_attn_out,
+                                      (uint64_t)n_tokens * DS4_N_EMBD,
+                                      il,
+                                      pos0);
+    }
     if (ok && !glm_graph_disable_add3_residual()) {
         ok = ds4_gpu_add3_tensor(next,
                                  after_attn,
@@ -42042,6 +42085,13 @@ static bool glm_graph_encode_ffn_batch(
                                                   pos0,
                                                   n_tokens,
                                                   stage_t0);
+    if (ok) {
+        metal_graph_debug_dump_tensor("glm_ffn_next",
+                                      next,
+                                      (uint64_t)n_tokens * DS4_N_EMBD,
+                                      il,
+                                      pos0);
+    }
     return ok;
 }
 
