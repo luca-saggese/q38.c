@@ -55603,15 +55603,27 @@ static int ds4_engine_open_internal(ds4_engine **out,
         }
         bool glm_backend_supported = ds4_backend_uses_graph(e->backend);
 #ifdef DS4_ROCM_BUILD
-        if (e->backend == DS4_BACKEND_CUDA && !e->ssd_streaming) {
+        const bool rocm_full_model_requires_streaming =
+            e->backend == DS4_BACKEND_CUDA &&
+            !e->ssd_streaming &&
+            !load_slice;
+        if (rocm_full_model_requires_streaming) {
             glm_backend_supported = false;
         }
 #endif
         if (!glm_backend_supported) {
 #ifdef DS4_ROCM_BUILD
-            fprintf(stderr,
-                    "ds4: GLM 5.2 ROCm inference requires --ssd-streaming; "
-                    "use --inspect or --cpu --first-token-test for CPU diagnostics\n");
+            if (rocm_full_model_requires_streaming) {
+                fprintf(stderr,
+                        "ds4: full-model GLM 5.2 ROCm inference requires "
+                        "--ssd-streaming; distributed layer slices can run "
+                        "fully resident\n");
+            } else {
+                fprintf(stderr,
+                        "ds4: GLM 5.2 inference requires the ROCm graph "
+                        "backend; use --inspect or --cpu --first-token-test "
+                        "for CPU diagnostics\n");
+            }
 #else
             fprintf(stderr,
                     "ds4: GLM 5.2 inference requires the Metal or CUDA graph "
@@ -55632,7 +55644,10 @@ static int ds4_engine_open_internal(ds4_engine **out,
                                                  load_layer_start,
                                                  load_layer_end,
                                                  load_layer_start == 0,
-                                                 load_output,
+                                                 load_output ||
+                                                     (load_output_optional &&
+                                                      weights_have_output_head(
+                                                              &e->weights)),
                                                  guard_ctx) :
                     glm_graph_memory_guard(&e->model,
                                            &e->weights,
