@@ -37634,8 +37634,22 @@ static bool glm_graph_memory_guard_for_compact_cap(
 
     const double fraction =
         glm_graph_env_double("DS4_GLM_MEMORY_GUARD_FRACTION", 0.99, 0.50, 1.00);
-    const double default_reserve_gib =
+    double default_reserve_gib =
         glm_graph_memory_guard_default_reserve_gib(budget_base, model_bytes);
+#ifdef DS4_ROCM_BUILD
+    if (load_slice && !ssd_streaming) {
+        /* The original fixed reserve protects Metal's shared host/GPU heap.
+         * A resident ROCm layer slice already accounts its exact model spans
+         * and owned graph state above. Keep proportional backend headroom for
+         * driver and temporary allocations without rejecting viable UMA
+         * slices merely because the heap is smaller than a high-memory Mac. */
+        double rocm_reserve_gib = glm_graph_bytes_to_gib(budget_base) / 16.0;
+        if (rocm_reserve_gib < 8.0) rocm_reserve_gib = 8.0;
+        if (rocm_reserve_gib < default_reserve_gib) {
+            default_reserve_gib = rocm_reserve_gib;
+        }
+    }
+#endif
     const double reserve_gib =
         glm_graph_env_double("DS4_GLM_MEMORY_GUARD_RESERVE_GB",
                              default_reserve_gib,
