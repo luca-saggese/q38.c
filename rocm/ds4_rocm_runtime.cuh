@@ -4767,9 +4767,17 @@ static const ds4_rocm_runtime_config *cuda_runtime_config(void) {
         g_rocm_cfg.disable_shared_gate_up_fused_w32 = !g_quality_mode;
         g_rocm_cfg.attention_output_cublas_all = !g_quality_mode;
         g_rocm_cfg.shared_down_cublas = !g_quality_mode;
-        g_rocm_cfg.graph_dump =
+        const int graph_dump_requested =
             cuda_env_present(getenv("DS4_ROCM_GRAPH_DUMP_PREFIX")) ||
             cuda_env_present(getenv("DS4_METAL_GRAPH_DUMP_PREFIX"));
+        /* Graph dumps traditionally select conservative kernels so their
+         * intermediate tensors are easier to inspect.  Correctness bisects
+         * sometimes need the opposite: observe the exact production kernel
+         * path without the diagnostic changing it. */
+        const int graph_dump_noninvasive =
+            cuda_env_present(getenv("DS4_ROCM_GRAPH_DUMP_NONINVASIVE"));
+        g_rocm_cfg.graph_dump =
+            graph_dump_requested && !graph_dump_noninvasive;
         const char *moe_decode_rpb_env = getenv("DS4_ROCM_MOE_DECODE_RPB");
         const int moe_decode_rpb_env_present =
             moe_decode_rpb_env != NULL && moe_decode_rpb_env[0] != '\0';
