@@ -4752,6 +4752,7 @@ struct ds4_rocm_runtime_config {
     int disable_shared_gate_up_fused_w32;
     int attention_output_cublas_all;
     int shared_down_cublas;
+    int glm_grouped_value_project;
     int graph_dump;
     uint32_t moe_decode_rpb;
     uint32_t moe_decode_gate_rpb;
@@ -4767,6 +4768,8 @@ static const ds4_rocm_runtime_config *cuda_runtime_config(void) {
         g_rocm_cfg.disable_shared_gate_up_fused_w32 = !g_quality_mode;
         g_rocm_cfg.attention_output_cublas_all = !g_quality_mode;
         g_rocm_cfg.shared_down_cublas = !g_quality_mode;
+        g_rocm_cfg.glm_grouped_value_project =
+            cuda_env_present(getenv("DS4_ROCM_GLM_GROUPED_VALUE_PROJECT"));
         const int graph_dump_requested =
             cuda_env_present(getenv("DS4_ROCM_GRAPH_DUMP_PREFIX")) ||
             cuda_env_present(getenv("DS4_METAL_GRAPH_DUMP_PREFIX"));

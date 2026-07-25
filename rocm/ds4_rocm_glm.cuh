@@ -1931,6 +1931,27 @@ extern "C" int ds4_gpu_glm_value_project_q8_0_batch_heads_tensor(
                                 "glm_value_project", &w, &row_bytes)) {
         return 0;
     }
+    if (n_tokens > 1u &&
+        (kv_lora_dim & 31u) == 0u &&
+        cuda_runtime_config()->glm_grouped_value_project) {
+        const uint32_t rows_per_block = 32u;
+        const uint32_t token_tile = 32u;
+        const uint32_t block_tile = 16u;
+        cuda_launch_grouped_q8_a_sharedx(
+                (float *)heads->ptr,
+                w,
+                (const float *)lora->ptr,
+                n_tokens,
+                n_head,
+                kv_lora_dim >> 5u,
+                value_dim,
+                row_bytes,
+                rows_per_block,
+                token_tile,
+                block_tile);
+        return cuda_ok(cudaGetLastError(),
+                       "glm grouped value project batch heads launch");
+    }
     dim3 grid(n_head, n_tokens, 1);
     glm_q8_project_head_kernel<<<grid, 256, (size_t)kv_lora_dim * sizeof(float)>>>(
             (float *)heads->ptr,
