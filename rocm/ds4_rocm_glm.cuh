@@ -2133,6 +2133,122 @@ __global__ static void glm_causal_gemm_scatter_head_kernel(
         head_out[i];
 }
 
+__global__ static void glm_causal_gemm_rope_to_f32_kernel(
+        float *dst,
+        const char *src,
+        uint32_t n_rows,
+        uint32_t qk_rope,
+        uint32_t n_ctx_orig,
+        float freq_base,
+        float freq_scale,
+        float ext_factor,
+        float attn_factor,
+        float beta_fast,
+        float beta_slow) {
+    const uint64_t pair = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const uint64_t pairs = (uint64_t)n_rows * (qk_rope >> 1u);
+    if (pair >= pairs) return;
+    const uint32_t row = (uint32_t)(pair / (qk_rope >> 1u));
+    const uint32_t r =
+        (uint32_t)(pair - (uint64_t)row * (qk_rope >> 1u)) << 1u;
+    const float2 y = glm_rocm_rotated_cache_rope_pair(src,
+                                                       (uint64_t)row * qk_rope,
+                                                       r,
+                                                       row,
+                                                       qk_rope,
+                                                       false,
+                                                       n_ctx_orig,
+                                                       freq_base,
+                                                       freq_scale,
+                                                       ext_factor,
+                                                       attn_factor,
+                                                       beta_fast,
+                                                       beta_slow);
+    dst[(uint64_t)row * qk_rope + r] = y.x;
+    dst[(uint64_t)row * qk_rope + r + 1u] = y.y;
+}
+
+__global__ static void glm_causal_gemm_gather_head_f32_kernel(
+        float *low_h,
+        float *qrope_h,
+        const float *low,
+        const float *q,
+        uint32_t n_tokens,
+        uint32_t head,
+        uint32_t n_head,
+        uint32_t kv_lora_dim,
+        uint32_t qk_nope,
+        uint32_t qk_rope) {
+    const uint64_t total = (uint64_t)n_tokens * kv_lora_dim;
+    for (uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+         i < total;
+         i += (uint64_t)gridDim.x * blockDim.x) {
+        const uint32_t token = (uint32_t)(i / kv_lora_dim);
+        const uint32_t j =
+            (uint32_t)(i - (uint64_t)token * kv_lora_dim);
+        low_h[i] =
+            low[((uint64_t)token * n_head + head) * kv_lora_dim + j];
+    }
+    const uint64_t rope_total = (uint64_t)n_tokens * qk_rope;
+    for (uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+         i < rope_total;
+         i += (uint64_t)gridDim.x * blockDim.x) {
+        const uint32_t token = (uint32_t)(i / qk_rope);
+        const uint32_t r = (uint32_t)(i - (uint64_t)token * qk_rope);
+        const uint32_t qk_dim = qk_nope + qk_rope;
+        qrope_h[i] =
+            q[((uint64_t)token * n_head + head) * qk_dim + qk_nope + r];
+    }
+}
+
+__global__ static void glm_causal_gemm_softmax_f32_kernel(
+        float *probs,
+        float *scores,
+        uint32_t n_tokens,
+        uint32_t n_selected,
+        uint32_t pos0,
+        float scale) {
+    const uint32_t token = blockIdx.x;
+    if (token >= n_tokens) return;
+    float *row = scores + (uint64_t)token * n_selected;
+    __shared__ float reduce[256];
+    const uint32_t visible = min(n_selected, pos0 + token + 1u);
+    float vmax = -INFINITY;
+    for (uint32_t s = threadIdx.x; s < n_selected; s += blockDim.x) {
+        const float v = s < visible ? row[s] * scale : -INFINITY;
+        row[s] = v;
+        vmax = fmaxf(vmax, v);
+    }
+    reduce[threadIdx.x] = vmax;
+    __syncthreads();
+    for (uint32_t stride = blockDim.x >> 1u; stride != 0u; stride >>= 1u) {
+        if (threadIdx.x < stride) {
+            reduce[threadIdx.x] =
+                fmaxf(reduce[threadIdx.x], reduce[threadIdx.x + stride]);
+        }
+        __syncthreads();
+    }
+    const float max_score = reduce[0];
+    float sum = 0.0f;
+    for (uint32_t s = threadIdx.x; s < n_selected; s += blockDim.x) {
+        const float v = s < visible ? expf(row[s] - max_score) : 0.0f;
+        probs[(uint64_t)token * n_selected + s] = v;
+        sum += v;
+    }
+    reduce[threadIdx.x] = sum;
+    __syncthreads();
+    for (uint32_t stride = blockDim.x >> 1u; stride != 0u; stride >>= 1u) {
+        if (threadIdx.x < stride) {
+            reduce[threadIdx.x] += reduce[threadIdx.x + stride];
+        }
+        __syncthreads();
+    }
+    const float inv = 1.0f / fmaxf(reduce[0], 1.0e-20f);
+    for (uint32_t s = threadIdx.x; s < n_selected; s += blockDim.x) {
+        probs[(uint64_t)token * n_selected + s] *= inv;
+    }
+}
+
 static int glm_causal_gemm_scratch_part(
         uint64_t *offset,
         uint64_t bytes,
@@ -2145,6 +2261,201 @@ static int glm_causal_gemm_scratch_part(
     aligned &= ~255ull;
     if (!cuda_u64_add_checked(aligned, bytes, offset)) return 0;
     *part_offset = aligned;
+    return 1;
+}
+
+static int glm_attention_indexed_lora_causal_gemm_f32(
+        ds4_gpu_tensor *lora_out,
+        const ds4_gpu_tensor *q,
+        const ds4_gpu_tensor *qk_low,
+        const ds4_gpu_tensor *kv_lora_cache,
+        const ds4_gpu_tensor *k_rope_cache,
+        uint32_t n_tokens,
+        uint32_t pos0,
+        uint32_t n_selected,
+        bool cache_f16,
+        uint32_t n_head,
+        uint32_t kv_lora_dim,
+        uint32_t qk_nope,
+        uint32_t qk_rope,
+        uint32_t n_ctx_orig,
+        float freq_base,
+        float freq_scale,
+        float ext_factor,
+        float attn_factor,
+        float beta_fast,
+        float beta_slow) {
+    if (!g_cublas_ready || !lora_out || !q || !qk_low ||
+        !kv_lora_cache || !k_rope_cache || cache_f16 ||
+        n_tokens < 256u || n_selected == 0u ||
+        n_head == 0u || kv_lora_dim == 0u ||
+        qk_rope == 0u || (qk_rope & 1u) != 0u ||
+        n_tokens > INT_MAX || n_selected > INT_MAX ||
+        kv_lora_dim > INT_MAX || qk_rope > INT_MAX) {
+        return 0;
+    }
+
+    uint64_t rope_count = 0, low_count = 0, qrope_count = 0;
+    uint64_t score_count = 0, head_count = 0;
+    if (!cuda_u64_mul_checked(n_selected, qk_rope, &rope_count) ||
+        !cuda_u64_mul_checked(n_tokens, kv_lora_dim, &low_count) ||
+        !cuda_u64_mul_checked(n_tokens, qk_rope, &qrope_count) ||
+        !cuda_u64_mul_checked(n_tokens, n_selected, &score_count) ||
+        !cuda_u64_mul_checked(n_tokens, kv_lora_dim, &head_count)) {
+        return 0;
+    }
+
+    uint64_t rope_bytes = 0, low_bytes = 0, qrope_bytes = 0;
+    uint64_t score_bytes = 0, prob_bytes = 0, head_bytes = 0;
+    if (!cuda_u64_mul_checked(rope_count, sizeof(float), &rope_bytes) ||
+        !cuda_u64_mul_checked(low_count, sizeof(float), &low_bytes) ||
+        !cuda_u64_mul_checked(qrope_count, sizeof(float), &qrope_bytes) ||
+        !cuda_u64_mul_checked(score_count, sizeof(float), &score_bytes) ||
+        !cuda_u64_mul_checked(score_count, sizeof(float), &prob_bytes) ||
+        !cuda_u64_mul_checked(head_count, sizeof(float), &head_bytes)) {
+        return 0;
+    }
+
+    uint64_t scratch_bytes = 0;
+    uint64_t rope_offset = 0, low_offset = 0, qrope_offset = 0;
+    uint64_t score_offset = 0, prob_offset = 0, head_offset = 0;
+    if (!glm_causal_gemm_scratch_part(
+            &scratch_bytes, rope_bytes, &rope_offset) ||
+        !glm_causal_gemm_scratch_part(
+            &scratch_bytes, low_bytes, &low_offset) ||
+        !glm_causal_gemm_scratch_part(
+            &scratch_bytes, qrope_bytes, &qrope_offset) ||
+        !glm_causal_gemm_scratch_part(
+            &scratch_bytes, score_bytes, &score_offset) ||
+        !glm_causal_gemm_scratch_part(
+            &scratch_bytes, prob_bytes, &prob_offset) ||
+        !glm_causal_gemm_scratch_part(
+            &scratch_bytes, head_bytes, &head_offset)) {
+        return 0;
+    }
+
+    char *scratch =
+        (char *)cuda_tmp_alloc(scratch_bytes, "glm causal attention f32 gemm");
+    if (!scratch) return 0;
+    float *rope_f = (float *)(scratch + rope_offset);
+    float *low_f = (float *)(scratch + low_offset);
+    float *qrope_f = (float *)(scratch + qrope_offset);
+    float *scores = (float *)(scratch + score_offset);
+    float *probs = (float *)(scratch + prob_offset);
+    float *head_out = (float *)(scratch + head_offset);
+
+    const uint64_t rope_pairs =
+        (uint64_t)n_selected * (qk_rope >> 1u);
+    glm_causal_gemm_rope_to_f32_kernel<<<
+        (rope_pairs + 255u) / 256u, 256>>>(
+            rope_f,
+            (const char *)k_rope_cache->ptr,
+            n_selected,
+            qk_rope,
+            n_ctx_orig,
+            freq_base,
+            freq_scale,
+            ext_factor,
+            attn_factor,
+            beta_fast,
+            beta_slow);
+    if (!cuda_ok(cudaGetLastError(), "glm causal attention rope f32 launch")) {
+        return 0;
+    }
+
+    const float one = 1.0f;
+    const float zero = 0.0f;
+    const float scale = 1.0f / sqrtf((float)(qk_nope + qk_rope));
+    const uint32_t gather_blocks =
+        (uint32_t)((low_count + 255u) / 256u);
+    const uint32_t scatter_blocks =
+        (uint32_t)((head_count + 255u) / 256u);
+    const float *kv_f = (const float *)kv_lora_cache->ptr;
+    for (uint32_t head = 0; head < n_head; head++) {
+        glm_causal_gemm_gather_head_f32_kernel<<<gather_blocks, 256>>>(
+            low_f,
+            qrope_f,
+            (const float *)qk_low->ptr,
+            (const float *)q->ptr,
+            n_tokens,
+            head,
+            n_head,
+            kv_lora_dim,
+            qk_nope,
+            qk_rope);
+        if (!cuda_ok(cudaGetLastError(),
+                     "glm causal attention query f32 gather launch")) {
+            return 0;
+        }
+        cublasStatus_t st = cublasSgemm(g_cublas,
+                                        CUBLAS_OP_T,
+                                        CUBLAS_OP_N,
+                                        (int)n_selected,
+                                        (int)n_tokens,
+                                        (int)kv_lora_dim,
+                                        &one,
+                                        kv_f,
+                                        (int)kv_lora_dim,
+                                        low_f,
+                                        (int)kv_lora_dim,
+                                        &zero,
+                                        scores,
+                                        (int)n_selected);
+        if (!cublas_ok(st, "glm causal attention lora score f32 gemm")) {
+            return 0;
+        }
+        st = cublasSgemm(g_cublas,
+                         CUBLAS_OP_T,
+                         CUBLAS_OP_N,
+                         (int)n_selected,
+                         (int)n_tokens,
+                         (int)qk_rope,
+                         &one,
+                         rope_f,
+                         (int)qk_rope,
+                         qrope_f,
+                         (int)qk_rope,
+                         &one,
+                         scores,
+                         (int)n_selected);
+        if (!cublas_ok(st, "glm causal attention rope score f32 gemm")) {
+            return 0;
+        }
+        glm_causal_gemm_softmax_f32_kernel<<<n_tokens, 256>>>(
+            probs, scores, n_tokens, n_selected, pos0, scale);
+        if (!cuda_ok(cudaGetLastError(),
+                     "glm causal attention softmax f32 launch")) {
+            return 0;
+        }
+        st = cublasSgemm(g_cublas,
+                         CUBLAS_OP_N,
+                         CUBLAS_OP_N,
+                         (int)kv_lora_dim,
+                         (int)n_tokens,
+                         (int)n_selected,
+                         &one,
+                         kv_f,
+                         (int)kv_lora_dim,
+                         probs,
+                         (int)n_selected,
+                         &zero,
+                         head_out,
+                         (int)kv_lora_dim);
+        if (!cublas_ok(st, "glm causal attention value f32 gemm")) {
+            return 0;
+        }
+        glm_causal_gemm_scatter_head_kernel<<<scatter_blocks, 256>>>(
+            (float *)lora_out->ptr,
+            head_out,
+            n_tokens,
+            head,
+            n_head,
+            kv_lora_dim);
+        if (!cuda_ok(cudaGetLastError(),
+                     "glm causal attention f32 head scatter launch")) {
+            return 0;
+        }
+    }
     return 1;
 }
 
@@ -2418,9 +2729,50 @@ static int glm_attention_indexed_lora_launch(
         !glm_rocm_tensor_has_cache2(k_rope_cache, cache_cap, qk_rope, elem)) {
         return 0;
     }
+    /*
+     * The F32 path keeps the original cache, query, softmax, and value
+     * precision while replacing the scalar attention loops with BLAS GEMMs.
+     * Keep it separate from the reference branch's faster but lossy FP16
+     * experiment so remote quality tests can isolate precision from layout.
+     */
+    if (causal_range && !has_selected &&
+        cuda_env_present(getenv("DS4_ROCM_GLM_CAUSAL_ATTN_GEMM_F32")) &&
+        glm_attention_indexed_lora_causal_gemm_f32(lora_out,
+                                                    q,
+                                                    qk_low,
+                                                    kv_lora_cache,
+                                                    k_rope_cache,
+                                                    n_tokens,
+                                                    pos0,
+                                                    n_selected,
+                                                    cache_f16,
+                                                    n_head,
+                                                    kv_lora_dim,
+                                                    qk_nope,
+                                                    qk_rope,
+                                                    n_ctx_orig,
+                                                    freq_base,
+                                                    freq_scale,
+                                                    ext_factor,
+                                                    attn_factor,
+                                                    beta_fast,
+                                                    beta_slow)) {
+        static int f32_notice_printed = 0;
+        if (!f32_notice_printed) {
+            fprintf(stderr,
+                    DS4_GPU_LOG_PREFIX
+                    "GLM causal indexed prefill using f32 "
+                    DS4_GPU_BLAS_NAME
+                    " attention GEMMs (tokens=%u rows=%u cache=f32)\n",
+                    n_tokens,
+                    n_selected);
+            f32_notice_printed = 1;
+        }
+        return 1;
+    }
     /* Diagnostic port of the heterogeneous branch's dense causal prefill
-     * path.  Keep it opt-in until remote gfx1151 timing and logit comparisons
-     * establish that the FP16 GEMMs are a safe default. */
+     * path. The FP16 output comparison failed on the resident IQ2 GLM model,
+     * so retain it only as an explicit approximation experiment. */
     if (causal_range && !has_selected &&
         cuda_env_present(getenv("DS4_ROCM_GLM_CAUSAL_ATTN_GEMM")) &&
         glm_attention_indexed_lora_causal_gemm(lora_out,
