@@ -39157,6 +39157,13 @@ static bool glm_graph_alloc_slice(
         fprintf(stderr,
                 "ds4: GLM graph using compact DSA KV only; expanded full-attention KV cache is skipped\n");
     }
+#ifdef DS4_ROCM_BUILD
+    if (glm_graph_env_truthy(
+            getenv("DS4_ROCM_GLM_LAYER_SLICE_TOKEN_DECODE"))) {
+        fprintf(stderr,
+                "ds4: ROCm GLM one-token layer slices use the optimized token graph\n");
+    }
+#endif
     if (g->compact_cache_cap != 0) {
         const uint64_t compact_kv_total =
             (uint64_t)g->layer_count * (compact_kv_lora_bytes + compact_k_rope_bytes);
@@ -57572,6 +57579,13 @@ int ds4_session_eval_layer_slice(ds4_session *s,
         }
 
         const uint64_t hidden_dim = DS4_N_EMBD;
+#ifdef DS4_ROCM_BUILD
+        const bool rocm_layer_slice_token_decode =
+            glm_graph_env_truthy(
+                    getenv("DS4_ROCM_GLM_LAYER_SLICE_TOKEN_DECODE"));
+#else
+        const bool rocm_layer_slice_token_decode = false;
+#endif
         uint32_t done = 0;
         while (done < n_tokens) {
             const uint32_t pos = pos0 + done;
@@ -57582,11 +57596,13 @@ int ds4_session_eval_layer_slice(ds4_session *s,
             bool ok = false;
 
             /*
-             * Raw decode starts from a token embedding. Continuation slices
-             * receive a hidden vector from the previous node, so use the
-             * batch-equivalent path even for a single token.
+             * The token graph accepts both embeddings and inter-node hidden
+             * states. Keep the resident ROCm continuation path opt-in until
+             * remote output and timing tests validate it across GLM quants.
              */
-            if (remaining == 1 && pos > 0 && !input_hc && !output_hc) {
+            if (remaining == 1 && pos > 0 &&
+                ((!input_hc && !output_hc) ||
+                 rocm_layer_slice_token_decode)) {
                 float *chunk_logits = output_logits ? logits : NULL;
                 ok = glm_graph_forward_token(g,
                                              &e->model,
