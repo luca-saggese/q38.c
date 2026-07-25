@@ -4778,8 +4778,11 @@ static const ds4_rocm_runtime_config *cuda_runtime_config(void) {
         g_rocm_cfg.glm_grouped_value_project =
             glm_grouped_value_project_env == NULL ||
             cuda_env_present(glm_grouped_value_project_env);
+        const char *glm_grouped_qk_low_env =
+            getenv("DS4_ROCM_GLM_GROUPED_QK_LOW");
         g_rocm_cfg.glm_grouped_qk_low =
-            cuda_env_present(getenv("DS4_ROCM_GLM_GROUPED_QK_LOW"));
+            glm_grouped_qk_low_env == NULL ||
+            cuda_env_present(glm_grouped_qk_low_env);
         const int graph_dump_requested =
             cuda_env_present(getenv("DS4_ROCM_GRAPH_DUMP_PREFIX")) ||
             cuda_env_present(getenv("DS4_METAL_GRAPH_DUMP_PREFIX"));
