@@ -4753,6 +4753,7 @@ struct ds4_rocm_runtime_config {
     int attention_output_cublas_all;
     int shared_down_cublas;
     int glm_grouped_value_project;
+    int glm_grouped_qk_low;
     int graph_dump;
     uint32_t moe_decode_rpb;
     uint32_t moe_decode_gate_rpb;
@@ -4768,8 +4769,17 @@ static const ds4_rocm_runtime_config *cuda_runtime_config(void) {
         g_rocm_cfg.disable_shared_gate_up_fused_w32 = !g_quality_mode;
         g_rocm_cfg.attention_output_cublas_all = !g_quality_mode;
         g_rocm_cfg.shared_down_cublas = !g_quality_mode;
+        const char *glm_grouped_value_project_env =
+            getenv("DS4_ROCM_GLM_GROUPED_VALUE_PROJECT");
+        /*
+         * The grouped batch kernel is the validated production path.  Keep
+         * the environment variable as an explicit =0 correctness fallback.
+         */
         g_rocm_cfg.glm_grouped_value_project =
-            cuda_env_present(getenv("DS4_ROCM_GLM_GROUPED_VALUE_PROJECT"));
+            glm_grouped_value_project_env == NULL ||
+            cuda_env_present(glm_grouped_value_project_env);
+        g_rocm_cfg.glm_grouped_qk_low =
+            cuda_env_present(getenv("DS4_ROCM_GLM_GROUPED_QK_LOW"));
         const int graph_dump_requested =
             cuda_env_present(getenv("DS4_ROCM_GRAPH_DUMP_PREFIX")) ||
             cuda_env_present(getenv("DS4_METAL_GRAPH_DUMP_PREFIX"));

@@ -99,6 +99,87 @@ static void cuda_launch_grouped_q8_a_sharedx(
     }
 }
 
+template <uint32_t BT>
+static void cuda_launch_grouped_q8_a_sharedx_strided_bt(
+        float *low,
+        const unsigned char *w,
+        const float *heads,
+        uint32_t n_tokens,
+        uint32_t n_groups,
+        uint32_t n_blocks,
+        uint32_t rank,
+        uint32_t x_token_stride,
+        uint32_t x_group_stride,
+        uint64_t row_bytes,
+        dim3 grid,
+        uint32_t rows_per_block,
+        uint32_t tile) {
+    const size_t shmem = (size_t)tile * BT * 32u * sizeof(float);
+    if (tile == 2u) {
+        grouped_q8_0_a_f32_batch_sharedx_chunked_strided_w32_kernel<2u, BT>
+            <<<grid, rows_per_block * 32u, shmem>>>(
+                low, w, heads, n_tokens, n_groups, n_blocks, rank,
+                x_token_stride, x_group_stride, row_bytes);
+    } else if (tile == 4u) {
+        grouped_q8_0_a_f32_batch_sharedx_chunked_strided_w32_kernel<4u, BT>
+            <<<grid, rows_per_block * 32u, shmem>>>(
+                low, w, heads, n_tokens, n_groups, n_blocks, rank,
+                x_token_stride, x_group_stride, row_bytes);
+    } else if (tile == 8u) {
+        grouped_q8_0_a_f32_batch_sharedx_chunked_strided_w32_kernel<8u, BT>
+            <<<grid, rows_per_block * 32u, shmem>>>(
+                low, w, heads, n_tokens, n_groups, n_blocks, rank,
+                x_token_stride, x_group_stride, row_bytes);
+    } else if (tile == 16u) {
+        grouped_q8_0_a_f32_batch_sharedx_chunked_strided_w32_kernel<16u, BT>
+            <<<grid, rows_per_block * 32u, shmem>>>(
+                low, w, heads, n_tokens, n_groups, n_blocks, rank,
+                x_token_stride, x_group_stride, row_bytes);
+    } else {
+        grouped_q8_0_a_f32_batch_sharedx_chunked_strided_w32_kernel<32u, BT>
+            <<<grid, rows_per_block * 32u, shmem>>>(
+                low, w, heads, n_tokens, n_groups, n_blocks, rank,
+                x_token_stride, x_group_stride, row_bytes);
+    }
+}
+
+static void cuda_launch_grouped_q8_a_sharedx_strided(
+        float *low,
+        const unsigned char *w,
+        const float *heads,
+        uint32_t n_tokens,
+        uint32_t n_groups,
+        uint32_t n_blocks,
+        uint32_t rank,
+        uint32_t x_token_stride,
+        uint32_t x_group_stride,
+        uint64_t row_bytes,
+        uint32_t rows_per_block,
+        uint32_t tile,
+        uint32_t block_tile) {
+    const uint32_t row_blocks =
+        (rank + rows_per_block - 1u) / rows_per_block;
+    const dim3 grid(n_groups * row_blocks,
+                    (n_tokens + tile - 1u) / tile,
+                    1u);
+    if (block_tile == 8u) {
+        cuda_launch_grouped_q8_a_sharedx_strided_bt<8u>(
+            low, w, heads, n_tokens, n_groups, n_blocks, rank,
+            x_token_stride, x_group_stride, row_bytes, grid,
+            rows_per_block, tile);
+    } else if (block_tile == 32u) {
+        cuda_launch_grouped_q8_a_sharedx_strided_bt<32u>(
+            low, w, heads, n_tokens, n_groups, n_blocks, rank,
+            x_token_stride, x_group_stride, row_bytes, grid,
+            rows_per_block, tile);
+    } else {
+        cuda_launch_grouped_q8_a_sharedx_strided_bt<16u>(
+            low, w, heads, n_tokens, n_groups, n_blocks, rank,
+            x_token_stride, x_group_stride, row_bytes, grid,
+            rows_per_block, tile);
+    }
+}
+
 static int cuda_matmul_q8_0_tensor_f16_gemm(
         ds4_gpu_tensor *out,
         const void *model_map,

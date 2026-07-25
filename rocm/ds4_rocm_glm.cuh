@@ -1891,6 +1891,29 @@ extern "C" int ds4_gpu_glm_qk_lowrank_q8_0_batch_tensor(
                                 "glm_qk_lowrank_batch", &w, &row_bytes)) {
         return 0;
     }
+    if (n_tokens > 1u &&
+        (qk_nope & 31u) == 0u &&
+        cuda_runtime_config()->glm_grouped_qk_low) {
+        const uint32_t rows_per_block = 32u;
+        const uint32_t token_tile = 32u;
+        const uint32_t block_tile = 8u;
+        cuda_launch_grouped_q8_a_sharedx_strided(
+                (float *)qk_low->ptr,
+                w,
+                (const float *)q->ptr,
+                n_tokens,
+                n_head,
+                qk_nope >> 5u,
+                kv_lora_dim,
+                (uint32_t)x_stride64,
+                qk_dim,
+                row_bytes,
+                rows_per_block,
+                token_tile,
+                block_tile);
+        return cuda_ok(cudaGetLastError(),
+                       "glm grouped qk lowrank batch launch");
+    }
     dim3 grid(n_head, n_tokens, 1);
     glm_q8_project_head_kernel<<<grid, 256, (size_t)qk_nope * sizeof(float)>>>(
             (float *)qk_low->ptr,
