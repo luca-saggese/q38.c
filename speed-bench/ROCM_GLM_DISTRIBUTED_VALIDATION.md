@@ -55,6 +55,83 @@ podman run --rm --userns=keep-id \
 
 Require a successful warning-free build and run `git diff --check`.
 
+## One-build experimental flag matrix
+
+The following ROCm experiments are independent and default to off. They can be
+compiled into one image, enabled separately for attribution, and enabled
+together for the final interaction check:
+
+| Experiment | Environment variable | Intended effect |
+| --- | --- | --- |
+| 64 KiB shared input | `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1` | Let one-token Q8 projections with a 16,384-element input reuse the input through LDS. |
+| Paired Q/KV projection | `DS4_ROCM_GLM_DECODE_QKV_PAIR=1` | Compute the one-token GLM Q and KV input projections together. |
+| Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1` | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. |
+
+Apply an enabled flag to **both** worker and coordinator. For the Podman worker,
+add it as `-e NAME=1`; for the coordinator, put `NAME=1 \` before `ds4-bench`
+or `ds4-server`.
+
+Use this order so one deployment answers both attribution and interaction:
+
+1. no experimental flags;
+2. `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1`;
+3. `DS4_ROCM_GLM_DECODE_QKV_PAIR=1`;
+4. both decode flags;
+5. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1`;
+6. all three flags.
+
+The expected activation messages are:
+
+```text
+Q8 one-token shared-input kernel enabled through 64 KiB LDS
+ROCm GLM one-token Q/KV input projections use the paired Q8 kernel
+GLM selected indexed prefill using fp16 hipBLAS strided-batched attention GEMMs
+```
+
+Absence of a message means the tested workload did not reach that path. The
+64 KiB path also reports and automatically falls back if the launch is not
+supported by the device.
+
+The normal 2,048-token benchmark below exercises the two decode flags, but it
+does **not** exercise selected attention: 2,048 visible rows still use the
+dense causal path. Measure the prompt-processing cliff with a live 256-token
+suffix curve:
+
+```sh
+RUN_NAME=selected-baseline
+
+DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
+DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
+DS4_BENCH_DISABLE_SNAPSHOT=1 \
+ds4-bench \
+  --prompt-file ~/ds4/ds4/speed-bench/promessi_sposi.txt \
+  --ctx-start 2048 \
+  --ctx-max 4096 \
+  --step-incr 256 \
+  --ctx-alloc 4097 \
+  --gen-tokens 0 \
+  --csv "/tmp/glm-${RUN_NAME}.csv" \
+  -m ~/ds4/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K.gguf \
+  --dist-prefill-chunk 256 \
+  --dist-prefill-window 2 \
+  --role coordinator \
+  --layers 0:37 \
+  --listen 192.168.100.2 8081 \
+  2>&1 | tee "/tmp/glm-coordinator-${RUN_NAME}.log"
+```
+
+Run it once without selected attention and once with
+`DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1` on both nodes. The first 2,048-token row is
+the causal control; the later 256-token suffix rows exercise selected
+attention. The selected GEMM experiment accepts 64–256 tokens and uses about
+580 MiB of temporary workspace at 256 tokens with 2,048 selected rows.
+
+For a layer-local selected-attention comparison, adapt the graph-dump command
+below to `--ctx-start 2304 --ctx-max 2304 --ctx-alloc 2433` and set
+`DS4_ROCM_GRAPH_DUMP_POS=2048`. For an end-to-end comparison, dump frontier
+logits at 2,304 tokens and compare `frontier_002304.logits.json`. A 512-token
+dump cannot validate this path.
+
 ## Matched baseline and candidate
 
 Write down the single environment setting, option, or code path being tested.

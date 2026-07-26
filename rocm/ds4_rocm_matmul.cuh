@@ -330,7 +330,12 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
     const char *wptr = cuda_model_range_ptr(model_map, weight_offset, weight_bytes, "q8_0");
     if (!wptr) return 0;
     if (n_tok == 1) {
-        if ((in_dim & 31u) == 0u && in_dim <= 8192u) {
+        const bool extended_sharedx =
+            in_dim > 8192u &&
+            in_dim <= 16384u &&
+            cuda_runtime_config()->q8_decode_sharedx_64k;
+        if ((in_dim & 31u) == 0u &&
+            (in_dim <= 8192u || extended_sharedx)) {
             const unsigned rows_per_block = 32u;
             const unsigned threads = rows_per_block * 32u;
             matmul_q8_0_f32_sharedx_warp_rows_w32_kernel<<<
@@ -343,7 +348,34 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
                     (uint32_t)blocks,
                     out_dim,
                     blocks * 34u);
-            return cuda_ok(cudaGetLastError(), "matmul_q8_0 f32 sharedx launch");
+            const cudaError_t launch_err = cudaGetLastError();
+            if (launch_err == cudaSuccess) {
+                if (extended_sharedx) {
+                    static int notice_printed = 0;
+                    if (!notice_printed) {
+                        fprintf(stderr,
+                                DS4_GPU_LOG_PREFIX
+                                "Q8 one-token shared-input kernel enabled "
+                                "through 64 KiB LDS (in_dim=%llu)\n",
+                                (unsigned long long)in_dim);
+                        notice_printed = 1;
+                    }
+                }
+                return 1;
+            }
+            if (!extended_sharedx) {
+                return cuda_ok(launch_err,
+                               "matmul_q8_0 f32 sharedx launch");
+            }
+            static int fallback_notice_printed = 0;
+            if (!fallback_notice_printed) {
+                fprintf(stderr,
+                        DS4_GPU_LOG_PREFIX
+                        "Q8 64 KiB shared-input launch unavailable "
+                        "(%s); falling back to the warp-row kernel\n",
+                        cudaGetErrorString(launch_err));
+                fallback_notice_printed = 1;
+            }
         }
         matmul_q8_0_f32_warp8_kernel<<<((unsigned)out_dim + 7u) / 8u, 256>>>(
                 (float *)out->ptr,
