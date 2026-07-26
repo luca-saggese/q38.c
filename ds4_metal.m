@@ -162,6 +162,8 @@ static id<MTLComputePipelineState> g_dsv4_compressor_store_one_pipeline;
 static id<MTLComputePipelineState> g_dsv4_sort_i32_rows_asc_pipeline;
 static id<MTLComputePipelineState> g_dsv4_indexed_attention_heads8_pipeline;
 static id<MTLComputePipelineState> g_dsv4_indexed_attention_heads8_rb16_pipeline;
+static id<MTLComputePipelineState> g_dsv4_indexed_attention_heads8_split_pipeline;
+static id<MTLComputePipelineState> g_dsv4_indexed_attention_heads8_split_reduce_pipeline;
 static id<MTLComputePipelineState> g_dsv4_softplus_sqrt_pipeline;
 static id<MTLComputePipelineState> g_dsv4_router_finalize_one_pipeline;
 static id<MTLComputePipelineState> g_dsv4_router_finalize_one_simd_pipeline;
@@ -5634,7 +5636,7 @@ typedef struct {
     uint32_t window;
     uint32_t ratio;
     uint32_t comp_kv_f16;
-    uint32_t pad0;
+    uint32_t n_splits;
     uint64_t q_token_stride;
     uint64_t q_head_stride;
     uint64_t raw_row_stride;
@@ -7653,6 +7655,10 @@ int ds4_gpu_init(void) {
             ds4_gpu_get_pipeline("kernel_dsv4_indexed_mixed_attention_heads8");
         g_dsv4_indexed_attention_heads8_rb16_pipeline =
             ds4_gpu_get_pipeline("kernel_dsv4_indexed_mixed_attention_heads8_rb16");
+        g_dsv4_indexed_attention_heads8_split_pipeline =
+            ds4_gpu_get_pipeline("kernel_dsv4_indexed_mixed_attention_heads8_split");
+        g_dsv4_indexed_attention_heads8_split_reduce_pipeline =
+            ds4_gpu_get_pipeline("kernel_dsv4_indexed_mixed_attention_heads8_split_reduce");
         g_dsv4_softplus_sqrt_pipeline =
             ds4_gpu_get_pipeline("kernel_dsv4_softplus_sqrt_f32_4");
         g_dsv4_router_finalize_one_pipeline =
@@ -7790,6 +7796,8 @@ int ds4_gpu_init(void) {
             !g_dsv4_sort_i32_rows_asc_pipeline ||
             !g_dsv4_indexed_attention_heads8_pipeline ||
             !g_dsv4_indexed_attention_heads8_rb16_pipeline ||
+            !g_dsv4_indexed_attention_heads8_split_pipeline ||
+            !g_dsv4_indexed_attention_heads8_split_reduce_pipeline ||
             !g_dsv4_softplus_sqrt_pipeline ||
             !g_dsv4_router_finalize_one_pipeline ||
             !g_dsv4_router_weights_one_pipeline ||
@@ -9134,6 +9142,8 @@ void ds4_gpu_cleanup(void) {
         g_dsv4_sort_i32_rows_asc_pipeline = nil;
         g_dsv4_indexed_attention_heads8_pipeline = nil;
         g_dsv4_indexed_attention_heads8_rb16_pipeline = nil;
+        g_dsv4_indexed_attention_heads8_split_pipeline = nil;
+        g_dsv4_indexed_attention_heads8_split_reduce_pipeline = nil;
         g_dsv4_softplus_sqrt_pipeline = nil;
         g_dsv4_router_finalize_one_pipeline = nil;
         g_dsv4_router_finalize_one_simd_pipeline = nil;
@@ -25653,13 +25663,28 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
             ds4_gpu_hot_pipeline(g_dsv4_sort_i32_rows_asc_pipeline,
                                     "kernel_dsv4_sort_i32_rows_asc");
         const bool decode_one_token = n_tokens == 1u;
+        const uint32_t decode_splits =
+            decode_one_token && !g_quality_mode ? 12u : 1u;
+        const bool split_decode = decode_splits > 1u;
         id<MTLComputePipelineState> attn_pipeline =
+            split_decode ?
+            ds4_gpu_hot_pipeline(
+                g_dsv4_indexed_attention_heads8_split_pipeline,
+                "kernel_dsv4_indexed_mixed_attention_heads8_split") :
             decode_one_token ?
             ds4_gpu_hot_pipeline(g_dsv4_indexed_attention_heads8_rb16_pipeline,
                                    "kernel_dsv4_indexed_mixed_attention_heads8_rb16") :
             ds4_gpu_hot_pipeline(g_dsv4_indexed_attention_heads8_pipeline,
                                    "kernel_dsv4_indexed_mixed_attention_heads8");
-        if (!sort_pipeline || !attn_pipeline) return 0;
+        id<MTLComputePipelineState> split_reduce_pipeline = split_decode ?
+            ds4_gpu_hot_pipeline(
+                g_dsv4_indexed_attention_heads8_split_reduce_pipeline,
+                "kernel_dsv4_indexed_mixed_attention_heads8_split_reduce") :
+            nil;
+        if (!sort_pipeline || !attn_pipeline ||
+            (split_decode && !split_reduce_pipeline)) {
+            return 0;
+        }
         if ((NSUInteger)top_k > sort_pipeline.maxTotalThreadsPerThreadgroup) {
             fprintf(stderr, "ds4: Metal indexed attention top-k exceeds sort threadgroup limit\n");
             return 0;
@@ -25700,7 +25725,7 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
             .window = window,
             .ratio = ratio,
             .comp_kv_f16 = comp_kv_f16 ? 1u : 0u,
-            .pad0 = 0,
+            .n_splits = decode_splits,
             .q_token_stride = (uint64_t)n_head * row_bytes,
             .q_head_stride = row_bytes,
             .raw_row_stride = row_bytes,
@@ -25728,23 +25753,71 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
             ds4_gpu_end_compute_encoder(cb, enc);
         }
 
-        enc = ds4_gpu_compute_encoder(cb);
-        [enc setComputePipelineState:attn_pipeline];
-        [enc setBytes:&attn_args length:sizeof(attn_args) atIndex:0];
-        [enc setBuffer:qbuf offset:ds4_gpu_tensor_offset(q) atIndex:1];
-        [enc setBuffer:rawbuf offset:ds4_gpu_tensor_offset(raw_kv) atIndex:2];
-        [enc setBuffer:compbuf offset:ds4_gpu_tensor_offset(comp_kv) atIndex:3];
-        [enc setBuffer:skip_decode_sort ? topkbuf : g_indexed_topk_buffer
-              offset:skip_decode_sort ? ds4_gpu_tensor_offset(topk) : 0
-             atIndex:4];
-        [enc setBuffer:sinks_buf offset:(NSUInteger)sinks_inner atIndex:5];
-        [enc setBuffer:headsbuf offset:ds4_gpu_tensor_offset(heads) atIndex:6];
-        [enc setThreadgroupMemoryLength:(decode_one_token ? 16u : 1u) *
-                                        128u * 4u * sizeof(uint16_t)
-                                atIndex:0];
-        [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)n_tokens, ((NSUInteger)n_head + 7u) / 8u, 1)
-             threadsPerThreadgroup:MTLSizeMake(32, 8, 1)];
-        ds4_gpu_end_compute_encoder(cb, enc);
+        if (split_decode) {
+            const uint64_t nrows = (uint64_t)n_tokens * n_head;
+            const uint64_t partial_bytes =
+                nrows * head_dim * decode_splits * sizeof(float);
+            const uint64_t stats_bytes =
+                nrows * decode_splits * 2u * sizeof(float);
+            if (partial_bytes > NSUIntegerMax - stats_bytes ||
+                !ds4_gpu_ensure_scratch_buffer(
+                    &g_flash_attn_tmp_buffer,
+                    &g_flash_attn_tmp_bytes,
+                    (NSUInteger)(partial_bytes + stats_bytes),
+                    "ds4_dsv4_indexed_attention_split_tmp")) {
+                return 0;
+            }
+
+            enc = ds4_gpu_compute_encoder(cb);
+            [enc setComputePipelineState:attn_pipeline];
+            [enc setBytes:&attn_args length:sizeof(attn_args) atIndex:0];
+            [enc setBuffer:qbuf offset:ds4_gpu_tensor_offset(q) atIndex:1];
+            [enc setBuffer:rawbuf offset:ds4_gpu_tensor_offset(raw_kv) atIndex:2];
+            [enc setBuffer:compbuf offset:ds4_gpu_tensor_offset(comp_kv) atIndex:3];
+            [enc setBuffer:skip_decode_sort ? topkbuf : g_indexed_topk_buffer
+                  offset:skip_decode_sort ? ds4_gpu_tensor_offset(topk) : 0
+                 atIndex:4];
+            [enc setBuffer:g_flash_attn_tmp_buffer offset:0 atIndex:5];
+            [enc setThreadgroupMemoryLength:16u * 128u * sizeof(uint16_t) * 4u
+                                    atIndex:0];
+            [enc dispatchThreadgroups:
+                    MTLSizeMake((NSUInteger)n_tokens,
+                                ((NSUInteger)n_head + 7u) / 8u,
+                                decode_splits)
+                 threadsPerThreadgroup:MTLSizeMake(32, 8, 1)];
+            ds4_gpu_end_compute_encoder(cb, enc);
+
+            enc = ds4_gpu_compute_encoder(cb);
+            [enc setComputePipelineState:split_reduce_pipeline];
+            [enc setBytes:&attn_args length:sizeof(attn_args) atIndex:0];
+            [enc setBuffer:g_flash_attn_tmp_buffer offset:0 atIndex:1];
+            [enc setBuffer:sinks_buf offset:(NSUInteger)sinks_inner atIndex:2];
+            [enc setBuffer:headsbuf offset:ds4_gpu_tensor_offset(heads) atIndex:3];
+            [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)nrows, 1, 1)
+                 threadsPerThreadgroup:MTLSizeMake(32, 4, 1)];
+            ds4_gpu_end_compute_encoder(cb, enc);
+        } else {
+            enc = ds4_gpu_compute_encoder(cb);
+            [enc setComputePipelineState:attn_pipeline];
+            [enc setBytes:&attn_args length:sizeof(attn_args) atIndex:0];
+            [enc setBuffer:qbuf offset:ds4_gpu_tensor_offset(q) atIndex:1];
+            [enc setBuffer:rawbuf offset:ds4_gpu_tensor_offset(raw_kv) atIndex:2];
+            [enc setBuffer:compbuf offset:ds4_gpu_tensor_offset(comp_kv) atIndex:3];
+            [enc setBuffer:skip_decode_sort ? topkbuf : g_indexed_topk_buffer
+                  offset:skip_decode_sort ? ds4_gpu_tensor_offset(topk) : 0
+                 atIndex:4];
+            [enc setBuffer:sinks_buf offset:(NSUInteger)sinks_inner atIndex:5];
+            [enc setBuffer:headsbuf offset:ds4_gpu_tensor_offset(heads) atIndex:6];
+            [enc setThreadgroupMemoryLength:(decode_one_token ? 16u : 1u) *
+                                            128u * 4u * sizeof(uint16_t)
+                                    atIndex:0];
+            [enc dispatchThreadgroups:
+                    MTLSizeMake((NSUInteger)n_tokens,
+                                ((NSUInteger)n_head + 7u) / 8u,
+                                1)
+                 threadsPerThreadgroup:MTLSizeMake(32, 8, 1)];
+            ds4_gpu_end_compute_encoder(cb, enc);
+        }
 
         if (!ds4_gpu_finish_command_buffer(cb, owned, "graph indexed mixed attention heads")) return 0;
     }
