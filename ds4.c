@@ -37943,13 +37943,30 @@ static uint32_t glm_graph_indexed_decode_split_blocks(void) {
 }
 
 static uint32_t glm_graph_indexed_decode_split_block_rows_for(uint32_t n_selected) {
-    return n_selected <= 1024u ? 32u : 128u;
+    const uint32_t default_rows = n_selected <= 1024u ? 32u : 128u;
+    const char *env = getenv("DS4_ROCM_GLM_INDEXED_DECODE_BLOCK_ROWS");
+    if (!env || !env[0]) return default_rows;
+    char *end = NULL;
+    errno = 0;
+    const unsigned long rows = strtoul(env, &end, 10);
+    if (errno == 0 && end && *end == '\0' &&
+        (rows == 32ul || rows == 64ul ||
+         rows == 128ul || rows == 256ul)) {
+        return (uint32_t)rows;
+    }
+    return default_rows;
 }
 
 static bool glm_graph_indexed_decode_split_group8_available(uint32_t n_selected) {
     const uint32_t block_rows = glm_graph_indexed_decode_split_block_rows_for(n_selected);
     const uint32_t needed_blocks =
         block_rows != 0u ? (n_selected + block_rows - 1u) / block_rows : 0u;
+    const char *group8_f32_env =
+        getenv("DS4_ROCM_GLM_INDEXED_DECODE_GROUP8_F32");
+    const bool compatible_cache =
+        glm_graph_compact_cache_is_f16() ||
+        (group8_f32_env && group8_f32_env[0] &&
+         strcmp(group8_f32_env, "0") != 0);
     return n_selected > 512u &&
            block_rows > 0 &&
            needed_blocks > 0 &&
@@ -37958,7 +37975,7 @@ static bool glm_graph_indexed_decode_split_group8_available(uint32_t n_selected)
            (DS4_N_HEAD % 8u) == 0 &&
            DS4_N_KV_LORA == 512u &&
            DS4_N_ROT == 64u &&
-           glm_graph_compact_cache_is_f16();
+           compatible_cache;
 }
 
 static bool glm_graph_prefill_stage_sync_boundary(void) {

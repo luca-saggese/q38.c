@@ -4784,8 +4784,16 @@ static const ds4_rocm_runtime_config *cuda_runtime_config(void) {
         g_rocm_cfg.glm_grouped_qk_low =
             glm_grouped_qk_low_env == NULL ||
             cuda_env_present(glm_grouped_qk_low_env);
+        const char *q8_decode_sharedx_64k_env =
+            getenv("DS4_ROCM_Q8_DECODE_SHAREDX_64K");
+        /*
+         * The 64 KiB shared-input path is bit-exact on gfx1151 and falls back
+         * automatically when a device cannot launch that much dynamic LDS.
+         * Keep an explicit =0 diagnostic rollback.
+         */
         g_rocm_cfg.q8_decode_sharedx_64k =
-            cuda_env_present(getenv("DS4_ROCM_Q8_DECODE_SHAREDX_64K"));
+            q8_decode_sharedx_64k_env == NULL ||
+            cuda_env_present(q8_decode_sharedx_64k_env);
         const int graph_dump_requested =
             cuda_env_present(getenv("DS4_ROCM_GRAPH_DUMP_PREFIX")) ||
             cuda_env_present(getenv("DS4_METAL_GRAPH_DUMP_PREFIX"));
