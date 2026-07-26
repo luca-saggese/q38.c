@@ -64,6 +64,7 @@ together for the final interaction check:
 | Experiment | Environment variable | Intended effect |
 | --- | --- | --- |
 | 64 KiB shared input | `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1` | Let one-token Q8 projections with a 16,384-element input reuse the input through LDS. |
+| Wave-parallel value projection | `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=1` | Give each one-token GLM value-projection output row a 32-lane wave instead of a serial thread. |
 | Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1` | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. |
 
 Apply an enabled flag to **both** worker and coordinator. For the Podman worker,
@@ -74,19 +75,24 @@ Use this order so one deployment answers both attribution and interaction:
 
 1. no experimental flags;
 2. `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1`;
-3. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1`;
-4. both flags.
+3. `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=1`;
+4. both decode flags;
+5. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1`;
+6. all flags.
 
 The expected activation messages are:
 
 ```text
 Q8 one-token shared-input kernel enabled through 64 KiB LDS
+GLM one-token value projection using wave-parallel Q8 rows
 GLM selected indexed prefill using fp16 hipBLAS strided-batched attention GEMMs
 ```
 
 Absence of a message means the tested workload did not reach that path. The
 64 KiB path also reports and automatically falls back if the launch is not
-supported by the device.
+supported by the device. The wave-parallel value projection changes FP32
+summation order; validate its layer output and frontier logits even when its
+generated text looks coherent.
 
 The normal 2,048-token benchmark below exercises the decode flag, but it does
 **not** exercise selected attention: 2,048 visible rows still use the dense

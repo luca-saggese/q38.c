@@ -487,6 +487,46 @@ __global__ static void glm_q8_project_head_kernel(
     }
 }
 
+/* Diagnostic port of the heterogeneous GLM branch's one-token Q8-head
+ * projection.  One wave cooperates on each output row instead of assigning a
+ * complete serial dot product to one thread.  The reduction changes FP32
+ * summation order, so keep it opt-in until layer and frontier-logit comparisons
+ * establish the acceptable numerical envelope. */
+__global__ static void glm_q8_project_head_wave_kernel(
+        float *out,
+        const unsigned char *weight,
+        const float *x,
+        uint32_t n_head,
+        uint32_t in_dim,
+        uint32_t out_dim,
+        uint32_t x_stride,
+        uint32_t x_head_stride,
+        uint32_t row_bytes) {
+    const uint32_t lane = threadIdx.x & 31u;
+    const uint32_t wave = threadIdx.x >> 5u;
+    const uint32_t waves_per_block = blockDim.x >> 5u;
+    const uint32_t d = blockIdx.x * waves_per_block + wave;
+    const uint32_t head = blockIdx.y;
+    const uint32_t token = blockIdx.z;
+    if (d >= out_dim || head >= n_head) return;
+
+    const float *xr =
+        x + (uint64_t)token * x_stride + (uint64_t)head * x_head_stride;
+    const unsigned char *row =
+        weight + ((uint64_t)head * out_dim + d) * row_bytes;
+    float acc = 0.0f;
+    for (uint32_t i = lane; i < in_dim; i += 32u) {
+        const unsigned char *blk = row + (uint64_t)(i >> 5u) * 34u;
+        const float scale = q8_0_scale_scalar(blk);
+        const int8_t q = ((const int8_t *)(blk + 2u))[i & 31u];
+        acc += scale * (float)q * xr[i];
+    }
+    acc = warp_sum_f32(acc);
+    if (lane == 0u) {
+        out[((uint64_t)token * n_head + head) * out_dim + d] = acc;
+    }
+}
+
 __global__ static void glm_build_kv_cache_kernel(
         char *key_cache,
         char *value_cache,
@@ -1974,6 +2014,39 @@ extern "C" int ds4_gpu_glm_value_project_q8_0_batch_heads_tensor(
                 block_tile);
         return cuda_ok(cudaGetLastError(),
                        "glm grouped value project batch heads launch");
+    }
+    if (n_tokens == 1u &&
+        cuda_env_present(
+            getenv("DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE"))) {
+        const uint32_t threads = 256u;
+        const uint32_t waves_per_block = threads / 32u;
+        dim3 grid((value_dim + waves_per_block - 1u) / waves_per_block,
+                  n_head,
+                  n_tokens);
+        glm_q8_project_head_wave_kernel<<<grid, threads>>>(
+                (float *)heads->ptr,
+                w,
+                (const float *)lora->ptr,
+                n_head,
+                kv_lora_dim,
+                value_dim,
+                (uint32_t)x_stride64,
+                kv_lora_dim,
+                row_bytes);
+        const cudaError_t launch_err = cudaGetLastError();
+        if (launch_err == cudaSuccess) {
+            static int notice_printed = 0;
+            if (!notice_printed) {
+                fprintf(stderr,
+                        DS4_GPU_LOG_PREFIX
+                        "GLM one-token value projection using "
+                        "wave-parallel Q8 rows\n");
+                notice_printed = 1;
+            }
+            return 1;
+        }
+        return cuda_ok(launch_err,
+                       "glm wave-parallel value project launch");
     }
     dim3 grid(n_head, n_tokens, 1);
     glm_q8_project_head_kernel<<<grid, 256, (size_t)kv_lora_dim * sizeof(float)>>>(
