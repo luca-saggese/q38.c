@@ -2513,13 +2513,15 @@ static uint32_t glm_selected_gemm_head_tile(void) {
     const unsigned long value = strtoul(env, &end, 10);
     if (errno == 0 && end && *end == '\0' &&
         (value == 1ul || value == 2ul ||
-         value == 4ul || value == 8ul)) {
+         value == 4ul || value == 8ul ||
+         value == 16ul || value == 32ul ||
+         value == 64ul)) {
         tile = (uint32_t)value;
         return tile;
     }
     fprintf(stderr,
             "ds4: invalid DS4_ROCM_GLM_SELECTED_ATTN_HEAD_TILE='%s'; "
-            "using 1 (valid values: 1,2,4,8)\n",
+            "using 1 (valid values: 1,2,4,8,16,32,64)\n",
             env);
     return tile;
 }

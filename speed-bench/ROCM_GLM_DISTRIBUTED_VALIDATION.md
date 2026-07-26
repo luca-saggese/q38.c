@@ -135,7 +135,7 @@ attribution and interaction checks:
 | Wave-parallel value projection | `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` | On | Give each one-token GLM value-projection output row a 32-lane wave instead of a serial thread. Set `=0` only for a serial-row correctness baseline. |
 | Causal attention GEMM | `DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=0` | On | Use FP16 BLAS for contiguous causal attention during initial prefill. Set `=0` only for the scalar-kernel fallback. |
 | Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` | On | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. Set `=0` only for the scalar-kernel fallback. |
-| Selected-attention head tile | `DS4_ROCM_GLM_SELECTED_ATTN_HEAD_TILE=1\|2\|4\|8` | `1` | Process several attention heads as BLAS matrix columns. Tile 1 preserves the production path. |
+| Selected-attention head tile | `DS4_ROCM_GLM_SELECTED_ATTN_HEAD_TILE=1\|2\|4\|8\|16\|32\|64` | `1` | Process several attention heads as BLAS matrix columns. Tile 1 preserves the production path. |
 | Selected-attention phase profile | `DS4_ROCM_GLM_SELECTED_ATTN_PROFILE=1` | Off | Print HIP-event phase totals for the first selected-attention invocation in each process. Diagnostic only. |
 
 Apply any opt-in or fallback override to **both** worker and coordinator. For
@@ -203,8 +203,8 @@ scalar-kernel baseline and once without the override for the production GEMM
 path. The first 2,048-token row is the causal control; the later 256-token
 suffix rows exercise selected attention. The selected GEMM path accepts
 64–256 tokens and uses about 580 MiB of temporary workspace at 256 tokens with
-2,048 selected rows at head tile 1. Tiles 2, 4, and 8 use approximately 584,
-591, and 606 MiB respectively.
+2,048 selected rows at head tile 1. Tiles 2, 4, 8, 16, 32, and 64 use
+approximately 584, 591, 606, 637, 697, and 818 MiB respectively.
 
 The phase profiler intentionally synchronizes at each measured boundary, so
 never use its wall-clock benchmark row as a performance result. It claims only
