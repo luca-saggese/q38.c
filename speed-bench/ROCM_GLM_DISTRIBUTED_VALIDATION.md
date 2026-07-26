@@ -456,6 +456,52 @@ activated selected attention, completed prefill in `102.769 s`, decoded at
 `2.29 t/s`, and returned a coherent description of the supplied passage as the
 introduction to Manzoni's *I promessi sposi*.
 
+## Causal-attention default deployment record
+
+The causal-attention GEMM became default-on in ds4 commit `dd837f0`, published
+by toolbox GitHub Actions run
+[`30215053603`](https://github.com/kyuz0/strix-halo-ds4-toolbox/actions/runs/30215053603).
+Both hosts pulled and verified:
+
+```text
+image ID: 6f424ab78c427808d7d7cee3b4a0ea01b232223a0ca525ebfb033042dec4c4a0
+digest:   sha256:9bda0b1d4c45c08bc06caffa90262a964d935534353595b199eab98ce9e6c5cb
+created:  2026-07-26 18:41:10 UTC
+```
+
+The post-deployment benchmark used no kernel environment overrides, layers
+`0:37` plus `38:output`, a 2,433-token allocation, 128 generated tokens, and
+the production distributed prefill settings:
+
+```text
+--dist-prefill-chunk 256
+--dist-prefill-window 2
+```
+
+Chunk 256 is intentional. Earlier matched 2,048-token runs measured
+`50.81 t/s` with chunk 256 versus `48.15 t/s` with chunk 512.
+
+The production curve measured:
+
+```text
+ctx   prefill tokens   prefill t/s   generation t/s   first token
+2048  2048             50.55         2.30             439.299 ms
+2304   256              5.22         2.30             434.724 ms
+```
+
+The second row is the incremental selected-attention suffix at an existing
+2,048-token frontier, not full-prompt throughput. It exposes the remaining
+post-2,048 prefill cliff. A separate cold 2,304-token full-prompt run measured:
+
+```text
+prefill=27.46 t/s generation=2.30 t/s first-token=439.220 ms
+```
+
+All three default activation messages were present: causal attention GEMM,
+selected attention GEMM, and wave-parallel one-token value projection. Both
+128-token raw continuations were coherent. Preserve
+`DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=0` as the independent scalar-kernel rollback.
+
 ## API smoke test
 
 After tensor and logit checks pass, run a server and test the actual chat
