@@ -1029,7 +1029,6 @@ __global__ static void glm_attention_indexed_decode_split_group8_partial_valid_k
         const float *qk_low,
         const char *kv_lora_cache,
         const char *k_rope_cache,
-        bool cache_f16,
         const int32_t *selected,
         uint32_t n_selected,
         uint32_t n_head,
@@ -1099,9 +1098,8 @@ __global__ static void glm_attention_indexed_decode_split_group8_partial_valid_k
             const uint32_t d = off - rr * kv_lora_dim;
             const uint32_t row = (uint32_t)selected[base + rr];
             kv_shared[off] =
-                glm_rocm_cache_load(kv_lora_cache,
-                                    (uint64_t)row * kv_lora_dim + d,
-                                    cache_f16);
+                __half2float(((const __half *)kv_lora_cache)
+                             [(uint64_t)row * kv_lora_dim + d]);
         }
         for (uint32_t off = tid; off < rows * rope_pairs; off += 256u) {
             const uint32_t rr = off / rope_pairs;
@@ -1115,7 +1113,7 @@ __global__ static void glm_attention_indexed_decode_split_group8_partial_valid_k
                                                  r,
                                                  row,
                                                  qk_rope,
-                                                 cache_f16,
+                                                 true,
                                                  n_ctx_orig,
                                                  freq_base,
                                                  freq_scale,
@@ -3653,8 +3651,6 @@ extern "C" int ds4_gpu_glm_attention_indexed_decode_split_group8_tensor(
     const unsigned char *value_weight = NULL;
     uint32_t row_bytes = 0;
     uint32_t qk_dim = 0;
-    const uint64_t cache_elem =
-        cache_f16 ? sizeof(__half) : sizeof(float);
     const uint32_t needed_blocks =
         block_rows != 0u ? (n_selected + block_rows - 1u) / block_rows : 0u;
     if (!glm_rocm_u32_add_checked(qk_nope, qk_rope, &qk_dim) ||
@@ -3667,6 +3663,7 @@ extern "C" int ds4_gpu_glm_attention_indexed_decode_split_group8_tensor(
         value_dim == 0u || qk_dim < qk_nope ||
         block_rows == 0u || needed_blocks == 0u ||
         n_blocks < needed_blocks || n_blocks > 64u ||
+        !cache_f16 ||
         !isfinite(freq_base) || freq_base <= 0.0f ||
         !isfinite(freq_scale) || freq_scale <= 0.0f ||
         !isfinite(ext_factor) || !isfinite(attn_factor) ||
@@ -3677,8 +3674,8 @@ extern "C" int ds4_gpu_glm_attention_indexed_decode_split_group8_tensor(
         !cuda_tensor_has_elems2(heads, n_head, value_dim, sizeof(float)) ||
         !cuda_tensor_has_elems3(partial_lora, n_blocks, n_head, kv_lora_dim, sizeof(float)) ||
         !cuda_tensor_has_elems3(partial_ms, n_blocks, n_head, 2u, sizeof(float)) ||
-        !glm_rocm_tensor_has_cache2(kv_lora_cache, cache_cap, kv_lora_dim, cache_elem) ||
-        !glm_rocm_tensor_has_cache2(k_rope_cache, cache_cap, qk_rope, cache_elem) ||
+        !glm_rocm_tensor_has_cache2(kv_lora_cache, cache_cap, kv_lora_dim, sizeof(__half)) ||
+        !glm_rocm_tensor_has_cache2(k_rope_cache, cache_cap, qk_rope, sizeof(__half)) ||
         !glm_rocm_check_q8_rows(model_map, model_size, value_weight_offset,
                                 (uint64_t)n_head * value_dim, kv_lora_dim,
                                 "glm_value_project_split", &value_weight, &row_bytes)) {
@@ -3700,7 +3697,6 @@ extern "C" int ds4_gpu_glm_attention_indexed_decode_split_group8_tensor(
                 (const float *)qk_low->ptr,
                 (const char *)kv_lora_cache->ptr,
                 (const char *)k_rope_cache->ptr,
-                cache_f16,
                 (const int32_t *)selected->ptr,
                 n_selected,
                 n_head,

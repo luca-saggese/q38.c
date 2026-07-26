@@ -133,8 +133,6 @@ attribution and interaction checks:
 | --- | --- | --- | --- |
 | 64 KiB shared input | `DS4_ROCM_Q8_DECODE_SHAREDX_64K=0` | On | Let one-token Q8 projections with a 16,384-element input reuse the input through LDS. Set `=0` for the warp-row fallback. |
 | Wave-parallel value projection | `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` | On | Give each one-token GLM value-projection output row a 32-lane wave instead of a serial thread. Set `=0` only for a serial-row correctness baseline. |
-| F32-cache group-8 indexed decode | `DS4_ROCM_GLM_INDEXED_DECODE_GROUP8_F32=1` | Off | Test the split group-of-8 indexed-attention kernel without changing the validated F32 compact cache. |
-| Indexed-decode block rows | `DS4_ROCM_GLM_INDEXED_DECODE_BLOCK_ROWS=32\|64\|128\|256` | Auto (`32` through 1,024 selected rows, otherwise `128`) | Tune split-attention rows per partial block. Relevant only when the group-8 path is active. |
 | Causal attention GEMM | `DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=0` | On | Use FP16 BLAS for contiguous causal attention during initial prefill. Set `=0` only for the scalar-kernel fallback. |
 | Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` | On | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. Set `=0` only for the scalar-kernel fallback. |
 | Selected-attention head tile | `DS4_ROCM_GLM_SELECTED_ATTN_HEAD_TILE=1\|2\|4\|8\|16\|32\|64` | `16` | Process several attention heads as BLAS matrix columns. Tile 1 is the bit-exact untiled baseline; tiles 32 and 64 remain experimental because they showed accumulated logit drift. |
