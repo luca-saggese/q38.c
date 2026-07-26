@@ -133,20 +133,23 @@ attribution and interaction checks:
 | --- | --- | --- | --- |
 | 64 KiB shared input | `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1` | Off | Let one-token Q8 projections with a 16,384-element input reuse the input through LDS. |
 | Wave-parallel value projection | `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` | On | Give each one-token GLM value-projection output row a 32-lane wave instead of a serial thread. Set `=0` only for a serial-row correctness baseline. |
+| Causal attention GEMM | `DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=0` | On | Use FP16 BLAS for contiguous causal attention during initial prefill. Set `=0` only for the scalar-kernel fallback. |
 | Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` | On | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. Set `=0` only for the scalar-kernel fallback. |
 
 Apply any opt-in or fallback override to **both** worker and coordinator. For
-the Podman worker, add it as `-e NAME=value`; for the coordinator, put
-`NAME=value \` before `ds4-bench` or `ds4-server`.
+Podman, add it as `-e NAME=value`; for a host binary, put `NAME=value \`
+before `ds4-bench` or `ds4-server`.
 
 Use this order so one deployment answers both attribution and interaction:
 
-1. `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` for the serial-row baseline;
-2. no value-projection override for the production wave path;
-3. production wave path plus `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1`;
-4. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` for the selected-attention scalar
+1. `DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=0` for the causal-attention scalar fallback;
+2. no causal-attention override for the production causal GEMM path;
+3. `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` for the serial-row baseline;
+4. no value-projection override for the production wave path;
+5. production wave path plus `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1`;
+6. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` for the selected-attention scalar
    fallback;
-5. the production selected-attention GEMM path, with the shared-input
+7. the production selected-attention GEMM path, with the shared-input
    experiment either off or on as required.
 
 The expected activation messages are:
@@ -154,6 +157,7 @@ The expected activation messages are:
 ```text
 Q8 one-token shared-input kernel enabled through 64 KiB LDS
 GLM one-token value projection using wave-parallel Q8 rows
+GLM causal indexed prefill using fp16 hipBLAS attention GEMMs
 GLM selected indexed prefill using fp16 hipBLAS strided-batched attention GEMMs
 ```
 
@@ -172,7 +176,6 @@ curve:
 RUN_NAME=selected-baseline
 
 DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
-DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
 DS4_BENCH_DISABLE_SNAPSHOT=1 \
 ds4-bench \
   --prompt-file ~/ds4/ds4/speed-bench/promessi_sposi.txt \
@@ -211,11 +214,10 @@ Run the commands below once without it for the baseline, then again with only
 that setting changed for the candidate. If the setting affects both halves of
 the model, apply it to both worker and coordinator.
 
-Keep the accepted FP16 causal-attention GEMM enabled in both runs:
-
-```text
-DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1
-```
+The accepted FP16 causal-attention GEMM is enabled by default. Leave it without
+an override in ordinary baseline/candidate comparisons. When validating the
+causal GEMM itself, use `DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=0` on both nodes for
+the scalar-kernel reference and no override for the production candidate.
 
 ### Worker
 
@@ -228,7 +230,6 @@ RUN_NAME=baseline
 podman run --rm \
   --name "ds4-worker-${RUN_NAME}" \
   -e DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
-  -e DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
   --device /dev/dri \
   --device /dev/kfd \
   --group-add keep-groups \
@@ -263,7 +264,6 @@ mkdir -p "/tmp/glm-${RUN_NAME}"
 podman run --rm \
   --name "ds4-coordinator-${RUN_NAME}" \
   -e DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
-  -e DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
   -e DS4_BENCH_DISABLE_SNAPSHOT=1 \
   --device /dev/dri \
   --device /dev/kfd \
@@ -311,7 +311,6 @@ RUN_NAME=baseline
 mkdir -p /tmp/glm-validation
 
 DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
-DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
 DS4_ROCM_GRAPH_DUMP_PREFIX="/tmp/glm-validation/${RUN_NAME}" \
 DS4_ROCM_GRAPH_DUMP_NONINVASIVE=1 \
 DS4_ROCM_GRAPH_DUMP_LAYER=0 \
@@ -357,7 +356,6 @@ RUN_NAME=baseline
 mkdir -p "/tmp/glm-logits-${RUN_NAME}"
 
 DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
-DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
 DS4_BENCH_DISABLE_SNAPSHOT=1 \
 ds4-bench \
   --prompt-file ~/ds4/ds4/speed-bench/promessi_sposi.txt \

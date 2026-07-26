@@ -2923,11 +2923,14 @@ static int glm_attention_indexed_lora_launch(
         }
         return 1;
     }
-    /* Diagnostic port of the heterogeneous branch's dense causal prefill
-     * path.  Keep it opt-in until remote gfx1151 timing and logit comparisons
-     * establish that the FP16 GEMMs are a safe default. */
+    /* Dense causal prefill can use contiguous cache rows directly.  Keep an
+     * explicit zero fallback for diagnosis and numerical comparisons with the
+     * scalar attention kernel. */
+    const char *causal_attn_gemm_env =
+        getenv("DS4_ROCM_GLM_CAUSAL_ATTN_GEMM");
     if (causal_range && !has_selected &&
-        cuda_env_present(getenv("DS4_ROCM_GLM_CAUSAL_ATTN_GEMM")) &&
+        (causal_attn_gemm_env == NULL ||
+         cuda_env_present(causal_attn_gemm_env)) &&
         glm_attention_indexed_lora_causal_gemm(lora_out,
                                                 q,
                                                 qk_low,
