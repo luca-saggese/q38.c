@@ -2335,6 +2335,135 @@ __global__ static void glm_selected_gemm_softmax_f16_kernel(
     }
 }
 
+__global__ static void glm_selected_gemm_gather_heads_f16_kernel(
+        __half *low_h,
+        __half *qrope_h,
+        const float *low,
+        const float *q,
+        uint32_t n_tokens,
+        uint32_t head0,
+        uint32_t head_count,
+        uint32_t head_capacity,
+        uint32_t n_head,
+        uint32_t kv_lora_dim,
+        uint32_t qk_nope,
+        uint32_t qk_rope) {
+    const uint64_t low_per_token =
+        (uint64_t)head_capacity * kv_lora_dim;
+    const uint64_t low_total = (uint64_t)n_tokens * low_per_token;
+    for (uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+         i < low_total;
+         i += (uint64_t)gridDim.x * blockDim.x) {
+        const uint32_t token = (uint32_t)(i / low_per_token);
+        const uint64_t token_i = i - (uint64_t)token * low_per_token;
+        const uint32_t head_local = (uint32_t)(token_i / kv_lora_dim);
+        const uint32_t j =
+            (uint32_t)(token_i - (uint64_t)head_local * kv_lora_dim);
+        if (head_local < head_count) {
+            low_h[i] = __float2half(
+                low[((uint64_t)token * n_head + head0 + head_local) *
+                    kv_lora_dim + j]);
+        }
+    }
+
+    const uint64_t rope_per_token =
+        (uint64_t)head_capacity * qk_rope;
+    const uint64_t rope_total = (uint64_t)n_tokens * rope_per_token;
+    const uint32_t qk_dim = qk_nope + qk_rope;
+    for (uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+         i < rope_total;
+         i += (uint64_t)gridDim.x * blockDim.x) {
+        const uint32_t token = (uint32_t)(i / rope_per_token);
+        const uint64_t token_i = i - (uint64_t)token * rope_per_token;
+        const uint32_t head_local = (uint32_t)(token_i / qk_rope);
+        const uint32_t r =
+            (uint32_t)(token_i - (uint64_t)head_local * qk_rope);
+        if (head_local < head_count) {
+            qrope_h[i] = __float2half(
+                q[((uint64_t)token * n_head + head0 + head_local) *
+                  qk_dim + qk_nope + r]);
+        }
+    }
+}
+
+__global__ static void glm_selected_gemm_softmax_heads_f16_kernel(
+        __half *probs,
+        float *scores,
+        uint32_t n_tokens,
+        uint32_t n_selected,
+        uint32_t head_count,
+        uint32_t head_capacity,
+        float scale) {
+    const uint32_t token = blockIdx.x;
+    const uint32_t head_local = blockIdx.y;
+    if (token >= n_tokens || head_local >= head_count) return;
+    const uint64_t row_index =
+        (uint64_t)token * head_capacity + head_local;
+    float *row = scores + row_index * n_selected;
+    __shared__ float reduce[256];
+    float vmax = -INFINITY;
+    for (uint32_t s = threadIdx.x; s < n_selected; s += blockDim.x) {
+        const float v = row[s] * scale;
+        row[s] = v;
+        vmax = fmaxf(vmax, v);
+    }
+    reduce[threadIdx.x] = vmax;
+    __syncthreads();
+    for (uint32_t stride = blockDim.x >> 1u; stride != 0u; stride >>= 1u) {
+        if (threadIdx.x < stride) {
+            reduce[threadIdx.x] =
+                fmaxf(reduce[threadIdx.x], reduce[threadIdx.x + stride]);
+        }
+        __syncthreads();
+    }
+    const float max_score = reduce[0];
+    float sum = 0.0f;
+    for (uint32_t s = threadIdx.x; s < n_selected; s += blockDim.x) {
+        const float v = expf(row[s] - max_score);
+        row[s] = v;
+        sum += v;
+    }
+    reduce[threadIdx.x] = sum;
+    __syncthreads();
+    for (uint32_t stride = blockDim.x >> 1u; stride != 0u; stride >>= 1u) {
+        if (threadIdx.x < stride) {
+            reduce[threadIdx.x] += reduce[threadIdx.x + stride];
+        }
+        __syncthreads();
+    }
+    const float inv = 1.0f / fmaxf(reduce[0], 1.0e-20f);
+    __half *prob_row = probs + row_index * n_selected;
+    for (uint32_t s = threadIdx.x; s < n_selected; s += blockDim.x) {
+        prob_row[s] = __float2half(row[s] * inv);
+    }
+}
+
+__global__ static void glm_selected_gemm_scatter_heads_kernel(
+        float *out,
+        const float *head_out,
+        uint32_t n_tokens,
+        uint32_t head0,
+        uint32_t head_count,
+        uint32_t head_capacity,
+        uint32_t n_head,
+        uint32_t kv_lora_dim) {
+    const uint64_t n =
+        (uint64_t)n_tokens * head_count * kv_lora_dim;
+    const uint64_t i =
+        (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    const uint64_t per_token = (uint64_t)head_count * kv_lora_dim;
+    const uint32_t token = (uint32_t)(i / per_token);
+    const uint64_t token_i = i - (uint64_t)token * per_token;
+    const uint32_t head_local = (uint32_t)(token_i / kv_lora_dim);
+    const uint32_t j =
+        (uint32_t)(token_i - (uint64_t)head_local * kv_lora_dim);
+    out[((uint64_t)token * n_head + head0 + head_local) *
+        kv_lora_dim + j] =
+        head_out[((uint64_t)token * head_capacity + head_local) *
+                 kv_lora_dim + j];
+}
+
 static int glm_causal_gemm_scratch_part(
         uint64_t *offset,
         uint64_t bytes,
@@ -2348,6 +2477,134 @@ static int glm_causal_gemm_scratch_part(
     if (!cuda_u64_add_checked(aligned, bytes, offset)) return 0;
     *part_offset = aligned;
     return 1;
+}
+
+enum glm_selected_gemm_profile_phase {
+    GLM_SELECTED_PROFILE_KV_GATHER = 0,
+    GLM_SELECTED_PROFILE_ROPE_GATHER,
+    GLM_SELECTED_PROFILE_QUERY_GATHER,
+    GLM_SELECTED_PROFILE_LORA_SCORE,
+    GLM_SELECTED_PROFILE_ROPE_SCORE,
+    GLM_SELECTED_PROFILE_SOFTMAX,
+    GLM_SELECTED_PROFILE_VALUE,
+    GLM_SELECTED_PROFILE_SCATTER,
+    GLM_SELECTED_PROFILE_PHASE_COUNT
+};
+
+struct glm_selected_gemm_profile {
+    int enabled;
+    float ms[GLM_SELECTED_PROFILE_PHASE_COUNT];
+};
+
+static cudaEvent_t g_glm_selected_profile_begin;
+static cudaEvent_t g_glm_selected_profile_end;
+static int g_glm_selected_profile_events_ready = 0;
+static int g_glm_selected_profile_claimed = 0;
+
+static uint32_t glm_selected_gemm_head_tile(void) {
+    static int initialized = 0;
+    static uint32_t tile = 1u;
+    if (initialized) return tile;
+    initialized = 1;
+    const char *env = getenv("DS4_ROCM_GLM_SELECTED_ATTN_HEAD_TILE");
+    if (!env || !env[0]) return tile;
+    char *end = NULL;
+    errno = 0;
+    const unsigned long value = strtoul(env, &end, 10);
+    if (errno == 0 && end && *end == '\0' &&
+        (value == 1ul || value == 2ul ||
+         value == 4ul || value == 8ul)) {
+        tile = (uint32_t)value;
+        return tile;
+    }
+    fprintf(stderr,
+            "ds4: invalid DS4_ROCM_GLM_SELECTED_ATTN_HEAD_TILE='%s'; "
+            "using 1 (valid values: 1,2,4,8)\n",
+            env);
+    return tile;
+}
+
+static void glm_selected_gemm_profile_init(
+        glm_selected_gemm_profile *profile) {
+    if (!profile) return;
+    memset(profile, 0, sizeof(*profile));
+    if (!cuda_env_present(
+            getenv("DS4_ROCM_GLM_SELECTED_ATTN_PROFILE")) ||
+        g_glm_selected_profile_claimed) {
+        return;
+    }
+    g_glm_selected_profile_claimed = 1;
+    if (!g_glm_selected_profile_events_ready) {
+        if (cudaEventCreate(&g_glm_selected_profile_begin) != cudaSuccess) {
+            return;
+        }
+        if (cudaEventCreate(&g_glm_selected_profile_end) != cudaSuccess) {
+            (void)cudaEventDestroy(g_glm_selected_profile_begin);
+            return;
+        }
+        g_glm_selected_profile_events_ready = 1;
+    }
+    profile->enabled = 1;
+}
+
+static void glm_selected_gemm_profile_begin(
+        glm_selected_gemm_profile *profile) {
+    if (!profile || !profile->enabled) return;
+    if (cudaEventRecord(g_glm_selected_profile_begin, 0) != cudaSuccess) {
+        profile->enabled = 0;
+    }
+}
+
+static void glm_selected_gemm_profile_end(
+        glm_selected_gemm_profile *profile,
+        glm_selected_gemm_profile_phase phase) {
+    if (!profile || !profile->enabled ||
+        phase >= GLM_SELECTED_PROFILE_PHASE_COUNT) {
+        return;
+    }
+    float elapsed = 0.0f;
+    if (cudaEventRecord(g_glm_selected_profile_end, 0) != cudaSuccess ||
+        cudaEventSynchronize(g_glm_selected_profile_end) != cudaSuccess ||
+        cudaEventElapsedTime(&elapsed,
+                             g_glm_selected_profile_begin,
+                             g_glm_selected_profile_end) != cudaSuccess) {
+        profile->enabled = 0;
+        return;
+    }
+    profile->ms[phase] += elapsed;
+}
+
+static void glm_selected_gemm_profile_report(
+        const glm_selected_gemm_profile *profile,
+        uint32_t n_tokens,
+        uint32_t n_selected,
+        uint32_t n_head,
+        uint32_t head_tile) {
+    if (!profile || !profile->enabled) return;
+    float total = 0.0f;
+    for (uint32_t i = 0; i < GLM_SELECTED_PROFILE_PHASE_COUNT; i++) {
+        total += profile->ms[i];
+    }
+    fprintf(stderr,
+            "ds4: ROCm GLM selected attention profile "
+            "tokens=%u selected=%u heads=%u tile=%u "
+            "kv_gather=%.3fms rope_gather=%.3fms "
+            "query_gather=%.3fms lora_score=%.3fms "
+            "rope_score=%.3fms softmax=%.3fms "
+            "value=%.3fms scatter=%.3fms total=%.3fms\n",
+            n_tokens,
+            n_selected,
+            n_head,
+            head_tile,
+            profile->ms[GLM_SELECTED_PROFILE_KV_GATHER],
+            profile->ms[GLM_SELECTED_PROFILE_ROPE_GATHER],
+            profile->ms[GLM_SELECTED_PROFILE_QUERY_GATHER],
+            profile->ms[GLM_SELECTED_PROFILE_LORA_SCORE],
+            profile->ms[GLM_SELECTED_PROFILE_ROPE_SCORE],
+            profile->ms[GLM_SELECTED_PROFILE_SOFTMAX],
+            profile->ms[GLM_SELECTED_PROFILE_VALUE],
+            profile->ms[GLM_SELECTED_PROFILE_SCATTER],
+            total);
 }
 
 static int glm_attention_indexed_lora_causal_gemm(
@@ -2599,6 +2856,18 @@ static int glm_attention_indexed_lora_selected_gemm(
         return 0;
     }
 
+    const uint32_t requested_head_tile = glm_selected_gemm_head_tile();
+    const uint32_t head_tile = min(requested_head_tile, n_head);
+    if (head_tile > 1u) {
+        static int notice_printed = 0;
+        if (!notice_printed) {
+            fprintf(stderr,
+                    "ds4: ROCm GLM selected attention using head tile %u\n",
+                    head_tile);
+            notice_printed = 1;
+        }
+    }
+
     uint64_t selected_rows = 0;
     uint64_t kv_count = 0, rope_count = 0;
     uint64_t low_count = 0, qrope_count = 0;
@@ -2610,6 +2879,12 @@ static int glm_attention_indexed_lora_selected_gemm(
         !cuda_u64_mul_checked(n_tokens, qk_rope, &qrope_count) ||
         !cuda_u64_mul_checked(n_tokens, n_selected, &score_count) ||
         !cuda_u64_mul_checked(n_tokens, kv_lora_dim, &head_count)) {
+        return 0;
+    }
+    if (!cuda_u64_mul_checked(low_count, head_tile, &low_count) ||
+        !cuda_u64_mul_checked(qrope_count, head_tile, &qrope_count) ||
+        !cuda_u64_mul_checked(score_count, head_tile, &score_count) ||
+        !cuda_u64_mul_checked(head_count, head_tile, &head_count)) {
         return 0;
     }
 
@@ -2651,8 +2926,12 @@ static int glm_attention_indexed_lora_selected_gemm(
     __half *probs = (__half *)(scratch + prob_offset);
     float *head_out = (float *)(scratch + head_offset);
 
+    glm_selected_gemm_profile profile;
+    glm_selected_gemm_profile_init(&profile);
+
     const uint32_t kv_blocks =
         (uint32_t)min((kv_count + 255u) / 256u, 4096ull);
+    glm_selected_gemm_profile_begin(&profile);
     glm_selected_gemm_kv_to_f16_kernel<<<kv_blocks, 256>>>(
         kv_h,
         (const char *)kv_lora_cache->ptr,
@@ -2666,9 +2945,12 @@ static int glm_attention_indexed_lora_selected_gemm(
                  "glm selected attention kv gather launch")) {
         return 0;
     }
+    glm_selected_gemm_profile_end(
+        &profile, GLM_SELECTED_PROFILE_KV_GATHER);
     const uint64_t rope_pairs = selected_rows * (qk_rope >> 1u);
     const uint32_t rope_blocks =
         (uint32_t)min((rope_pairs + 255u) / 256u, 4096ull);
+    glm_selected_gemm_profile_begin(&profile);
     glm_selected_gemm_rope_to_f16_kernel<<<rope_blocks, 256>>>(
         rope_h,
         (const char *)k_rope_cache->ptr,
@@ -2689,43 +2971,67 @@ static int glm_attention_indexed_lora_selected_gemm(
                  "glm selected attention rope gather launch")) {
         return 0;
     }
+    glm_selected_gemm_profile_end(
+        &profile, GLM_SELECTED_PROFILE_ROPE_GATHER);
 
     const float one = 1.0f;
     const float zero = 0.0f;
     const float scale = 1.0f / sqrtf((float)(qk_nope + qk_rope));
     const uint32_t gather_blocks =
-        (uint32_t)((low_count + 255u) / 256u);
-    const uint32_t scatter_blocks =
-        (uint32_t)((head_count + 255u) / 256u);
+        (uint32_t)min((low_count + 255u) / 256u, 4096ull);
     const long long kv_stride =
         (long long)n_selected * (long long)kv_lora_dim;
     const long long rope_stride =
         (long long)n_selected * (long long)qk_rope;
-    const long long low_stride = (long long)kv_lora_dim;
-    const long long qrope_stride = (long long)qk_rope;
-    const long long score_stride = (long long)n_selected;
-    for (uint32_t head = 0; head < n_head; head++) {
-        glm_causal_gemm_gather_head_f16_kernel<<<gather_blocks, 256>>>(
-            low_h,
-            qrope_h,
-            (const float *)qk_low->ptr,
-            (const float *)q->ptr,
-            n_tokens,
-            head,
-            n_head,
-            kv_lora_dim,
-            qk_nope,
-            qk_rope);
+    const long long low_stride =
+        (long long)head_tile * (long long)kv_lora_dim;
+    const long long qrope_stride =
+        (long long)head_tile * (long long)qk_rope;
+    const long long score_stride =
+        (long long)head_tile * (long long)n_selected;
+    for (uint32_t head0 = 0; head0 < n_head; head0 += head_tile) {
+        const uint32_t tile_heads = min(head_tile, n_head - head0);
+        glm_selected_gemm_profile_begin(&profile);
+        if (head_tile == 1u) {
+            glm_causal_gemm_gather_head_f16_kernel<<<gather_blocks, 256>>>(
+                low_h,
+                qrope_h,
+                (const float *)qk_low->ptr,
+                (const float *)q->ptr,
+                n_tokens,
+                head0,
+                n_head,
+                kv_lora_dim,
+                qk_nope,
+                qk_rope);
+        } else {
+            glm_selected_gemm_gather_heads_f16_kernel<<<gather_blocks, 256>>>(
+                low_h,
+                qrope_h,
+                (const float *)qk_low->ptr,
+                (const float *)q->ptr,
+                n_tokens,
+                head0,
+                tile_heads,
+                head_tile,
+                n_head,
+                kv_lora_dim,
+                qk_nope,
+                qk_rope);
+        }
         if (!cuda_ok(cudaGetLastError(),
                      "glm selected attention query gather launch")) {
             return 0;
         }
+        glm_selected_gemm_profile_end(
+            &profile, GLM_SELECTED_PROFILE_QUERY_GATHER);
+        glm_selected_gemm_profile_begin(&profile);
         cublasStatus_t st = cublasGemmStridedBatchedEx(
             g_cublas,
             CUBLAS_OP_T,
             CUBLAS_OP_N,
             (int)n_selected,
-            1,
+            (int)tile_heads,
             (int)kv_lora_dim,
             &one,
             kv_h,
@@ -2747,12 +3053,15 @@ static int glm_attention_indexed_lora_selected_gemm(
         if (!cublas_ok(st, "glm selected attention lora score gemm")) {
             return 0;
         }
+        glm_selected_gemm_profile_end(
+            &profile, GLM_SELECTED_PROFILE_LORA_SCORE);
+        glm_selected_gemm_profile_begin(&profile);
         st = cublasGemmStridedBatchedEx(
             g_cublas,
             CUBLAS_OP_T,
             CUBLAS_OP_N,
             (int)n_selected,
-            1,
+            (int)tile_heads,
             (int)qk_rope,
             &one,
             rope_h,
@@ -2774,18 +3083,37 @@ static int glm_attention_indexed_lora_selected_gemm(
         if (!cublas_ok(st, "glm selected attention rope score gemm")) {
             return 0;
         }
-        glm_selected_gemm_softmax_f16_kernel<<<n_tokens, 256>>>(
-            probs, scores, n_tokens, n_selected, scale);
+        glm_selected_gemm_profile_end(
+            &profile, GLM_SELECTED_PROFILE_ROPE_SCORE);
+        glm_selected_gemm_profile_begin(&profile);
+        if (head_tile == 1u) {
+            glm_selected_gemm_softmax_f16_kernel<<<n_tokens, 256>>>(
+                probs, scores, n_tokens, n_selected, scale);
+        } else {
+            const dim3 softmax_grid(n_tokens, tile_heads, 1u);
+            glm_selected_gemm_softmax_heads_f16_kernel<<<
+                softmax_grid, 256>>>(
+                    probs,
+                    scores,
+                    n_tokens,
+                    n_selected,
+                    tile_heads,
+                    head_tile,
+                    scale);
+        }
         if (!cuda_ok(cudaGetLastError(),
                      "glm selected attention softmax launch")) {
             return 0;
         }
+        glm_selected_gemm_profile_end(
+            &profile, GLM_SELECTED_PROFILE_SOFTMAX);
+        glm_selected_gemm_profile_begin(&profile);
         st = cublasGemmStridedBatchedEx(
             g_cublas,
             CUBLAS_OP_N,
             CUBLAS_OP_N,
             (int)kv_lora_dim,
-            1,
+            (int)tile_heads,
             (int)n_selected,
             &one,
             kv_h,
@@ -2807,18 +3135,41 @@ static int glm_attention_indexed_lora_selected_gemm(
         if (!cublas_ok(st, "glm selected attention value gemm")) {
             return 0;
         }
-        glm_causal_gemm_scatter_head_kernel<<<scatter_blocks, 256>>>(
-            (float *)lora_out->ptr,
-            head_out,
-            n_tokens,
-            head,
-            n_head,
-            kv_lora_dim);
+        glm_selected_gemm_profile_end(
+            &profile, GLM_SELECTED_PROFILE_VALUE);
+        const uint64_t scatter_count =
+            (uint64_t)n_tokens * tile_heads * kv_lora_dim;
+        const uint32_t scatter_blocks =
+            (uint32_t)((scatter_count + 255u) / 256u);
+        glm_selected_gemm_profile_begin(&profile);
+        if (head_tile == 1u) {
+            glm_causal_gemm_scatter_head_kernel<<<scatter_blocks, 256>>>(
+                (float *)lora_out->ptr,
+                head_out,
+                n_tokens,
+                head0,
+                n_head,
+                kv_lora_dim);
+        } else {
+            glm_selected_gemm_scatter_heads_kernel<<<scatter_blocks, 256>>>(
+                (float *)lora_out->ptr,
+                head_out,
+                n_tokens,
+                head0,
+                tile_heads,
+                head_tile,
+                n_head,
+                kv_lora_dim);
+        }
         if (!cuda_ok(cudaGetLastError(),
                      "glm selected attention head scatter launch")) {
             return 0;
         }
+        glm_selected_gemm_profile_end(
+            &profile, GLM_SELECTED_PROFILE_SCATTER);
     }
+    glm_selected_gemm_profile_report(
+        &profile, n_tokens, n_selected, n_head, head_tile);
     return 1;
 }
 
