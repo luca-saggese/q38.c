@@ -45442,14 +45442,6 @@ static bool glm_graph_forward_token(
         g->ssd_streaming &&
         !static_decode_map &&
         glm_graph_streaming_decode_sync_each_layer();
-#ifdef DS4_ROCM_BUILD
-    const bool rocm_decode_qkv_pair =
-        !g->ssd_streaming &&
-        glm_graph_env_truthy(
-            getenv("DS4_ROCM_GLM_DECODE_QKV_PAIR"));
-#else
-    const bool rocm_decode_qkv_pair = false;
-#endif
     bool ok = true;
     if (input_hc) {
         ok = ds4_gpu_tensor_write(g->cur,
@@ -45529,46 +45521,7 @@ static bool glm_graph_forward_token(
                                                     DS4_RMS_EPS) != 0;
         DS4_GLM_PROFILE_DECODE_STAGE("glm_decode_attn", "attn_norm");
         const uint32_t decode_ablate = glm_decode_ablate_mask();
-        bool qkv_pair_projected = false;
-        if (ok &&
-            rocm_decode_qkv_pair &&
-            !(decode_ablate & DS4_GLM_ABLATE_QPATH) &&
-            l->attn_q_a->type == DS4_TENSOR_Q8_0 &&
-            l->attn_kv_a_mqa->type == DS4_TENSOR_Q8_0) {
-            qkv_pair_projected =
-                ds4_gpu_matmul_q8_0_pair_tensor(
-                    g->q_rank,
-                    g->kv_raw,
-                    model->map,
-                    model->size,
-                    l->attn_q_a->abs_offset,
-                    l->attn_kv_a_mqa->abs_offset,
-                    DS4_N_EMBD,
-                    DS4_N_LORA_Q,
-                    kv_raw_dim,
-                    g->attn_norm,
-                    1) != 0;
-            if (qkv_pair_projected) {
-                static bool notice_printed = false;
-                if (!notice_printed) {
-                    fprintf(stderr,
-                            "ds4: ROCm GLM one-token Q/KV input "
-                            "projections use the paired Q8 kernel\n");
-                    notice_printed = true;
-                }
-            } else {
-                static bool fallback_notice_printed = false;
-                if (!fallback_notice_printed) {
-                    fprintf(stderr,
-                            "ds4: ROCm GLM paired Q/KV projection "
-                            "unavailable; using separate projections\n");
-                    fallback_notice_printed = true;
-                }
-            }
-        }
-        if (ok &&
-            !qkv_pair_projected &&
-            !(decode_ablate & DS4_GLM_ABLATE_QPATH)) {
+        if (ok && !(decode_ablate & DS4_GLM_ABLATE_QPATH)) {
             ok = glm_graph_matmul_q8_0_decode_profiled_tensor(g->q_rank,
                                                               model,
                                                               l->attn_q_a->abs_offset,
@@ -45585,19 +45538,16 @@ static bool glm_graph_forward_token(
                                          g->compact_cache_cap != 0;
         const bool fuse_qkv_norm = !decode_stage_profile && !fuse_qkv_norm_store;
         if (ok && fuse_qkv_norm_store) {
-            if (!qkv_pair_projected) {
-                ok = glm_graph_matmul_q8_0_decode_profiled_tensor(
-                        g->kv_raw,
-                        model,
-                        l->attn_kv_a_mqa->abs_offset,
-                        DS4_N_EMBD,
-                        kv_raw_dim,
-                        g->attn_norm,
-                        il,
-                        pos,
-                        "attn_kv_a_store",
-                        g->ssd_streaming) != 0;
-            }
+            ok = glm_graph_matmul_q8_0_decode_profiled_tensor(g->kv_raw,
+                                                              model,
+                                                              l->attn_kv_a_mqa->abs_offset,
+                                                              DS4_N_EMBD,
+                                                              kv_raw_dim,
+                                                              g->attn_norm,
+                                                              il,
+                                                              pos,
+                                                              "attn_kv_a_store",
+                                                              g->ssd_streaming) != 0;
             if (ok) {
                 ok = ds4_gpu_glm_qkv_norm_store_compact_kv_tensor(
                         g->q_rank_norm,
@@ -45620,19 +45570,16 @@ static bool glm_graph_forward_token(
                         DS4_RMS_EPS) != 0;
             }
         } else if (ok && fuse_qkv_norm) {
-            if (!qkv_pair_projected) {
-                ok = glm_graph_matmul_q8_0_decode_profiled_tensor(
-                        g->kv_raw,
-                        model,
-                        l->attn_kv_a_mqa->abs_offset,
-                        DS4_N_EMBD,
-                        kv_raw_dim,
-                        g->attn_norm,
-                        il,
-                        pos,
-                        "attn_kv_a_norm",
-                        g->ssd_streaming) != 0;
-            }
+            ok = glm_graph_matmul_q8_0_decode_profiled_tensor(g->kv_raw,
+                                                              model,
+                                                              l->attn_kv_a_mqa->abs_offset,
+                                                              DS4_N_EMBD,
+                                                              kv_raw_dim,
+                                                              g->attn_norm,
+                                                              il,
+                                                              pos,
+                                                              "attn_kv_a_norm",
+                                                              g->ssd_streaming) != 0;
             if (ok) {
                 ok = ds4_gpu_dsv4_qkv_rms_norm_rows_tensor(g->q_rank_norm,
                                                            g->q_rank,
@@ -45727,19 +45674,16 @@ static bool glm_graph_forward_token(
         }
         DS4_GLM_PROFILE_DECODE_STAGE("glm_decode_attn", "indexer_k");
         if (ok && !fuse_qkv_norm && !fuse_qkv_norm_store) {
-            if (!qkv_pair_projected) {
-                ok = glm_graph_matmul_q8_0_decode_profiled_tensor(
-                        g->kv_raw,
-                        model,
-                        l->attn_kv_a_mqa->abs_offset,
-                        DS4_N_EMBD,
-                        kv_raw_dim,
-                        g->attn_norm,
-                        il,
-                        pos,
-                        "attn_kv_a",
-                        g->ssd_streaming) != 0;
-            }
+            ok = glm_graph_matmul_q8_0_decode_profiled_tensor(g->kv_raw,
+                                                              model,
+                                                              l->attn_kv_a_mqa->abs_offset,
+                                                              DS4_N_EMBD,
+                                                              kv_raw_dim,
+                                                              g->attn_norm,
+                                                              il,
+                                                              pos,
+                                                              "attn_kv_a",
+                                                              g->ssd_streaming) != 0;
             if (ok) ok = ds4_gpu_glm_kv_lora_rms_norm_tensor(g->kv_norm,
                                                              g->kv_raw,
                                                              model->map,
