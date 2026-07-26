@@ -55,6 +55,75 @@ podman run --rm --userns=keep-id \
 
 Require a successful warning-free build and run `git diff --check`.
 
+## Publish and deploy the test image
+
+The image is built by
+`kyuz0/strix-halo-ds4-toolbox/.github/workflows/build_and_publish.yml`.
+Its `glm-rocm-7.2.4` Dockerfile clones
+`https://github.com/kyuz0/ds4.git`, branch
+`fix/rocm-distributed-glm`, so push the exact ds4 commit before dispatching the
+workflow. The toolbox workflow itself runs from `main`.
+
+Dispatch only the GLM ROCm image and follow the run to completion:
+
+```sh
+gh workflow run build_and_publish.yml \
+  --repo kyuz0/strix-halo-ds4-toolbox \
+  --ref main \
+  -f backends=glm-rocm-7.2.4
+
+gh run list \
+  --repo kyuz0/strix-halo-ds4-toolbox \
+  --workflow build_and_publish.yml \
+  --limit 1
+
+gh run watch RUN_ID \
+  --repo kyuz0/strix-halo-ds4-toolbox \
+  --exit-status
+```
+
+The workflow publishes both an immutable timestamped tag and the channel tag
+used by this playbook:
+
+```text
+docker.io/kyuz0/strix-halo-ds4-toolbox:glm-rocm-7.2.4
+```
+
+Pull the channel tag on both hosts before testing. Do not assume a mutable tag
+changed merely because `podman pull` succeeded; compare image IDs:
+
+```sh
+ssh fw1 podman pull \
+  docker.io/kyuz0/strix-halo-ds4-toolbox:glm-rocm-7.2.4
+ssh fw2 podman pull \
+  docker.io/kyuz0/strix-halo-ds4-toolbox:glm-rocm-7.2.4
+
+ssh fw1 podman image inspect \
+  docker.io/kyuz0/strix-halo-ds4-toolbox:glm-rocm-7.2.4 \
+  --format '{{.Id}} {{.Created}}'
+ssh fw2 podman image inspect \
+  docker.io/kyuz0/strix-halo-ds4-toolbox:glm-rocm-7.2.4 \
+  --format '{{.Id}} {{.Created}}'
+```
+
+The IDs must match. The worker and coordinator examples below invoke the image
+directly with Podman; entering a Toolbx shell is not required. Host `/tmp`
+results must be mounted explicitly when the command writes inside the
+container, for example:
+
+```sh
+mkdir -p /tmp/glm-validation
+
+podman run --rm \
+  --security-opt label=disable \
+  -v /tmp/glm-validation:/results \
+  IMAGE COMMAND --csv /results/run.csv
+```
+
+Keep logs outside the container with `2>&1 | tee /tmp/name.log`. Use distinct
+container names and result directories for baseline and candidate, and stop
+the worker after its coordinator run completes.
+
 ## One-build kernel flag matrix
 
 The following ROCm paths can be varied independently in one image for
@@ -64,7 +133,7 @@ attribution and interaction checks:
 | --- | --- | --- | --- |
 | 64 KiB shared input | `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1` | Off | Let one-token Q8 projections with a 16,384-element input reuse the input through LDS. |
 | Wave-parallel value projection | `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` | On | Give each one-token GLM value-projection output row a 32-lane wave instead of a serial thread. Set `=0` only for a serial-row correctness baseline. |
-| Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1` | Off | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. |
+| Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` | On | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. Set `=0` only for the scalar-kernel fallback. |
 
 Apply any opt-in or fallback override to **both** worker and coordinator. For
 the Podman worker, add it as `-e NAME=value`; for the coordinator, put
@@ -75,8 +144,10 @@ Use this order so one deployment answers both attribution and interaction:
 1. `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` for the serial-row baseline;
 2. no value-projection override for the production wave path;
 3. production wave path plus `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1`;
-4. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1`;
-5. both opt-in flags with the production wave path.
+4. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` for the selected-attention scalar
+   fallback;
+5. the production selected-attention GEMM path, with the shared-input
+   experiment either off or on as required.
 
 The expected activation messages are:
 
@@ -120,11 +191,12 @@ ds4-bench \
   2>&1 | tee "/tmp/glm-coordinator-${RUN_NAME}.log"
 ```
 
-Run it once without selected attention and once with
-`DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1` on both nodes. The first 2,048-token row is
-the causal control; the later 256-token suffix rows exercise selected
-attention. The selected GEMM experiment accepts 64–256 tokens and uses about
-580 MiB of temporary workspace at 256 tokens with 2,048 selected rows.
+Run it once with `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` on both nodes for the
+scalar-kernel baseline and once without the override for the production GEMM
+path. The first 2,048-token row is the causal control; the later 256-token
+suffix rows exercise selected attention. The selected GEMM path accepts
+64–256 tokens and uses about 580 MiB of temporary workspace at 256 tokens with
+2,048 selected rows.
 
 For a layer-local selected-attention comparison, adapt the graph-dump command
 below to `--ctx-start 2304 --ctx-max 2304 --ctx-alloc 2433` and set
@@ -153,7 +225,7 @@ the one candidate environment setting only for the candidate run.
 ```sh
 RUN_NAME=baseline
 
-podman run --rm -it \
+podman run --rm \
   --name "ds4-worker-${RUN_NAME}" \
   -e DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
   -e DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
@@ -182,23 +254,38 @@ podman run --rm -it \
 ### Coordinator performance run
 
 Set `RUN_NAME` to match the worker. Add the one candidate environment setting
-before `ds4-bench` only for the candidate run.
+as another `-e NAME=value` only for the candidate run.
 
 ```sh
 RUN_NAME=baseline
+mkdir -p "/tmp/glm-${RUN_NAME}"
 
-DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
-DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
-DS4_BENCH_DISABLE_SNAPSHOT=1 \
-ds4-bench \
-  --prompt-file ~/ds4/ds4/speed-bench/promessi_sposi.txt \
+podman run --rm \
+  --name "ds4-coordinator-${RUN_NAME}" \
+  -e DS4_GLM_MEMORY_GUARD_RESERVE_GB=8 \
+  -e DS4_ROCM_GLM_CAUSAL_ATTN_GEMM=1 \
+  -e DS4_BENCH_DISABLE_SNAPSHOT=1 \
+  --device /dev/dri \
+  --device /dev/kfd \
+  --group-add keep-groups \
+  --security-opt seccomp=unconfined \
+  --ipc=host \
+  --cap-add=SYS_PTRACE \
+  --security-opt label=disable \
+  --userns=keep-id \
+  --network=host \
+  -v /home/kyuz0/ds4:/models:ro \
+  -v "/tmp/glm-${RUN_NAME}:/results" \
+  docker.io/kyuz0/strix-halo-ds4-toolbox:glm-rocm-7.2.4 \
+  ds4-bench \
+  --prompt-file /models/ds4/speed-bench/promessi_sposi.txt \
   --ctx-start 2048 \
   --ctx-max 2048 \
   --ctx-alloc 2177 \
   --gen-tokens 128 \
   --show-output \
-  --csv "/tmp/glm-${RUN_NAME}.csv" \
-  -m ~/ds4/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K.gguf \
+  --csv /results/run.csv \
+  -m /models/GLM-5.2-UD-IQ2_XXS_RoutedIQ2XXS_blk78Q2K.gguf \
   --dist-prefill-chunk 256 \
   --dist-prefill-window 2 \
   --role coordinator \
@@ -310,6 +397,43 @@ There is no universal threshold that turns one frontier into a model-quality
 proof. Investigate a material regression from the last accepted path and use
 the official GLM continuation scorer before making an approximation the
 unconditional release default.
+
+## Selected-attention promotion record
+
+On 2026-07-26, the selected-attention GEMM was compared with its scalar-kernel
+fallback on the topology at the top of this document. Both runs used commit
+`34b3862`, FP16 causal-attention GEMMs, a 2,304-token prompt, 256-token
+distributed chunks, and a 2,433-token allocation. The only changed setting was
+`DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` versus `=1`, on both nodes.
+
+The graph dump at layer 0 and position 2,048 produced:
+
+```text
+all-token relative RMSE: 5.9441e-05
+all-token cosine:        0.999999998234
+final-token cosine:      0.999999997577
+non-finite pairs:        0
+```
+
+The complete 154,880-value frontier-logit comparison produced:
+
+```text
+KL(reference || candidate): 0.0664153
+top-1:                     3956 -> 3956
+top-10 overlap:            10/10
+top-50 overlap:            46/50
+centered cosine:           0.9921320
+```
+
+The dump-free performance pair improved from `19.11` to `27.48` prompt
+tokens/s (`+43.8%`). The instrumented pair measured `18.85` versus `27.49`
+tokens/s; do not compare either instrumented row with a normal benchmark
+because serializing the full logit vector is included in the final chunk.
+
+Decision: make the selected-attention GEMM the ROCm GLM default and preserve
+`DS4_ROCM_GLM_SELECTED_ATTN_GEMM=0` as the diagnostic rollback. The narrower
+candidate top-1 margin (`1.2262` to `0.3320`) remains important context even
+though the selected token and top-10 set matched.
 
 ## API smoke test
 

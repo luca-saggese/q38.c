@@ -2879,10 +2879,14 @@ static int glm_attention_indexed_lora_launch(
     /* Once the visible context exceeds the indexer's top-k, each token carries
      * its own selected row list.  Gather those rows into per-token FP16
      * matrices, then batch the score and value products through BLAS.  Keep
-     * the experiment opt-in and bounded: at 256 x 2048 selected rows the
-     * temporary workspace is already roughly 580 MiB. */
+     * the path bounded: at 256 x 2048 selected rows the temporary workspace is
+     * already roughly 580 MiB.  An explicit zero retains the scalar-kernel
+     * fallback for diagnosis and numerical comparisons. */
+    const char *selected_attn_gemm_env =
+        getenv("DS4_ROCM_GLM_SELECTED_ATTN_GEMM");
     if (!causal_range && has_selected &&
-        cuda_env_present(getenv("DS4_ROCM_GLM_SELECTED_ATTN_GEMM")) &&
+        (selected_attn_gemm_env == NULL ||
+         cuda_env_present(selected_attn_gemm_env)) &&
         glm_attention_indexed_lora_selected_gemm(lora_out,
                                                   q,
                                                   qk_low,
