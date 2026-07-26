@@ -2015,9 +2015,14 @@ extern "C" int ds4_gpu_glm_value_project_q8_0_batch_heads_tensor(
         return cuda_ok(cudaGetLastError(),
                        "glm grouped value project batch heads launch");
     }
+    const char *wave_decode_env =
+        getenv("DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE");
+    /*
+     * The wave-per-output-row kernel is the validated production decode path.
+     * Keep an explicit =0 fallback for correctness diagnostics.
+     */
     if (n_tokens == 1u &&
-        cuda_env_present(
-            getenv("DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE"))) {
+        (wave_decode_env == NULL || cuda_env_present(wave_decode_env))) {
         const uint32_t threads = 256u;
         const uint32_t waves_per_block = threads / 32u;
         dim3 grid((value_dim + waves_per_block - 1u) / waves_per_block,

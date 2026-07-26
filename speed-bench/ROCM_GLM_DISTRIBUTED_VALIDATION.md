@@ -55,30 +55,28 @@ podman run --rm --userns=keep-id \
 
 Require a successful warning-free build and run `git diff --check`.
 
-## One-build experimental flag matrix
+## One-build kernel flag matrix
 
-The following ROCm experiments are independent and default to off. They can be
-compiled into one image, enabled separately for attribution, and enabled
-together for the final interaction check:
+The following ROCm paths can be varied independently in one image for
+attribution and interaction checks:
 
-| Experiment | Environment variable | Intended effect |
-| --- | --- | --- |
-| 64 KiB shared input | `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1` | Let one-token Q8 projections with a 16,384-element input reuse the input through LDS. |
-| Wave-parallel value projection | `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=1` | Give each one-token GLM value-projection output row a 32-lane wave instead of a serial thread. |
-| Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1` | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. |
+| Path | Environment variable | Default | Intended effect |
+| --- | --- | --- | --- |
+| 64 KiB shared input | `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1` | Off | Let one-token Q8 projections with a 16,384-element input reuse the input through LDS. |
+| Wave-parallel value projection | `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` | On | Give each one-token GLM value-projection output row a 32-lane wave instead of a serial thread. Set `=0` only for a serial-row correctness baseline. |
+| Selected attention GEMM | `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1` | Off | Gather per-token selected KV rows and use FP16 strided-batched BLAS after the 2,048-row indexer boundary. |
 
-Apply an enabled flag to **both** worker and coordinator. For the Podman worker,
-add it as `-e NAME=1`; for the coordinator, put `NAME=1 \` before `ds4-bench`
-or `ds4-server`.
+Apply any opt-in or fallback override to **both** worker and coordinator. For
+the Podman worker, add it as `-e NAME=value`; for the coordinator, put
+`NAME=value \` before `ds4-bench` or `ds4-server`.
 
 Use this order so one deployment answers both attribution and interaction:
 
-1. no experimental flags;
-2. `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1`;
-3. `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=1`;
-4. both decode flags;
-5. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1`;
-6. all flags.
+1. `DS4_ROCM_GLM_VALUE_PROJECT_WAVE_DECODE=0` for the serial-row baseline;
+2. no value-projection override for the production wave path;
+3. production wave path plus `DS4_ROCM_Q8_DECODE_SHAREDX_64K=1`;
+4. `DS4_ROCM_GLM_SELECTED_ATTN_GEMM=1`;
+5. both opt-in flags with the production wave path.
 
 The expected activation messages are:
 
