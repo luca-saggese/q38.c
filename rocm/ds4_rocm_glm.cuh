@@ -2503,7 +2503,7 @@ static int g_glm_selected_profile_claimed = 0;
 
 static uint32_t glm_selected_gemm_head_tile(void) {
     static int initialized = 0;
-    static uint32_t tile = 1u;
+    static uint32_t tile = 16u;
     if (initialized) return tile;
     initialized = 1;
     const char *env = getenv("DS4_ROCM_GLM_SELECTED_ATTN_HEAD_TILE");
@@ -2521,7 +2521,7 @@ static uint32_t glm_selected_gemm_head_tile(void) {
     }
     fprintf(stderr,
             "ds4: invalid DS4_ROCM_GLM_SELECTED_ATTN_HEAD_TILE='%s'; "
-            "using 1 (valid values: 1,2,4,8,16,32,64)\n",
+            "using 16 (valid values: 1,2,4,8,16,32,64)\n",
             env);
     return tile;
 }
