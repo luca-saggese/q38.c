@@ -14888,8 +14888,7 @@ static void print_vec_stats(const char *name, const float *x, uint64_t n) {
 #define DS4_GPU_ATTN_COMP_CACHE_F16 0
 #endif
 
-/* GLM's DSA compact cache has a ROCm runtime opt-in below; it is independent
- * from the general compressed-attention cache format. */
+#define DS4_GPU_GLM_COMPACT_CACHE_F16 DS4_GPU_ATTN_COMP_CACHE_F16
 
 /* =========================================================================
  * Metal Release Graph State.
@@ -34467,19 +34466,12 @@ static uint32_t glm_graph_indexed_prefill_score_tokens(
         uint32_t indexed_prefill_cap,
         uint32_t compact_cap);
 
-static uint32_t glm_graph_compact_cache_is_f16(void) {
-#if defined(__APPLE__)
-    return 1u;
-#elif defined(DS4_ROCM_BUILD)
-    return getenv("DS4_ROCM_GLM_COMPACT_CACHE_F16") != NULL ? 1u : 0u;
-#else
-    return 0u;
-#endif
+static uint64_t glm_graph_compact_cache_elem_bytes(void) {
+    return DS4_GPU_GLM_COMPACT_CACHE_F16 ? sizeof(uint16_t) : sizeof(float);
 }
 
-static uint64_t glm_graph_compact_cache_elem_bytes(void) {
-    return glm_graph_compact_cache_is_f16() ?
-        sizeof(uint16_t) : sizeof(float);
+static uint32_t glm_graph_compact_cache_is_f16(void) {
+    return DS4_GPU_GLM_COMPACT_CACHE_F16 ? 1u : 0u;
 }
 
 static bool glm_graph_expanded_kv_cache_enabled(bool ssd_streaming) {
