@@ -435,6 +435,29 @@ Decision: make the selected-attention GEMM the ROCm GLM default and preserve
 candidate top-1 margin (`1.2262` to `0.3320`) remains important context even
 though the selected token and top-10 set matched.
 
+The default-on change was published from ds4 commit `ea2e766` by toolbox
+GitHub Actions run
+[`30214076099`](https://github.com/kyuz0/strix-halo-ds4-toolbox/actions/runs/30214076099).
+After pulling the channel tag, both hosts reported:
+
+```text
+image ID: 379e27ad0439970bf72e04ac63fe2711e3471468f2171bad757ea03bca52d72c
+digest:   sha256:221bc3b031f5600094e40a1b0202fbd7f7057f31ab4854836bf97a5420dbc36f
+created:  2026-07-26 18:13:38 UTC
+```
+
+A no-override post-deployment benchmark activated both the selected-attention
+GEMM and wave-parallel one-token value projection and measured:
+
+```text
+ctx=2304 prefill=27.45 t/s generation=2.30 t/s first-token=434.913 ms
+```
+
+The long API smoke used a 2,482-token chat prompt and 32 generated tokens. It
+activated selected attention, completed prefill in `102.769 s`, decoded at
+`2.29 t/s`, and returned a coherent description of the supplied passage as the
+introduction to Manzoni's *I promessi sposi*.
+
 ## API smoke test
 
 After tensor and logit checks pass, run a server and test the actual chat
