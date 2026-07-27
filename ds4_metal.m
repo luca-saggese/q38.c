@@ -28156,11 +28156,25 @@ static int ds4_gpu_encode_mul_mm_id_map(
     }
 
     const NSUInteger tpe_bytes = (NSUInteger)mm_args->ne02 * sizeof(int32_t);
-    const NSUInteger hids_bytes = (NSUInteger)mm_args->ne02 * (NSUInteger)mm_args->ne21 * sizeof(int32_t);
+    const NSUInteger hids_bytes =
+        (NSUInteger)mm_args->ne02 * (NSUInteger)mm_args->ne21 * sizeof(int32_t);
     if (tpe_bytes > NSUIntegerMax - hids_bytes) return 0;
+    const NSUInteger work_offset = (tpe_bytes + hids_bytes + 7u) & ~7u;
+    const uint64_t pair_rows =
+        (uint64_t)(uint32_t)mm_args->ne20 * (uint32_t)mm_args->ne21;
+    const uint64_t work_cap =
+        (pair_rows + 31u * (uint32_t)mm_args->ne02 + 31u) / 32u;
+    const NSUInteger work_item_bytes = 2u * sizeof(uint32_t);
+    if (work_cap > (NSUIntegerMax - 8u) / work_item_bytes ||
+        work_offset > NSUIntegerMax - 8u -
+                          (NSUInteger)work_cap * work_item_bytes) {
+        return 0;
+    }
+    const NSUInteger total_bytes =
+        work_offset + 8u + (NSUInteger)work_cap * work_item_bytes;
     if (!ds4_gpu_ensure_scratch_buffer(&g_moe_id_map_buffer,
                                          &g_moe_id_map_bytes,
-                                         tpe_bytes + hids_bytes,
+                                         total_bytes,
                                          "ds4_moe_id_map")) {
         return 0;
     }
@@ -28171,6 +28185,7 @@ static int ds4_gpu_encode_mul_mm_id_map(
     [enc setBuffer:ids offset:ids_off atIndex:1];
     [enc setBuffer:g_moe_id_map_buffer offset:0 atIndex:2];
     [enc setBuffer:g_moe_id_map_buffer offset:tpe_bytes atIndex:3];
+    [enc setBuffer:g_moe_id_map_buffer offset:work_offset atIndex:4];
     [enc setThreadgroupMemoryLength:(NSUInteger)mm_args->ne02 * (NSUInteger)mm_args->ne20 * sizeof(uint16_t) atIndex:0];
     [enc dispatchThreadgroups:MTLSizeMake(1, 1, 1)
          threadsPerThreadgroup:MTLSizeMake((NSUInteger)mm_args->ne02, 1, 1)];
@@ -28200,15 +28215,27 @@ static int ds4_gpu_encode_mul_mm_id_mapped_tile(
      * The removed TensorOps variant was not semantically stable on evals, so keep
      * this encoder tied to the tested simdgroup kernel shape.
      */
-    const NSUInteger tile_n = 32u;
     const bool use_resource_hints =
         getenv("DS4_METAL_MOE_MM_ID_USE_RESOURCES") != NULL &&
         getenv("DS4_METAL_DISABLE_MOE_MM_ID_USE_RESOURCES") == NULL;
 
     const NSUInteger tpe_bytes = (NSUInteger)mm_args->ne02 * sizeof(int32_t);
     const NSUInteger hids_bytes = (NSUInteger)mm_args->ne02 * (NSUInteger)mm_args->ne21 * sizeof(int32_t);
-    if (tpe_bytes > NSUIntegerMax - hids_bytes ||
-        g_moe_id_map_bytes < tpe_bytes + hids_bytes) {
+    if (tpe_bytes > NSUIntegerMax - hids_bytes) {
+        return 0;
+    }
+    const NSUInteger work_offset = (tpe_bytes + hids_bytes + 7u) & ~7u;
+    const uint64_t pair_rows =
+        (uint64_t)(uint32_t)mm_args->ne20 * (uint32_t)mm_args->ne21;
+    const uint64_t work_cap =
+        (pair_rows + 31u * (uint32_t)mm_args->ne02 + 31u) / 32u;
+    const NSUInteger work_item_bytes = 2u * sizeof(uint32_t);
+    if (work_cap > NSUIntegerMax ||
+        work_offset > NSUIntegerMax - 8u ||
+        (NSUInteger)work_cap >
+            (NSUIntegerMax - work_offset - 8u) / work_item_bytes ||
+        g_moe_id_map_bytes <
+            work_offset + 8u + (NSUInteger)work_cap * work_item_bytes) {
         return 0;
     }
 
@@ -28220,13 +28247,14 @@ static int ds4_gpu_encode_mul_mm_id_mapped_tile(
     [enc setBuffer:g_moe_id_map_buffer offset:0 atIndex:3];
     [enc setBuffer:g_moe_id_map_buffer offset:tpe_bytes atIndex:4];
     [enc setBuffer:dst offset:dst_off atIndex:5];
+    [enc setBuffer:g_moe_id_map_buffer offset:work_offset atIndex:6];
     if (use_resource_hints) {
         [enc useResource:src0 usage:MTLResourceUsageRead];
     }
     [enc setThreadgroupMemoryLength:threadgroup_bytes atIndex:0];
-    [enc dispatchThreadgroups:MTLSizeMake(((NSUInteger)mm_args->ne21 + tile_n - 1u) / tile_n,
+    [enc dispatchThreadgroups:MTLSizeMake((NSUInteger)work_cap,
                                           ((NSUInteger)mm_args->ne0 + 63u) / 64u,
-                                          (NSUInteger)mm_args->ne02)
+                                          1)
          threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
     ds4_gpu_end_compute_encoder(cb, enc);
     return 1;

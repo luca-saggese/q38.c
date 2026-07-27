@@ -6986,6 +6986,7 @@ kernel void kernel_mul_mm_id_map0(
         device  const char * src2,
         device        char * htpe,
         device        char * hids,
+        device        char * work,
         threadgroup   char * shmem [[threadgroup(0)]],
         ushort tpitg[[thread_position_in_threadgroup]],
         ushort   ntg[[threads_per_threadgroup]]) {
@@ -7032,6 +7033,29 @@ kernel void kernel_mul_mm_id_map0(
 
     device uint32_t * tpe_u32 = (device uint32_t *) (htpe);
     tpe_u32[ide] = n_all;
+
+    // Reuse the route-id staging memory after the map is complete to build a
+    // compact list of non-empty 32-row matmul tiles. The old dispatch covered
+    // every possible token tile for every expert, even though most experts
+    // receive only a small fraction of the prompt rows.
+    threadgroup uint16_t * tile_counts = (threadgroup uint16_t *) shmem;
+    const uint16_t n_tiles = (uint16_t)((n_all + 31u) / 32u);
+    tile_counts[ide] = n_tiles;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    uint32_t tile_base = 0;
+    for (ushort i = 0; i < ide; i++) {
+        tile_base += tile_counts[i];
+    }
+
+    device uint32_t * work_count = (device uint32_t *) work;
+    device uint2 * work_items = (device uint2 *)(work + 8);
+    for (uint32_t tile = 0; tile < n_tiles; tile++) {
+        work_items[tile_base + tile] = uint2((uint32_t)ide, tile * 32u);
+    }
+    if (ide + 1u == ntg) {
+        work_count[0] = tile_base + n_tiles;
+    }
 }
 
 typedef decltype(kernel_mul_mm_id_map0<1>) kernel_mul_mm_id_map0_t;
@@ -7059,6 +7083,7 @@ kernel void kernel_mul_mm_id(
         device const char * htpe,
         device const char * hids,
         device       char * dst,
+        device const char * work,
         threadgroup  char * shmem [[threadgroup(0)]],
         uint3  tgpig[[threadgroup_position_in_grid]],
         ushort tiitg[[thread_index_in_threadgroup]],
@@ -7075,9 +7100,16 @@ kernel void kernel_mul_mm_id(
     threadgroup S0 * sa = (threadgroup S0 *)(shmem);
     threadgroup S1 * sb = (threadgroup S1 *)(shmem + SA_BYTES);
 
-    const int im = tgpig.z;
+    device const uint32_t * work_count = (device const uint32_t *) work;
+    const uint32_t work_index = tgpig.x;
+    if (work_index >= work_count[0]) {
+        return;
+    }
+    device const uint2 * work_items = (device const uint2 *)(work + 8);
+    const uint2 item = work_items[work_index];
+    const int im = (int)item.x;
     const int r0 = tgpig.y*NR0;
-    const int r1 = tgpig.x*NR1;
+    const int r1 = (int)item.y;
 
     device const uint32_t * tpe_u32 = (device const uint32_t *) (htpe);
     device const int32_t  * ids_i32 = (device const int32_t  *) (hids);
