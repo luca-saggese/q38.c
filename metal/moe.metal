@@ -7526,6 +7526,7 @@ kernel void kernel_mul_mm_id_pair_swiglu_f16_impl(
         device const char * hids,
         device       char * dst_mid,
         device const char * weights,
+        device const char * work,
         threadgroup  char * shmem [[threadgroup(0)]],
         uint3  tgpig[[threadgroup_position_in_grid]],
         ushort tiitg[[thread_index_in_threadgroup]],
@@ -7541,9 +7542,16 @@ kernel void kernel_mul_mm_id_pair_swiglu_f16_impl(
     constexpr int NL0 = NK/16;
     constexpr int NL1 = NK/8;
 
-    const int im = tgpig.z;
+    device const uint32_t * work_count = (device const uint32_t *) work;
+    const uint32_t work_index = tgpig.x;
+    if (work_index >= work_count[0]) {
+        return;
+    }
+    device const uint2 * work_items = (device const uint2 *)(work + 8);
+    const uint2 item = work_items[work_index];
+    const int im = (int)item.x;
     const int r0 = tgpig.y*NR0;
-    const int r1 = tgpig.x*NR1;
+    const int r1 = (int)item.y;
 
     device const uint32_t * tpe_u32 = (device const uint32_t *) (htpe);
     device const int32_t  * ids_i32 = (device const int32_t  *) (hids);
