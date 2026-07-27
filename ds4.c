@@ -31234,11 +31234,18 @@ static bool metal_graph_eval_dspark_stage_block(
     return ok;
 }
 
+static bool metal_graph_eval_dspark_final_hidden(
+        ds4_gpu_graph            *g,
+        const ds4_model          *dspark_model,
+        const ds4_dspark_weights *dw,
+        bool                      commands_open);
+
 static bool metal_graph_eval_dspark_stage_chain(
         ds4_gpu_graph            *g,
         const ds4_model          *dspark_model,
         const ds4_dspark_weights *dw,
         uint32_t                  pos,
+        bool                      encode_final_hidden,
         uint32_t                 *completed_stages,
         uint32_t                 *cache_start_out,
         uint32_t                 *cache_rows_out) {
@@ -31311,6 +31318,11 @@ static bool metal_graph_eval_dspark_stage_chain(
             break;
         }
         if (completed_stages) *completed_stages = stage + 1u;
+    }
+    /* Final hidden rows consume only the last stage's GPU output. Keep them in
+     * this command buffer when the CPU confidence precheck will need them. */
+    if (ok && encode_final_hidden) {
+        ok = metal_graph_eval_dspark_final_hidden(g, dspark_model, dw, true);
     }
     if (ok) ok = ds4_gpu_end_commands() != 0;
     if (suspended_expert_sharding) {
@@ -31596,7 +31608,8 @@ static bool metal_graph_eval_dspark_base_logits(
 static bool metal_graph_eval_dspark_final_hidden(
         ds4_gpu_graph            *g,
         const ds4_model          *dspark_model,
-        const ds4_dspark_weights *dw) {
+        const ds4_dspark_weights *dw,
+        bool                      commands_open) {
     if (!g || !dspark_model || !dw ||
         dw->n_stages == 0 ||
         dw->n_stages > DS4_DSPARK_MAX_STAGES ||
@@ -31668,7 +31681,7 @@ static bool metal_graph_eval_dspark_final_hidden(
 
     bool ok = stage_output_hc && output_pre && output_weights &&
               output_embd && output_norm;
-    if (ok) ok = ds4_gpu_begin_commands() != 0;
+    if (ok && !commands_open) ok = ds4_gpu_begin_commands() != 0;
     if (ok) ok = ds4_gpu_rms_norm_plain_rows_tensor(metal_graph_batch_flat_hc(g),
                                                      stage_output_hc,
                                                      (uint32_t)hc_dim,
@@ -31702,8 +31715,8 @@ static bool metal_graph_eval_dspark_final_hidden(
                                                       DS4_N_EMBD,
                                                       draft,
                                                       DS4_RMS_EPS) != 0;
-    if (ok) ok = ds4_gpu_end_commands() != 0;
-    if (!ok) (void)ds4_gpu_synchronize();
+    if (ok && !commands_open) ok = ds4_gpu_end_commands() != 0;
+    if (!ok && !commands_open) (void)ds4_gpu_synchronize();
 
     ds4_gpu_tensor_free(output_norm);
     ds4_gpu_tensor_free(output_embd);
@@ -59401,12 +59414,18 @@ static bool ds4_session_prepare_dspark_draft_impl(ds4_session *s,
         uint32_t stage_cache_rows = 0;
         const double chain_t0 = DS4_DSPARK_PROP_T0();
         bool stage_chain_ok = false;
+        const bool fuse_final_hidden =
+            stage_chain_ready &&
+            !probe_log &&
+            confidence_threshold > 0.0f &&
+            dspark_confidence_probe_ready(dw);
         if (stage_chain_ready) {
             stage_chain_ok =
                 metal_graph_eval_dspark_stage_chain(&s->graph,
                                                 &s->engine->mtp_model,
                                                 dw,
                                                 pos,
+                                                fuse_final_hidden,
                                                 &stage_chain_done,
                                                 &stage_cache_start,
                                                 &stage_cache_rows);
@@ -59436,9 +59455,11 @@ static bool ds4_session_prepare_dspark_draft_impl(ds4_session *s,
         if (runtime_confidence_precheck) {
             const double hidden_t0 = DS4_DSPARK_PROP_T0();
             const bool hidden_ok =
+                fuse_final_hidden ||
                 metal_graph_eval_dspark_final_hidden(&s->graph,
                                                      &s->engine->mtp_model,
-                                                     dw);
+                                                     dw,
+                                                     false);
             DS4_DSPARK_PROP_ADD(propose_hidden_ms, hidden_t0);
             bool conf0_ok = false;
             if (hidden_ok) {
