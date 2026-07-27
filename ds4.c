@@ -21670,6 +21670,8 @@ static bool metal_graph_encode_decode_layer_phase(
     if (!resume_after_qkv) {
     bool qkv_pair_projected = resume_after_qa_kv_raw;
     if (!resume_after_qa_kv_raw && ok && qkv_rms_fused &&
+        layer->attn_q_a->type == DS4_TENSOR_Q8_0 &&
+        layer->attn_kv->type == DS4_TENSOR_Q8_0 &&
         g->cuda_qkv_pair && !metal_graph_use_reference_qkv_pair_proj()) {
         qkv_pair_projected = ds4_gpu_matmul_q8_0_pair_tensor(
                 metal_graph_qr(g),
@@ -21684,20 +21686,30 @@ static bool metal_graph_encode_decode_layer_phase(
                 metal_graph_attn_norm(g),
                 1) != 0;
     }
-    if (!resume_after_qa_kv_raw && ok && !qkv_pair_projected) ok = ds4_gpu_matmul_q8_0_tensor(metal_graph_qr(g), model->map, model->size,
-                                                                     layer->attn_q_a->abs_offset,
-                                                                     DS4_N_EMBD, q_rank,
-                                                                     metal_graph_attn_norm(g), 1) != 0;
+    if (!resume_after_qa_kv_raw && ok && !qkv_pair_projected) {
+        ok = metal_graph_matmul_dense_quant_tensor(metal_graph_qr(g),
+                                                   model,
+                                                   layer->attn_q_a,
+                                                   DS4_N_EMBD,
+                                                   q_rank,
+                                                   metal_graph_attn_norm(g),
+                                                   1);
+    }
     if (ok) {
         metal_graph_debug_dump_tensor("q_lora", metal_graph_qr(g), q_rank, il, pos);
     }
     const bool kvnorm_dump = metal_graph_debug_wants("KVnorm", il, pos);
     bool kv_rope_fused = false;
     if (qkv_rms_fused) {
-        if (!resume_after_qa_kv_raw && ok && !qkv_pair_projected) ok = ds4_gpu_matmul_q8_0_tensor(metal_graph_kv_raw(g), model->map, model->size,
-                                                                         layer->attn_kv->abs_offset,
-                                                                         DS4_N_EMBD, DS4_N_HEAD_DIM,
-                                                                         metal_graph_attn_norm(g), 1) != 0;
+        if (!resume_after_qa_kv_raw && ok && !qkv_pair_projected) {
+            ok = metal_graph_matmul_dense_quant_tensor(metal_graph_kv_raw(g),
+                                                       model,
+                                                       layer->attn_kv,
+                                                       DS4_N_EMBD,
+                                                       DS4_N_HEAD_DIM,
+                                                       metal_graph_attn_norm(g),
+                                                       1);
+        }
         if (ok) {
             metal_graph_debug_dump_tensor("KVraw", metal_graph_kv_raw(g), DS4_N_HEAD_DIM, il, pos);
         }
@@ -24577,14 +24589,13 @@ static bool metal_graph_output_logits_head_matmul(
             }
         }
     } else if (ok && !(g->cuda_tp_ep && g->cuda_tp_output)) {
-        ok = ds4_gpu_matmul_q8_0_tensor(logits,
-                                        model->map,
-                                        model->size,
-                                        weights->output->abs_offset,
-                                        DS4_N_EMBD,
-                                        vocab_dim,
-                                        output_norm,
-                                        head_rows) != 0;
+        ok = metal_graph_matmul_dense_quant_tensor(logits,
+                                                   model,
+                                                   weights->output,
+                                                   DS4_N_EMBD,
+                                                   vocab_dim,
+                                                   output_norm,
+                                                   head_rows);
     } else if (ok) {
         /* The expert-parallel cache stores only output vocabulary shards, so
          * a single-device full-head fallback would access uncached weights. */
