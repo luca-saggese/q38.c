@@ -7712,18 +7712,21 @@ template [[host_name("kernel_mul_mm_id_addr_q2_K_f16")]]    kernel mul_mm_id_add
 template [[host_name("kernel_mul_mm_id_addr_q4_K_f16")]]    kernel mul_mm_id_addr_f16_rhs kernel_mul_mm_id_addr<32, half, half4x4, simdgroup_half8x8, half, half2x4, simdgroup_half8x8, block_q4_K, QK_NL, dequantize_q4_K, half, half4x4, half, half2x4>;
 
 #ifdef DS4_METAL_HAS_TENSOR
-// Attention-output low-rank projection retained for Metal4 prefill.  It uses
-// the same direct-RHS idea as dense matmul: dequantize the Q8_0 low projection
-// weights to a half tile, then let TensorOps read the dense head activations
-// directly.  Only the 64-token direct-RHS instantiation is exported because the
-// staged-RHS and 32-token variants were benchmark-only experiments.
+// Attention-output low-rank projection retained for Metal4 prefill. It uses
+// the same direct-RHS idea as dense matmul: dequantize the Q8_0 or Q4_K low
+// projection weights to a half tile, then let TensorOps read the dense head
+// activations directly. Only the 64-token direct-RHS instantiations are
+// exported because the staged-RHS and 32-token variants were benchmark-only
+// experiments.
 //
 // Full tiles (the host dispatch guarantee for aligned batches) skip all bounds
 // work.  The weight tile is double-buffered: the next k-step's dequant
 // overlaps the current cooperative matmul, so the k-loop needs one
 // threadgroup barrier per step instead of two.
-template<short NR1>
-kernel void kernel_attn_out_low_q8_0_mpp_direct_rhs(
+template<typename block_q, short qnl,
+         void (*dequantize_func)(device const block_q *, short, thread half4x4 &),
+         short NR1>
+kernel void kernel_attn_out_low_mpp_direct_rhs(
         constant ds4_metal_args_mul_mm_id & args,
         device const char * srcA,
         device const char * srcB,
@@ -7778,24 +7781,24 @@ kernel void kernel_attn_out_low_q8_0_mpp_direct_rhs(
             const short k_base = k_chunk*16;
 
             if (full_tile) {
-                device const block_q8_0 *row_ptr =
-                    (device const block_q8_0 *)(srcA + args.nb01*(r0 + row) + group*args.nb02);
+                device const block_q *row_ptr =
+                    (device const block_q *)(srcA + args.nb01*(r0 + row) + group*args.nb02);
 
                 half4x4 temp_a;
-                dequantize_q8_0_pairs(row_ptr + k_pos/32, (k_pos/16)%2, temp_a);
+                dequantize_func(row_ptr + k_pos/(16*qnl), (k_pos/16)%qnl, temp_a);
                 threadgroup half4 *dst4 = (threadgroup half4 *)(buf + row*NK + k_base);
                 dst4[0] = temp_a[0];
                 dst4[1] = temp_a[1];
                 dst4[2] = temp_a[2];
                 dst4[3] = temp_a[3];
             } else if (r0 + row < M) {
-                const int block_idx = k_pos/32;
-                const short il = (k_pos/16)%2;
-                device const block_q8_0 *row_ptr =
-                    (device const block_q8_0 *)(srcA + args.nb01*(r0 + row) + group*args.nb02);
+                const int block_idx = k_pos/(16*qnl);
+                const short il = (k_pos/16)%qnl;
+                device const block_q *row_ptr =
+                    (device const block_q *)(srcA + args.nb01*(r0 + row) + group*args.nb02);
 
                 half4x4 temp_a;
-                dequantize_q8_0_pairs(row_ptr + block_idx, il, temp_a);
+                dequantize_func(row_ptr + block_idx, il, temp_a);
                 FOR_UNROLL (short i = 0; i < 16; i++) {
                     buf[row*NK + k_base + i] = (k_pos + i < K) ? temp_a[i/4][i%4] : (half)0;
                 }
@@ -7836,9 +7839,21 @@ kernel void kernel_attn_out_low_q8_0_mpp_direct_rhs(
     }
 }
 
-typedef decltype(kernel_attn_out_low_q8_0_mpp_direct_rhs<64>) attn_out_low_q8_0_mpp_direct_rhs_n64_t;
+typedef decltype(kernel_attn_out_low_mpp_direct_rhs<
+        block_q8_0, 2, dequantize_q8_0_pairs, 64>)
+    attn_out_low_q8_0_mpp_direct_rhs_n64_t;
+typedef decltype(kernel_attn_out_low_mpp_direct_rhs<
+        block_q4_K, QK_NL, dequantize_q4_K, 64>)
+    attn_out_low_q4_K_mpp_direct_rhs_n64_t;
 
-template [[host_name("kernel_attn_out_low_q8_0_mpp_direct_rhs_n64")]] kernel attn_out_low_q8_0_mpp_direct_rhs_n64_t kernel_attn_out_low_q8_0_mpp_direct_rhs<64>;
+template [[host_name("kernel_attn_out_low_q8_0_mpp_direct_rhs_n64")]]
+kernel attn_out_low_q8_0_mpp_direct_rhs_n64_t
+kernel_attn_out_low_mpp_direct_rhs<
+        block_q8_0, 2, dequantize_q8_0_pairs, 64>;
+template [[host_name("kernel_attn_out_low_q4_K_mpp_direct_rhs_n64")]]
+kernel attn_out_low_q4_K_mpp_direct_rhs_n64_t
+kernel_attn_out_low_mpp_direct_rhs<
+        block_q4_K, QK_NL, dequantize_q4_K, 64>;
 
 #endif
 
