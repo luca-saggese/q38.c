@@ -21751,8 +21751,28 @@ int ds4_gpu_attention_output_q4_K_batch_tensor(
         (void)group_tmp;
         (void)low_tmp;
 
+        const uint64_t padded_n_tokens_u64 =
+            ((uint64_t)n_tokens + DS4_METAL_ATTN_OUT_MPP_TILE_N - 1u) /
+            DS4_METAL_ATTN_OUT_MPP_TILE_N * DS4_METAL_ATTN_OUT_MPP_TILE_N;
+        const uint32_t padded_n_tokens =
+            padded_n_tokens_u64 <= UINT32_MAX ? (uint32_t)padded_n_tokens_u64 : n_tokens;
+        /*
+         * TensorOps requires complete 64-row tiles.  For a substantial final
+         * prefill chunk, compute harmless extra rows when the caller's
+         * workspace already covers them; the following projection consumes
+         * only the real rows.  Small tails stay on the legacy kernel because
+         * padding overhead outweighs the faster arithmetic there.
+         */
+        const bool use_mpp_padding =
+            n_tokens >= 256u &&
+            padded_n_tokens > n_tokens &&
+            ds4_gpu_tensor_bytes(heads) >=
+                (uint64_t)padded_n_tokens * n_groups * group_dim * sizeof(float) &&
+            ds4_gpu_tensor_bytes(low) >=
+                (uint64_t)padded_n_tokens * low_dim * sizeof(float);
         bool use_mpp_low =
-            (n_tokens % DS4_METAL_ATTN_OUT_MPP_TILE_N) == 0 &&
+            ((n_tokens % DS4_METAL_ATTN_OUT_MPP_TILE_N) == 0 ||
+             use_mpp_padding) &&
             ds4_gpu_use_mpp_attn_out_low_matmul();
         id<MTLComputePipelineState> mpp_low_pipeline = nil;
         if (use_mpp_low) {
@@ -21809,7 +21829,9 @@ int ds4_gpu_attention_output_q4_K_batch_tensor(
                                             (uint64_t)rank * row_a_bytes,
                                             n_groups,
                                             n_groups,
-                                            n_tokens);
+                                            use_mpp_low && use_mpp_padding
+                                                ? padded_n_tokens
+                                                : n_tokens);
             if (use_mpp_low) {
                 ok = ds4_gpu_encode_attn_out_low_mpp(
                         cb,
