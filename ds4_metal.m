@@ -18804,11 +18804,83 @@ int ds4_gpu_head_rms_norm_rope_tail_tensor(
         float             beta_fast,
         float             beta_slow,
         float             eps) {
-    (void)x; (void)n_tok; (void)n_head; (void)head_dim; (void)n_rot;
-    (void)pos0; (void)n_ctx_orig; (void)inverse; (void)freq_base;
-    (void)freq_scale; (void)ext_factor; (void)attn_factor;
-    (void)beta_fast; (void)beta_slow; (void)eps;
-    return 0;
+    if (!g_initialized && !ds4_gpu_init()) return 0;
+    if (!x || n_tok == 0u || n_head == 0u || head_dim == 0u ||
+        (head_dim & 3u) != 0u || n_rot > head_dim ||
+        pos0 > (uint32_t)INT32_MAX - n_tok) {
+        return 0;
+    }
+
+    @autoreleasepool {
+        id<MTLBuffer> xbuf = ds4_gpu_tensor_buffer(x);
+        const uint64_t bytes =
+            (uint64_t)n_tok * n_head * head_dim * sizeof(float);
+        if (!xbuf || ds4_gpu_tensor_bytes(x) < bytes) {
+            fprintf(stderr,
+                    "ds4: Metal fused head norm/RoPE received undersized activation buffer\n");
+            return 0;
+        }
+
+        id<MTLComputePipelineState> pipeline =
+            ds4_gpu_get_pipeline(
+                "kernel_dsv4_head_rms_norm_rope_tail_f32");
+        if (!pipeline) return 0;
+
+        struct {
+            int32_t n_head;
+            int32_t head_dim;
+            int32_t head_dim4;
+            int32_t n_dims;
+            int32_t n_ctx_orig;
+            int32_t pos0;
+            int32_t inverse;
+            float eps;
+            float freq_base;
+            float freq_scale;
+            float ext_factor;
+            float attn_factor;
+            float beta_fast;
+            float beta_slow;
+        } args = {
+            .n_head = (int32_t)n_head,
+            .head_dim = (int32_t)head_dim,
+            .head_dim4 = (int32_t)(head_dim / 4u),
+            .n_dims = (int32_t)n_rot,
+            .n_ctx_orig = (int32_t)n_ctx_orig,
+            .pos0 = (int32_t)pos0,
+            .inverse = inverse ? 1 : 0,
+            .eps = eps,
+            .freq_base = freq_base,
+            .freq_scale = freq_scale,
+            .ext_factor = ext_factor,
+            .attn_factor = attn_factor,
+            .beta_fast = beta_fast,
+            .beta_slow = beta_slow,
+        };
+
+        int owned = 0;
+        id<MTLCommandBuffer> cb = ds4_gpu_command_buffer(&owned);
+        if (!cb) return 0;
+
+        id<MTLComputeCommandEncoder> enc = ds4_gpu_compute_encoder(cb);
+        [enc setComputePipelineState:pipeline];
+        [enc setBytes:&args length:sizeof(args) atIndex:0];
+        [enc setBuffer:xbuf offset:ds4_gpu_tensor_offset(x) atIndex:1];
+        [enc setThreadgroupMemoryLength:32u * sizeof(float) atIndex:0];
+        [enc dispatchThreadgroups:MTLSizeMake(n_head, n_tok, 1)
+             threadsPerThreadgroup:MTLSizeMake(
+                 ds4_gpu_rms_norm_pipeline_threads(head_dim, pipeline),
+                 1,
+                 1)];
+        ds4_gpu_end_compute_encoder(cb, enc);
+
+        if (!ds4_gpu_finish_command_buffer(
+                cb, owned, "fused head norm/RoPE")) {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 int ds4_gpu_attn_q_b_f16_head_rms_rope_tail_tensor(
