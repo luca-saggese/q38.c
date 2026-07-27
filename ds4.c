@@ -47804,11 +47804,13 @@ static uint32_t ds4_dspark_scheduler_min_avg_milli(void) {
 }
 
 static uint32_t ds4_dspark_scheduler_max_ms_per_accept_milli(void) {
-    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_MAX_MS_PER_ACCEPT_MILLI", 28000);
+    return ds4_dspark_env_u32(
+            "DS4_DSPARK_SCHEDULER_MAX_MS_PER_ACCEPT_MILLI", 0);
 }
 
 static uint32_t ds4_dspark_scheduler_max_extra_saved_ratio_milli(void) {
-    return ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_MAX_EXTRA_SAVED_RATIO_MILLI", 1000);
+    return ds4_dspark_env_u32(
+            "DS4_DSPARK_SCHEDULER_MAX_EXTRA_SAVED_RATIO_MILLI", 0);
 }
 
 static uint32_t ds4_dspark_scheduler_break_even_window(void) {
@@ -47833,6 +47835,13 @@ static uint32_t ds4_dspark_scheduler_tail_min_tokens(void) {
 
 static float ds4_dspark_scheduler_cold_low_confidence_threshold(void) {
     return (float)ds4_dspark_env_u32("DS4_DSPARK_SCHEDULER_COLD_LOW_CONFIDENCE_MILLI", 500) / 1000.0f;
+}
+
+/* Timing-sensitive scheduling changes which arithmetic path advances a token.
+ * Keep it opt-in so greedy DSpark output is reproducible across runs. */
+static bool ds4_dspark_scheduler_timing_enabled(void) {
+    return ds4_dspark_scheduler_max_ms_per_accept_milli() != 0 ||
+           ds4_dspark_scheduler_max_extra_saved_ratio_milli() != 0;
 }
 
 static void ds4_session_dspark_scheduler_reset(ds4_session *s) {
@@ -59241,7 +59250,9 @@ static bool ds4_session_prepare_dspark_draft_impl(ds4_session *s,
     const float confidence_threshold = s->engine->dspark_confidence_threshold;
     const bool stats_enabled = ds4_dspark_stats_enabled();
     const bool scheduler_enabled = ds4_dspark_scheduler_enabled();
-    const bool time_enabled = stats_enabled || scheduler_enabled;
+    const bool time_enabled =
+        stats_enabled ||
+        (scheduler_enabled && ds4_dspark_scheduler_timing_enabled());
     const double stats_t0 = time_enabled ? now_sec() : 0.0;
 #define DS4_DSPARK_PROP_T0() (stats_enabled ? now_sec() : 0.0)
 #define DS4_DSPARK_PROP_ADD(field_, t0_) do {                              \
@@ -59896,7 +59907,9 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
     }
     const bool dspark_target_timing =
         e->support_kind == DS4_SUPPORT_DSPARK &&
-        (ds4_dspark_stats_enabled() || ds4_dspark_scheduler_enabled());
+        (ds4_dspark_stats_enabled() ||
+         (ds4_dspark_scheduler_enabled() &&
+          ds4_dspark_scheduler_timing_enabled()));
     const double target_t0 = dspark_target_timing ? now_sec() : 0.0;
     if (!metal_graph_eval_token_raw_swa(&s->graph, &e->model, &e->weights,
                                         (uint32_t)token,
@@ -60895,7 +60908,9 @@ static int ds4_session_eval_dspark_speculative_argmax(
     const bool stats_enabled = s && ds4_dspark_stats_enabled();
     const bool scheduler_enabled = s && ds4_dspark_scheduler_enabled();
     const double stats_t0 =
-        (stats_enabled || scheduler_enabled) ? now_sec() : 0.0;
+        (stats_enabled ||
+         (scheduler_enabled && ds4_dspark_scheduler_timing_enabled()))
+            ? now_sec() : 0.0;
 #define DS4_DSPARK_STATS_FINISH() do {                                      \
         if (stats_enabled) {                                                \
             s->dspark_stats.total_ms += (now_sec() - stats_t0) * 1000.0;    \
