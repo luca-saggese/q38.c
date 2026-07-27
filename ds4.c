@@ -55549,7 +55549,7 @@ static int ds4_engine_open_internal(ds4_engine **out,
     if (opt->dspark_confidence_threshold_set) {
         e->dspark_confidence_threshold = opt->dspark_confidence_threshold;
     } else {
-        e->dspark_confidence_threshold = 0.9f;
+        e->dspark_confidence_threshold = 0.7f;
     }
     if (opt->cuda_tensor_parallel &&
         (opt->backend != DS4_BACKEND_CUDA || !gpu_cfg ||

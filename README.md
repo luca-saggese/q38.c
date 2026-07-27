@@ -222,7 +222,7 @@ Run it with greedy decoding:
 ```
 
 `--mtp` supplies the support GGUF, while `--dspark` selects the DSpark runtime.
-The default confidence threshold is `0.9`; it prunes suffixes that are unlikely
+The default confidence threshold is `0.7`; it prunes suffixes that are unlikely
 to repay their verification cost. `--dspark-confidence 0` forces fixed
 five-token blocks and is intended for diagnostics. Sampled decoding does not
 use DSpark proposals. `--quality` and `--dspark-strict` also keep target-only
