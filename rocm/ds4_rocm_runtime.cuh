@@ -5530,7 +5530,18 @@ static int cuda_stream_model_cache_prepare_memory(
 }
 
 static uint64_t cuda_model_arena_chunk_bytes(uint64_t need) {
-    uint64_t bytes = 1792ull * 1048576ull;
+    const uint64_t default_bytes = 1792ull * 1048576ull;
+    /*
+     * Two allocations larger than half the default arena can never share it.
+     * Allocate those spans tightly for DeepSeek instead of stranding the
+     * remainder of every arena.  This matters for Q4 expert spans (1152 MiB),
+     * where the default policy otherwise wastes 640 MiB per tensor span.
+     *
+     * Keep GLM on its existing allocation policy.
+     */
+    if (!g_glm_model && need > default_bytes / 2u) return need;
+
+    uint64_t bytes = default_bytes;
     if (bytes < need) {
         const uint64_t align = 256ull * 1048576ull;
         bytes = (need + align - 1u) & ~(align - 1u);
