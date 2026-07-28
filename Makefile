@@ -28,7 +28,13 @@ CORE_OBJS = ds4.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_metal.o ds4_layer_pac
 CPU_CORE_OBJS = ds4_cpu.o ds4_distributed.o ds4_tp.o ds4_ssd.o ds4_layer_pack.o
 else
 CFLAGS += -D_GNU_SOURCE -fno-finite-math-only
-CUDA_HOME ?= /usr/local/cuda
+CUDA_HOME ?= $(shell if [ -x /usr/local/cuda/bin/nvcc ]; then \
+	printf '%s' /usr/local/cuda; \
+	elif command -v nvcc >/dev/null 2>&1; then \
+	dirname "$$(dirname "$$(command -v nvcc)")"; \
+	else \
+	printf '%s' /usr/local/cuda; \
+	fi)
 NVCC ?= $(CUDA_HOME)/bin/nvcc
 CUDA_ARCH ?=
 ifneq ($(strip $(CUDA_ARCH)),)
