@@ -55958,6 +55958,15 @@ static int ds4_engine_open_internal(ds4_engine **out,
             }
             e->metal_ready = true;
             ds4_gpu_set_quality(e->quality);
+#ifdef DS4_ROCM_BUILD
+            /*
+             * The ROCm Q8 decode selector must know that a multi-tier model
+             * is GLM before any layer dispatch.  The single-tier path sets
+             * the same model-family state below.
+             */
+            ds4_gpu_set_glm_model(
+                    DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA);
+#endif
             (void)ds4_gpu_set_model_fd(e->model.fd);
 
             if (engine_install_gpu_placement(e) != 0) {

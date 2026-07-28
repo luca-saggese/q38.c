@@ -126,7 +126,7 @@ extern "C" void ds4_gpu_set_ssd_streaming(bool enabled) {
 }
 
 extern "C" void ds4_gpu_set_glm_model(bool enabled) {
-    (void)enabled;
+    g_glm_model = enabled ? 1 : 0;
 }
 
 extern "C" void ds4_gpu_set_glm_streaming_prefill_full_layer(bool enabled) {
