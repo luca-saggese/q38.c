@@ -281,6 +281,10 @@ extern "C" int ds4_gpu_stream_expert_cache_seed_from_layer_selected(
                                                         table->down_expert_bytes);
 }
 
+extern "C" int ds4_gpu_stream_expert_cache_finish_pending_batch(void) {
+    return cuda_stream_batch_selected_finish_pending_missing();
+}
+
 extern "C" int ds4_gpu_stream_expert_cache_release_layer_cache(void) {
     cuda_stream_layer_expert_cache_release();
     return 1;

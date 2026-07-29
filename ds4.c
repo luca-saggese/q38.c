@@ -33593,6 +33593,17 @@ static bool metal_graph_prefill_layer_major(
     if (show_progress) fputc('\n', stderr);
     metal_graph_stream_prefill_selected_profile_summary(g);
 #ifdef DS4_ROCM_BUILD
+    /*
+     * The final layer can use its fully mapped prefill table after the
+     * asynchronous selected-expert loader has already queued a resident-cache
+     * batch.  Drain that completed batch before hotlist seeding starts another
+     * read-pool job set, otherwise both callers wait forever for ownership of
+     * the single ROCm streaming read pool.
+     */
+    if (g->ssd_streaming &&
+        !ds4_gpu_stream_expert_cache_finish_pending_batch()) {
+        return false;
+    }
     (void)ds4_gpu_stream_expert_cache_release_layer_cache();
     if (g->ssd_streaming) ds4_gpu_release_q8_f16_cache();
 #endif
