@@ -752,9 +752,11 @@ static int g_ds4_lock_fd = -1;
  *   - Q4_K routed experts in the high-memory variant
  *   - Q5_K/Q6_K GLM routed experts
  *   - IQ2_XXS routed gate/up experts
+ *   - MXFP4 routed experts preserved from native checkpoints
  *   - Q8_K temporary activation blocks for dot products
  */
 #define QK_K 256
+#define QK_MXFP4 32
 
 typedef struct {
     uint8_t  scales[QK_K / 16];
@@ -796,6 +798,11 @@ typedef struct {
     uint16_t qs[QK_K / 8];
 } block_iq2_xxs;
 
+typedef struct {
+    uint8_t e;
+    uint8_t qs[QK_MXFP4 / 2];
+} block_mxfp4;
+
 #define DS4_STATIC_ASSERT(name, cond) typedef char name[(cond) ? 1 : -1]
 DS4_STATIC_ASSERT(ds4_block_q2_k_size, sizeof(block_q2_K) == 84);
 DS4_STATIC_ASSERT(ds4_block_q4_k_size, sizeof(block_q4_K) == 144);
@@ -803,6 +810,7 @@ DS4_STATIC_ASSERT(ds4_block_q5_k_size, sizeof(block_q5_K) == 176);
 DS4_STATIC_ASSERT(ds4_block_q6_k_size, sizeof(block_q6_K) == 210);
 DS4_STATIC_ASSERT(ds4_block_q8_k_size, sizeof(block_q8_K) == 292);
 DS4_STATIC_ASSERT(ds4_block_iq2_xxs_size, sizeof(block_iq2_xxs) == 66);
+DS4_STATIC_ASSERT(ds4_block_mxfp4_size, sizeof(block_mxfp4) == 17);
 
 typedef struct {
     uint32_t ctx_size;
@@ -2035,6 +2043,7 @@ static const gguf_type_info gguf_types[] = {
     [28] = {"f64",      1,   8},
     [29] = {"iq1_m",  256,  56},
     [30] = {"bf16",     1,   2},
+    [39] = {"mxfp4",   32,  17},
 };
 
 enum {
@@ -2049,6 +2058,7 @@ enum {
     DS4_TENSOR_Q8_K     = 15,
     DS4_TENSOR_IQ2_XXS  = 16,
     DS4_TENSOR_I32      = 26,
+    DS4_TENSOR_MXFP4    = 39,
 };
 
 typedef struct {
@@ -3700,6 +3710,35 @@ static float ds4_vec_dot_q4_K_f32(int n, const block_q4_K *x, const float *y) {
     return sumf;
 }
 
+static inline float ds4_e8m0_to_f32(uint8_t e) {
+    const uint32_t bits = e == 0 ? 0x00400000u : (uint32_t)e << 23;
+    float value;
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+static const float ds4_mxfp4_values[16] = {
+     0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
+    -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f,
+};
+
+static float ds4_vec_dot_mxfp4_f32(int n, const block_mxfp4 *x, const float *y) {
+    const int nb = n / QK_MXFP4;
+    float sumf = 0.0f;
+
+    for (int ib = 0; ib < nb; ib++) {
+        const float d = ds4_e8m0_to_f32(x[ib].e);
+        const float *yb = y + (uint64_t)ib * QK_MXFP4;
+        for (int j = 0; j < QK_MXFP4 / 2; j++) {
+            const uint8_t q = x[ib].qs[j];
+            sumf += d * ds4_mxfp4_values[q & 0x0fu] * yb[j];
+            sumf += d * ds4_mxfp4_values[q >> 4] * yb[j + QK_MXFP4 / 2];
+        }
+    }
+
+    return sumf;
+}
+
 static float ds4_vec_dot_q5_K_f32(int n, const block_q5_K *x, const float *y) {
     const int nb = n / QK_K;
     float sumf = 0.0f;
@@ -4371,7 +4410,8 @@ static bool tensor_is_routed_expert_type(uint32_t type) {
            type == DS4_TENSOR_Q2_K ||
            type == DS4_TENSOR_Q4_K ||
            type == DS4_TENSOR_Q5_K ||
-           type == DS4_TENSOR_Q6_K;
+           type == DS4_TENSOR_Q6_K ||
+           type == DS4_TENSOR_MXFP4;
 }
 
 static DS4_MAYBE_UNUSED uint64_t routed_expert_block_bytes(uint32_t type) {
@@ -4382,6 +4422,7 @@ static DS4_MAYBE_UNUSED uint64_t routed_expert_block_bytes(uint32_t type) {
     case DS4_TENSOR_Q4_K:    return sizeof(block_q4_K);
     case DS4_TENSOR_Q5_K:    return sizeof(block_q5_K);
     case DS4_TENSOR_Q6_K:    return sizeof(block_q6_K);
+    case DS4_TENSOR_MXFP4:   return sizeof(block_mxfp4);
     default:                 ds4_die("unsupported routed expert tensor type");
     }
     return 0;
@@ -6014,7 +6055,8 @@ static void model_map_span_vec_include_one(ds4_model_map_span_vec *spans, const 
 
     uint64_t lo = UINT64_MAX, hi = 0;
     model_map_span_include_tensor(t, &lo, &hi, &spans->max_tensor_bytes);
-    const bool isolate = t->type == DS4_TENSOR_Q4_K &&
+    const bool isolate = (t->type == DS4_TENSOR_Q4_K ||
+                          t->type == DS4_TENSOR_MXFP4) &&
                          t->bytes >= q4_isolated_min_bytes;
     model_map_span_vec_append(spans, lo, hi, isolate);
 }
@@ -14383,7 +14425,8 @@ static bool glm_graph_gate_pair_type_supported(uint32_t gate_type, uint32_t up_t
            (gate_type == DS4_TENSOR_IQ2_XXS ||
             gate_type == DS4_TENSOR_Q2_K ||
             gate_type == DS4_TENSOR_Q4_K ||
-            gate_type == DS4_TENSOR_Q5_K);
+            gate_type == DS4_TENSOR_Q5_K ||
+            gate_type == DS4_TENSOR_MXFP4);
 }
 
 static bool glm_graph_down_type_supported(uint32_t down_type) {
@@ -14391,7 +14434,8 @@ static bool glm_graph_down_type_supported(uint32_t down_type) {
            down_type == DS4_TENSOR_Q2_K ||
            down_type == DS4_TENSOR_Q4_K ||
            down_type == DS4_TENSOR_Q5_K ||
-           down_type == DS4_TENSOR_Q6_K;
+           down_type == DS4_TENSOR_Q6_K ||
+           down_type == DS4_TENSOR_MXFP4;
 }
 
 static float glm_routed_moe_dot_f32(uint32_t type, int n, const uint8_t *row, const float *x) {
@@ -14406,6 +14450,9 @@ static float glm_routed_moe_dot_f32(uint32_t type, int n, const uint8_t *row, co
     }
     if (type == DS4_TENSOR_Q5_K || type == DS4_TENSOR_Q6_K) {
         return ds4_vec_dot_q5_q6_K_f32(type, n, row, x);
+    }
+    if (type == DS4_TENSOR_MXFP4) {
+        return ds4_vec_dot_mxfp4_f32(n, (const block_mxfp4 *)row, x);
     }
     ds4_die("GLM F32 routed-MoE reference encountered unsupported expert tensor type");
     return 0.0f;
