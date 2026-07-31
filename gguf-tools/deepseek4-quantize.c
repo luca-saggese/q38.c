@@ -1163,6 +1163,12 @@ static bool is_quantizable_target(ds4q_type type) {
     return type == DS4Q_TYPE_F32 || type == DS4Q_TYPE_F16 || type == DS4Q_TYPE_BF16 || ds4q_can_quantize(type);
 }
 
+static bool target_uses_imatrix(ds4q_type type) {
+    return type == DS4Q_TYPE_Q2_K ||
+           type == DS4Q_TYPE_Q4_K ||
+           type == DS4Q_TYPE_IQ2_XXS;
+}
+
 /* =====
  * Tensor generation
  */
@@ -1290,8 +1296,11 @@ static byte_buf generate_regular_hf(st_db *db, const char *gguf_name, const char
         f32 = tensor_to_f32(&w, &n);
         st_value_free(&w);
     }
-    const char *names[2] = { gguf_name, hf_name };
-    const float *imat = imatrix_find(imatrix, names, 2, tmpl->ne[0], -1, 0);
+    const float *imat = NULL;
+    if (target_uses_imatrix(target)) {
+        const char *names[2] = { gguf_name, hf_name };
+        imat = imatrix_find(imatrix, names, 2, tmpl->ne[0], -1, 0);
+    }
     byte_buf b = f32_to_type(f32, n, target, tmpl->ne[0], imat);
     free(f32);
     return b;
@@ -1360,8 +1369,11 @@ static void generate_one_expert(expert_job *j, int xid) {
         if (w.n_dims != 2 || w.shape[0] != j->nrows || w.shape[1] != j->ncols) die("expert shape mismatch");
         f32 = tensor_to_f32(&w, &n);
     }
-    const char *names[3] = { j->gguf_name, weight_name, NULL };
-    const float *imat = imatrix_find(j->imatrix, names, 2, j->ncols, xid, j->n_experts);
+    const float *imat = NULL;
+    if (target_uses_imatrix(j->target)) {
+        const char *names[2] = { j->gguf_name, weight_name };
+        imat = imatrix_find(j->imatrix, names, 2, j->ncols, xid, j->n_experts);
+    }
     byte_buf q = f32_to_type(f32, n, j->target, j->ncols, imat);
     if (q.size != j->per_expert) die("expert quantized size mismatch");
     memcpy(j->out->data + (size_t)xid * j->per_expert, q.data, q.size);
