@@ -20327,6 +20327,24 @@ static bool metal_graph_decode_iq2_selected_slots_expected(
                                   "DS4_METAL_DISABLE_IQ2_SELECTED_EXPERT_VIEWS");
 }
 
+static bool metal_graph_decode_mxfp4_selected_slots_expected(
+        const ds4_gpu_graph     *g,
+        const ds4_layer_weights *layer) {
+    return g &&
+           g->ssd_streaming &&
+           !g->quality &&
+           layer->ffn_gate_exps->type == DS4_TENSOR_MXFP4 &&
+           layer->ffn_up_exps->type == DS4_TENSOR_MXFP4 &&
+           layer->ffn_down_exps->type == DS4_TENSOR_MXFP4 &&
+           DS4_N_EXPERT_USED == 6 &&
+           DS4_N_EXPERT >= 128 &&
+           !glm_graph_env_present("DS4_ROCM_MOE_WRITE_CLAMPED_ACT",
+                                  "DS4_METAL_MOE_WRITE_CLAMPED_ACT") &&
+           !glm_graph_env_present("DS4_ROCM_DISABLE_ROUTED_PAIR_SWIGLU_FUSION",
+                                  "DS4_METAL_DISABLE_ROUTED_PAIR_SWIGLU_FUSION") &&
+           getenv("DS4_METAL_DISABLE_MXFP4_SELECTED_EXPERT_VIEWS") == NULL;
+}
+
 static bool metal_graph_streaming_expert_cache_seed_layer_expected(
         const ds4_gpu_graph     *g,
         const ds4_layer_weights *layer) {
@@ -20338,7 +20356,8 @@ static bool metal_graph_streaming_expert_cache_seed_layer_expected(
         !layer->ffn_down_exps) {
         return false;
     }
-    if (metal_graph_decode_iq2_selected_slots_expected(g, layer)) return true;
+    if (metal_graph_decode_iq2_selected_slots_expected(g, layer) ||
+        metal_graph_decode_mxfp4_selected_slots_expected(g, layer)) return true;
     if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA &&
         !g->quality &&
         layer->ffn_gate_exps->type == DS4_TENSOR_IQ2_XXS &&
@@ -20646,7 +20665,9 @@ static bool metal_graph_decode_set_hash_selected_override(
                                                       down_tensor_bytes);
     const bool iq2_selected =
         metal_graph_decode_iq2_selected_slots_expected(g, layer);
-    if (!q4_selected && !iq2_selected) {
+    const bool mxfp4_selected =
+        metal_graph_decode_mxfp4_selected_slots_expected(g, layer);
+    if (!q4_selected && !iq2_selected && !mxfp4_selected) {
         return true;
     }
 
@@ -23353,6 +23374,9 @@ static bool metal_graph_encode_decode_layer_phase(
     const bool iq2_selected_shared_overlap =
         metal_graph_use_iq2_selected_shared_overlap(g) &&
         metal_graph_decode_iq2_selected_slots_expected(g, layer);
+    const bool mxfp4_selected_shared_overlap =
+        metal_graph_use_iq2_selected_shared_overlap(g) &&
+        metal_graph_decode_mxfp4_selected_slots_expected(g, layer);
     const bool cuda_selected_shared_overlap =
         metal_graph_use_cuda_selected_shared_overlap(g) &&
         metal_graph_decode_cuda_selected_slots_expected(g, layer);
@@ -23365,10 +23389,13 @@ static bool metal_graph_encode_decode_layer_phase(
         getenv("DS4_MOE_REPLAY_SELECTED_IDS") == NULL &&
         (q4_selected_shared_overlap ||
          iq2_selected_shared_overlap ||
+         mxfp4_selected_shared_overlap ||
          cuda_selected_shared_overlap);
     const bool async_selected_load =
         overlap_selected_shared &&
         ((iq2_selected_shared_overlap &&
+          metal_graph_use_iq2_selected_async_load(g)) ||
+         (mxfp4_selected_shared_overlap &&
           metal_graph_use_iq2_selected_async_load(g)) ||
          cuda_selected_shared_overlap);
     const bool selected_readahead_shared_delay =
@@ -29506,12 +29533,13 @@ static bool metal_graph_eval_token_raw_swa(
 
 static bool metal_graph_streaming_decode_prefill_wide_default(
         const ds4_weights *weights) {
-    return DS4_MODEL_VARIANT == DS4_VARIANT_FLASH &&
-           weights &&
-           DS4_N_LAYER > 0 &&
-           weights->layer[0].ffn_gate_exps->type == DS4_TENSOR_Q4_K &&
-           weights->layer[0].ffn_up_exps->type == DS4_TENSOR_Q4_K &&
-           weights->layer[0].ffn_down_exps->type == DS4_TENSOR_Q4_K;
+    if (DS4_MODEL_VARIANT != DS4_VARIANT_FLASH || !weights || DS4_N_LAYER == 0) {
+        return false;
+    }
+    const uint32_t type = weights->layer[0].ffn_gate_exps->type;
+    return (type == DS4_TENSOR_Q4_K || type == DS4_TENSOR_MXFP4) &&
+           weights->layer[0].ffn_up_exps->type == type &&
+           weights->layer[0].ffn_down_exps->type == type;
 }
 
 static uint32_t metal_graph_streaming_decode_prefill_max_tokens(
