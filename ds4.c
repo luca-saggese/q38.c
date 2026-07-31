@@ -50739,6 +50739,16 @@ static char *imatrix_trim_block(char *p, char *end) {
     *end = '\0';
     return p;
 }
+
+static char *imatrix_find_marker(char *dataset, char *cursor, const char *marker) {
+    const size_t marker_len = strlen(marker);
+    char *p = cursor;
+    while ((p = strstr(p, marker)) != NULL) {
+        if (p == dataset || p[-1] == '\n') return p;
+        p += marker_len;
+    }
+    return NULL;
+}
 #endif
 
 int ds4_engine_collect_imatrix(ds4_engine *e,
@@ -50808,7 +50818,7 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
     const char *marker_lit = "===== DS4_IMATRIX_PROMPT";
     while (*cursor) {
         char *start = cursor;
-        char *marker = strstr(cursor, marker_lit);
+        char *marker = imatrix_find_marker(dataset, cursor, marker_lit);
         if (marker) {
             char *nl = strchr(marker, '\n');
             if (!nl) break;
@@ -50817,7 +50827,7 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
             break;
         }
 
-        char *next = strstr(start, marker_lit);
+        char *next = imatrix_find_marker(dataset, start, marker_lit);
         char *end = next ? next : dataset + dataset_len;
         char saved = *end;
         char *prompt_text = imatrix_trim_block(start, end);
