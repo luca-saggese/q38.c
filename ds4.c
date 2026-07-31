@@ -20648,6 +20648,99 @@ static uint32_t metal_graph_streaming_expert_preload_count(
     return preload;
 }
 
+#ifdef __APPLE__
+/* Layer-major prefill has already made this layer's weights GPU-visible.
+ * Preserve the built-in hot seed with model-to-cache blits before the next
+ * layer replaces those mapped views, rather than rereading it after prefill. */
+static bool metal_graph_seed_streaming_expert_cache_layer_from_mapped_hotlist(
+        ds4_gpu_graph     *g,
+        const ds4_model   *model,
+        const ds4_weights *weights,
+        uint32_t           il) {
+    const char *hotlist_path = glm_graph_env_value(
+            "DS4_ROCM_STREAMING_EXPERT_HOTLIST",
+            "DS4_METAL_STREAMING_EXPERT_HOTLIST");
+    if (!metal_graph_streaming_expert_hotlist_enabled(g) ||
+        !model || !weights || il >= DS4_N_LAYER ||
+        (hotlist_path && hotlist_path[0]) ||
+        (g_ds4_shape.variant != DS4_VARIANT_FLASH &&
+         g_ds4_shape.variant != DS4_VARIANT_PRO)) {
+        return true;
+    }
+
+    const ds4_layer_weights *layer = &weights->layer[il];
+    if (!metal_graph_streaming_expert_cache_seed_layer_expected(g, layer)) {
+        return true;
+    }
+    const uint64_t gate_row_bytes = routed_expert_row_bytes(layer->ffn_gate_exps);
+    const uint64_t down_row_bytes = routed_expert_row_bytes(layer->ffn_down_exps);
+    if (gate_row_bytes == 0 || down_row_bytes == 0 ||
+        layer->ffn_gate_exps->dim[1] > UINT64_MAX / gate_row_bytes ||
+        layer->ffn_down_exps->dim[1] > UINT64_MAX / down_row_bytes) {
+        fprintf(stderr,
+                "ds4: streaming resident hotlist seed byte size overflow at layer %u\n",
+                il);
+        return false;
+    }
+    const uint64_t gate_expert_bytes =
+        layer->ffn_gate_exps->dim[1] * gate_row_bytes;
+    const uint64_t down_expert_bytes =
+        layer->ffn_down_exps->dim[1] * down_row_bytes;
+    const uint32_t cache_budget =
+        ds4_gpu_stream_expert_cache_budget_for_expert_size(gate_expert_bytes,
+                                                            down_expert_bytes);
+    const uint32_t preload_count =
+        metal_graph_streaming_expert_preload_count(g, cache_budget);
+    if (preload_count == 0) return true;
+
+    const uint16_t (*hotlist)[2] = NULL;
+    uint32_t hotlist_count = 0;
+    if (g_ds4_shape.variant == DS4_VARIANT_FLASH) {
+        hotlist = ds4_default_streaming_hotlist_flash;
+        hotlist_count = ds4_default_streaming_hotlist_flash_count;
+    } else {
+        hotlist = ds4_default_streaming_hotlist_pro;
+        hotlist_count = ds4_default_streaming_hotlist_pro_count;
+    }
+    const uint32_t target_count = preload_count < hotlist_count ?
+        preload_count : hotlist_count;
+    if (ds4_gpu_stream_expert_cache_current_count() >= target_count) {
+        return true;
+    }
+
+    int32_t experts[DS4_MAX_EXPERT];
+    uint32_t priorities[DS4_MAX_EXPERT];
+    uint32_t n = 0;
+    uint32_t loaded = 0;
+    for (uint32_t i = 0;
+         i < hotlist_count && loaded < preload_count;
+         i++) {
+        const uint32_t hot_layer = hotlist[i][0];
+        const uint32_t hot_expert = hotlist[i][1];
+        if (hot_layer >= DS4_N_LAYER || hot_expert >= DS4_N_EXPERT) continue;
+        const uint32_t priority = preload_count - loaded;
+        loaded++;
+        if (hot_layer != il) continue;
+        if (n >= DS4_MAX_EXPERT) return false;
+        experts[n] = (int32_t)hot_expert;
+        priorities[n] = priority;
+        n++;
+    }
+    if (n == 0) return true;
+
+    const ds4_gpu_stream_expert_table table =
+        graph_stream_expert_table_make(model,
+                                       layer,
+                                       il,
+                                       gate_expert_bytes,
+                                       down_expert_bytes);
+    return ds4_gpu_stream_expert_cache_seed_experts_gpu_copy(&table,
+                                                              experts,
+                                                              priorities,
+                                                              n) != 0;
+}
+#endif
+
 static bool metal_graph_decode_set_hash_selected_override(
         const ds4_model         *model,
         const ds4_layer_weights *layer,
@@ -33586,6 +33679,15 @@ static bool metal_graph_prefill_layer_major(
             if (ok) ok = metal_graph_capture_prefill_seed_router_selected(g,
                                                                           il,
                                                                           n_tokens);
+#ifdef __APPLE__
+            if (ok) {
+                ok = metal_graph_seed_streaming_expert_cache_layer_from_mapped_hotlist(
+                        g,
+                        model,
+                        weights,
+                        il);
+            }
+#endif
             const double t_ffn_encoded = now_sec();
             if (ok) ok = ds4_gpu_end_commands() != 0;
             const double t_ffn_done = now_sec();
@@ -33636,6 +33738,15 @@ static bool metal_graph_prefill_layer_major(
             if (ok) ok = metal_graph_capture_prefill_seed_router_selected(g,
                                                                           il,
                                                                           n_tokens);
+#ifdef __APPLE__
+            if (ok) {
+                ok = metal_graph_seed_streaming_expert_cache_layer_from_mapped_hotlist(
+                        g,
+                        model,
+                        weights,
+                        il);
+            }
+#endif
             const double t_encoded = (profile || throttle) ? now_sec() : 0.0;
             if (ok) ok = ds4_gpu_end_commands() != 0;
             const double t_done = (profile || throttle) ? now_sec() : 0.0;

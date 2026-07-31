@@ -13890,7 +13890,7 @@ int ds4_gpu_stream_expert_cache_begin_selected_load(
     return 1;
 }
 
-static int ds4_gpu_stream_expert_cache_load_selected_missing(
+static int ds4_gpu_stream_expert_cache_load_selected_missing_with_source(
         const void    *model_map,
         uint64_t       model_size,
         uint32_t       layer,
@@ -13903,6 +13903,7 @@ static int ds4_gpu_stream_expert_cache_load_selected_missing(
         uint64_t       gate_expert_bytes,
         uint64_t       down_expert_bytes,
         uint32_t       missing_mask,
+        int            gpu_copy_source,
         ds4_gpu_stream_expert_cache_entry **entries) {
     if (!g_ssd_streaming_mode ||
         !model_map ||
@@ -14059,12 +14060,14 @@ static int ds4_gpu_stream_expert_cache_load_selected_missing(
         const int force_reuse =
             cache_budget != 0 && reserved_entries >= cache_budget;
 
-        ds4_gpu_stream_expert_readahead_range(gate_abs_offsets[slot],
-                                              gate_expert_bytes);
-        ds4_gpu_stream_expert_readahead_range(up_abs_offsets[slot],
-                                              gate_expert_bytes);
-        ds4_gpu_stream_expert_readahead_range(down_abs_offsets[slot],
-                                              down_expert_bytes);
+        if (!gpu_copy_source) {
+            ds4_gpu_stream_expert_readahead_range(gate_abs_offsets[slot],
+                                                  gate_expert_bytes);
+            ds4_gpu_stream_expert_readahead_range(up_abs_offsets[slot],
+                                                  gate_expert_bytes);
+            ds4_gpu_stream_expert_readahead_range(down_abs_offsets[slot],
+                                                  down_expert_bytes);
+        }
 
         if (load_i < batch_reuse_count &&
             batch_reuse[load_i].gate_buffer &&
@@ -14115,7 +14118,17 @@ static int ds4_gpu_stream_expert_cache_load_selected_missing(
         uint8_t *down_dst = (uint8_t *)[down_bufs[load_i] contents] +
                              down_inners[load_i];
         if (!gate_dst || !up_dst || !down_dst) return 0;
-
+        if (gpu_copy_source &&
+            (gate_abs_offsets[slot] > model_size ||
+             gate_expert_bytes > model_size - gate_abs_offsets[slot] ||
+             up_abs_offsets[slot] > model_size ||
+             gate_expert_bytes > model_size - up_abs_offsets[slot] ||
+             down_abs_offsets[slot] > model_size ||
+             down_expert_bytes > model_size - down_abs_offsets[slot])) {
+            fprintf(stderr,
+                    "ds4: Metal streaming mapped expert source is outside the model mapping\n");
+            return 0;
+        }
         const double task_t0 = load_timing ? ds4_gpu_now_ms() : 0.0;
         tasks[n_tasks++] = (ds4_gpu_stream_expert_pread_task) {
             .offset = gate_abs_offsets[slot],
@@ -14147,27 +14160,113 @@ static int ds4_gpu_stream_expert_cache_load_selected_missing(
 
     uint64_t read_bytes = 0;
     double read_ms = 0.0;
-    const int ok = ds4_gpu_stream_expert_pread_tasks(tasks,
-                                                     n_tasks,
-                                                     &read_bytes,
-                                                     &read_ms);
+    int ok = 1;
+    if (gpu_copy_source) {
+        if (!g_batch_cb ||
+            gate_expert_bytes > (uint64_t)NSUIntegerMax ||
+            down_expert_bytes > (uint64_t)NSUIntegerMax) {
+            return 0;
+        }
+        __strong id<MTLBuffer> gate_srcs[DS4_METAL_STREAM_EXPERT_CACHE_MAX_SELECTED];
+        __strong id<MTLBuffer> up_srcs[DS4_METAL_STREAM_EXPERT_CACHE_MAX_SELECTED];
+        __strong id<MTLBuffer> down_srcs[DS4_METAL_STREAM_EXPERT_CACHE_MAX_SELECTED];
+        NSUInteger gate_src_inners[DS4_METAL_STREAM_EXPERT_CACHE_MAX_SELECTED];
+        NSUInteger up_src_inners[DS4_METAL_STREAM_EXPERT_CACHE_MAX_SELECTED];
+        NSUInteger down_src_inners[DS4_METAL_STREAM_EXPERT_CACHE_MAX_SELECTED];
+        for (uint32_t load_i = 0; load_i < n_loads; load_i++) {
+            const uint32_t slot = load_slots[load_i];
+            uint64_t gate_inner = 0;
+            uint64_t up_inner = 0;
+            uint64_t down_inner = 0;
+            gate_srcs[load_i] = ds4_gpu_wrap_model_range(model_map,
+                                                         model_size,
+                                                         gate_abs_offsets[slot],
+                                                         gate_expert_bytes,
+                                                         &gate_inner);
+            up_srcs[load_i] = ds4_gpu_wrap_model_range(model_map,
+                                                       model_size,
+                                                       up_abs_offsets[slot],
+                                                       gate_expert_bytes,
+                                                       &up_inner);
+            down_srcs[load_i] = ds4_gpu_wrap_model_range(model_map,
+                                                         model_size,
+                                                         down_abs_offsets[slot],
+                                                         down_expert_bytes,
+                                                         &down_inner);
+            if (!gate_srcs[load_i] || !up_srcs[load_i] || !down_srcs[load_i] ||
+                gate_inner > (uint64_t)NSUIntegerMax ||
+                up_inner > (uint64_t)NSUIntegerMax ||
+                down_inner > (uint64_t)NSUIntegerMax) {
+                return 0;
+            }
+            gate_src_inners[load_i] = (NSUInteger)gate_inner;
+            up_src_inners[load_i] = (NSUInteger)up_inner;
+            down_src_inners[load_i] = (NSUInteger)down_inner;
+        }
+
+        ds4_gpu_close_batch_encoder();
+        id<MTLBlitCommandEncoder> blit = [g_batch_cb blitCommandEncoder];
+        if (!blit) return 0;
+        for (uint32_t load_i = 0; load_i < n_loads; load_i++) {
+            [blit copyFromBuffer:gate_srcs[load_i]
+                    sourceOffset:gate_src_inners[load_i]
+                        toBuffer:gate_bufs[load_i]
+               destinationOffset:gate_inners[load_i]
+                            size:(NSUInteger)gate_expert_bytes];
+            [blit copyFromBuffer:up_srcs[load_i]
+                    sourceOffset:up_src_inners[load_i]
+                        toBuffer:up_bufs[load_i]
+               destinationOffset:up_inners[load_i]
+                            size:(NSUInteger)gate_expert_bytes];
+            [blit copyFromBuffer:down_srcs[load_i]
+                    sourceOffset:down_src_inners[load_i]
+                        toBuffer:down_bufs[load_i]
+               destinationOffset:down_inners[load_i]
+                            size:(NSUInteger)down_expert_bytes];
+            const uint64_t bytes =
+                gate_expert_bytes > (UINT64_MAX - down_expert_bytes) / 2u ?
+                    UINT64_MAX : gate_expert_bytes * 2u + down_expert_bytes;
+            read_bytes = read_bytes > UINT64_MAX - bytes ?
+                UINT64_MAX : read_bytes + bytes;
+        }
+        [blit endEncoding];
+        g_batch_has_work = YES;
+    } else {
+        ok = ds4_gpu_stream_expert_pread_tasks(tasks,
+                                               n_tasks,
+                                               &read_bytes,
+                                               &read_ms);
+    }
     if (!ok) return 0;
     if (load_timing) {
         load_t0 = ds4_gpu_now_ms();
     }
-    ds4_gpu_stream_expert_cache_note_pread(layer, read_bytes, read_ms);
+    if (!gpu_copy_source) {
+        ds4_gpu_stream_expert_cache_note_pread(layer, read_bytes, read_ms);
+    }
 
-    for (uint32_t load_i = 0; load_i < n_loads; load_i++) {
-        [gate_bufs[load_i] didModifyRange:NSMakeRange(gate_inners[load_i], (NSUInteger)gate_expert_bytes)];
-        [up_bufs[load_i] didModifyRange:NSMakeRange(up_inners[load_i], (NSUInteger)gate_expert_bytes)];
-        [down_bufs[load_i] didModifyRange:NSMakeRange(down_inners[load_i], (NSUInteger)down_expert_bytes)];
+    if (!gpu_copy_source) {
+        for (uint32_t load_i = 0; load_i < n_loads; load_i++) {
+            [gate_bufs[load_i] didModifyRange:NSMakeRange(gate_inners[load_i], (NSUInteger)gate_expert_bytes)];
+            [up_bufs[load_i] didModifyRange:NSMakeRange(up_inners[load_i], (NSUInteger)gate_expert_bytes)];
+            [down_bufs[load_i] didModifyRange:NSMakeRange(down_inners[load_i], (NSUInteger)down_expert_bytes)];
+        }
     }
     if (load_timing) {
         const double now_ms = ds4_gpu_now_ms();
         load_modify_ms = now_ms - load_t0;
         load_t0 = now_ms;
     }
-    if (getenv("DS4_METAL_STREAMING_EXPERT_PREAD_PROFILE") != NULL) {
+    if (gpu_copy_source &&
+        getenv("DS4_METAL_STREAMING_PREFILL_CACHE_SEED_PROFILE") != NULL) {
+        fprintf(stderr,
+                "ds4: Metal streaming expert GPU cache copy layer=%u "
+                "experts=%u bytes=%.2f GiB\n",
+                layer,
+                n_loads,
+                ds4_gpu_gib(read_bytes));
+    } else if (!gpu_copy_source &&
+               getenv("DS4_METAL_STREAMING_EXPERT_PREAD_PROFILE") != NULL) {
         fprintf(stderr,
                 "ds4: Metal streaming expert parallel pread layer=%u experts=%u tensors=%u "
                 "threads=%u bytes=%.2f GiB wall=%.3f ms\n",
@@ -14212,7 +14311,7 @@ static int ds4_gpu_stream_expert_cache_load_selected_missing(
     for (uint32_t i = 0; i < n_selected; i++) {
         if ((missing_mask & (1u << i)) != 0 && !entries[i]) return 0;
     }
-    if (load_timing) {
+    if (load_timing && !gpu_copy_source) {
         load_install_ms = ds4_gpu_now_ms() - load_t0;
         ds4_gpu_stream_expert_timing_note_load_detail(load_prepare_ms,
                                                       read_ms,
@@ -14220,6 +14319,37 @@ static int ds4_gpu_stream_expert_cache_load_selected_missing(
                                                       load_install_ms);
     }
     return 1;
+}
+
+static int ds4_gpu_stream_expert_cache_load_selected_missing(
+        const void    *model_map,
+        uint64_t       model_size,
+        uint32_t       layer,
+        const int32_t *selected_ids,
+        uint32_t       n_total_expert,
+        uint32_t       n_selected,
+        const uint64_t *gate_abs_offsets,
+        const uint64_t *up_abs_offsets,
+        const uint64_t *down_abs_offsets,
+        uint64_t       gate_expert_bytes,
+        uint64_t       down_expert_bytes,
+        uint32_t       missing_mask,
+        ds4_gpu_stream_expert_cache_entry **entries) {
+    return ds4_gpu_stream_expert_cache_load_selected_missing_with_source(
+            model_map,
+            model_size,
+            layer,
+            selected_ids,
+            n_total_expert,
+            n_selected,
+            gate_abs_offsets,
+            up_abs_offsets,
+            down_abs_offsets,
+            gate_expert_bytes,
+            down_expert_bytes,
+            missing_mask,
+            0,
+            entries);
 }
 
 static void ds4_gpu_glm_stream_selected_prefetch_set(
@@ -14916,11 +15046,12 @@ int ds4_gpu_stream_expert_cache_seed_selected(
     return 1;
 }
 
-int ds4_gpu_stream_expert_cache_seed_experts(
+static int ds4_gpu_stream_expert_cache_seed_experts_impl(
         const ds4_gpu_stream_expert_table *table,
         const int32_t                     *expert_ids,
         const uint32_t                    *expert_priorities,
-        uint32_t                           n_experts) {
+        uint32_t                           n_experts,
+        int                                gpu_copy_source) {
     if (!g_ssd_streaming_mode) return 1;
     if (!table) return 0;
     const void *model_map = table->model_map;
@@ -15015,19 +15146,21 @@ int ds4_gpu_stream_expert_cache_seed_experts(
         }
 
         if (missing_mask != 0 &&
-            !ds4_gpu_stream_expert_cache_load_selected_missing(model_map,
-                                                               model_size,
-                                                               layer,
-                                                               selected_ids,
-                                                               n_total_expert,
-                                                               batch,
-                                                               gate_abs_offsets,
-                                                               up_abs_offsets,
-                                                               down_abs_offsets,
-                                                               gate_expert_bytes,
-                                                               down_expert_bytes,
-                                                               missing_mask,
-                                                               entries)) {
+            !ds4_gpu_stream_expert_cache_load_selected_missing_with_source(
+                    model_map,
+                    model_size,
+                    layer,
+                    selected_ids,
+                    n_total_expert,
+                    batch,
+                    gate_abs_offsets,
+                    up_abs_offsets,
+                    down_abs_offsets,
+                    gate_expert_bytes,
+                    down_expert_bytes,
+                    missing_mask,
+                    gpu_copy_source,
+                    entries)) {
             return 0;
         }
         if (expert_priorities) {
@@ -15053,6 +15186,29 @@ int ds4_gpu_stream_expert_cache_seed_experts(
     return 1;
 }
 
+int ds4_gpu_stream_expert_cache_seed_experts(
+        const ds4_gpu_stream_expert_table *table,
+        const int32_t                     *expert_ids,
+        const uint32_t                    *expert_priorities,
+        uint32_t                           n_experts) {
+    return ds4_gpu_stream_expert_cache_seed_experts_impl(table,
+                                                         expert_ids,
+                                                         expert_priorities,
+                                                         n_experts,
+                                                         0);
+}
+
+int ds4_gpu_stream_expert_cache_seed_experts_gpu_copy(
+        const ds4_gpu_stream_expert_table *table,
+        const int32_t                     *expert_ids,
+        const uint32_t                    *expert_priorities,
+        uint32_t                           n_experts) {
+    return ds4_gpu_stream_expert_cache_seed_experts_impl(table,
+                                                         expert_ids,
+                                                         expert_priorities,
+                                                         n_experts,
+                                                         1);
+}
 static uint32_t ds4_gpu_q4_expert_table_group_size(uint32_t n_total_expert) {
     const char *env = getenv("DS4_METAL_Q4_EXPERT_TABLE_GROUP_SIZE");
     if (!env || !env[0]) return 1;
