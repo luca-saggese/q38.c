@@ -19,6 +19,8 @@
 #include <vector>
 #include <algorithm>
 
+#include "cuda/mmq/ds4_mmq.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -905,6 +907,96 @@ extern "C" int ds4_gpu_decode_graph_end(const ds4_decode_graph_key *key) {
                 (unsigned long long)g_decode_graph_captures);
     }
     return 0;
+}
+
+/* ------------------------------------------------------------------------
+ * Vendored llama.cpp mmq prefill tier (cuda/mmq/, see cuda/mmq/VENDOR.md).
+ *
+ * Ported from the Entrpi/ds4 batched-serving fork (fork commits 39d3877c,
+ * a56e07a5, 944482d5 and the Phase 5/6 MoE wiring; author Entrpi
+ * <entrpi@proton.me>).  Phase 1 takes only the RAW-layout entries: dense
+ * Q8_0 GEMMs and the IQ2_XXS gate/up + Q2_K down routed-MoE pipeline for
+ * n_tok >= 2 (prefill and batched verify).  The aligned-SoA / D2R /
+ * producer-quantized tiers and the weight server are deliberately left
+ * behind: they need the repack artifact pipeline for a further ~25% on
+ * top of the ~2.5x this tier gives.  Decode (n_tok == 1) is untouched.
+ * mmq changes FP32 reduction order vs the cublas+dequant pipeline, so
+ * prefill logits drift at ULP scale: validated against the official
+ * continuation vectors rather than byte-diffs.  DS4_CUDA_MMQ=0 restores
+ * the legacy dispatch. */
+/* Producer-fold registry lookup the vendored ds4_mmq.cu entries probe for
+ * pre-quantized q8_1 activations (the fork's flat-pool M2-Inc2a fold).
+ * The flat-pool producers are not ported, so nothing is ever registered:
+ * always miss, and the entries run their own activation quantize. */
+extern "C" int ds4_cuda_q8_fold_take_q81(const void *src, uint64_t in_dim,
+                                         const void **q81) {
+    (void)src; (void)in_dim; (void)q81;
+    return 0;
+}
+
+static int cuda_use_mmq(void) {
+    static int init = 0;
+    static int use = 0;
+    if (!init) {
+        init = 1;
+        const char *s = getenv("DS4_CUDA_MMQ");
+        const int off = (s && s[0] == '0') || g_quality_mode || g_n_gpus > 1;
+        if (off) {
+            if (s && s[0] == '0') {
+                fprintf(stderr, "ds4: DS4_CUDA_MMQ=0 - mmq prefill tier disabled\n");
+            }
+        } else if (ds4_mmq_init(0) == 0) {
+            use = 1;
+        } else {
+            fprintf(stderr, "ds4: ds4_mmq_init failed - mmq prefill tier disabled\n");
+        }
+    }
+    return use;
+}
+
+/* mmq pipeline helpers, ported from the fork: SwiGLU + clamp + router
+ * weight in the (token, slot, feature) layout ds4_mmq_*_moe writes, and
+ * the guarded per-token slot sum. */
+__global__ static void moe_mmq_swiglu_weighted_clamp_kernel(
+        float *mid_out,
+        const float *gate_buf, const float *up_buf,
+        const float *weights,
+        uint32_t expert_mid_dim,
+        uint32_t n_tokens,
+        uint32_t n_expert_used,
+        float clamp) {
+    uint64_t gid = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t n = (uint64_t)n_tokens * n_expert_used * expert_mid_dim;
+    if (gid >= n) return;
+    uint64_t slot_pair = gid / expert_mid_dim;
+    uint32_t tok = (uint32_t)(slot_pair / n_expert_used);
+    uint32_t slot = (uint32_t)(slot_pair - (uint64_t)tok * n_expert_used);
+    float g = gate_buf[gid];
+    float u = up_buf[gid];
+    if (!isfinite(g)) g = 0.0f;
+    if (!isfinite(u)) u = 0.0f;
+    if (clamp > 1.0e-6f) {
+        if (g > clamp) g = clamp;
+        if (u > clamp) u = clamp;
+        if (u < -clamp) u = -clamp;
+    }
+    const float w = weights[(uint64_t)tok * n_expert_used + slot];
+    const float s = g / (1.0f + expf(-g));
+    mid_out[gid] = s * u * w;
+}
+
+__global__ static void moe_mmq_sum_kernel(float *out, const float *down, uint32_t out_dim, uint32_t n_expert, uint32_t n_tokens, uint32_t guard_nonfinite) {
+    uint64_t gid = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t n = (uint64_t)n_tokens * out_dim;
+    if (gid >= n) return;
+    uint32_t tok = gid / out_dim;
+    uint32_t row = gid - (uint64_t)tok * out_dim;
+    float acc = 0.0f;
+    for (uint32_t e = 0; e < n_expert; e++) {
+        const float v = down[((uint64_t)tok * n_expert + e) * out_dim + row];
+        if (!guard_nonfinite || isfinite(v)) acc += v;
+    }
+    out[gid] = acc;
 }
 
 /* Abort an in-flight capture after an encode error inside the island.
@@ -12347,6 +12439,23 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
             ? g_gpu[logical_tier].device_id : 0;
     const char *wptr = cuda_resolve_weight_ptr(model_map, weight_offset, weight_bytes, logical_tier, "q8_0");
     if (!wptr) return 0;
+    /* mmq fused-dequant-matmul prefill tier (ported from the Entrpi/ds4
+     * fork).  Layout-compatible drop-in for the cuBLAS+dequant pipeline
+     * below: mmq's [out_dim, n_tok] column-major output flattens to
+     * [n_tok, out_dim] row-major, exactly what ds4 stores in out->ptr,
+     * and the Q8_0 weight is already in mmq's expected row-major block
+     * layout (the GGUF on-disk format).  K must be a multiple of 256;
+     * every Q8_0 weight in V4 Flash satisfies this, odd shapes fall
+     * through to the legacy paths. */
+    if (n_tok > 1 && (in_dim % 256u) == 0 && cuda_use_mmq()) {
+        int rc = ds4_mmq_q8_0_dense(wptr, (const float *)x->ptr, (float *)out->ptr,
+                                    (int)out_dim, (int)n_tok, (int)in_dim,
+                                    (cudaStream_t)0);
+        if (rc == 0) return 1;
+        fprintf(stderr, "ds4: ds4_mmq_q8_0_dense returned %d (label='%s' in=%llu out=%llu n_tok=%llu); falling back\n",
+                rc, label ? label : "", (unsigned long long)in_dim,
+                (unsigned long long)out_dim, (unsigned long long)n_tok);
+    }
     if (g_cublas_ready && n_tok > 1) {
         const float *w_f32 = cuda_q8_f32_ptr(model_map, weight_offset, weight_bytes, in_dim, out_dim, physical_device, label);
         if (w_f32) {
@@ -21085,6 +21194,61 @@ static int routed_moe_launch(
     }
     const int q4k_path = (gate_type == 12u && down_type == 12u);
     if (!q4k_path && (gate_type != 16u || down_type != 10u)) return 0;
+    /* mmq routed-MoE prefill tier (ported from the Entrpi/ds4 fork).
+     * IQ2_XXS gate/up pair (one shared activation quantize + routing
+     * pass) -> SwiGLU + clamp + router weight -> Q2_K down, treating
+     * each (token, slot) assignment as its own single-expert row ->
+     * guarded slot sum.  Buffers gate/up/mid/down are already sized to
+     * [n_tokens, n_expert, *] by the validation above.  Any entry
+     * failure falls through to the legacy sorted-pairs path (the
+     * buffers are scratch there too). */
+    if (!q4k_path && n_tokens > 1u && !owned_filtered && cuda_use_mmq()) {
+        const uint64_t gate_total = (uint64_t)n_total_expert * gate_expert_bytes;
+        const uint64_t down_total = (uint64_t)n_total_expert * down_expert_bytes;
+        const int mmq_tier = ds4_tensor_device_idx(out);
+        const char *gate_w = cuda_resolve_weight_ptr(model_map, gate_offset, gate_total, mmq_tier, "moe gate mmq");
+        const char *up_w = gate_w ? cuda_resolve_weight_ptr(model_map, up_offset, gate_total, mmq_tier, "moe up mmq") : NULL;
+        const char *down_w = up_w ? cuda_resolve_weight_ptr(model_map, down_offset, down_total, mmq_tier, "moe down mmq") : NULL;
+        if (down_w) {
+            const uint64_t n_assignments = (uint64_t)n_tokens * n_expert;
+            int rc = ds4_mmq_iq2_xxs_moe_pair(
+                    gate_w, up_w, (const float *)x->ptr,
+                    (const int32_t *)selected->ptr,
+                    (float *)gate->ptr, (float *)up->ptr,
+                    (int)expert_mid_dim, (int)expert_in_dim,
+                    (int)n_tokens, (int)n_total_expert, (int)n_expert,
+                    (cudaStream_t)0);
+            if (rc == 0) {
+                const uint64_t mid_floats = n_assignments * expert_mid_dim;
+                moe_mmq_swiglu_weighted_clamp_kernel<<<(uint32_t)((mid_floats + 255) / 256), 256>>>(
+                        (float *)mid->ptr,
+                        (const float *)gate->ptr, (const float *)up->ptr,
+                        (const float *)weights->ptr,
+                        expert_mid_dim, n_tokens, n_expert, clamp);
+                rc = cuda_ok(cudaGetLastError(), "mmq moe swiglu launch") ? 0 : -1;
+            }
+            if (rc == 0) {
+                rc = ds4_mmq_q2_K_moe(
+                        down_w, (const float *)mid->ptr,
+                        (const int32_t *)selected->ptr,
+                        (float *)down->ptr,
+                        (int)out_dim, (int)expert_mid_dim,
+                        (int)n_assignments, (int)n_total_expert,
+                        /*n_expert_used=*/1,
+                        (cudaStream_t)0);
+            }
+            if (rc == 0) {
+                const uint64_t n = (uint64_t)n_tokens * out_dim;
+                moe_mmq_sum_kernel<<<(uint32_t)((n + 255) / 256), 256>>>(
+                        (float *)out->ptr, (const float *)down->ptr,
+                        out_dim, n_expert, n_tokens, /*guard_nonfinite=*/1);
+                if (cuda_ok(cudaGetLastError(), "mmq moe sum launch")) return 1;
+                rc = -1;
+            }
+            fprintf(stderr, "ds4: mmq routed-MoE tier rc=%d (layer=%u n_tokens=%u); falling back\n",
+                    rc, layer_index, n_tokens);
+        }
+    }
     /* Q4_K routed-MoE dispatch:
      *   n_tokens == 1 and n_expert == 6:
      *                  use_direct_down_sum + moe_gate_up_mid_decode_q4K_qwarp32
