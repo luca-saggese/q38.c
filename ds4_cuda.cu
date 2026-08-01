@@ -673,6 +673,256 @@ static inline cublasHandle_t cuda_cublas_for_tier(int logical_tier) {
     return (cublasHandle_t)g_gpu[logical_tier].cublas;
 }
 
+/* ------------------------------------------------------------------------
+ * Decode-island CUDA graph capture.
+ *
+ * Design ported from the Entrpi/ds4 batched-serving fork's per-layer
+ * decode graph work (fork commits abe26575, 2200c675, 9caaa508; author
+ * Entrpi <entrpi@proton.me>), re-implemented against upstream's decode
+ * body.  Phase 1 captures the two position-independent islands of each
+ * decode layer:
+ *   island 0: layer top (hc pre-norm, mixes, QKV projections), ending
+ *             before the position-dependent QKV rope.
+ *   island 1: attention output projection through the FFN/MoE tail.
+ * Kernel launches inside the islands ride cuda_decode_stream(): the
+ * legacy NULL stream in eager mode (bit-identical behavior to before),
+ * or a dedicated blocking stream while capturing/replaying.  The legacy
+ * stream cannot be captured; a blocking (default-flags) stream keeps the
+ * implicit serialization against NULL-stream work, so the eager middle
+ * section of each layer orders correctly around replays.
+ *
+ * Per-entry state machine: first sight of a key runs eager (warms lazy
+ * allocators -- cudaMalloc is forbidden inside capture), second sight
+ * captures + instantiates + launches, later sights replay.  Any failure
+ * marks the entry dead and the caller re-encodes the island eagerly, so
+ * a broken capture can never lose a token's work.  Graphs replay the
+ * captured kernels byte-for-byte, so replayed output is bit-identical
+ * to the eager encode of the same island.
+ *
+ * DS4_CUDA_DECODE_GRAPHS=0 (or off/no/false) disables everything. */
+#define CUDA_DECODE_GRAPH_LAYERS   64u
+#define CUDA_DECODE_GRAPH_ISLANDS   2u
+#define CUDA_DECODE_GRAPH_VARIANTS  4u
+
+/* Mirrors the public `struct ds4_decode_graph_key` decl in ds4_gpu.h
+ * byte-for-byte (ds4_cuda.cu does not include that header; it carries
+ * its own extern "C" signatures inline).  The static_assert catches
+ * accidental drift: adding a field means updating both sites. */
+struct ds4_decode_graph_key {
+    uint32_t il;
+    uint32_t island;
+    uint32_t variant;
+    uint32_t _pad;
+    void    *cur_hc;
+    void    *after_attn_hc;
+    void    *after_ffn_hc;
+    void    *attn_norm;
+};
+typedef struct ds4_decode_graph_key ds4_decode_graph_key;
+static_assert(sizeof(ds4_decode_graph_key) == 48u,
+              "ds4_decode_graph_key must match the ds4_gpu.h decl");
+
+struct cuda_decode_graph_entry {
+    ds4_decode_graph_key key;
+    cudaGraphExec_t      exec;
+    int                  state;   /* 0 empty, 1 warmed, 2 ready, 3 dead */
+    uint64_t             hits;
+};
+
+static cuda_decode_graph_entry
+    g_decode_graphs[CUDA_DECODE_GRAPH_LAYERS][CUDA_DECODE_GRAPH_ISLANDS]
+                   [CUDA_DECODE_GRAPH_VARIANTS];
+static cudaStream_t g_decode_graph_stream = NULL;
+static int g_decode_graph_capturing = 0;
+static uint64_t g_decode_graph_replays = 0;
+static uint64_t g_decode_graph_captures = 0;
+
+extern "C" int ds4_gpu_decode_graphs_supported(void) {
+    static int init = 0;
+    static int enabled = 0;
+    if (!init) {
+        init = 1;
+        const char *s = getenv("DS4_CUDA_DECODE_GRAPHS");
+        const int off = s && *s &&
+            (s[0] == '0' ||
+             strcmp(s, "off") == 0 || strcmp(s, "OFF") == 0 ||
+             strcmp(s, "no") == 0 || strcmp(s, "NO") == 0 ||
+             strcmp(s, "false") == 0 || strcmp(s, "FALSE") == 0);
+        if (off) {
+            fprintf(stderr, "ds4: DS4_CUDA_DECODE_GRAPHS=%s - decode graph capture disabled\n", s);
+            enabled = 0;
+        } else {
+            enabled = 1;
+        }
+    }
+    return enabled && g_n_gpus == 1;
+}
+
+/* Stream the decode-island kernels launch on.  Legacy NULL stream in
+ * eager mode (unchanged behavior); the capture stream while a capture
+ * or replay is in flight. */
+static inline cudaStream_t cuda_decode_stream(void) {
+    return g_decode_graph_capturing ? g_decode_graph_stream : (cudaStream_t)0;
+}
+
+static void cuda_decode_graph_entry_kill(cuda_decode_graph_entry *e) {
+    if (e->exec) {
+        (void)cudaGraphExecDestroy(e->exec);
+        e->exec = NULL;
+    }
+    e->state = 3;
+}
+
+extern "C" void ds4_gpu_decode_graphs_invalidate(void) {
+    for (uint32_t il = 0; il < CUDA_DECODE_GRAPH_LAYERS; il++) {
+        for (uint32_t is = 0; is < CUDA_DECODE_GRAPH_ISLANDS; is++) {
+            for (uint32_t v = 0; v < CUDA_DECODE_GRAPH_VARIANTS; v++) {
+                cuda_decode_graph_entry *e = &g_decode_graphs[il][is][v];
+                if (e->exec) {
+                    (void)cudaGraphExecDestroy(e->exec);
+                    e->exec = NULL;
+                }
+                e->state = 0;
+                e->hits = 0;
+                memset(&e->key, 0, sizeof(e->key));
+            }
+        }
+    }
+}
+
+static cuda_decode_graph_entry *cuda_decode_graph_find(
+        const ds4_decode_graph_key *key) {
+    if (key->il >= CUDA_DECODE_GRAPH_LAYERS ||
+        key->island >= CUDA_DECODE_GRAPH_ISLANDS) return NULL;
+    cuda_decode_graph_entry *slot = NULL;
+    for (uint32_t v = 0; v < CUDA_DECODE_GRAPH_VARIANTS; v++) {
+        cuda_decode_graph_entry *e = &g_decode_graphs[key->il][key->island][v];
+        if (e->state != 0 &&
+            memcmp(&e->key, key, sizeof(*key)) == 0) return e;
+        if (e->state == 0 && !slot) slot = e;
+    }
+    if (slot) {
+        memcpy(&slot->key, key, sizeof(*key));
+        slot->state = 0;   /* caller advances the state machine */
+        return slot;
+    }
+    return NULL;           /* all variants busy with other keys: stay eager */
+}
+
+extern "C" int ds4_gpu_decode_graph_begin(const ds4_decode_graph_key *key) {
+    if (!key || !ds4_gpu_decode_graphs_supported()) return -1;
+    if (g_decode_graph_capturing) return -1;   /* no nesting */
+    cuda_decode_graph_entry *e = cuda_decode_graph_find(key);
+    if (!e || e->state == 3) return -1;
+    if (e->state == 0) {
+        /* Warm pass: run eagerly once so lazy allocators (tmp scratch,
+         * cuBLAS workspaces) reach steady-state sizes before capture. */
+        e->state = 1;
+        return -1;
+    }
+    if (e->state == 2) {
+        cudaError_t err = cudaGraphLaunch(e->exec, g_decode_graph_stream);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "ds4: decode graph replay failed (il=%u island=%u): %s\n",
+                    key->il, key->island, cudaGetErrorString(err));
+            (void)cudaGetLastError();
+            cuda_decode_graph_entry_kill(e);
+            return -1;     /* caller encodes eagerly; nothing was consumed */
+        }
+        e->hits++;
+        g_decode_graph_replays++;
+        return 1;
+    }
+    /* state == 1: capture this encode. */
+    if (!g_decode_graph_stream) {
+        if (!cuda_ok(cudaStreamCreate(&g_decode_graph_stream),
+                     "decode graph stream create")) {
+            g_decode_graph_stream = NULL;
+            cuda_decode_graph_entry_kill(e);
+            return -1;
+        }
+    }
+    /* cuBLAS rides the legacy NULL stream, which cannot be captured:
+     * point the handle at the capture stream for the duration. */
+    (void)cublasSetStream(cuda_cublas_for_tier(0), g_decode_graph_stream);
+    if (!cuda_ok(cudaStreamBeginCapture(g_decode_graph_stream,
+                                        cudaStreamCaptureModeGlobal),
+                 "decode graph begin capture")) {
+        (void)cublasSetStream(cuda_cublas_for_tier(0), NULL);
+        cuda_decode_graph_entry_kill(e);
+        return -1;
+    }
+    g_decode_graph_capturing = 1;
+    return 0;
+}
+
+extern "C" int ds4_gpu_decode_graph_end(const ds4_decode_graph_key *key) {
+    if (!key || !g_decode_graph_capturing) return -1;
+    g_decode_graph_capturing = 0;
+    cudaGraph_t graph = NULL;
+    cudaError_t err = cudaStreamEndCapture(g_decode_graph_stream, &graph);
+    (void)cublasSetStream(cuda_cublas_for_tier(0), NULL);
+    cuda_decode_graph_entry *e = cuda_decode_graph_find(key);
+    if (err != cudaSuccess || graph == NULL) {
+        fprintf(stderr, "ds4: decode graph capture failed (il=%u island=%u): %s\n",
+                key->il, key->island, cudaGetErrorString(err));
+        (void)cudaGetLastError();
+        if (graph) (void)cudaGraphDestroy(graph);
+        if (e) cuda_decode_graph_entry_kill(e);
+        return -1;         /* caller re-encodes the island eagerly */
+    }
+    if (!e) {              /* cannot happen: begin() found it */
+        (void)cudaGraphDestroy(graph);
+        return -1;
+    }
+    cudaGraphExec_t exec = NULL;
+    err = cudaGraphInstantiate(&exec, graph, NULL, NULL, 0);
+    (void)cudaGraphDestroy(graph);
+    if (err != cudaSuccess || exec == NULL) {
+        fprintf(stderr, "ds4: decode graph instantiate failed (il=%u island=%u): %s\n",
+                key->il, key->island, cudaGetErrorString(err));
+        (void)cudaGetLastError();
+        cuda_decode_graph_entry_kill(e);
+        return -1;
+    }
+    /* Capture recorded the work without executing it: launch now so this
+     * token's island actually runs. */
+    err = cudaGraphLaunch(exec, g_decode_graph_stream);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "ds4: decode graph first launch failed (il=%u island=%u): %s\n",
+                key->il, key->island, cudaGetErrorString(err));
+        (void)cudaGetLastError();
+        (void)cudaGraphExecDestroy(exec);
+        cuda_decode_graph_entry_kill(e);
+        return -1;
+    }
+    e->exec = exec;
+    e->state = 2;
+    g_decode_graph_captures++;
+    if (getenv("DS4_CUDA_DECODE_GRAPH_LOG") != NULL) {
+        fprintf(stderr, "ds4: decode graph captured il=%u island=%u (total %llu)\n",
+                key->il, key->island,
+                (unsigned long long)g_decode_graph_captures);
+    }
+    return 0;
+}
+
+/* Abort an in-flight capture after an encode error inside the island.
+ * Nothing was executed; the caller re-encodes eagerly. */
+extern "C" void ds4_gpu_decode_graph_abort(const ds4_decode_graph_key *key) {
+    if (!g_decode_graph_capturing) return;
+    g_decode_graph_capturing = 0;
+    cudaGraph_t graph = NULL;
+    (void)cudaStreamEndCapture(g_decode_graph_stream, &graph);
+    if (graph) (void)cudaGraphDestroy(graph);
+    (void)cublasSetStream(cuda_cublas_for_tier(0), NULL);
+    (void)cudaGetLastError();
+    if (key) {
+        cuda_decode_graph_entry *e = cuda_decode_graph_find(key);
+        if (e) cuda_decode_graph_entry_kill(e);
+    }
+}
+
 /* Multi-tier-aware weight pointer resolver.
  *
  * Used by kernel-dispatch wrappers in the per-layer execution path to
@@ -12123,7 +12373,7 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
             const uint64_t xh_count = n_tok * in_dim;
             __half *xh = (__half *)cuda_tmp_alloc_on(logical_tier, xh_count * sizeof(__half), "q8 f16 gemm activations");
             if (!xh) return 0;
-            f32_to_f16_kernel<<<(xh_count + 255) / 256, 256>>>(xh, (const float *)x->ptr, xh_count);
+            f32_to_f16_kernel<<<(xh_count + 255) / 256, 256, 0, cuda_decode_stream()>>>(xh, (const float *)x->ptr, xh_count);
             if (!cuda_ok(cudaGetLastError(), "q8 f16 activation convert launch")) return 0;
             const float alpha = 1.0f;
             const float beta = 0.0f;
@@ -12187,11 +12437,11 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
              * from GEMM kernels run at <1GB/s over PCIe. */
             float *olocal = (float *)((char *)tmp16 + oo_off);
             const uint64_t total_blocks = out_dim * blocks;
-            q8_0_dequant_f16_kernel<<<(unsigned)((total_blocks * 2u + 255u) / 256u), 256>>>(
+            q8_0_dequant_f16_kernel<<<(unsigned)((total_blocks * 2u + 255u) / 256u), 256, 0, cuda_decode_stream()>>>(
                     wh, reinterpret_cast<const unsigned char *>(wptr),
                     total_blocks, (uint32_t)blocks, (uint32_t)in_dim);
             const uint64_t xh_count = n_tok * in_dim;
-            f32_to_f16_kernel<<<(xh_count + 255) / 256, 256>>>(
+            f32_to_f16_kernel<<<(xh_count + 255) / 256, 256, 0, cuda_decode_stream()>>>(
                     xh, (const float *)x->ptr, xh_count);
             if (cuda_ok(cudaGetLastError(), "q8 dequant gemm staging")) {
                 const int gemm_trace = getenv("DS4_GLM_GEMM_TRACE") != NULL;
@@ -12249,10 +12499,10 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
     float *xscale = (float *)((char *)tmp + scale_offset);
     const int use_dp4a = cuda_q8_use_dp4a();
     dim3 qgrid((unsigned)blocks, (unsigned)n_tok, 1);
-    quantize_q8_0_f32_kernel<<<qgrid, 32>>>(xq, xscale, (const float *)x->ptr, in_dim, blocks);
+    quantize_q8_0_f32_kernel<<<qgrid, 32, 0, cuda_decode_stream()>>>(xq, xscale, (const float *)x->ptr, in_dim, blocks);
     if (!cuda_ok(cudaGetLastError(), "matmul_q8_0 quantize launch")) return 0;
     if (n_tok == 1) {
-        matmul_q8_0_preq_warp8_kernel<<<((unsigned)out_dim + 7u) / 8u, 256>>>(
+        matmul_q8_0_preq_warp8_kernel<<<((unsigned)out_dim + 7u) / 8u, 256, 0, cuda_decode_stream()>>>(
                 (float *)out->ptr,
                 reinterpret_cast<const unsigned char *>(wptr),
                 xq,
@@ -12280,7 +12530,7 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
         blocks <= 32u &&
         n_tok >= 8u) {
         dim3 bgrid(((unsigned)out_dim + 7u) / 8u, ((unsigned)n_tok + 7u) / 8u, 1);
-        matmul_q8_0_preq_batch_warp8_tok8_kernel<<<bgrid, 256>>>(
+        matmul_q8_0_preq_batch_warp8_tok8_kernel<<<bgrid, 256, 0, cuda_decode_stream()>>>(
                 (float *)out->ptr,
                 reinterpret_cast<const unsigned char *>(wptr),
                 xq,
@@ -12297,7 +12547,7 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
         blocks <= 32u &&
         n_tok >= 4u) {
         dim3 bgrid(((unsigned)out_dim + 7u) / 8u, ((unsigned)n_tok + 3u) / 4u, 1);
-        matmul_q8_0_preq_batch_warp8_tok4_kernel<<<bgrid, 256>>>(
+        matmul_q8_0_preq_batch_warp8_tok4_kernel<<<bgrid, 256, 0, cuda_decode_stream()>>>(
                 (float *)out->ptr,
                 reinterpret_cast<const unsigned char *>(wptr),
                 xq,
@@ -12314,7 +12564,7 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
         if (force_decode_warp &&
             getenv("DS4_CUDA_GLM_VERIFY_NO_Q8_TOK2") == NULL) {
             matmul_q8_0_preq_batch_warp8_tok2_kernel
-                    <<<((unsigned)out_dim + 7u) / 8u, 256>>>(
+                    <<<((unsigned)out_dim + 7u) / 8u, 256, 0, cuda_decode_stream()>>>(
                     (float *)out->ptr,
                     reinterpret_cast<const unsigned char *>(wptr),
                     xq,
@@ -12327,7 +12577,7 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
                            "matmul_q8_0 batch tok2 warp launch");
         }
         dim3 bgrid(((unsigned)out_dim + 7u) / 8u, (unsigned)n_tok, 1);
-        matmul_q8_0_preq_batch_warp8_kernel<<<bgrid, 256>>>(
+        matmul_q8_0_preq_batch_warp8_kernel<<<bgrid, 256, 0, cuda_decode_stream()>>>(
                 (float *)out->ptr,
                 reinterpret_cast<const unsigned char *>(wptr),
                 xq,
@@ -12343,7 +12593,7 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
     if (getenv("DS4_CUDA_NO_Q8_BATCH_EXACT_TOK2") == NULL &&
         n_tok >= 2u) {
         dim3 bgrid((unsigned)out_dim, ((unsigned)n_tok + 1u) / 2u, 1);
-        matmul_q8_0_preq_batch_tok2_exact_kernel<<<bgrid, exact_threads>>>(
+        matmul_q8_0_preq_batch_tok2_exact_kernel<<<bgrid, exact_threads, 0, cuda_decode_stream()>>>(
                 (float *)out->ptr,
                 reinterpret_cast<const unsigned char *>(wptr),
                 xq,
@@ -12356,7 +12606,7 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
         return cuda_ok(cudaGetLastError(), "matmul_q8_0 exact tok2 launch");
     }
     dim3 grid((unsigned)out_dim, (unsigned)n_tok, 1);
-    matmul_q8_0_preq_kernel<<<grid, exact_threads>>>((float *)out->ptr,
+    matmul_q8_0_preq_kernel<<<grid, exact_threads, 0, cuda_decode_stream()>>>((float *)out->ptr,
                                                      reinterpret_cast<const unsigned char *>(wptr),
                                                      xq,
                                                      xscale,
@@ -12645,13 +12895,13 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
     float *xscale = (float *)((char *)tmp + scale_offset);
     const int use_dp4a = cuda_q8_use_dp4a();
     dim3 qgrid((unsigned)blocks, (unsigned)n_tok, 1);
-    quantize_q8_0_f32_kernel<<<qgrid, 32>>>(xq, xscale, (const float *)x->ptr, in_dim, blocks);
+    quantize_q8_0_f32_kernel<<<qgrid, 32, 0, cuda_decode_stream()>>>(xq, xscale, (const float *)x->ptr, in_dim, blocks);
     if (!cuda_ok(cudaGetLastError(), "matmul_q8_0 pair quantize launch")) return 0;
     if (n_tok != 1) {
         if (force_decode_warp &&
             getenv("DS4_CUDA_GLM_VERIFY_NO_Q8_TOK2") == NULL) {
             matmul_q8_0_preq_batch_warp8_tok2_kernel
-                    <<<((unsigned)out0_dim + 7u) / 8u, 256>>>(
+                    <<<((unsigned)out0_dim + 7u) / 8u, 256, 0, cuda_decode_stream()>>>(
                     (float *)out0->ptr,
                     reinterpret_cast<const unsigned char *>(w0),
                     xq, xscale, in_dim, out0_dim, blocks, use_dp4a);
@@ -12660,7 +12910,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
                 return 0;
             }
             matmul_q8_0_preq_batch_warp8_tok2_kernel
-                    <<<((unsigned)out1_dim + 7u) / 8u, 256>>>(
+                    <<<((unsigned)out1_dim + 7u) / 8u, 256, 0, cuda_decode_stream()>>>(
                     (float *)out1->ptr,
                     reinterpret_cast<const unsigned char *>(w1),
                     xq, xscale, in_dim, out1_dim, blocks, use_dp4a);
@@ -12684,7 +12934,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
             blocks <= 32u &&
             n_tok >= 8u) {
             dim3 grid0(((unsigned)out0_dim + 7u) / 8u, ((unsigned)n_tok + 7u) / 8u, 1);
-            matmul_q8_0_preq_batch_warp8_tok8_kernel<<<grid0, 256>>>(
+            matmul_q8_0_preq_batch_warp8_tok8_kernel<<<grid0, 256, 0, cuda_decode_stream()>>>(
                     (float *)out0->ptr,
                     reinterpret_cast<const unsigned char *>(w0),
                     xq,
@@ -12696,7 +12946,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
                     use_dp4a);
             if (!cuda_ok(cudaGetLastError(), "matmul_q8_0 pair0 batch tok8 launch")) return 0;
             dim3 grid1(((unsigned)out1_dim + 7u) / 8u, ((unsigned)n_tok + 7u) / 8u, 1);
-            matmul_q8_0_preq_batch_warp8_tok8_kernel<<<grid1, 256>>>(
+            matmul_q8_0_preq_batch_warp8_tok8_kernel<<<grid1, 256, 0, cuda_decode_stream()>>>(
                     (float *)out1->ptr,
                     reinterpret_cast<const unsigned char *>(w1),
                     xq,
@@ -12713,7 +12963,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
             blocks <= 32u &&
             n_tok >= 4u) {
             dim3 grid0(((unsigned)out0_dim + 7u) / 8u, ((unsigned)n_tok + 3u) / 4u, 1);
-            matmul_q8_0_preq_batch_warp8_tok4_kernel<<<grid0, 256>>>(
+            matmul_q8_0_preq_batch_warp8_tok4_kernel<<<grid0, 256, 0, cuda_decode_stream()>>>(
                     (float *)out0->ptr,
                     reinterpret_cast<const unsigned char *>(w0),
                     xq,
@@ -12725,7 +12975,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
                     use_dp4a);
             if (!cuda_ok(cudaGetLastError(), "matmul_q8_0 pair0 batch tok4 launch")) return 0;
             dim3 grid1(((unsigned)out1_dim + 7u) / 8u, ((unsigned)n_tok + 3u) / 4u, 1);
-            matmul_q8_0_preq_batch_warp8_tok4_kernel<<<grid1, 256>>>(
+            matmul_q8_0_preq_batch_warp8_tok4_kernel<<<grid1, 256, 0, cuda_decode_stream()>>>(
                     (float *)out1->ptr,
                     reinterpret_cast<const unsigned char *>(w1),
                     xq,
@@ -12740,7 +12990,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
         if (getenv("DS4_CUDA_NO_Q8_BATCH_WARP") == NULL &&
             blocks <= 32u) {
             dim3 grid0(((unsigned)out0_dim + 7u) / 8u, (unsigned)n_tok, 1);
-            matmul_q8_0_preq_batch_warp8_kernel<<<grid0, 256>>>(
+            matmul_q8_0_preq_batch_warp8_kernel<<<grid0, 256, 0, cuda_decode_stream()>>>(
                     (float *)out0->ptr,
                     reinterpret_cast<const unsigned char *>(w0),
                     xq,
@@ -12752,7 +13002,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
                     use_dp4a);
             if (!cuda_ok(cudaGetLastError(), "matmul_q8_0 pair0 batch warp launch")) return 0;
             dim3 grid1(((unsigned)out1_dim + 7u) / 8u, (unsigned)n_tok, 1);
-            matmul_q8_0_preq_batch_warp8_kernel<<<grid1, 256>>>(
+            matmul_q8_0_preq_batch_warp8_kernel<<<grid1, 256, 0, cuda_decode_stream()>>>(
                     (float *)out1->ptr,
                     reinterpret_cast<const unsigned char *>(w1),
                     xq,
@@ -12770,7 +13020,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
             if (getenv("DS4_CUDA_NO_Q8_PAIR_BATCH_EXACT_TOK2") == NULL &&
                 n_tok >= 2u) {
                 dim3 grid((unsigned)max_out_dim, ((unsigned)n_tok + 1u) / 2u, 1);
-                matmul_q8_0_pair_preq_batch_tok2_exact_kernel<<<grid, exact_threads>>>(
+                matmul_q8_0_pair_preq_batch_tok2_exact_kernel<<<grid, exact_threads, 0, cuda_decode_stream()>>>(
                         (float *)out0->ptr,
                         (float *)out1->ptr,
                         reinterpret_cast<const unsigned char *>(w0),
@@ -12786,7 +13036,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
                 return cuda_ok(cudaGetLastError(), "matmul_q8_0 pair exact tok2 launch");
             }
             dim3 grid((unsigned)max_out_dim, (unsigned)n_tok, 1);
-            matmul_q8_0_pair_preq_batch_kernel<<<grid, exact_threads>>>(
+            matmul_q8_0_pair_preq_batch_kernel<<<grid, exact_threads, 0, cuda_decode_stream()>>>(
                     (float *)out0->ptr,
                     (float *)out1->ptr,
                     reinterpret_cast<const unsigned char *>(w0),
@@ -12803,7 +13053,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
         }
         const unsigned exact_threads = cuda_q8_exact_threads(blocks);
         dim3 grid0((unsigned)out0_dim, (unsigned)n_tok, 1);
-        matmul_q8_0_preq_kernel<<<grid0, exact_threads>>>((float *)out0->ptr,
+        matmul_q8_0_preq_kernel<<<grid0, exact_threads, 0, cuda_decode_stream()>>>((float *)out0->ptr,
                                                           reinterpret_cast<const unsigned char *>(w0),
                                                           xq,
                                                           xscale,
@@ -12811,7 +13061,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
                                                           use_dp4a);
         if (!cuda_ok(cudaGetLastError(), "matmul_q8_0 pair0 batch launch")) return 0;
         dim3 grid1((unsigned)out1_dim, (unsigned)n_tok, 1);
-        matmul_q8_0_preq_kernel<<<grid1, exact_threads>>>((float *)out1->ptr,
+        matmul_q8_0_preq_kernel<<<grid1, exact_threads, 0, cuda_decode_stream()>>>((float *)out1->ptr,
                                                           reinterpret_cast<const unsigned char *>(w1),
                                                           xq,
                                                           xscale,
@@ -12820,7 +13070,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_tensor(
         return cuda_ok(cudaGetLastError(), "matmul_q8_0 pair1 batch launch");
     }
     const uint64_t max_out = out0_dim > out1_dim ? out0_dim : out1_dim;
-    matmul_q8_0_pair_preq_warp8_kernel<<<((unsigned)max_out + 7u) / 8u, 256>>>(
+    matmul_q8_0_pair_preq_warp8_kernel<<<((unsigned)max_out + 7u) / 8u, 256, 0, cuda_decode_stream()>>>(
             (float *)out0->ptr,
             (float *)out1->ptr,
             reinterpret_cast<const unsigned char *>(w0),
@@ -12947,7 +13197,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_decode_rows_exact_tensor(
     int8_t *xq = (int8_t *)tmp;
     float *xscale = (float *)((char *)tmp + scale_offset);
     dim3 qgrid((unsigned)blocks, n_rows, 1u);
-    quantize_q8_0_f32_kernel<<<qgrid, 32>>>(
+    quantize_q8_0_f32_kernel<<<qgrid, 32, 0, cuda_decode_stream()>>>(
             xq, xscale, (const float *)x->ptr, in_dim, blocks);
     if (!cuda_ok(cudaGetLastError(),
                  "q8_0 pair decode rows exact quantize launch")) {
@@ -12955,7 +13205,7 @@ extern "C" int ds4_gpu_matmul_q8_0_pair_decode_rows_exact_tensor(
     }
     const uint64_t max_out = out0_dim > out1_dim ? out0_dim : out1_dim;
     dim3 grid(((unsigned)max_out + 7u) / 8u, n_rows, 1u);
-    matmul_q8_0_pair_preq_warp8_kernel<<<grid, 256>>>(
+    matmul_q8_0_pair_preq_warp8_kernel<<<grid, 256, 0, cuda_decode_stream()>>>(
             (float *)out0->ptr,
             (float *)out1->ptr,
             reinterpret_cast<const unsigned char *>(w0),
@@ -13024,9 +13274,9 @@ static int cuda_matmul_q8_0_hc_expand_tensor_labeled(
     int8_t *xq = (int8_t *)tmp;
     float *xscale = (float *)((char *)tmp + scale_offset);
     const int use_dp4a = cuda_q8_use_dp4a();
-    quantize_q8_0_f32_kernel<<<(unsigned)blocks, 32>>>(xq, xscale, (const float *)x->ptr, in_dim, blocks);
+    quantize_q8_0_f32_kernel<<<(unsigned)blocks, 32, 0, cuda_decode_stream()>>>(xq, xscale, (const float *)x->ptr, in_dim, blocks);
     if (!cuda_ok(cudaGetLastError(), "matmul_q8_0_hc_expand quantize launch")) return 0;
-    matmul_q8_0_hc_expand_preq_warp8_kernel<<<((unsigned)out_dim + 7u) / 8u, 256>>>(
+    matmul_q8_0_hc_expand_preq_warp8_kernel<<<((unsigned)out_dim + 7u) / 8u, 256, 0, cuda_decode_stream()>>>(
             (float *)out_hc->ptr,
             (float *)block_out->ptr,
             block_add ? (const float *)block_add->ptr : (const float *)block_out->ptr,
@@ -13085,7 +13335,7 @@ extern "C" int ds4_gpu_matmul_f16_tensor(ds4_gpu_tensor *out, const void *model_
         getenv("DS4_CUDA_NO_ORDERED_F16_MATMUL") == NULL &&
         getenv("DS4_CUDA_NO_F16_SMALL_OUT") == NULL;
     if (small_out_one_token) {
-        matmul_f16_small_out_hx_ordered_chunks_kernel<<<(unsigned)out_dim, 32>>>(
+        matmul_f16_small_out_hx_ordered_chunks_kernel<<<(unsigned)out_dim, 32, 0, cuda_decode_stream()>>>(
                 (float *)out->ptr,
                 w,
                 (const float *)x->ptr,
@@ -13102,7 +13352,7 @@ extern "C" int ds4_gpu_matmul_f16_tensor(ds4_gpu_tensor *out, const void *model_
         (g_quality_mode || getenv("DS4_CUDA_F16_SMALL_BATCH") != NULL) &&
         getenv("DS4_CUDA_NO_F16_SMALL_BATCH") == NULL;
     if (small_out_batch) {
-        matmul_f16_small_out_batch_kernel<<<(unsigned)n_tok, 256>>>(
+        matmul_f16_small_out_batch_kernel<<<(unsigned)n_tok, 256, 0, cuda_decode_stream()>>>(
                 (float *)out->ptr,
                 w,
                 (const float *)x->ptr,
@@ -13121,7 +13371,7 @@ extern "C" int ds4_gpu_matmul_f16_tensor(ds4_gpu_tensor *out, const void *model_
         const uint64_t xh_count = n_tok * in_dim;
         __half *xh = (__half *)cuda_tmp_alloc_on(logical_tier, xh_count * sizeof(__half), "f16 gemm activations");
         if (!xh) return 0;
-        f32_to_f16_kernel<<<(xh_count + 255) / 256, 256>>>(xh, (const float *)x->ptr, xh_count);
+        f32_to_f16_kernel<<<(xh_count + 255) / 256, 256, 0, cuda_decode_stream()>>>(xh, (const float *)x->ptr, xh_count);
         if (!cuda_ok(cudaGetLastError(), "f16 activation convert launch")) return 0;
         const float alpha = 1.0f;
         const float beta = 0.0f;
@@ -13148,14 +13398,14 @@ extern "C" int ds4_gpu_matmul_f16_tensor(ds4_gpu_tensor *out, const void *model_
     }
     dim3 grid((unsigned)out_dim, (unsigned)n_tok, 1);
     if (serial_f16 || serial_router) {
-        matmul_f16_serial_kernel<<<grid, 1>>>((float *)out->ptr, w, (const float *)x->ptr, in_dim, out_dim, n_tok);
+        matmul_f16_serial_kernel<<<grid, 1, 0, cuda_decode_stream()>>>((float *)out->ptr, w, (const float *)x->ptr, in_dim, out_dim, n_tok);
         return cuda_ok(cudaGetLastError(), serial_router ? "matmul_f16_router_serial launch" : "matmul_f16_serial launch");
     }
     if (ordered_router) {
-        matmul_f16_ordered_chunks_kernel<<<grid, 32>>>((float *)out->ptr, w, (const float *)x->ptr, in_dim, out_dim, n_tok);
+        matmul_f16_ordered_chunks_kernel<<<grid, 32, 0, cuda_decode_stream()>>>((float *)out->ptr, w, (const float *)x->ptr, in_dim, out_dim, n_tok);
         return cuda_ok(cudaGetLastError(), "matmul_f16_ordered_chunks launch");
     }
-    matmul_f16_kernel<<<grid, 256>>>((float *)out->ptr, w, (const float *)x->ptr, in_dim, out_dim, n_tok);
+    matmul_f16_kernel<<<grid, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, w, (const float *)x->ptr, in_dim, out_dim, n_tok);
     return cuda_ok(cudaGetLastError(), "matmul_f16 launch");
 }
 
@@ -13643,11 +13893,11 @@ extern "C" int ds4_gpu_rms_norm_plain_tensor(ds4_gpu_tensor *out, const ds4_gpu_
     if (!out || !x || out->bytes < (uint64_t)n * sizeof(float) ||
         x->bytes < (uint64_t)n * sizeof(float)) return 0;
     if (n == 4096u) {
-        rms_norm_plain_fast4096_kernel<<<1, 256>>>((float *)out->ptr, (const float *)x->ptr, n, 1, eps);
+        rms_norm_plain_fast4096_kernel<<<1, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, (const float *)x->ptr, n, 1, eps);
     } else if ((n & 2047u) == 0u) {
-        rms_norm_plain_batch8_kernel<<<1, 256>>>((float *)out->ptr, (const float *)x->ptr, n, 1, eps);
+        rms_norm_plain_batch8_kernel<<<1, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, (const float *)x->ptr, n, 1, eps);
     } else {
-        rms_norm_plain_kernel<<<1, 256>>>((float *)out->ptr, (const float *)x->ptr, n, 1, eps);
+        rms_norm_plain_kernel<<<1, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, (const float *)x->ptr, n, 1, eps);
     }
     return cuda_ok(cudaGetLastError(), "rms_norm_plain launch");
 }
@@ -13672,7 +13922,7 @@ extern "C" int ds4_gpu_rms_norm_weight_tensor(ds4_gpu_tensor *out, const ds4_gpu
     const char *wptr = cuda_resolve_weight_ptr(model_map, weight_offset, (uint64_t)n * sizeof(float), logical_tier, "rms_weight");
     if (!wptr) return 0;
     const float *w = (const float *)wptr;
-    rms_norm_weight_kernel<<<1, 256>>>((float *)out->ptr, (const float *)x->ptr, w, n, 1, eps);
+    rms_norm_weight_kernel<<<1, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, (const float *)x->ptr, w, n, 1, eps);
     return cuda_ok(cudaGetLastError(), "rms_norm_weight launch");
 }
 extern "C" int ds4_gpu_rms_norm_weight_rows_tensor(ds4_gpu_tensor *out, const ds4_gpu_tensor *x, const void *model_map, uint64_t model_size, uint64_t weight_offset, uint32_t n, uint32_t rows, float eps) {
@@ -15546,7 +15796,7 @@ extern "C" int ds4_gpu_attention_output_q8_batch_tensor(
         if (!tmp) return 0;
         __half *heads_h = (__half *)tmp;
         float *low_packed = (float *)((char *)tmp + low_tmp_offset);
-        attention_pack_group_heads_f16_kernel<<<(heads_h_count + 255) / 256, 256>>>(
+        attention_pack_group_heads_f16_kernel<<<(heads_h_count + 255) / 256, 256, 0, cuda_decode_stream()>>>(
                 heads_h,
                 (const float *)heads->ptr,
                 n_tokens,
@@ -15579,7 +15829,7 @@ extern "C" int ds4_gpu_attention_output_q8_batch_tensor(
                                                        CUDA_R_32F,
                                                        CUBLAS_GEMM_DEFAULT);
         if (!cublas_ok(st, "attention output a gemm")) return 0;
-        attention_unpack_group_low_kernel<<<(low_tmp_count + 255) / 256, 256>>>(
+        attention_unpack_group_low_kernel<<<(low_tmp_count + 255) / 256, 256, 0, cuda_decode_stream()>>>(
                 (float *)low->ptr,
                 low_packed,
                 n_tokens,
@@ -15597,7 +15847,7 @@ extern "C" int ds4_gpu_attention_output_q8_batch_tensor(
         float *xscale = (float *)((char *)tmp + scale_offset);
         const int use_dp4a = cuda_q8_use_dp4a();
         dim3 qgrid((unsigned)blocks_a, (unsigned)x_rows, 1);
-        quantize_q8_0_f32_kernel<<<qgrid, 32>>>(xq,
+        quantize_q8_0_f32_kernel<<<qgrid, 32, 0, cuda_decode_stream()>>>(xq,
                                                 xscale,
                                                 (const float *)heads->ptr,
                                                 group_dim,
@@ -15625,7 +15875,7 @@ extern "C" int ds4_gpu_attention_output_q8_batch_tensor(
             /* handled */
         } else if (getenv("DS4_CUDA_NO_ATTN_A_TOK2") == NULL && n_tokens >= 2u) {
             dim3 grid_a(((unsigned)low_dim + 7u) / 8u, ((unsigned)n_tokens + 1u) / 2u, 1);
-            grouped_q8_0_a_preq_warp8_tok2_kernel<<<grid_a, 512>>>((float *)low->ptr,
+            grouped_q8_0_a_preq_warp8_tok2_kernel<<<grid_a, 512, 0, cuda_decode_stream()>>>((float *)low->ptr,
                                                                    out_a,
                                                                    xq,
                                                                    xscale,
@@ -15637,7 +15887,7 @@ extern "C" int ds4_gpu_attention_output_q8_batch_tensor(
                                                                    use_dp4a);
         } else {
             dim3 grid_a(((unsigned)low_dim + 7u) / 8u, (unsigned)n_tokens, 1);
-            grouped_q8_0_a_preq_warp8_kernel<<<grid_a, 256>>>((float *)low->ptr,
+            grouped_q8_0_a_preq_warp8_kernel<<<grid_a, 256, 0, cuda_decode_stream()>>>((float *)low->ptr,
                                                               out_a,
                                                               xq,
                                                               xscale,
@@ -15732,7 +15982,7 @@ extern "C" int ds4_gpu_attention_output_low_q8_rows_exact_tensor(
     float *xscale = (float *)((char *)tmp + scale_offset);
     const int use_dp4a = cuda_q8_use_dp4a();
     dim3 qgrid((unsigned)blocks_a, (unsigned)x_rows, 1);
-    quantize_q8_0_group_slice_rows_kernel<<<qgrid, 32>>>(
+    quantize_q8_0_group_slice_rows_kernel<<<qgrid, 32, 0, cuda_decode_stream()>>>(
             xq,
             xscale,
             (const float *)heads->ptr,
@@ -15744,7 +15994,7 @@ extern "C" int ds4_gpu_attention_output_low_q8_rows_exact_tensor(
     if (!cuda_ok(cudaGetLastError(),
                  "attention_output_low_q8 rows prequant launch")) return 0;
     dim3 grid_a(((unsigned)low_dim + 7u) / 8u, n_rows, 1u);
-    grouped_q8_0_a_preq_warp8_kernel<<<grid_a, 256>>>((float *)low->ptr,
+    grouped_q8_0_a_preq_warp8_kernel<<<grid_a, 256, 0, cuda_decode_stream()>>>((float *)low->ptr,
                                                       out_a,
                                                       xq,
                                                       xscale,
@@ -15834,7 +16084,7 @@ extern "C" int ds4_gpu_swiglu_tensor(ds4_gpu_tensor *out, const ds4_gpu_tensor *
         out->bytes < (uint64_t)n * sizeof(float) ||
         gate->bytes < (uint64_t)n * sizeof(float) ||
         up->bytes < (uint64_t)n * sizeof(float)) return 0;
-    swiglu_kernel<<<(n + 255) / 256, 256>>>((float *)out->ptr, (const float *)gate->ptr, (const float *)up->ptr, n, clamp, weight);
+    swiglu_kernel<<<(n + 255) / 256, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, (const float *)gate->ptr, (const float *)up->ptr, n, clamp, weight);
     return cuda_ok(cudaGetLastError(), "swiglu launch");
 }
 extern "C" int ds4_gpu_shared_gate_up_swiglu_q8_0_tensor(
@@ -15926,7 +16176,7 @@ extern "C" int ds4_gpu_shared_mid_swiglu_q8_0_decode_exact_tensor(
         if (!tmp) return 0;
         xq = (int8_t *)tmp;
         xscale = (float *)((char *)tmp + scale_offset);
-        quantize_q8_0_f32_kernel<<<(unsigned)blocks, 32>>>(
+        quantize_q8_0_f32_kernel<<<(unsigned)blocks, 32, 0, cuda_decode_stream()>>>(
                 xq, xscale, (const float *)x->ptr, in_dim, blocks);
         if (!cuda_ok(cudaGetLastError(),
                      "shared mid q8 exact quantize launch")) {
@@ -15934,7 +16184,7 @@ extern "C" int ds4_gpu_shared_mid_swiglu_q8_0_decode_exact_tensor(
         }
     }
     shared_mid_q8_0_preq_warp8_exact_kernel<<<
-            ((unsigned)out_dim + 7u) / 8u, 256>>>(
+            ((unsigned)out_dim + 7u) / 8u, 256, 0, cuda_decode_stream()>>>(
             (float *)mid->ptr,
             (const unsigned char *)gate_w,
             (const unsigned char *)up_w,
@@ -15955,7 +16205,7 @@ extern "C" int ds4_gpu_add_tensor(ds4_gpu_tensor *out, const ds4_gpu_tensor *a, 
         out->bytes < (uint64_t)n * sizeof(float) ||
         a->bytes < (uint64_t)n * sizeof(float) ||
         b->bytes < (uint64_t)n * sizeof(float)) return 0;
-    add_kernel<<<(n + 255) / 256, 256>>>((float *)out->ptr, (const float *)a->ptr, (const float *)b->ptr, n);
+    add_kernel<<<(n + 255) / 256, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, (const float *)a->ptr, (const float *)b->ptr, n);
     return cuda_ok(cudaGetLastError(), "add launch");
 }
 
@@ -16049,15 +16299,15 @@ extern "C" int ds4_gpu_router_select_tensor(ds4_gpu_tensor *selected, ds4_gpu_te
         if (getenv("DS4_CUDA_NO_WARP_ROUTER_SELECT") == NULL &&
             getenv("DS4_CUDA_NO_PARALLEL_ROUTER_SELECT") == NULL) {
             dim3 block(32, 4, 1);
-            router_select_warp_topk_kernel<<<1, block>>>((int32_t *)selected->ptr, (float *)weights->ptr, (float *)probs->ptr,
+            router_select_warp_topk_kernel<<<1, block, 0, cuda_decode_stream()>>>((int32_t *)selected->ptr, (float *)weights->ptr, (float *)probs->ptr,
                                                          bias, hash, (const float *)logits->ptr, NULL, tok, hash_rows, 1,
                                                          has_bias && !hash_mode, hash_mode);
         } else if (getenv("DS4_CUDA_NO_PARALLEL_ROUTER_SELECT") == NULL) {
-            router_select_parallel_kernel<<<1, 256>>>((int32_t *)selected->ptr, (float *)weights->ptr, (float *)probs->ptr,
+            router_select_parallel_kernel<<<1, 256, 0, cuda_decode_stream()>>>((int32_t *)selected->ptr, (float *)weights->ptr, (float *)probs->ptr,
                                                       bias, hash, (const float *)logits->ptr, NULL, tok, hash_rows, 1,
                                                       has_bias && !hash_mode, hash_mode);
         } else {
-            router_select_kernel<<<1, 1>>>((int32_t *)selected->ptr, (float *)weights->ptr, (float *)probs->ptr,
+            router_select_kernel<<<1, 1, 0, cuda_decode_stream()>>>((int32_t *)selected->ptr, (float *)weights->ptr, (float *)probs->ptr,
                                           bias, hash, (const float *)logits->ptr, NULL, tok, hash_rows, 1,
                                           has_bias && !hash_mode, hash_mode);
         }
@@ -21082,7 +21332,7 @@ static int routed_moe_launch(
         uint32_t tile_capacity = 0;
         uint32_t tile16_capacity = 0;
         dim3 xq_grid(xq_blocks, n_tokens, 1);
-        q8_K_quantize_kernel<<<xq_grid, 256>>>(xq, (const float *)x->ptr, expert_in_dim, n_tokens);
+        q8_K_quantize_kernel<<<xq_grid, 256, 0, cuda_decode_stream()>>>(xq, (const float *)x->ptr, expert_in_dim, n_tokens);
         ok = cuda_ok(cudaGetLastError(), "routed_moe x quantize launch");
         if (prof_ev[1]) (void)cudaEventRecord(prof_ev[1], 0);
         if (ok && use_sorted_pairs) {
@@ -21129,7 +21379,7 @@ static int routed_moe_launch(
                 tile16_experts = (use_down_tile16 || use_q4_mma_tiles16) ? (uint32_t *)(scratch + tile16_experts_off) : NULL;
                 tile16_starts = (use_down_tile16 || use_q4_mma_tiles16) ? (uint32_t *)(scratch + tile16_starts_off) : NULL;
                 if (use_small_sorted_prep) {
-                    moe_prepare_sorted_tiles_small_kernel<<<1, 128>>>(
+                    moe_prepare_sorted_tiles_small_kernel<<<1, 128, 0, cuda_decode_stream()>>>(
                         counts, offsets, cursors, sorted_pairs,
                         tile_offsets, tile_total, tile_experts, tile_starts,
                         tile16_offsets, tile16_total, tile16_experts, tile16_starts,
@@ -21142,7 +21392,7 @@ static int routed_moe_launch(
                                  "routed_moe sorted counts clear");
                 }
                 if (ok && !use_small_sorted_prep) {
-                    moe_count_sorted_pairs_kernel<<<(pair_count + 255u) / 256u, 256>>>(
+                    moe_count_sorted_pairs_kernel<<<(pair_count + 255u) / 256u, 256, 0, cuda_decode_stream()>>>(
                         counts,
                         (const int32_t *)selected->ptr,
                         pair_count,
@@ -21150,11 +21400,11 @@ static int routed_moe_launch(
                     ok = cuda_ok(cudaGetLastError(), "routed_moe sorted count launch");
                 }
                 if (ok && !use_small_sorted_prep) {
-                    moe_prefix_sorted_pairs_kernel<<<1, 1>>>(offsets, cursors, counts, n_total_expert);
+                    moe_prefix_sorted_pairs_kernel<<<1, 1, 0, cuda_decode_stream()>>>(offsets, cursors, counts, n_total_expert);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe sorted prefix launch");
                 }
                 if (ok && !use_small_sorted_prep) {
-                    moe_scatter_sorted_pairs_kernel<<<(pair_count + 255u) / 256u, 256>>>(
+                    moe_scatter_sorted_pairs_kernel<<<(pair_count + 255u) / 256u, 256, 0, cuda_decode_stream()>>>(
                         sorted_pairs,
                         cursors,
                         (const int32_t *)selected->ptr,
@@ -21163,22 +21413,22 @@ static int routed_moe_launch(
                     ok = cuda_ok(cudaGetLastError(), "routed_moe sorted scatter launch");
                 }
                 if (ok && use_expert_tiles && !use_small_sorted_prep) {
-                    moe_build_expert_tile_offsets_kernel<<<1, 1>>>(tile_offsets, tile_total, counts, expert_tile_m, n_total_expert);
+                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, cuda_decode_stream()>>>(tile_offsets, tile_total, counts, expert_tile_m, n_total_expert);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile offsets launch");
                 }
                 if (ok && use_expert_tiles && !use_small_sorted_prep) {
-                    moe_build_expert_tiles_kernel<<<(n_total_expert + 255u) / 256u, 256>>>(
+                    moe_build_expert_tiles_kernel<<<(n_total_expert + 255u) / 256u, 256, 0, cuda_decode_stream()>>>(
                         tile_experts, tile_starts, tile_offsets, counts, expert_tile_m, n_total_expert);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tiles launch");
                 }
                 if (ok && use_expert_tiles && !use_small_sorted_prep &&
                     (use_down_tile16 || use_q4_mma_tiles16)) {
-                    moe_build_expert_tile_offsets_kernel<<<1, 1>>>(tile16_offsets, tile16_total, counts, 16u, n_total_expert);
+                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, cuda_decode_stream()>>>(tile16_offsets, tile16_total, counts, 16u, n_total_expert);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile16 offsets launch");
                 }
                 if (ok && use_expert_tiles && !use_small_sorted_prep &&
                     (use_down_tile16 || use_q4_mma_tiles16)) {
-                    moe_build_expert_tiles_kernel<<<(n_total_expert + 255u) / 256u, 256>>>(
+                    moe_build_expert_tiles_kernel<<<(n_total_expert + 255u) / 256u, 256, 0, cuda_decode_stream()>>>(
                         tile16_experts, tile16_starts, tile16_offsets, counts, 16u, n_total_expert);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile16 launch");
                 }
@@ -21208,7 +21458,7 @@ static int routed_moe_launch(
                         const size_t t16sh = 16u * 16u * sizeof(cuda_block_q8_K);
                         if (gate_row_span == 512u) {
                             dim3 tgrid((expert_mid_dim + 511u) / 512u, t16cap, 1);
-                            moe_gate_up_mid_q4K_tile16_mma_kernel<512><<<tgrid, 256, t16sh>>>(
+                            moe_gate_up_mid_q4K_tile16_mma_kernel<512><<<tgrid, 256, t16sh, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile16_total, tile16_experts, tile16_starts, (const float *)weights->ptr,
@@ -21216,7 +21466,7 @@ static int routed_moe_launch(
                                 write_gate_up, clamp);
                         } else if (gate_row_span == 1024u) {
                             dim3 tgrid((expert_mid_dim + 1023u) / 1024u, t16cap, 1);
-                            moe_gate_up_mid_q4K_tile16_mma_kernel<1024><<<tgrid, 256, t16sh>>>(
+                            moe_gate_up_mid_q4K_tile16_mma_kernel<1024><<<tgrid, 256, t16sh, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile16_total, tile16_experts, tile16_starts, (const float *)weights->ptr,
@@ -21224,7 +21474,7 @@ static int routed_moe_launch(
                                 write_gate_up, clamp);
                         } else {
                             dim3 tgrid((expert_mid_dim + 2047u) / 2048u, t16cap, 1);
-                            moe_gate_up_mid_q4K_tile16_mma_kernel<2048><<<tgrid, 256, t16sh>>>(
+                            moe_gate_up_mid_q4K_tile16_mma_kernel<2048><<<tgrid, 256, t16sh, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile16_total, tile16_experts, tile16_starts, (const float *)weights->ptr,
@@ -21234,7 +21484,7 @@ static int routed_moe_launch(
                     } else if (use_q4_mma && use_gate_row2048) {
                         if (gate_row_span == 512u) {
                             dim3 tgrid((expert_mid_dim + 511u) / 512u, tile_capacity, 1);
-                            moe_gate_up_mid_q4K_tile8_mma_kernel<512><<<tgrid, 256>>>(
+                            moe_gate_up_mid_q4K_tile8_mma_kernel<512><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21242,7 +21492,7 @@ static int routed_moe_launch(
                                 write_gate_up, clamp);
                         } else if (gate_row_span == 1024u) {
                             dim3 tgrid((expert_mid_dim + 1023u) / 1024u, tile_capacity, 1);
-                            moe_gate_up_mid_q4K_tile8_mma_kernel<1024><<<tgrid, 256>>>(
+                            moe_gate_up_mid_q4K_tile8_mma_kernel<1024><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21250,7 +21500,7 @@ static int routed_moe_launch(
                                 write_gate_up, clamp);
                         } else {
                             dim3 tgrid((expert_mid_dim + 2047u) / 2048u, tile_capacity, 1);
-                            moe_gate_up_mid_q4K_tile8_mma_kernel<2048><<<tgrid, 256>>>(
+                            moe_gate_up_mid_q4K_tile8_mma_kernel<2048><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21260,7 +21510,7 @@ static int routed_moe_launch(
                     } else if (use_gate_row2048) {
                         if (gate_row_span == 512u) {
                             dim3 tgrid((expert_mid_dim + 511u) / 512u, tile_capacity, 1);
-                            moe_gate_up_mid_q4K_expert_tile8_rowspan_kernel<512><<<tgrid, 256>>>(
+                            moe_gate_up_mid_q4K_expert_tile8_rowspan_kernel<512><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21268,7 +21518,7 @@ static int routed_moe_launch(
                                 write_gate_up, clamp);
                         } else if (gate_row_span == 1024u) {
                             dim3 tgrid((expert_mid_dim + 1023u) / 1024u, tile_capacity, 1);
-                            moe_gate_up_mid_q4K_expert_tile8_rowspan_kernel<1024><<<tgrid, 256>>>(
+                            moe_gate_up_mid_q4K_expert_tile8_rowspan_kernel<1024><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21276,7 +21526,7 @@ static int routed_moe_launch(
                                 write_gate_up, clamp);
                         } else {
                             dim3 tgrid((expert_mid_dim + 2047u) / 2048u, tile_capacity, 1);
-                            moe_gate_up_mid_q4K_expert_tile8_rowspan_kernel<2048><<<tgrid, 256>>>(
+                            moe_gate_up_mid_q4K_expert_tile8_rowspan_kernel<2048><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                                 gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21285,7 +21535,7 @@ static int routed_moe_launch(
                         }
                     } else {
                         dim3 tgrid((expert_mid_dim + 31u) / 32u, tile_capacity, 1);
-                        moe_gate_up_mid_q4K_expert_tile8_rowspan_kernel<32><<<tgrid, 256>>>(
+                        moe_gate_up_mid_q4K_expert_tile8_rowspan_kernel<32><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                             gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                             tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21295,7 +21545,7 @@ static int routed_moe_launch(
                 } else if (use_gate_row2048) {
                     if (gate_row_span == 512u) {
                         dim3 tgrid((expert_mid_dim + 511u) / 512u, tile_capacity, 1);
-                        moe_gate_up_mid_expert_tile8_rowspan_kernel<512><<<tgrid, 256>>>(
+                        moe_gate_up_mid_expert_tile8_rowspan_kernel<512><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                             gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                             tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21303,7 +21553,7 @@ static int routed_moe_launch(
                             write_gate_up, clamp);
                     } else if (gate_row_span == 1024u) {
                         dim3 tgrid((expert_mid_dim + 1023u) / 1024u, tile_capacity, 1);
-                        moe_gate_up_mid_expert_tile8_rowspan_kernel<1024><<<tgrid, 256>>>(
+                        moe_gate_up_mid_expert_tile8_rowspan_kernel<1024><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                             gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                             tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21311,7 +21561,7 @@ static int routed_moe_launch(
                             write_gate_up, clamp);
                     } else {
                         dim3 tgrid((expert_mid_dim + 2047u) / 2048u, tile_capacity, 1);
-                        moe_gate_up_mid_expert_tile8_row2048_kernel<<<tgrid, 256>>>(
+                        moe_gate_up_mid_expert_tile8_row2048_kernel<<<tgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                             gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                             tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21320,7 +21570,7 @@ static int routed_moe_launch(
                     }
                 } else if (expert_tile_m == 8u) {
                     dim3 tgrid((expert_mid_dim + 31u) / 32u, tile_capacity, 1);
-                    moe_gate_up_mid_expert_tile8_row32_kernel<<<tgrid, 256>>>(
+                    moe_gate_up_mid_expert_tile8_row32_kernel<<<tgrid, 256, 0, cuda_decode_stream()>>>(
                         (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                         gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                         tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21328,7 +21578,7 @@ static int routed_moe_launch(
                         write_gate_up, clamp);
                 } else {
                     dim3 tgrid((expert_mid_dim + 31u) / 32u, tile_capacity, 1);
-                    moe_gate_up_mid_expert_tile4_row32_kernel<<<tgrid, 256>>>(
+                    moe_gate_up_mid_expert_tile4_row32_kernel<<<tgrid, 256, 0, cuda_decode_stream()>>>(
                         (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                         gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                         tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -21337,7 +21587,7 @@ static int routed_moe_launch(
                 }
             } else if (ok && sorted_pairs && use_p2_sorted) {
                 dim3 p2_mgrid((expert_mid_dim + 15u) / 16u, (pair_count + 1u) / 2u, 1);
-                moe_gate_up_mid_sorted_p2_qwarp32_kernel<<<p2_mgrid, 256>>>(
+                moe_gate_up_mid_sorted_p2_qwarp32_kernel<<<p2_mgrid, 256, 0, cuda_decode_stream()>>>(
                     (float *)gate->ptr,
                     (float *)up->ptr,
                     (float *)mid->ptr,
@@ -21355,7 +21605,7 @@ static int routed_moe_launch(
                     pair_count,
                     clamp);
             } else if (ok && sorted_pairs) {
-                moe_gate_up_mid_sorted_qwarp32_kernel<<<mgrid, 256>>>(
+                moe_gate_up_mid_sorted_qwarp32_kernel<<<mgrid, 256, 0, cuda_decode_stream()>>>(
                     (float *)gate->ptr,
                     (float *)up->ptr,
                     (float *)mid->ptr,
@@ -21381,7 +21631,7 @@ static int routed_moe_launch(
                      * cascading the IQ2 sorted/expert-tile branches off. */
                     if (use_direct_midq) {
                         dim3 mqgrid(midq_blocks, n_tokens * n_expert, 1);
-                        moe_gate_up_midq_decode_q4K_qwarp32_kernel<<<mqgrid, 256>>>(
+                        moe_gate_up_midq_decode_q4K_qwarp32_kernel<<<mqgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)mid->ptr,
                             midq,
                             gate_w,
@@ -21397,7 +21647,7 @@ static int routed_moe_launch(
                             clamp);
                     } else if (use_q4_gate_h16r8) {
                         dim3 h8grid((expert_mid_dim + 7u) / 8u, n_tokens * n_expert, 1);
-                        moe_gate_up_mid_decode_q4K_hwarp16_row8_kernel<<<h8grid, 256>>>(
+                        moe_gate_up_mid_decode_q4K_hwarp16_row8_kernel<<<h8grid, 256, 0, cuda_decode_stream()>>>(
                             (float *)gate->ptr,
                             (float *)up->ptr,
                             (float *)mid->ptr,
@@ -21415,7 +21665,7 @@ static int routed_moe_launch(
                             clamp);
                     } else if (use_q4_gate_w32r16) {
                         dim3 w16grid((expert_mid_dim + 15u) / 16u, n_tokens * n_expert, 1);
-                        moe_gate_up_mid_decode_q4K_warp32_row16_kernel<<<w16grid, 512>>>(
+                        moe_gate_up_mid_decode_q4K_warp32_row16_kernel<<<w16grid, 512, 0, cuda_decode_stream()>>>(
                             (float *)gate->ptr,
                             (float *)up->ptr,
                             (float *)mid->ptr,
@@ -21435,7 +21685,7 @@ static int routed_moe_launch(
                         dim3 wgrid((expert_mid_dim + 7u) / 8u, n_tokens * n_expert, 1);
                         if (use_q4_gate_w32_noaux) {
                             if (use_q4_midq_sidecar) {
-                                moe_gate_up_mid_decode_q4K_warp32_noaux_sidecar_kernel<<<wgrid, 256>>>(
+                                moe_gate_up_mid_decode_q4K_warp32_noaux_sidecar_kernel<<<wgrid, 256, 0, cuda_decode_stream()>>>(
                                     (float *)mid->ptr,
                                     midq_sidecar,
                                     gate_w,
@@ -21450,7 +21700,7 @@ static int routed_moe_launch(
                                     n_expert,
                                     clamp);
                             } else {
-                                moe_gate_up_mid_decode_q4K_warp32_noaux_kernel<<<wgrid, 256>>>(
+                                moe_gate_up_mid_decode_q4K_warp32_noaux_kernel<<<wgrid, 256, 0, cuda_decode_stream()>>>(
                                     (float *)mid->ptr,
                                     gate_w,
                                     up_w,
@@ -21465,7 +21715,7 @@ static int routed_moe_launch(
                                     clamp);
                             }
                         } else {
-                            moe_gate_up_mid_decode_q4K_warp32_kernel<<<wgrid, 256>>>(
+                            moe_gate_up_mid_decode_q4K_warp32_kernel<<<wgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)gate->ptr,
                                 (float *)up->ptr,
                                 (float *)mid->ptr,
@@ -21484,7 +21734,7 @@ static int routed_moe_launch(
                         }
                     } else if (use_q4_gate_h16) {
                         dim3 hgrid((expert_mid_dim + 15u) / 16u, n_tokens * n_expert, 1);
-                        moe_gate_up_mid_decode_q4K_hwarp16_kernel<<<hgrid, 256>>>(
+                        moe_gate_up_mid_decode_q4K_hwarp16_kernel<<<hgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)gate->ptr,
                             (float *)up->ptr,
                             (float *)mid->ptr,
@@ -21501,7 +21751,7 @@ static int routed_moe_launch(
                             write_gate_up,
                             clamp);
                     } else {
-                        moe_gate_up_mid_decode_q4K_qwarp32_kernel<<<qgrid, 256>>>(
+                        moe_gate_up_mid_decode_q4K_qwarp32_kernel<<<qgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)gate->ptr,
                             (float *)up->ptr,
                             (float *)mid->ptr,
@@ -21519,7 +21769,7 @@ static int routed_moe_launch(
                             clamp);
                     }
                 } else if (use_decode_lut_gate) {
-                    moe_gate_up_mid_decode_lut_qwarp32_kernel<<<qgrid, 256>>>(
+                    moe_gate_up_mid_decode_lut_qwarp32_kernel<<<qgrid, 256, 0, cuda_decode_stream()>>>(
                         (float *)gate->ptr,
                         (float *)up->ptr,
                         (float *)mid->ptr,
@@ -21536,7 +21786,7 @@ static int routed_moe_launch(
                         write_gate_up,
                         clamp);
                 } else {
-                    moe_gate_up_mid_qwarp32_kernel<<<qgrid, 256>>>(
+                    moe_gate_up_mid_qwarp32_kernel<<<qgrid, 256, 0, cuda_decode_stream()>>>(
                         (float *)gate->ptr,
                         (float *)up->ptr,
                         (float *)mid->ptr,
@@ -21559,7 +21809,7 @@ static int routed_moe_launch(
         if (ok && !use_direct_midq) {
             dim3 midq_grid(midq_blocks, n_tokens * n_expert, 1);
             if (use_q4_midq_sidecar) {
-                q8_K_quantize_sidecar_kernel<<<midq_grid, 256>>>(
+                q8_K_quantize_sidecar_kernel<<<midq_grid, 256, 0, cuda_decode_stream()>>>(
                         midq,
                         (const float *)mid->ptr,
                         midq_sidecar,
@@ -21567,7 +21817,7 @@ static int routed_moe_launch(
                         n_tokens * n_expert);
                 ok = cuda_ok(cudaGetLastError(), "routed_moe mid sidecar quantize launch");
             } else if (use_owned_sparse_buffers) {
-                q8_K_quantize_owned_kernel<<<midq_grid, 256>>>(
+                q8_K_quantize_owned_kernel<<<midq_grid, 256, 0, cuda_decode_stream()>>>(
                         midq,
                         (const float *)mid->ptr,
                         (const int32_t *)selected->ptr,
@@ -21578,7 +21828,7 @@ static int routed_moe_launch(
                 ok = cuda_ok(cudaGetLastError(),
                              "owned routed_moe active mid quantize launch");
             } else {
-                q8_K_quantize_kernel<<<midq_grid, 256>>>(midq, (const float *)mid->ptr, expert_mid_dim, n_tokens * n_expert);
+                q8_K_quantize_kernel<<<midq_grid, 256, 0, cuda_decode_stream()>>>(midq, (const float *)mid->ptr, expert_mid_dim, n_tokens * n_expert);
                 ok = cuda_ok(cudaGetLastError(), "routed_moe mid quantize launch");
             }
         }
@@ -21606,7 +21856,7 @@ static int routed_moe_launch(
                 dim3 sgrid((out_dim + 31u) / 32u, 1, 1);
                 if (q4k_path) {
                     if (n_expert == 6u) {
-                        moe_down_q4K_sum6_qwarp32_kernel<<<sgrid, 256>>>(
+                        moe_down_q4K_sum6_qwarp32_kernel<<<sgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)out->ptr,
                             down_w,
                             midq,
@@ -21618,7 +21868,7 @@ static int routed_moe_launch(
                     } else {
                         if (use_q4_down_slot3) {
                             dim3 swgrid((out_dim + 7u) / 8u, 1, 1);
-                            moe_down_q4K_sum3_slotwarp_kernel<<<swgrid, 256>>>(
+                            moe_down_q4K_sum3_slotwarp_kernel<<<swgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)out->ptr,
                                 down_w,
                                 midq,
@@ -21628,7 +21878,7 @@ static int routed_moe_launch(
                                 midq_blocks,
                                 out_dim);
                         } else {
-                            moe_down_q4K_sum3_qwarp32_kernel<<<sgrid, 256>>>(
+                            moe_down_q4K_sum3_qwarp32_kernel<<<sgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)out->ptr,
                                 down_w,
                                 midq,
@@ -21641,7 +21891,7 @@ static int routed_moe_launch(
                     }
                 } else {
                     if (n_expert == 6u) {
-                        moe_down_sum6_qwarp32_kernel<<<sgrid, 256>>>(
+                        moe_down_sum6_qwarp32_kernel<<<sgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)out->ptr,
                             down_w,
                             midq,
@@ -21651,7 +21901,7 @@ static int routed_moe_launch(
                             midq_blocks,
                             out_dim);
                     } else {
-                        moe_down_sum3_qwarp32_kernel<<<sgrid, 256>>>(
+                        moe_down_sum3_qwarp32_kernel<<<sgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)out->ptr,
                             down_w,
                             midq,
@@ -21664,7 +21914,7 @@ static int routed_moe_launch(
                 }
             } else if (use_atomic_down) {
                 uint64_t n = (uint64_t)n_tokens * out_dim;
-                zero_kernel<<<(n + 255u) / 256u, 256>>>((float *)out->ptr, n);
+                zero_kernel<<<(n + 255u) / 256u, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, n);
                 ok = cuda_ok(cudaGetLastError(), "routed_moe atomic zero launch");
             }
             if (use_direct_down_sum) {
@@ -21683,21 +21933,21 @@ static int routed_moe_launch(
                         const size_t dt16sh = 16u * (size_t)midq_blocks * sizeof(cuda_block_q8_K);
                         if (down_row_span == 512u) {
                             dim3 tgrid((out_dim + 511u) / 512u, t16cap, 1);
-                            moe_down_q4K_tile16_mma_kernel<512><<<tgrid, 256, dt16sh>>>(
+                            moe_down_q4K_tile16_mma_kernel<512><<<tgrid, 256, dt16sh, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile16_total, tile16_experts, tile16_starts, down_expert_bytes, down_row_bytes,
                                 midq_blocks, out_dim, n_expert);
                         } else if (down_row_span == 1024u) {
                             dim3 tgrid((out_dim + 1023u) / 1024u, t16cap, 1);
-                            moe_down_q4K_tile16_mma_kernel<1024><<<tgrid, 256, dt16sh>>>(
+                            moe_down_q4K_tile16_mma_kernel<1024><<<tgrid, 256, dt16sh, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile16_total, tile16_experts, tile16_starts, down_expert_bytes, down_row_bytes,
                                 midq_blocks, out_dim, n_expert);
                         } else {
                             dim3 tgrid((out_dim + 2047u) / 2048u, t16cap, 1);
-                            moe_down_q4K_tile16_mma_kernel<2048><<<tgrid, 256, dt16sh>>>(
+                            moe_down_q4K_tile16_mma_kernel<2048><<<tgrid, 256, dt16sh, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 tile16_total, tile16_experts, tile16_starts, down_expert_bytes, down_row_bytes,
@@ -21706,21 +21956,21 @@ static int routed_moe_launch(
                     } else if (use_q4_down_mma && use_q4_down_rowspan) {
                         if (down_row_span == 512u) {
                             dim3 tgrid((out_dim + 511u) / 512u, down_tile_capacity, 1);
-                            moe_down_q4K_tile8_mma_kernel<512><<<tgrid, 256>>>(
+                            moe_down_q4K_tile8_mma_kernel<512><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
                                 midq_blocks, out_dim, n_expert);
                         } else if (down_row_span == 1024u) {
                             dim3 tgrid((out_dim + 1023u) / 1024u, down_tile_capacity, 1);
-                            moe_down_q4K_tile8_mma_kernel<1024><<<tgrid, 256>>>(
+                            moe_down_q4K_tile8_mma_kernel<1024><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
                                 midq_blocks, out_dim, n_expert);
                         } else {
                             dim3 tgrid((out_dim + 2047u) / 2048u, down_tile_capacity, 1);
-                            moe_down_q4K_tile8_mma_kernel<2048><<<tgrid, 256>>>(
+                            moe_down_q4K_tile8_mma_kernel<2048><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
@@ -21729,21 +21979,21 @@ static int routed_moe_launch(
                     } else if (use_q4_down_rowspan) {
                         if (down_row_span == 512u) {
                             dim3 tgrid((out_dim + 511u) / 512u, down_tile_capacity, 1);
-                            moe_down_q4K_expert_tile8_rowspan_kernel<512><<<tgrid, 256>>>(
+                            moe_down_q4K_expert_tile8_rowspan_kernel<512><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
                                 midq_blocks, out_dim, n_expert);
                         } else if (down_row_span == 1024u) {
                             dim3 tgrid((out_dim + 1023u) / 1024u, down_tile_capacity, 1);
-                            moe_down_q4K_expert_tile8_rowspan_kernel<1024><<<tgrid, 256>>>(
+                            moe_down_q4K_expert_tile8_rowspan_kernel<1024><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
                                 midq_blocks, out_dim, n_expert);
                         } else {
                             dim3 tgrid((out_dim + 2047u) / 2048u, down_tile_capacity, 1);
-                            moe_down_q4K_expert_tile8_rowspan_kernel<2048><<<tgrid, 256>>>(
+                            moe_down_q4K_expert_tile8_rowspan_kernel<2048><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                                 (float *)down->ptr,
                                 down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                                 down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
@@ -21751,7 +22001,7 @@ static int routed_moe_launch(
                         }
                     } else {
                         dim3 tgrid((out_dim + 31u) / 32u, down_tile_capacity, 1);
-                        moe_down_q4K_expert_tile8_rowspan_kernel<32><<<tgrid, 256>>>(
+                        moe_down_q4K_expert_tile8_rowspan_kernel<32><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                             (float *)down->ptr,
                             down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                             down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
@@ -21760,21 +22010,21 @@ static int routed_moe_launch(
                 } else if (use_down_row2048) {
                     if (down_row_span == 512u) {
                         dim3 tgrid((out_dim + 511u) / 512u, down_tile_capacity, 1);
-                        moe_down_expert_tile16_rowspan_kernel<512><<<tgrid, 256>>>(
+                        moe_down_expert_tile16_rowspan_kernel<512><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                             use_atomic_down ? (float *)out->ptr : (float *)down->ptr,
                             down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                             down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
                             midq_blocks, out_dim, n_expert, use_atomic_down);
                     } else if (down_row_span == 1024u) {
                         dim3 tgrid((out_dim + 1023u) / 1024u, down_tile_capacity, 1);
-                        moe_down_expert_tile16_rowspan_kernel<1024><<<tgrid, 256>>>(
+                        moe_down_expert_tile16_rowspan_kernel<1024><<<tgrid, 256, 0, cuda_decode_stream()>>>(
                             use_atomic_down ? (float *)out->ptr : (float *)down->ptr,
                             down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                             down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
                             midq_blocks, out_dim, n_expert, use_atomic_down);
                     } else {
                         dim3 tgrid((out_dim + 2047u) / 2048u, down_tile_capacity, 1);
-                        moe_down_expert_tile16_row2048_kernel<<<tgrid, 256>>>(
+                        moe_down_expert_tile16_row2048_kernel<<<tgrid, 256, 0, cuda_decode_stream()>>>(
                             use_atomic_down ? (float *)out->ptr : (float *)down->ptr,
                             down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                             down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
@@ -21782,21 +22032,21 @@ static int routed_moe_launch(
                     }
                 } else if (use_down_tile16) {
                     dim3 tgrid((out_dim + 31u) / 32u, down_tile_capacity, 1);
-                    moe_down_expert_tile16_row32_kernel<<<tgrid, 256>>>(
+                    moe_down_expert_tile16_row32_kernel<<<tgrid, 256, 0, cuda_decode_stream()>>>(
                         use_atomic_down ? (float *)out->ptr : (float *)down->ptr,
                         down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                         down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
                         midq_blocks, out_dim, n_expert, use_atomic_down);
                 } else if (expert_tile_m == 8u) {
                     dim3 tgrid((out_dim + 31u) / 32u, down_tile_capacity, 1);
-                    moe_down_expert_tile8_row32_kernel<<<tgrid, 256>>>(
+                    moe_down_expert_tile8_row32_kernel<<<tgrid, 256, 0, cuda_decode_stream()>>>(
                         use_atomic_down ? (float *)out->ptr : (float *)down->ptr,
                         down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                         down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
                         midq_blocks, out_dim, n_expert, use_atomic_down);
                 } else {
                     dim3 tgrid((out_dim + 31u) / 32u, down_tile_capacity, 1);
-                    moe_down_expert_tile4_row32_kernel<<<tgrid, 256>>>(
+                    moe_down_expert_tile4_row32_kernel<<<tgrid, 256, 0, cuda_decode_stream()>>>(
                         use_atomic_down ? (float *)out->ptr : (float *)down->ptr,
                         down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                         down_tile_total, down_tile_experts, down_tile_starts, down_expert_bytes, down_row_bytes,
@@ -21804,7 +22054,7 @@ static int routed_moe_launch(
                 }
             } else if (sorted_pairs && use_p2_sorted) {
                 dim3 p2_dgrid((out_dim + 15u) / 16u, (pair_count + 1u) / 2u, 1);
-                moe_down_sorted_p2_qwarp32_kernel<<<p2_dgrid, 256>>>(
+                moe_down_sorted_p2_qwarp32_kernel<<<p2_dgrid, 256, 0, cuda_decode_stream()>>>(
                     (float *)down->ptr,
                     down_w,
                     midq,
@@ -21817,7 +22067,7 @@ static int routed_moe_launch(
                     n_expert,
                     pair_count);
             } else if (sorted_pairs) {
-                moe_down_sorted_qwarp32_kernel<<<dgrid, 256>>>(
+                moe_down_sorted_qwarp32_kernel<<<dgrid, 256, 0, cuda_decode_stream()>>>(
                     (float *)down->ptr,
                     down_w,
                     midq,
@@ -21834,7 +22084,7 @@ static int routed_moe_launch(
                  * and the dot helper to dev_dot_q4_K_q8_K_block. Writes per-pair
                  * outputs into down->ptr; moe_sum_kernel below sums them across
                  * experts into out->ptr. */
-                moe_down_q4K_qwarp32_kernel<<<dgrid, 256>>>(
+                moe_down_q4K_qwarp32_kernel<<<dgrid, 256, 0, cuda_decode_stream()>>>(
                     (float *)down->ptr,
                     down_w,
                     midq,
@@ -21845,7 +22095,7 @@ static int routed_moe_launch(
                     out_dim,
                     n_expert);
             } else {
-                moe_down_qwarp32_kernel<<<dgrid, 256>>>(
+                moe_down_qwarp32_kernel<<<dgrid, 256, 0, cuda_decode_stream()>>>(
                     (float *)down->ptr,
                     down_w,
                     midq,
@@ -21862,7 +22112,7 @@ static int routed_moe_launch(
         if (ok && !use_atomic_down && !use_direct_down_sum) {
             uint64_t n = (uint64_t)n_tokens * out_dim;
             if (use_owned_sparse_buffers) {
-                moe_sum_owned_kernel<<<(n + 255) / 256, 256>>>(
+                moe_sum_owned_kernel<<<(n + 255) / 256, 256, 0, cuda_decode_stream()>>>(
                         (float *)out->ptr,
                         (const float *)down->ptr,
                         (const int32_t *)selected->ptr,
@@ -21870,7 +22120,7 @@ static int routed_moe_launch(
                         n_expert,
                         n_tokens);
             } else {
-                moe_sum_kernel<<<(n + 255) / 256, 256>>>(
+                moe_sum_kernel<<<(n + 255) / 256, 256, 0, cuda_decode_stream()>>>(
                         (float *)out->ptr,
                         (const float *)down->ptr,
                         out_dim,
@@ -21901,7 +22151,7 @@ static int routed_moe_launch(
 
     if (ok) {
         dim3 mgrid(expert_mid_dim, n_tokens * n_expert, 1);
-        moe_gate_up_mid_f32_kernel<<<mgrid, 256>>>(
+        moe_gate_up_mid_f32_kernel<<<mgrid, 256, 0, cuda_decode_stream()>>>(
             (float *)gate->ptr,
             (float *)up->ptr,
             (float *)mid->ptr,
@@ -21920,7 +22170,7 @@ static int routed_moe_launch(
     }
     if (ok) {
         dim3 dgrid(out_dim, n_tokens * n_expert, 1);
-        moe_down_f32_kernel<<<dgrid, 256>>>(
+        moe_down_f32_kernel<<<dgrid, 256, 0, cuda_decode_stream()>>>(
             (float *)down->ptr,
             down_w,
             (const float *)mid->ptr,
@@ -21934,7 +22184,7 @@ static int routed_moe_launch(
     }
     if (ok) {
         uint64_t n = (uint64_t)n_tokens * out_dim;
-        moe_sum_kernel<<<(n + 255) / 256, 256>>>((float *)out->ptr, (const float *)down->ptr, out_dim, n_expert, n_tokens);
+        moe_sum_kernel<<<(n + 255) / 256, 256, 0, cuda_decode_stream()>>>((float *)out->ptr, (const float *)down->ptr, out_dim, n_expert, n_tokens);
         ok = cuda_ok(cudaGetLastError(), "routed_moe sum launch");
     }
     return ok;
@@ -22428,7 +22678,7 @@ extern "C" int ds4_gpu_hc_split_weighted_sum_tensor(
     const float *scale = (const float *)cuda_resolve_weight_ptr(model_map, scale_offset, 3ull * sizeof(float), logical_tier, "hc_scale");
     const float *base = (const float *)cuda_resolve_weight_ptr(model_map, base_offset, mix_bytes, logical_tier, "hc_base");
     if (!scale || !base) return 0;
-    hc_split_weighted_sum_fused_kernel<<<(uint32_t)n_rows, 256>>>(
+    hc_split_weighted_sum_fused_kernel<<<(uint32_t)n_rows, 256, 0, cuda_decode_stream()>>>(
             (float *)out->ptr,
             (float *)split->ptr,
             (const float *)mix->ptr,
@@ -22486,7 +22736,7 @@ extern "C" int ds4_gpu_hc_split_weighted_sum_norm_tensor(
             const float *norm_w = (const float *)cuda_resolve_weight_ptr(model_map, norm_weight_offset,
                     (uint64_t)n_embd * sizeof(float), logical_tier, "hc_norm_weight");
             if (!scale || !base || !norm_w) return 0;
-            hc_split_weighted_sum_norm_fused_kernel<<<(uint32_t)n_rows, 256>>>(
+            hc_split_weighted_sum_norm_fused_kernel<<<(uint32_t)n_rows, 256, 0, cuda_decode_stream()>>>(
                     (float *)out->ptr,
                     (float *)norm_out->ptr,
                     (float *)split->ptr,
@@ -22551,7 +22801,7 @@ extern "C" int ds4_gpu_hc_expand_tensor(ds4_gpu_tensor *out_hc, const ds4_gpu_te
     if (!out_hc || !block_out || !residual_hc || !post || !comb || n_embd == 0 || n_hc == 0) return 0;
     uint32_t n_tokens = (uint32_t)(out_hc->bytes / ((uint64_t)n_hc * n_embd * sizeof(float)));
     uint64_t n_elem = (uint64_t)n_tokens * n_hc * n_embd;
-    hc_expand_kernel<<<(n_elem + 255) / 256, 256>>>((float *)out_hc->ptr,
+    hc_expand_kernel<<<(n_elem + 255) / 256, 256, 0, cuda_decode_stream()>>>((float *)out_hc->ptr,
                                                     (const float *)block_out->ptr,
                                                     (const float *)block_out->ptr,
                                                     (const float *)block_out->ptr,
@@ -22567,7 +22817,7 @@ extern "C" int ds4_gpu_hc_expand_add_tensor(ds4_gpu_tensor *out_hc, const ds4_gp
         n_embd == 0 || n_hc == 0) return 0;
     uint32_t n_tokens = (uint32_t)(out_hc->bytes / ((uint64_t)n_hc * n_embd * sizeof(float)));
     uint64_t n_elem = (uint64_t)n_tokens * n_hc * n_embd;
-    hc_expand_kernel<<<(n_elem + 255) / 256, 256>>>((float *)out_hc->ptr,
+    hc_expand_kernel<<<(n_elem + 255) / 256, 256, 0, cuda_decode_stream()>>>((float *)out_hc->ptr,
                                                     (const float *)block_out->ptr,
                                                     (const float *)block_add->ptr,
                                                     (const float *)block_out->ptr,
@@ -22601,7 +22851,7 @@ extern "C" int ds4_gpu_hc_expand_add_split_tensor(ds4_gpu_tensor *out_hc, const 
     uint32_t mix_hc = 2u * n_hc + n_hc * n_hc;
     uint64_t n_elem = (uint64_t)n_tokens * n_hc * n_embd;
     const float *base = (const float *)split->ptr;
-    hc_expand_kernel<<<(n_elem + 255) / 256, 256>>>((float *)out_hc->ptr,
+    hc_expand_kernel<<<(n_elem + 255) / 256, 256, 0, cuda_decode_stream()>>>((float *)out_hc->ptr,
                                                     (const float *)block_out->ptr,
                                                     (const float *)block_add->ptr,
                                                     (const float *)block_out->ptr,

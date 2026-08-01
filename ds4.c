@@ -127,6 +127,12 @@ static uint32_t metal_graph_cuda_tp_output_tiers_for_head(
  * we cannot reference ds4_tensor_range there — those stubs are guarded
  * by !DS4_NO_GPU below. */
 #if defined(__APPLE__) && !defined(DS4_NO_GPU)
+/* Decode-island graph capture is CUDA-only; Metal decodes eagerly. */
+int ds4_gpu_decode_graphs_supported(void) { return 0; }
+int ds4_gpu_decode_graph_begin(const ds4_decode_graph_key *key) { (void)key; return -1; }
+int ds4_gpu_decode_graph_end(const ds4_decode_graph_key *key) { (void)key; return -1; }
+void ds4_gpu_decode_graph_abort(const ds4_decode_graph_key *key) { (void)key; }
+void ds4_gpu_decode_graphs_invalidate(void) {}
 int ds4_gpu_set_current_device(int logical_tier) { (void)logical_tier; return -1; }
 int ds4_gpu_set_current_device_fenced(int logical_tier) { (void)logical_tier; return -1; }
 void ds4_gpu_enable_q8_dequant_gemm(void) {}
@@ -15397,6 +15403,23 @@ DS4_GPU_GRAPH_CLASS_P_ACCESSOR(directional_steering_dirs)
  * (g_n_gpus <= 1) callers no-op. Returns 0 on success. */
 
 #ifdef DS4_NO_GPU
+/* CPU-only builds do not include ds4_gpu.h: mirror the decode-graph key
+ * type and stub the capture API (always eager). */
+typedef struct ds4_decode_graph_key {
+    uint32_t il;
+    uint32_t island;
+    uint32_t variant;
+    uint32_t _pad;
+    void    *cur_hc;
+    void    *after_attn_hc;
+    void    *after_ffn_hc;
+    void    *attn_norm;
+} ds4_decode_graph_key;
+static inline int ds4_gpu_decode_graphs_supported(void) { return 0; }
+static inline int ds4_gpu_decode_graph_begin(const ds4_decode_graph_key *key) { (void)key; return -1; }
+static inline int ds4_gpu_decode_graph_end(const ds4_decode_graph_key *key) { (void)key; return -1; }
+static inline void ds4_gpu_decode_graph_abort(const ds4_decode_graph_key *key) { (void)key; }
+static inline void ds4_gpu_decode_graphs_invalidate(void) {}
 static inline int ds4_gpu_set_current_device(int tier) { (void)tier; return 0; }
 static inline int ds4_gpu_tensor_copy_xdev(ds4_gpu_tensor *dst,
                                             const ds4_gpu_tensor *src,
@@ -15639,6 +15662,9 @@ static void metal_graph_free_prefill_workspace(ds4_gpu_graph *g) {
 
 /* Release every Metal tensor owned by the whole-model graph runtime. */
 static void metal_graph_free(ds4_gpu_graph *g) {
+    /* Captured decode-island graphs bake this graph's buffer addresses
+     * into their kernel nodes; retire them before the buffers go away. */
+    ds4_gpu_decode_graphs_invalidate();
     /* free every Class P slot across all DS4_MAX_GPUS tier
      * slots. Unallocated slots are NULL and ds4_gpu_tensor_free(NULL) is a
      * no-op. The hc_pre / hc_post / hc_comb views must be freed BEFORE
@@ -21548,6 +21574,75 @@ static bool metal_graph_encode_decode_layer_phase(
         } \
     } while (0)
     const bool tp_ablate_hcpre = metal_graph_tp_ablate("hcpre");
+    /* Decode-island CUDA graph capture (design ported from the Entrpi/ds4
+     * batched-serving fork).  Two position-independent islands of the
+     * decode layer are captured and replayed: island 0 is the hc-pre
+     * stage (exactly the METAL_DECODE_LAYER_TO_QKV prefix), island 1 is
+     * the attention-output-to-layer-end tail (exactly the
+     * METAL_DECODE_LAYER_FROM_ATTN_TO_FFN suffix).  Everything a capture
+     * would freeze incorrectly -- TP, multi-tier, SSD streaming, debug
+     * dumps, stage profiling, expert profiling, reference kernels, the
+     * hash router's token argument -- disqualifies the layer and it runs
+     * eagerly, byte-identical to before.  A replayed graph re-runs the
+     * captured kernels byte-for-byte, so replay output is bit-identical
+     * to the eager encode it recorded. */
+    const bool decode_graphs_common_ok =
+        !g->placement &&
+        g->tp_world <= 1 &&
+        !g->cuda_tp_decode &&
+        !g->ssd_streaming &&
+        !g->materialize_ffn_out &&
+        !decode_stage_profile &&
+        !g_expert_profile.active &&
+        metal_graph_debug_get_config()->prefix == NULL &&
+        ds4_gpu_decode_graphs_supported() != 0;
+    const bool island_a_ok =
+        decode_graphs_common_ok &&
+        phase == METAL_DECODE_LAYER_FULL &&
+        !tp_ablate_hcpre &&
+        DS4_N_HC == 4 &&
+        !metal_graph_use_reference_hc_decode() &&
+        !metal_graph_use_reference_hc_norm_decode() &&
+        !metal_graph_hc_norm_fusion_check_enabled();
+    if (island_a_ok && ok) {
+        ds4_decode_graph_key isla_key;
+        memset(&isla_key, 0, sizeof(isla_key));
+        isla_key.il = il;
+        isla_key.island = 0u;
+        isla_key.cur_hc = (void *)metal_graph_cur_hc(g);
+        isla_key.after_attn_hc = (void *)metal_graph_after_attn_hc(g);
+        isla_key.after_ffn_hc = (void *)metal_graph_after_ffn_hc(g);
+        isla_key.attn_norm = (void *)metal_graph_attn_norm(g);
+        for (;;) {
+            const int isla_state = ds4_gpu_decode_graph_begin(&isla_key);
+            if (isla_state == 1) {
+                return metal_graph_encode_decode_layer_phase(
+                        g, model, layer, il, pos, raw_cache, raw_cap,
+                        raw_row, n_raw, token,
+                        METAL_DECODE_LAYER_FROM_ATTN_PRE_TO_FFN);
+            }
+            if (isla_state == 0) {
+                const bool isla_ok = metal_graph_encode_decode_layer_phase(
+                        g, model, layer, il, pos, raw_cache, raw_cap,
+                        raw_row, n_raw, token,
+                        METAL_DECODE_LAYER_TO_QKV);
+                if (!isla_ok) {
+                    /* Capture consumed no work; the entry is retired and
+                     * the retry runs the island eagerly. */
+                    ds4_gpu_decode_graph_abort(&isla_key);
+                    continue;
+                }
+                if (ds4_gpu_decode_graph_end(&isla_key) == 0) {
+                    return metal_graph_encode_decode_layer_phase(
+                            g, model, layer, il, pos, raw_cache, raw_cap,
+                            raw_row, n_raw, token,
+                            METAL_DECODE_LAYER_FROM_ATTN_PRE_TO_FFN);
+                }
+                continue;
+            }
+            break;      /* eager: disabled, warm pass, or retired entry */
+        }
+    }
     if (phase != METAL_DECODE_LAYER_FROM_ROUTER) {
     const bool fuse_hc_norm =
         DS4_N_HC == 4 &&
@@ -22459,6 +22554,48 @@ static bool metal_graph_encode_decode_layer_phase(
         cuda_tp_attn &&
         !metal_graph_use_reference_attn_out_hc() &&
         g->cuda_tp_attn_out_hc_fuse;
+    /* Decode island 1: the attention-output-to-layer-end tail, which is
+     * position-independent (the hash router's token argument disqualifies
+     * layers with ffn_gate_tid2eid).  Capture and replay both go through
+     * the METAL_DECODE_LAYER_FROM_ATTN_TO_FFN phase, which encodes
+     * exactly this suffix; the phase check keeps the capture recursion
+     * from re-entering this block. */
+    const bool island_b_ok =
+        decode_graphs_common_ok &&
+        ok &&
+        (phase == METAL_DECODE_LAYER_FULL ||
+         phase == METAL_DECODE_LAYER_FROM_ATTN_PRE_TO_FFN) &&
+        fuse_attn_out_hc &&
+        !cuda_tp_attn &&
+        !cuda_tp_attn_heads_active &&
+        layer->ffn_gate_tid2eid == NULL;
+    if (island_b_ok) {
+        ds4_decode_graph_key islb_key;
+        memset(&islb_key, 0, sizeof(islb_key));
+        islb_key.il = il;
+        islb_key.island = 1u;
+        islb_key.cur_hc = (void *)metal_graph_cur_hc(g);
+        islb_key.after_attn_hc = (void *)metal_graph_after_attn_hc(g);
+        islb_key.after_ffn_hc = (void *)metal_graph_after_ffn_hc(g);
+        islb_key.attn_norm = (void *)metal_graph_attn_norm(g);
+        for (;;) {
+            const int islb_state = ds4_gpu_decode_graph_begin(&islb_key);
+            if (islb_state == 1) return ok;
+            if (islb_state == 0) {
+                const bool islb_ok = metal_graph_encode_decode_layer_phase(
+                        g, model, layer, il, pos, raw_cache, raw_cap,
+                        raw_row, n_raw, token,
+                        METAL_DECODE_LAYER_FROM_ATTN_TO_FFN);
+                if (!islb_ok) {
+                    ds4_gpu_decode_graph_abort(&islb_key);
+                    continue;
+                }
+                if (ds4_gpu_decode_graph_end(&islb_key) == 0) return true;
+                continue;
+            }
+            break;
+        }
+    }
     if (ok && cuda_tp_attn_requested && !cuda_tp_attn) {
         fprintf(stderr,
                 "ds4: CUDA decode TP cannot split attention output for tier %d "
