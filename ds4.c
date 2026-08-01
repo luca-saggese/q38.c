@@ -64435,15 +64435,28 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
     }
 
     /*
-     * The useful N=2 verifier is the tiny batch path: it verifies two target
-     * positions in one layer-major pass and commits prefix-1 directly on a
-     * partial accept.  Like the rest of the non-quality Metal path, it may pick
-     * a different greedy token when batched reductions perturb nearly-tied
-     * logits.  --quality / DS4_MTP_STRICT selects the exact decode verifier,
-     * which preserves the one-token target stream but is not a speed win.
+     * Metal normally benefits from the tiny-batch verifier: it checks two
+     * target positions in one layer-major pass and commits prefix-1 directly
+     * on a partial accept. Like the rest of the non-quality Metal path, it may
+     * pick a different greedy token when batched reductions perturb nearly
+     * tied logits.
+     *
+     * ROCm is different. Its DeepSeek one-token graph uses the prequantized Q8
+     * decode kernels, while the generic N=2 batch graph uses full-F32
+     * activations and loses the paired and HC-expand decode fusions. Running
+     * the exact two-row verifier reuses those Q8 kernels and is faster.
+     * DS4_MTP_BATCH_VERIFY remains an explicit diagnostic rollback to the
+     * generic batch verifier.
      */
+#ifdef DS4_ROCM_BUILD
+    const bool prefer_decode2_exact = true;
+#else
+    const bool prefer_decode2_exact = false;
+#endif
     const bool use_decode2_exact =
-        draft_n == 2 && strict_mtp && getenv("DS4_MTP_BATCH_VERIFY") == NULL;
+        draft_n == 2 &&
+        (strict_mtp || prefer_decode2_exact) &&
+        getenv("DS4_MTP_BATCH_VERIFY") == NULL;
     if (use_decode2_exact) {
         ds4_spec_frontier frontier;
         memset(&frontier, 0, sizeof(frontier));
