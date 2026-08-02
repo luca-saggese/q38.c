@@ -749,8 +749,11 @@ static int routed_moe_launch(
         /* Correctness rollback for the optimized resident IQ2 prefill path. */
         const uint32_t disable_resident_iq2_sorted =
             iq2_gate_path && getenv("DS4_ROCM_DISABLE_RESIDENT_IQ2_SORTED") != NULL;
+        const uint32_t use_mxfp4_tiny_batch =
+            mxfp4_path && n_tokens <= 4u;
         const uint32_t use_sorted_pairs =
             n_tokens > 1u &&
+            !use_mxfp4_tiny_batch &&
             (!q4k_path || n_tokens >= 32u) &&
             !disable_resident_iq2_sorted;
         const uint32_t use_expert_tiles = use_sorted_pairs;
@@ -770,7 +773,8 @@ static int routed_moe_launch(
         const uint32_t use_down_row2048 =
             !q4k_path && !mxfp4_path && use_atomic_down && use_down_tile16;
         const uint32_t use_direct_down_sum6 =
-            n_tokens == 1u && n_expert <= DS4_ROCM_N_EXPERT_USED;
+            (n_tokens == 1u || use_mxfp4_tiny_batch) &&
+            n_expert <= DS4_ROCM_N_EXPERT_USED;
         uint32_t *sorted_pairs = NULL;
         uint32_t *sorted_offsets = NULL;
         uint32_t *sorted_counts = NULL;
@@ -1269,7 +1273,8 @@ static int routed_moe_launch(
                         write_gate_up,
                         clamp);
                 } else if (mxfp4_path) {
-                    moe_gate_up_mid_decode_mxfp4_qwarp32_kernel<<<qgrid, 256>>>(
+                    dim3 mxgrid((expert_mid_dim + 7u) / 8u, pair_count, 1);
+                    moe_gate_up_mid_decode_mxfp4_qwarp32_kernel<<<mxgrid, 256>>>(
                         (float *)gate->ptr,
                         (float *)up->ptr,
                         (float *)mid->ptr,
@@ -1487,16 +1492,30 @@ static int routed_moe_launch(
                         out_dim,
                         n_expert);
                 } else if (mxfp4_path) {
-                    moe_down_mxfp4_sum6_qwarp32_kernel<<<sgrid, 256>>>(
-                        (float *)out->ptr,
-                        down_w,
-                        midq,
-                        (const int32_t *)selected_exec->ptr,
-                        down_expert_bytes,
-                        down_row_bytes,
-                        midq_blocks,
-                        out_dim,
-                        n_expert);
+                    dim3 mxgrid((out_dim + 7u) / 8u, n_tokens, 1);
+                    if (n_tokens == 1u) {
+                        moe_down_mxfp4_sum6_qwarp32_kernel<false><<<mxgrid, 256>>>(
+                            (float *)out->ptr,
+                            down_w,
+                            midq,
+                            (const int32_t *)selected_exec->ptr,
+                            down_expert_bytes,
+                            down_row_bytes,
+                            midq_blocks,
+                            out_dim,
+                            n_expert);
+                    } else {
+                        moe_down_mxfp4_sum6_qwarp32_kernel<true><<<mxgrid, 256>>>(
+                            (float *)out->ptr,
+                            down_w,
+                            midq,
+                            (const int32_t *)selected_exec->ptr,
+                            down_expert_bytes,
+                            down_row_bytes,
+                            midq_blocks,
+                            out_dim,
+                            n_expert);
+                    }
                 } else {
                     moe_down_sum6_qwarp32_kernel<<<sgrid, 256>>>(
                         (float *)out->ptr,

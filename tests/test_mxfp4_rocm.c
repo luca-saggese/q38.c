@@ -406,9 +406,11 @@ static int run_case(uint32_t n_tokens,
 }
 
 int main(void) {
-    /* Three tokens leave partially filled expert tiles; larger cases cover
-     * the steady batched paths used during prefill. */
-    static const uint32_t token_cases[] = { 1u, 3u, 32u, 128u, 512u };
+    /* Two through four tokens exercise the direct tiny-batch path; five
+     * tokens returns to expert-sorted tiles. Larger cases cover prefill. */
+    static const uint32_t token_cases[] = {
+        1u, 2u, 3u, 4u, 5u, 32u, 128u, 512u,
+    };
     const uint64_t gate_row_bytes =
         (MODEL_DIM / QK_MXFP4) * sizeof(block_mxfp4);
     const uint64_t gate_expert_bytes = FFN_DIM * gate_row_bytes;
