@@ -2900,6 +2900,11 @@ static bool accelerator_prepare_model_tensor_spans(const ds4_model *m,
                                               span_offsets, span_sizes, span_count)) {
             continue;
         }
+#if !defined(__APPLE__) && !defined(DS4_ROCM_BUILD)
+        if (ds4_gpu_model_range_replaced(m->map, t->abs_offset, t->bytes)) {
+            continue;
+        }
+#endif
         spans[nspan++] = (accelerator_tensor_span){
             .off = t->abs_offset,
             .end = t->abs_offset + t->bytes,
@@ -56230,6 +56235,14 @@ static int ds4_engine_open_internal(ds4_engine **out,
             }
         }
         (void)ds4_gpu_set_model_fd(e->model.fd);
+#if !defined(__APPLE__) && !defined(DS4_ROCM_BUILD)
+        if (e->backend == DS4_BACKEND_CUDA &&
+            !load_slice && !tp_shard && !e->ssd_streaming) {
+            (void)ds4_gpu_build_derived_artifacts(e->model.map,
+                                                  e->model.size,
+                                                  opt->model_path);
+        }
+#endif
         int model_map_ok = 0;
         uint64_t *load_offsets = NULL;
         uint64_t *load_sizes = NULL;

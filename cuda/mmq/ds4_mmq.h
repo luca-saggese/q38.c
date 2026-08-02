@@ -28,6 +28,7 @@ extern "C" {
 //   device: CUDA device ordinal (0 for the primary GPU).
 // Returns 0 on success.
 int ds4_mmq_init(int device);
+void ds4_mmq_set_aligned_q81_scratch(void *ptr, size_t bytes);
 
 // Query whether ds4_mmq is willing to handle a given matmul. Returns
 //   1 if mmq is faster than dequant+cublas for this shape on this device,

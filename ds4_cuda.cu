@@ -20,6 +20,7 @@
 #include <algorithm>
 
 #include "cuda/mmq/ds4_mmq.h"
+#include "cuda/mmq/ds4_repack.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -386,6 +387,24 @@ struct cuda_q8_f32_range {
     int device_id;          /* physical CUDA device id; 0 in single-tier */
 };
 
+enum cuda_derived_kind {
+    CUDA_DERIVED_IQ2_XXS_ALIGNED_MOE = 4,
+    CUDA_DERIVED_Q8_0_ALIGNED_DENSE = 5,
+    CUDA_DERIVED_Q2_K_ALIGNED_MOE = 6,
+};
+
+struct cuda_derived_range {
+    const void *host_base;
+    uint64_t source_offset;
+    uint64_t source_bytes;
+    uint32_t kind;
+    uint64_t in_dim;
+    uint64_t out_dim;
+    uint32_t group_count;
+    uint64_t bytes;
+    char *device_ptr;
+};
+
 static std::vector<cuda_model_range> g_model_ranges;
 static std::vector<cuda_model_arena> g_model_arenas;
 static std::unordered_map<uint64_t, size_t> g_model_range_by_offset;
@@ -393,6 +412,12 @@ static std::vector<cuda_q8_f16_range> g_q8_f16_ranges;
 static std::unordered_map<uint64_t, size_t> g_q8_f16_by_offset;
 static std::vector<cuda_q8_f32_range> g_q8_f32_ranges;
 static std::unordered_map<uint64_t, size_t> g_q8_f32_by_offset;
+static std::vector<cuda_derived_range> g_derived_ranges;
+static const void *g_derived_replace_map;
+static uint64_t g_derived_artifact_bytes;
+static double g_derived_artifact_build_secs;
+static int g_derived_replaces_complete;
+static void *g_aligned_q81_scratch;
 static uint64_t g_model_range_bytes;
 static uint64_t g_q8_f16_bytes;
 static uint64_t g_q8_f32_bytes;
@@ -449,6 +474,94 @@ __global__ static void dequant_q8_0_to_f32_kernel(
         uint64_t in_dim,
         uint64_t out_dim,
         uint64_t blocks);
+
+static int cuda_aligned_iq2_enabled(void) {
+    const char *s = getenv("DS4_CUDA_MOE_NO_IQ2_ALIGNED");
+    return !(s && s[0] && strcmp(s, "0") != 0);
+}
+
+static int cuda_aligned_q2k_enabled(void) {
+    const char *s = getenv("DS4_CUDA_MOE_NO_Q2K_ALIGNED");
+    return !(s && s[0] && strcmp(s, "0") != 0);
+}
+
+static int cuda_aligned_q8_enabled(void) {
+    const char *s = getenv("DS4_CUDA_Q8_NO_ALIGNED");
+    return !(s && s[0] && strcmp(s, "0") != 0);
+}
+
+static const char *cuda_derived_weight_ptr(
+        const void *model_map,
+        uint64_t source_offset,
+        uint64_t source_bytes,
+        uint32_t kind,
+        uint64_t in_dim,
+        uint64_t out_dim,
+        uint32_t group_count,
+        uint64_t bytes) {
+    if (getenv("DS4_CUDA_NO_DERIVED_WEIGHTS") != NULL) return NULL;
+    for (const cuda_derived_range &r : g_derived_ranges) {
+        if (r.host_base == model_map &&
+            r.source_offset == source_offset &&
+            r.source_bytes == source_bytes &&
+            r.kind == kind &&
+            r.in_dim == in_dim &&
+            r.out_dim == out_dim &&
+            r.group_count == group_count &&
+            bytes <= r.bytes) {
+            return r.device_ptr;
+        }
+    }
+    return NULL;
+}
+
+static int cuda_model_map_replaces_complete(const void *model_map) {
+    return g_derived_replaces_complete && model_map == g_derived_replace_map;
+}
+
+static int cuda_integrated_artifact_map(const void *model_map) {
+    if (!cuda_model_map_replaces_complete(model_map)) return 0;
+    int device = 0;
+    int integrated = 0;
+    return cudaGetDevice(&device) == cudaSuccess &&
+           cudaDeviceGetAttribute(&integrated, cudaDevAttrIntegrated, device) == cudaSuccess &&
+           integrated;
+}
+
+/* Startup combines adjacent tensors into cache spans.  A span is replaceable
+ * when aligned IQ2/Q2K artifacts cover every tensor payload in it; GGUF
+ * alignment gaps of at most 64 KiB do not need device residency. */
+static int cuda_span_fully_replaced(
+        const void *model_map,
+        uint64_t offset,
+        uint64_t bytes) {
+    if (!cuda_model_map_replaces_complete(model_map) || bytes == 0) return 0;
+    const uint64_t end = offset + bytes;
+    if (end < offset) return 0;
+    uint64_t cursor = offset;
+    int found = 0;
+    while (cursor < end) {
+        uint64_t next = cursor;
+        for (const cuda_derived_range &r : g_derived_ranges) {
+            if (r.host_base != model_map ||
+                (r.kind != CUDA_DERIVED_IQ2_XXS_ALIGNED_MOE &&
+                 r.kind != CUDA_DERIVED_Q2_K_ALIGNED_MOE)) {
+                continue;
+            }
+            const uint64_t r_end = r.source_offset + r.source_bytes;
+            const uint64_t gap = found ? 65536u : 0u;
+            if (r_end >= r.source_offset &&
+                r.source_offset <= cursor + gap &&
+                r_end > next) {
+                next = r_end;
+            }
+        }
+        if (next <= cursor) return 0;
+        cursor = next;
+        found = 1;
+    }
+    return 1;
+}
 
 static void *cuda_tmp_alloc(uint64_t bytes, const char *what) {
     if (bytes == 0) return NULL;
@@ -2404,6 +2517,22 @@ static void cuda_model_range_release_all(void) {
     cuda_model_load_progress_reset();
 }
 
+static void cuda_derived_range_release_all(void) {
+    ds4_mmq_set_aligned_q81_scratch(NULL, 0);
+    if (g_aligned_q81_scratch) {
+        (void)cudaFree(g_aligned_q81_scratch);
+        g_aligned_q81_scratch = NULL;
+    }
+    for (const cuda_derived_range &r : g_derived_ranges) {
+        if (r.device_ptr) (void)cudaFree(r.device_ptr);
+    }
+    g_derived_ranges.clear();
+    g_derived_replace_map = NULL;
+    g_derived_artifact_bytes = 0;
+    g_derived_artifact_build_secs = 0.0;
+    g_derived_replaces_complete = 0;
+}
+
 static int cublas_ok(cublasStatus_t st, const char *what) {
     if (st == CUBLAS_STATUS_SUCCESS) return 1;
     fprintf(stderr, "ds4: cuBLAS %s failed: status %d\n", what, (int)st);
@@ -2685,6 +2814,7 @@ extern "C" void ds4_gpu_cleanup(void) {
     /* Continue with legacy global teardown below. */
 
     cuda_model_range_release_all();
+    cuda_derived_range_release_all();
     cuda_q8_f16_cache_release_all();
     g_q8_f16_disabled_after_oom = 0;
     g_q8_f16_budget_notice_printed = 0;
@@ -3581,6 +3711,14 @@ extern "C" int ds4_gpu_set_model_map(const void *model_map, uint64_t model_size)
         }
     }
 
+    if (cuda_integrated_artifact_map(model_map)) {
+        fprintf(stderr,
+                "ds4: CUDA aligned artifacts replace expert residency; "
+                "leaving the %.2f GiB model mmap unpinned\n",
+                (double)model_size / 1073741824.0);
+        return 1;
+    }
+
     cudaError_t err = cudaHostRegister((void *)model_map, (size_t)model_size,
                                        cudaHostRegisterMapped | cudaHostRegisterReadOnly);
     if (err == cudaSuccess) {
@@ -3654,6 +3792,14 @@ extern "C" int ds4_gpu_register_model_map_no_copy(const void *model_map, uint64_
     }
 
     /* No DS4_CUDA_COPY_MODEL branch — that is the entire point. */
+
+    if (cuda_integrated_artifact_map(model_map)) {
+        fprintf(stderr,
+                "ds4: CUDA aligned artifacts replace expert residency; "
+                "leaving the %.2f GiB model mmap unpinned\n",
+                (double)model_size / 1073741824.0);
+        return 1;
+    }
 
     cudaError_t err = cudaHostRegister((void *)model_map, (size_t)model_size,
                                        cudaHostRegisterMapped | cudaHostRegisterReadOnly);
@@ -4164,9 +4310,155 @@ extern "C" int ds4_gpu_set_model_fd(int fd) {
     return 1;
 }
 
+extern "C" int ds4_gpu_build_derived_artifacts(
+        const void *model_map,
+        uint64_t model_size,
+        const char *model_path) {
+    if (!model_map || model_size == 0 || !model_path || !model_path[0]) return 0;
+    if (!g_derived_ranges.empty()) return (int)g_derived_ranges.size();
+    if (getenv("DS4_CUDA_NO_DERIVED_WEIGHTS") != NULL) return 0;
+    const char *build = getenv("DS4_CUDA_BUILD_ARTIFACTS");
+    if (build && strcmp(build, "0") == 0) return 0;
+
+    int device = 0;
+    int integrated = 0;
+    if (cudaGetDevice(&device) != cudaSuccess ||
+        cudaDeviceGetAttribute(&integrated, cudaDevAttrIntegrated, device) != cudaSuccess ||
+        !integrated) {
+        return 0;
+    }
+
+    ds4_repack_file mapped;
+    if (!ds4_repack_map_file("ds4", model_path, mapped)) return 0;
+    if (mapped.size != model_size) {
+        ds4_repack_unmap_file(mapped);
+        fprintf(stderr, "ds4: aligned artifact build skipped: model size changed\n");
+        return 0;
+    }
+    std::vector<ds4_repack_tensor> records;
+    const bool catalog_ok =
+        ds4_repack_collect_catalog("ds4", mapped, nullptr, &records);
+    ds4_repack_unmap_file(mapped);
+    if (!catalog_ok) return 0;
+
+    const bool build_moe =
+        cuda_aligned_iq2_enabled() && cuda_aligned_q2k_enabled();
+    const bool build_q8 = cuda_aligned_q8_enabled();
+    if (!build_moe && !build_q8) return 0;
+
+    ds4_repack_build_args args;
+    args.log_prefix = "ds4";
+    args.model_id = "base";
+    args.path = model_path;
+    args.records = &records;
+    args.device = device;
+    args.copy_chunk_bytes = 256ull * 1048576ull;
+
+    const double t0 = cuda_wall_sec();
+    std::vector<ds4_repack_artifact> artifacts;
+    uint64_t built_bytes = 0;
+    uint64_t part_bytes = 0;
+    bool ok = true;
+    if (build_moe) {
+        ok = ds4_repack_build_q2k_aligned(args, artifacts, &part_bytes);
+        built_bytes += part_bytes;
+    }
+    if (ok && build_moe) {
+        ok = ds4_repack_build_iq2_aligned(args, artifacts, &part_bytes);
+        built_bytes += part_bytes;
+    }
+    if (ok && build_q8) {
+        ok = ds4_repack_build_q8_aligned(args, artifacts, &part_bytes);
+        built_bytes += part_bytes;
+    }
+    if (!ok || artifacts.empty()) {
+        for (ds4_repack_artifact &artifact : artifacts) {
+            if (artifact.dev) (void)cudaFree(artifact.dev);
+        }
+        fprintf(stderr, "ds4: aligned artifact build failed; using raw weights\n");
+        return 0;
+    }
+
+    for (const ds4_repack_artifact &artifact : artifacts) {
+        g_derived_ranges.push_back({
+            model_map,
+            artifact.t->off,
+            artifact.t->bytes,
+            artifact.kind,
+            artifact.in_dim,
+            artifact.out_dim,
+            artifact.group_count,
+            artifact.bytes,
+            (char *)artifact.dev,
+        });
+    }
+
+    int replaces_complete = build_moe ? 1 : 0;
+    uint64_t replace_candidates = 0;
+    for (const ds4_repack_tensor &tensor : records) {
+        if (!ds4_repack_iq2_candidate(tensor) &&
+            !ds4_repack_q2k_candidate(tensor)) {
+            continue;
+        }
+        replace_candidates++;
+        bool found = false;
+        for (const ds4_repack_artifact &artifact : artifacts) {
+            if (artifact.t == &tensor) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) replaces_complete = 0;
+    }
+    if (replace_candidates == 0) replaces_complete = 0;
+
+    g_derived_replace_map = model_map;
+    g_derived_replaces_complete = replaces_complete;
+    g_derived_artifact_bytes = built_bytes;
+    g_derived_artifact_build_secs = cuda_wall_sec() - t0;
+    if (!g_aligned_q81_scratch) {
+        cudaError_t scratch_err = cudaMalloc(&g_aligned_q81_scratch, 256u * 1024u);
+        if (scratch_err == cudaSuccess) {
+            ds4_mmq_set_aligned_q81_scratch(g_aligned_q81_scratch,
+                                             256u * 1024u);
+        } else {
+            g_aligned_q81_scratch = NULL;
+            (void)cudaGetLastError();
+            fprintf(stderr,
+                    "ds4: aligned decode scratch allocation failed: %s\n",
+                    cudaGetErrorString(scratch_err));
+        }
+    }
+    fprintf(stderr,
+            "ds4: built %llu aligned CUDA artifacts (%.2f GiB) in %.1fs%s\n",
+            (unsigned long long)g_derived_ranges.size(),
+            (double)g_derived_artifact_bytes / 1073741824.0,
+            g_derived_artifact_build_secs,
+            replaces_complete ? "; expert raw residency replaced" : "");
+    return (int)g_derived_ranges.size();
+}
+
+extern "C" int ds4_gpu_model_range_replaced(
+        const void *model_map,
+        uint64_t offset,
+        uint64_t bytes) {
+    if (!cuda_model_map_replaces_complete(model_map) || bytes == 0) return 0;
+    for (const cuda_derived_range &range : g_derived_ranges) {
+        if (range.host_base == model_map &&
+            range.source_offset == offset &&
+            range.source_bytes == bytes &&
+            (range.kind == CUDA_DERIVED_IQ2_XXS_ALIGNED_MOE ||
+             range.kind == CUDA_DERIVED_Q2_K_ALIGNED_MOE)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 extern "C" int ds4_gpu_cache_model_range(const void *model_map, uint64_t model_size, uint64_t offset, uint64_t bytes, const char *label) {
     if (!model_map || bytes == 0) return 1;
     if (offset > model_size || bytes > model_size - offset) return 0;
+    if (cuda_span_fully_replaced(model_map, offset, bytes)) return 1;
     if (!cuda_model_range_ptr(model_map, offset, bytes, label ? label : "model_tensor")) return 0;
     return cuda_model_range_is_cached(model_map, offset, bytes);
 }
@@ -14120,6 +14412,47 @@ static int cuda_matmul_q8_0_tensor_labeled(ds4_gpu_tensor *out, const void *mode
     const int physical_device =
         (g_n_gpus > 1 && logical_tier >= 0 && logical_tier < g_n_gpus)
             ? g_gpu[logical_tier].device_id : 0;
+    const uint64_t aligned_bytes =
+        (in_dim % 1024u) == 0 && (out_dim % 128u) == 0
+            ? ds4_mmq_q8_0_aligned_bytes((int)out_dim, (int)in_dim)
+            : 0;
+    const char *aligned = aligned_bytes && cuda_aligned_q8_enabled()
+        ? cuda_derived_weight_ptr(
+              model_map, weight_offset, weight_bytes,
+              CUDA_DERIVED_Q8_0_ALIGNED_DENSE,
+              in_dim, out_dim, 1u, aligned_bytes)
+        : NULL;
+    if (aligned && n_tok == 1u) {
+        const int rc = ds4_mmq_q8_0_aligned_dense_vec(
+            aligned, (const float *)x->ptr, (float *)out->ptr,
+            (int)out_dim, 1, (int)in_dim, cuda_decode_stream());
+        if (rc == 0) return 1;
+    }
+    if (aligned && n_tok >= 512u && out_dim >= 2048u &&
+        in_dim <= 4096u && cuda_use_mmq()) {
+        const char *d2r = getenv("DS4_MMQ_DENSE_D2R");
+        if (!d2r || strcmp(d2r, "0") != 0) {
+            const int rc = ds4_mmq_q8_0_dense_d2r(
+                aligned, (const float *)x->ptr, (float *)out->ptr,
+                (int)out_dim, (int)n_tok, (int)in_dim, (cudaStream_t)0);
+            if (rc == 0) {
+                static int logged = 0;
+                if (!logged) {
+                    logged = 1;
+                    fprintf(stderr,
+                            "ds4: dense Q8 prefill using aligned D2R\n");
+                }
+                return 1;
+            }
+            fprintf(stderr,
+                    "ds4: aligned dense Q8 D2R returned %d "
+                    "(label='%s' M=%llu N=%llu K=%llu); falling back\n",
+                    rc, label ? label : "",
+                    (unsigned long long)out_dim,
+                    (unsigned long long)n_tok,
+                    (unsigned long long)in_dim);
+        }
+    }
     const char *wptr = cuda_resolve_weight_ptr(model_map, weight_offset, weight_bytes, logical_tier, "q8_0");
     if (!wptr) return 0;
     /* mmq fused-dequant-matmul prefill tier (ported from the Entrpi/ds4
@@ -23147,6 +23480,94 @@ static int routed_moe_launch(
     }
     const int q4k_path = (gate_type == 12u && down_type == 12u);
     if (!q4k_path && (gate_type != 16u || down_type != 10u)) return 0;
+
+    /* The aligned artifacts replace the raw expert tensors on integrated
+     * CUDA systems.  Route both prefill and decode before resolving a raw
+     * pointer, otherwise the fallback cache would duplicate tens of GiB. */
+    if (!q4k_path && !owned_filtered && !g_ssd_streaming_mode &&
+        cuda_aligned_iq2_enabled() && cuda_aligned_q2k_enabled()) {
+        const uint64_t gate_total = (uint64_t)n_total_expert * gate_expert_bytes;
+        const uint64_t down_total = (uint64_t)n_total_expert * down_expert_bytes;
+        const uint64_t gate_aligned_bytes = ds4_mmq_iq2_xxs_aligned_bytes(
+            (int)expert_mid_dim, (int)expert_in_dim, (int)n_total_expert);
+        const uint64_t down_aligned_bytes = ds4_mmq_q2_k_aligned_bytes(
+            (int)out_dim, (int)expert_mid_dim, (int)n_total_expert);
+        const char *gate_aligned = cuda_derived_weight_ptr(
+            model_map, gate_offset, gate_total,
+            CUDA_DERIVED_IQ2_XXS_ALIGNED_MOE,
+            expert_in_dim, expert_mid_dim, n_total_expert,
+            gate_aligned_bytes);
+        const char *up_aligned = cuda_derived_weight_ptr(
+            model_map, up_offset, gate_total,
+            CUDA_DERIVED_IQ2_XXS_ALIGNED_MOE,
+            expert_in_dim, expert_mid_dim, n_total_expert,
+            gate_aligned_bytes);
+        const char *down_aligned = cuda_derived_weight_ptr(
+            model_map, down_offset, down_total,
+            CUDA_DERIVED_Q2_K_ALIGNED_MOE,
+            expert_mid_dim, out_dim, n_total_expert,
+            down_aligned_bytes);
+        if (gate_aligned && up_aligned && down_aligned) {
+            const cudaStream_t aligned_stream =
+                n_tokens == 1u ? cuda_decode_stream() : (cudaStream_t)0;
+            int rc;
+            if (n_tokens == 1u) {
+                rc = ds4_mmq_iq2_xxs_aligned_moe_gate_up_mid_vec(
+                    gate_aligned, up_aligned,
+                    (const float *)x->ptr,
+                    (const int32_t *)selected->ptr,
+                    (const float *)weights->ptr,
+                    (float *)mid->ptr,
+                    (int)expert_mid_dim, (int)expert_in_dim,
+                    (int)n_tokens, (int)n_total_expert, (int)n_expert,
+                    clamp, aligned_stream);
+                if (rc == 0) {
+                    const uint32_t assignments = n_tokens * n_expert;
+                    rc = ds4_mmq_q2_K_aligned_moe_vec(
+                        down_aligned, (const float *)mid->ptr,
+                        (const int32_t *)selected->ptr,
+                        (float *)down->ptr,
+                        (int)out_dim, (int)expert_mid_dim,
+                        (int)assignments, (int)n_total_expert,
+                        /*n_expert_used=*/1,
+                        aligned_stream);
+                }
+            } else {
+                rc = ds4_mmq_iq2_xxs_q2_K_moe_fused_soa(
+                    gate_aligned, up_aligned, down_aligned,
+                    (const float *)x->ptr,
+                    (const int32_t *)selected->ptr,
+                    (const float *)weights->ptr,
+                    (float *)gate->ptr, (float *)up->ptr,
+                    (float *)mid->ptr, (float *)down->ptr,
+                    (int)expert_mid_dim, (int)expert_in_dim, (int)out_dim,
+                    (int)n_tokens, (int)n_total_expert, (int)n_expert,
+                    clamp, aligned_stream);
+            }
+            if (rc == 0) {
+                const uint64_t n = (uint64_t)n_tokens * out_dim;
+                moe_mmq_sum_kernel<<<
+                    (uint32_t)((n + 255u) / 256u), 256, 0, aligned_stream>>>(
+                    (float *)out->ptr, (const float *)down->ptr,
+                    out_dim, n_expert, n_tokens, /*guard_nonfinite=*/1);
+                if (cuda_ok(cudaGetLastError(), "aligned moe sum launch")) {
+                    static int logged = 0;
+                    if (!logged) {
+                        logged = 1;
+                        fprintf(stderr,
+                                "ds4: routed MoE using aligned CUDA artifacts\n");
+                    }
+                    return 1;
+                }
+                rc = -1;
+            }
+            fprintf(stderr,
+                    "ds4: aligned routed-MoE returned %d "
+                    "(layer=%u n_tokens=%u)\n",
+                    rc, layer_index, n_tokens);
+            if (cuda_model_map_replaces_complete(model_map)) return 0;
+        }
+    }
     /* mmq routed-MoE prefill tier (ported from the Entrpi/ds4 fork).
      * IQ2_XXS gate/up pair (one shared activation quantize + routing
      * pass) -> SwiGLU + clamp + router weight -> Q2_K down, treating

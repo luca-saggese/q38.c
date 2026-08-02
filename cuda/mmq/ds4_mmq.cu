@@ -108,15 +108,19 @@ private:
 // startup via plain cudaMalloc (NOT cudaMallocAsync, NOT inside any
 // capture).  When the env flag DS4_CUDA_MMQ_Q81_PERSISTENT=1 is set,
 // ds4_mmq_moe_vec_impl uses this persistent buffer instead of pool_alloc.
-// If slot 213 (routed_gate) now matches OFF, the pool's interaction with
-// graph capture was the root cause.  If it still differs, the bug is in
-// the captured matvec kernel itself.
 //
 // Sized for V4 Flash decode shapes: gate Q8_1 ~8 KB, down Q8_1 ~14 KB.
 // 256 KB allocation gives generous headroom for short prefill batches.
 static void *g_q81_scratch_ptr   = nullptr;
 static size_t g_q81_scratch_bytes = 0;
 static bool   g_q81_scratch_enabled = false;
+static void  *g_aligned_q81_scratch_ptr = nullptr;
+static size_t g_aligned_q81_scratch_bytes = 0;
+
+extern "C" void ds4_mmq_set_aligned_q81_scratch(void *ptr, size_t bytes) {
+    g_aligned_q81_scratch_ptr = ptr;
+    g_aligned_q81_scratch_bytes = ptr ? bytes : 0;
+}
 
 // Read by ds4_mmq_moe_vec_impl; non-zero means use the persistent buffer.
 // Set by ds4_mmq_init once based on env.  (Single-threaded GPU work; no
@@ -2041,7 +2045,8 @@ int ds4_mmq_moe_vec_impl(
     // fall back to the pool path.  See ds4_mmq_init for setup.
     ggml_cuda_pool_alloc<char> src1_q8_1_pool;
     char *src1_q8_1_ptr = nullptr;
-    if (g_q81_scratch_enabled && g_q81_scratch_ptr && g_q81_scratch_bytes >= nbytes_q8_1) {
+    if (g_q81_scratch_enabled && g_q81_scratch_ptr &&
+        g_q81_scratch_bytes >= nbytes_q8_1) {
         src1_q8_1_ptr = (char *)g_q81_scratch_ptr;
     } else {
         src1_q8_1_pool.alloc(ctx->pool(), nbytes_q8_1);
@@ -3943,7 +3948,11 @@ extern "C" int ds4_mmq_q2_K_aligned_moe_vec(
     const size_t  nbytes_q8_1 = (size_t)n_tokens * ne10_padded * sizeof(block_q8_1) / QK8_1;
     ggml_cuda_pool_alloc<char> src1_q8_1_pool;
     char *src1_q8_1_ptr = nullptr;
-    if (g_q81_scratch_enabled && g_q81_scratch_ptr && g_q81_scratch_bytes >= nbytes_q8_1) {
+    if (g_aligned_q81_scratch_ptr &&
+        g_aligned_q81_scratch_bytes >= nbytes_q8_1) {
+        src1_q8_1_ptr = (char *)g_aligned_q81_scratch_ptr;
+    } else if (g_q81_scratch_enabled && g_q81_scratch_ptr &&
+               g_q81_scratch_bytes >= nbytes_q8_1) {
         src1_q8_1_ptr = (char *)g_q81_scratch_ptr;
     } else {
         src1_q8_1_pool.alloc(ctx->pool(), nbytes_q8_1);
@@ -4090,7 +4099,11 @@ static char *iq2_aligned_quantize_xn(
         return folded;
     }
     char *ptr = nullptr;
-    if (g_q81_scratch_enabled && g_q81_scratch_ptr && g_q81_scratch_bytes >= nbytes_q8_1) {
+    if (g_aligned_q81_scratch_ptr &&
+        g_aligned_q81_scratch_bytes >= nbytes_q8_1) {
+        ptr = (char *)g_aligned_q81_scratch_ptr;
+    } else if (g_q81_scratch_enabled && g_q81_scratch_ptr &&
+               g_q81_scratch_bytes >= nbytes_q8_1) {
         ptr = (char *)g_q81_scratch_ptr;
     } else {
         pool->alloc(ctx->pool(), nbytes_q8_1);
