@@ -720,6 +720,20 @@ int ds4_gpu_matmul_f16_tensor(
         const ds4_gpu_tensor *x,
         uint64_t                n_tok);
 
+/* CUDA batch path: fold an input RMS normalization into the FP16 activation
+ * conversion used by the following projection. Returns 0 without touching
+ * out when the optimized path is unavailable. */
+int ds4_gpu_matmul_f16_rms_fold_tensor(
+        ds4_gpu_tensor       *out,
+        const void             *model_map,
+        uint64_t                model_size,
+        uint64_t                weight_offset,
+        uint64_t                in_dim,
+        uint64_t                out_dim,
+        const ds4_gpu_tensor *x,
+        uint64_t                n_tok,
+        float                   norm_eps);
+
 /* Exact multi-row form of the DeepSeek 4096x256 F16 router projection. */
 int ds4_gpu_matmul_f16_router_rows_exact_tensor(
         ds4_gpu_tensor       *out,

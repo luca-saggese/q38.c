@@ -26588,6 +26588,21 @@ static bool metal_graph_hc_rms_scale_project(
                n_tokens,
                DS4_RMS_EPS) != 0;
 #else
+#if !defined(DS4_ROCM_BUILD) && !defined(DS4_NO_GPU)
+    if (weight->type == DS4_TENSOR_F16 &&
+        ds4_gpu_matmul_f16_rms_fold_tensor(
+            out,
+            model->map,
+            model->size,
+            weight->abs_offset,
+            in_dim,
+            2u * DS4_N_HC + DS4_N_HC * DS4_N_HC,
+            x,
+            n_tokens,
+            DS4_RMS_EPS)) {
+        return true;
+    }
+#endif
     bool ok = ds4_gpu_rms_norm_plain_rows_tensor(
                   norm_scratch,
                   x,
