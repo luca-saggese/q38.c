@@ -424,6 +424,7 @@ static uint64_t g_stream_selected_stage_bytes;
 static cudaStream_t g_stream_selected_upload_stream;
 
 static int cuda_ok(cudaError_t err, const char *what);
+extern "C" void ds4_gpu_decode_graphs_invalidate(void);
 static const char *cuda_model_range_ptr_from_fd(
         const void *model_map,
         uint64_t offset,
@@ -453,6 +454,11 @@ static void *cuda_tmp_alloc(uint64_t bytes, const char *what) {
     if (bytes == 0) return NULL;
     if (g_cuda_tmp_bytes >= bytes) return g_cuda_tmp;
     if (g_cuda_tmp) {
+        if (!cuda_ok(cudaDeviceSynchronize(),
+                     "synchronize CUDA scratch growth")) {
+            return NULL;
+        }
+        ds4_gpu_decode_graphs_invalidate();
         (void)cudaFree(g_cuda_tmp);
         g_cuda_tmp = NULL;
         g_cuda_tmp_bytes = 0;
