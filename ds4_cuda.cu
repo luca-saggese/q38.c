@@ -17607,6 +17607,20 @@ static int attention_prefill_mixed_launch(
     const float *sinks = (const float *)cuda_resolve_weight_ptr(
             model_map, sinks_offset, (uint64_t)n_head * sizeof(float), logical_tier, "attn_sinks");
     if (!sinks) return 0;
+    if (!use_comp_mask && g_n_gpus == 1 && n_tokens >= 128u &&
+        head_dim == kTTHeadDim && n_head == 64u &&
+        window == kTTRawWindow && ratio != 0u && n_comp <= 32768u &&
+        !g_cuda_no_window_attention && ds4_cuda_attn_tokentile_arch_ok()) {
+        cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+        if (cudaStreamIsCapturing(cuda_decode_stream(), &capture) == cudaSuccess &&
+            capture == cudaStreamCaptureStatusNone) {
+            return attention_decode_batch_launch(
+                heads, model_map, model_size, sinks_offset, q, raw_kv,
+                comp_kv, 0, NULL, 0, n_tokens, 0, n_tokens, n_tokens, 0,
+                n_comp, window, ratio, n_head, head_dim);
+        }
+        (void)cudaGetLastError();
+    }
     if (!use_comp_mask && n_tokens > 1 && head_dim == 512 &&
         getenv("DS4_CUDA_NO_WINDOW_ATTENTION") == NULL &&
         (getenv("DS4_CUDA_WINDOW_ATTENTION") != NULL || (!g_quality_mode && n_tokens >= 128u))) {
