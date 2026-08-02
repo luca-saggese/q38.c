@@ -10302,6 +10302,52 @@ __global__ static void __launch_bounds__(256, 1) attention_tokentile_comp_mirror
     out[3] = __float2half(v.w);
 }
 
+/* Non-indexed layers select the causal compressed range [0, visible), so
+ * their per-tile records can be built directly without a bitmap or sort. */
+__global__ static void __launch_bounds__(512, 1)
+attention_tokentile_dense_build_kernel(
+        int2 *records,
+        uint32_t *counts,
+        uint32_t pos0,
+        uint32_t n_tokens,
+        uint32_t ratio,
+        uint32_t n_comp,
+        uint32_t rec_stride) {
+    __shared__ uint32_t visible_s[kTTTileTokens];
+    const uint32_t tid = threadIdx.x;
+    const uint32_t tile_base = blockIdx.x * kTTTileTokens;
+    if (tile_base >= n_tokens) {
+        if (tid == 0u) counts[blockIdx.x] = 0u;
+        return;
+    }
+    const uint32_t tile_count =
+        n_tokens - tile_base < kTTTileTokens
+            ? n_tokens - tile_base : kTTTileTokens;
+    if (tid < kTTTileTokens) {
+        uint32_t visible = 0u;
+        if (tid < tile_count && n_comp != 0u && ratio != 0u) {
+            visible = (pos0 + tile_base + tid + 1u) / ratio;
+            if (visible > n_comp) visible = n_comp;
+        }
+        visible_s[tid] = visible;
+    }
+    __syncthreads();
+
+    uint32_t vmax = 0u;
+    for (uint32_t i = 0; i < tile_count; i++) {
+        if (visible_s[i] > vmax) vmax = visible_s[i];
+    }
+    for (uint32_t c = tid; c < vmax; c += blockDim.x) {
+        uint32_t mask = 0u;
+        for (uint32_t i = 0; i < tile_count; i++) {
+            if (c < visible_s[i]) mask |= 1u << i;
+        }
+        records[(uint64_t)blockIdx.x * rec_stride + c] =
+            make_int2((int)c, (int)mask);
+    }
+    if (tid == 0u) counts[blockIdx.x] = vmax;
+}
+
 template <uint32_t TT_STAGE_ROWS>
 __device__ __forceinline__ void tt_issue_record_stage_cp_async(
         int2 * __restrict__ rec_plane,
@@ -17052,6 +17098,98 @@ static int attention_decode_batch_launch(
     const float *sinks = (const float *)cuda_resolve_weight_ptr(
             model_map, sinks_offset, (uint64_t)n_head * sizeof(float), logical_tier, "attn_sinks");
     if (!sinks) return 0;
+    if (g_n_gpus == 1 && !use_comp_mask &&
+        n_tokens >= 128u && head_dim == kTTHeadDim && n_head == 64u &&
+        window == kTTRawWindow && ratio != 0u && n_comp <= 32768u &&
+        n_raw >= n_tokens &&
+        (uint64_t)n_raw <= (uint64_t)pos0 + n_tokens &&
+        !g_cuda_no_window_attention && ds4_cuda_attn_tokentile_arch_ok()) {
+        cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+        cudaStream_t stream = cuda_decode_stream();
+        if (cudaStreamIsCapturing(stream, &capture) == cudaSuccess &&
+            capture == cudaStreamCaptureStatusNone) {
+            const uint32_t n_tiles =
+                (n_tokens + kTTTileTokens - 1u) / kTTTileTokens;
+            const uint32_t rec_stride = n_comp;
+            const uint32_t n_mirror_rows = n_tokens + kTTRawWindow - 1u;
+            const uint32_t raw_before = n_raw - n_tokens;
+            const uint32_t available_before = raw_before < pos0 ? raw_before : pos0;
+            const uint32_t available_clamped =
+                available_before < (kTTRawWindow - 1u)
+                    ? available_before : (kTTRawWindow - 1u);
+            const uint32_t raw_row_min =
+                (kTTRawWindow - 1u) - available_clamped;
+            const uint32_t first_raw_pos = (uint32_t)(
+                (uint64_t)pos0 + n_tokens - n_raw);
+
+            uint64_t off = 0;
+            const uint64_t records_off = off;
+            off = tt_align256_u64(
+                off + (uint64_t)n_tiles * (rec_stride ? rec_stride : 1u) *
+                      sizeof(int2));
+            const uint64_t counts_off = off;
+            off = tt_align256_u64(
+                off + (uint64_t)n_tiles * sizeof(uint32_t));
+            const uint64_t raw_mirror_off = off;
+            off = tt_align256_u64(
+                off + (uint64_t)n_mirror_rows * kTTHeadDim * sizeof(half));
+            const uint64_t comp_mirror_off = off;
+            off = tt_align256_u64(
+                off + (uint64_t)n_comp * kTTHeadDim * sizeof(half));
+
+            unsigned char *scratch = (unsigned char *)tt_scratch_ensure(
+                off, "allocate dense token-tile attention scratch");
+            if (scratch) {
+                int2 *records = (int2 *)(scratch + records_off);
+                uint32_t *counts = (uint32_t *)(scratch + counts_off);
+                half *raw_mirror = (half *)(scratch + raw_mirror_off);
+                half *comp_mirror = (half *)(scratch + comp_mirror_off);
+                if (!cuda_ok(cudaFuncSetAttribute(
+                    attention_tokentile_hmma_kernel,
+                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                    (int)tt_TokentileSmemBudget<kTTStageRows, kTTG>::total),
+                    "set dense token-tile HMMA shared-memory limit")) {
+                    return 0;
+                }
+
+                attention_tokentile_dense_build_kernel
+                    <<<n_tiles, kTTThreads, 0, stream>>>(
+                        records, counts, pos0, n_tokens, ratio, n_comp,
+                        rec_stride);
+                if (!cuda_ok(cudaGetLastError(),
+                             "launch dense token-tile record builder")) return 0;
+                attention_tokentile_raw_mirror_kernel
+                    <<<n_mirror_rows, 256, 0, stream>>>(
+                        raw_mirror, (const float *)raw_kv->ptr, NULL, pos0,
+                        n_tokens, raw_cap, raw_start, first_raw_pos,
+                        raw_row_min, head_dim);
+                if (!cuda_ok(cudaGetLastError(),
+                             "launch dense token-tile raw mirror")) return 0;
+                if (n_comp != 0u) {
+                    attention_tokentile_comp_mirror_kernel
+                        <<<n_comp, 256, 0, stream>>>(
+                            comp_mirror, (const float *)comp_kv->ptr,
+                            n_comp, head_dim);
+                    if (!cuda_ok(cudaGetLastError(),
+                                 "launch dense token-tile compressed mirror")) {
+                        return 0;
+                    }
+                }
+                const dim3 grid(n_tiles, n_head / kTTG, 1);
+                attention_tokentile_hmma_kernel
+                    <<<grid, kTTThreads,
+                       tt_TokentileSmemBudget<kTTStageRows, kTTG>::total,
+                       stream>>>(
+                        (float *)heads->ptr, sinks, (const float *)q->ptr,
+                        raw_mirror, comp_mirror, records, counts, rec_stride,
+                        n_tokens, n_head, raw_row_min);
+                return cuda_ok(cudaGetLastError(),
+                               "launch dense token-tile HMMA attention");
+            }
+        } else {
+            (void)cudaGetLastError();
+        }
+    }
     if (!cuda_attention_score_buffer_fits(n_comp)) {
         if (!use_comp_mask && head_dim == 512u &&
             !g_cuda_no_window_attention) {
