@@ -9905,11 +9905,13 @@ __global__ static void attention_static_mixed_heads8_online_kernel(
 
 /* -------------------------------------------------------------------------
  * DS4_ATTN_TOKENTILE: token-tile HMMA indexed attention (opt-in).
- * Ported from the pass-12 standalone prototype with fixed STAGE_ROWS=32, G=2.
+ * Ported from the pass-12 standalone prototype with fixed STAGE_ROWS=32.
+ * Four-token tiles reduce the selected-row union while eight heads keep the
+ * 32-row MMA shape full.
  */
 
-static constexpr uint32_t kTTTileTokens = 16u;
-static constexpr uint32_t kTTG = 2u;
+static constexpr uint32_t kTTTileTokens = 4u;
+static constexpr uint32_t kTTG = 8u;
 static constexpr uint32_t kTTM = 32u;
 static constexpr uint32_t kTTStageRows = 32u;
 static constexpr uint32_t kTTRawWindow = 128u;
@@ -9926,7 +9928,7 @@ static constexpr uint32_t kTTRingChunksPerRow =
     (kTTHeadDim * sizeof(half)) / kTTRingChunkBytes;
 static constexpr size_t kTTSmemHardCap = 90ull * 1024ull;
 
-static_assert(kTTM == kTTTileTokens * kTTG, "token-tile M must be 16 tokens x G2");
+static_assert(kTTM == kTTTileTokens * kTTG, "token-tile M must be 4 tokens x G8");
 static_assert(kTTProbStride == kTTStageRows + 8u, "token-tile prob stride changed");
 static_assert(kTTScoreKSliceDim % 16u == 0, "token-tile score K split changed");
 static_assert(kTTRingChunksPerRow == 64u, "token-tile KV ring expects 64 chunks");
@@ -10879,14 +10881,14 @@ struct tt_TokentileSmemBudget {
         partial_bytes) + stats_bytes) + record_bytes);
 };
 
-static_assert(tt_TokentileSmemBudget<32, 2>::p_bytes == 5120ull,
+static_assert(tt_TokentileSmemBudget<kTTStageRows, kTTG>::p_bytes == 5120ull,
               "M32/R32 P double-buffer must use R+8 stride");
 static_assert(sizeof(float4) == 16u, "score partial records must stay 16 bytes");
-static_assert(tt_TokentileSmemBudget<32, 2>::partial_bytes == 16ull * 1024ull,
+static_assert(tt_TokentileSmemBudget<kTTStageRows, kTTG>::partial_bytes == 16ull * 1024ull,
               "M32/R32 score partial records must be M*R float4");
-static_assert(tt_TokentileSmemBudget<32, 2>::record_bytes == 1024ull,
+static_assert(tt_TokentileSmemBudget<kTTStageRows, kTTG>::record_bytes == 1024ull,
               "M32/R32 record ring must be four R-row int2 planes");
-static_assert(tt_TokentileSmemBudget<32, 2>::total == 88576ull,
+static_assert(tt_TokentileSmemBudget<kTTStageRows, kTTG>::total == 88576ull,
               "M32/R32 total dynamic shared memory changed unexpectedly");
 static_assert(tt_TokentileSmemBudget<kTTStageRows, kTTG>::total <= kTTSmemHardCap,
               "token-tile dynamic shared memory must stay under the 90 KiB pass gate");
