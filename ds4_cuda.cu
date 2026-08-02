@@ -11828,6 +11828,104 @@ __global__ static void indexer_topk_tree_merge_pow2_kernel(
     }
 }
 
+/* Exact streaming top-512 for wide prefill rows. The threshold is the
+ * 512th-best key seen so far, so it can only discard candidates that cannot
+ * belong to the final top set. Packing supplies the same value/index total
+ * order as the existing bitonic and CUB tiers. */
+__global__ static void __launch_bounds__(512) indexer_topk_stream512_kernel(
+        uint32_t *selected,
+        const float *scores,
+        uint32_t n_comp,
+        uint32_t n_tokens,
+        uint32_t top_k) {
+    constexpr uint32_t STREAM_THREADS = 512u;
+    constexpr uint32_t STREAM_ITEMS = 4u;
+    constexpr uint32_t STREAM_CAP = STREAM_THREADS * STREAM_ITEMS;
+    using StreamSort = cub::BlockRadixSort<uint64_t, STREAM_THREADS, STREAM_ITEMS>;
+    __shared__ uint64_t buf[STREAM_CAP];
+    __shared__ typename StreamSort::TempStorage sort_tmp;
+    __shared__ uint32_t s_cnt;
+    __shared__ uint64_t s_thr;
+
+    const uint32_t t = blockIdx.x;
+    const uint32_t tid = threadIdx.x;
+    if (t >= n_tokens) return;
+    const float *row = scores + (uint64_t)t * n_comp;
+    if (tid == 0u) {
+        s_cnt = 0u;
+        s_thr = 0u;
+    }
+    __syncthreads();
+
+    const uint32_t start =
+        (uint32_t)(((uint64_t)(t + 1u) * 0x9E3779B9u) % n_comp);
+    const uint32_t tile = blockDim.x;
+    for (uint32_t base = 0; base < n_comp; base += tile) {
+        const uint64_t thr = s_thr;
+        const uint32_t i = base + tid;
+        uint64_t key = 0u;
+        bool take = false;
+        if (i < n_comp) {
+            uint32_t c = start + i;
+            if (c >= n_comp) c -= n_comp;
+            key = topk_pack_key(row[c], c);
+            take = key > thr;
+        }
+        const uint32_t ballot = __ballot_sync(0xffffffffu, take);
+        if (take) {
+            const uint32_t lane = tid & 31u;
+            const uint32_t rank = __popc(ballot & ((1u << lane) - 1u));
+            uint32_t pos = 0u;
+            if (rank == 0u) pos = atomicAdd(&s_cnt, __popc(ballot));
+            pos = __shfl_sync(ballot, pos, __ffs(ballot) - 1);
+            buf[pos + rank] = key;
+        }
+        __syncthreads();
+
+        if (s_cnt > STREAM_CAP - tile) {
+            const uint32_t cnt = s_cnt;
+            uint64_t keys[STREAM_ITEMS];
+#pragma unroll
+            for (uint32_t k = 0; k < STREAM_ITEMS; k++) {
+                const uint32_t j = tid * STREAM_ITEMS + k;
+                keys[k] = j < cnt ? buf[j] : 0u;
+            }
+            __syncthreads();
+            StreamSort(sort_tmp).SortDescending(keys);
+            __syncthreads();
+            if (tid < top_k / STREAM_ITEMS) {
+#pragma unroll
+                for (uint32_t k = 0; k < STREAM_ITEMS; k++) {
+                    buf[tid * STREAM_ITEMS + k] = keys[k];
+                }
+            }
+            if (tid == top_k / STREAM_ITEMS - 1u) {
+                s_thr = keys[STREAM_ITEMS - 1u];
+            }
+            if (tid == 0u) s_cnt = top_k;
+            __syncthreads();
+        }
+    }
+
+    const uint32_t cnt = s_cnt;
+    uint64_t keys[STREAM_ITEMS];
+#pragma unroll
+    for (uint32_t k = 0; k < STREAM_ITEMS; k++) {
+        const uint32_t i = tid * STREAM_ITEMS + k;
+        keys[k] = i < cnt ? buf[i] : 0u;
+    }
+    __syncthreads();
+    StreamSort(sort_tmp).SortDescending(keys);
+    __syncthreads();
+    if (tid < top_k / STREAM_ITEMS) {
+#pragma unroll
+        for (uint32_t k = 0; k < STREAM_ITEMS; k++) {
+            selected[(uint64_t)t * top_k + tid * STREAM_ITEMS + k] =
+                0xffffffffu - (uint32_t)keys[k];
+        }
+    }
+}
+
 __global__ static void indexed_topk_sort_512_asc_kernel(
         int32_t *dst,
         const int32_t *src,
@@ -12269,6 +12367,15 @@ extern "C" int ds4_gpu_indexer_topk_tensor(
                                                                (const float *)scores->ptr,
                                                                n_comp, n_tokens, top_k);
         return cuda_ok(cudaGetLastError(), "indexer topk 8192 launch");
+    }
+    if (top_k == 512u && n_tokens >= 32u &&
+        getenv("DS4_CUDA_NO_TOPK2048") == NULL &&
+        getenv("DS4_CUDA_NO_TOPK_STREAM") == NULL) {
+        indexer_topk_stream512_kernel<<<n_tokens, 512>>>(
+                (uint32_t *)selected->ptr,
+                (const float *)scores->ptr,
+                n_comp, n_tokens, top_k);
+        return cuda_ok(cudaGetLastError(), "indexer topk stream launch");
     }
     if (top_k == 512u && getenv("DS4_CUDA_NO_TOPK2048") == NULL &&
         getenv("DS4_CUDA_NO_TOPK_CHUNKED") == NULL) {
