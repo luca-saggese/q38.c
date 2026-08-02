@@ -11083,8 +11083,11 @@ __global__ static void indexer_scores_wmma128_kernel(
         }
     }
 
-    __shared__ __half a_sh[16 * 128];
-    __shared__ __half b_sh[128 * 128];
+    /* A 128-half stride maps every ldmatrix row to the same shared-memory
+     * bank group. Padding to 136 halves removes that conflict without
+     * changing the values loaded by WMMA. */
+    __shared__ __half a_sh[16 * 136];
+    __shared__ __half b_sh[128 * 136];
     __shared__ float c_sh[8 * 16 * 16];
 
     float acc[8];
@@ -11097,7 +11100,7 @@ __global__ static void indexer_scores_wmma128_kernel(
         const uint32_t comp = tile_c + c;
         float v = 0.0f;
         if (comp < n_comp) v = index_comp[(uint64_t)comp * head_dim + d];
-        b_sh[d + c * 128u] = __float2half(v);
+        b_sh[d + c * 136u] = __float2half(v);
     }
     __syncthreads();
 
@@ -11110,7 +11113,7 @@ __global__ static void indexer_scores_wmma128_kernel(
             if (token < n_tokens) {
                 v = q[((uint64_t)token * n_head + h) * head_dim + d];
             }
-            a_sh[i] = __float2half(v);
+            a_sh[r * 136u + d] = __float2half(v);
         }
         __syncthreads();
 
@@ -11120,8 +11123,8 @@ __global__ static void indexer_scores_wmma128_kernel(
         wmma::fill_fragment(c_frag, 0.0f);
         const uint32_t col0 = warp * 16u;
         for (uint32_t k0 = 0; k0 < 128u; k0 += 16u) {
-            wmma::load_matrix_sync(a_frag, a_sh + k0, 128);
-            wmma::load_matrix_sync(b_frag, b_sh + col0 * 128u + k0, 128);
+            wmma::load_matrix_sync(a_frag, a_sh + k0, 136);
+            wmma::load_matrix_sync(b_frag, b_sh + col0 * 136u + k0, 136);
             wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
         }
         wmma::store_matrix_sync(c_sh + warp * 16u * 16u, c_frag, 16, wmma::mem_row_major);
