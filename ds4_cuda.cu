@@ -23726,14 +23726,17 @@ static int routed_moe_launch(
         const uint32_t use_expert_tiles =
             use_sorted_pairs &&
             (owned_filtered || getenv("DS4_CUDA_MOE_NO_EXPERT_TILES") == NULL);
+        const uint32_t q4_owned_batch =
+            owned_filtered && q4k_path && n_tokens >= 4u && n_tokens <= 16u;
         /* Small batches (DSpark stage chain / verify, n<=8) leave most of an
          * 8-slot expert tile empty (1-2 rows per expert): tile4 halves the
-         * wasted dot-slots and measures ~2x faster there. Large prefill
-         * keeps tile8. Env overrides both ways. */
+         * wasted dot-slots and measures ~2x faster there. Q4 TP batches use
+         * tile8 because its exact tensor-core row-span kernels recover more
+         * than the empty slots cost. Large prefill also keeps tile8. */
         const uint32_t expert_tile_m =
             getenv("DS4_CUDA_MOE_TILE4") ? 4u :
             (getenv("DS4_CUDA_MOE_TILE8") ? 8u :
-             (n_tokens <= 8u ? 4u : 8u));
+             (q4_owned_batch || n_tokens > 8u ? 8u : 4u));
         const uint32_t write_gate_up = getenv("DS4_CUDA_MOE_WRITE_GATE_UP") != NULL;
         const uint32_t use_p2_sorted =
             use_sorted_pairs && !owned_filtered &&
@@ -23747,7 +23750,7 @@ static int routed_moe_launch(
             (getenv("DS4_CUDA_MOE_GATE_ROW2048") != NULL ||
              getenv("DS4_CUDA_MOE_GATE_ROW256") != NULL ||
              getenv("DS4_CUDA_MOE_GATE_ROW128") != NULL ||
-             (n_tokens >= 128u &&
+             ((q4_owned_batch || n_tokens >= 128u) &&
               getenv("DS4_CUDA_MOE_NO_GATE_ROW2048") == NULL &&
               getenv("DS4_CUDA_MOE_NO_GATE_ROW256") == NULL &&
               getenv("DS4_CUDA_MOE_NO_GATE_ROW128") == NULL));
@@ -23760,8 +23763,14 @@ static int routed_moe_launch(
             owned_filtered && q4k_path && n_tokens <= 16u && pair_count <= 96u &&
             n_total_expert <= 128u && use_sorted_pairs && use_expert_tiles &&
             getenv("DS4_CUDA_MOE_NO_SMALL_SORTED_PREP") == NULL;
-        const uint32_t use_q4_down_rowspan = q4k_path && use_expert_tiles && expert_tile_m == 8u &&
-            n_tokens >= 128u && getenv("DS4_CUDA_MOE_NO_Q4_DOWN_ROWSPAN") == NULL;
+        const uint32_t force_q4_down_rowspan =
+            getenv("DS4_CUDA_MOE_DOWN_ROW512") != NULL ||
+            getenv("DS4_CUDA_MOE_DOWN_ROW1024") != NULL ||
+            getenv("DS4_CUDA_MOE_DOWN_ROW2048") != NULL;
+        const uint32_t use_q4_down_rowspan =
+            q4k_path && use_expert_tiles && expert_tile_m == 8u &&
+            (q4_owned_batch || n_tokens >= 128u || force_q4_down_rowspan) &&
+            getenv("DS4_CUDA_MOE_NO_Q4_DOWN_ROWSPAN") == NULL;
         const uint32_t use_decode_lut_gate =
             n_tokens == 1u && xq_blocks <= 16u &&
             getenv("DS4_CUDA_MOE_NO_DECODE_LUT_GATE") == NULL;
