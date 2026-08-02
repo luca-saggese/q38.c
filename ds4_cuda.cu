@@ -405,6 +405,11 @@ static int g_model_load_progress_started;
 static int g_model_load_progress_tty;
 static void *g_cuda_tmp;
 static uint64_t g_cuda_tmp_bytes;
+#ifdef DS4_CUDA_HAVE_MXF4
+static void *g_indexer_mxf4_scratch;
+static uint64_t g_indexer_mxf4_scratch_bytes;
+static int g_indexer_mxf4_scratch_device = -1;
+#endif
 static void *g_model_stage_raw[4];
 static void *g_model_stage[4];
 static cudaEvent_t g_model_stage_event[4];
@@ -2592,6 +2597,15 @@ extern "C" void ds4_gpu_cleanup(void) {
             c->scratch = NULL;
             c->scratch_bytes = 0;
         }
+#ifdef DS4_CUDA_HAVE_MXF4
+        if (g_indexer_mxf4_scratch &&
+            g_indexer_mxf4_scratch_device == c->device_id) {
+            (void)cudaFree(g_indexer_mxf4_scratch);
+            g_indexer_mxf4_scratch = NULL;
+            g_indexer_mxf4_scratch_bytes = 0;
+            g_indexer_mxf4_scratch_device = -1;
+        }
+#endif
     }
     for (int i = 0; i < DS4_MAX_GPUS; i++) {
         for (int j = 0; j < DS4_MAX_GPUS; j++) {
@@ -11174,6 +11188,405 @@ __global__ static void indexer_scores_wmma128_kernel(
 #endif
 }
 
+#ifdef DS4_CUDA_HAVE_MXF4
+#define DS4_MXF4_INDEXER_HEADS 64u
+#define DS4_MXF4_INDEXER_DIM 128u
+
+__device__ static inline uint32_t indexer_mxf4_nearest_level(float v) {
+    if (v <= 0.25f) return 0u;
+    if (v <= 0.75f) return 1u;
+    if (v <= 1.25f) return 2u;
+    if (v <= 1.75f) return 3u;
+    if (v <= 2.5f) return 4u;
+    if (v <= 3.5f) return 5u;
+    if (v <= 5.0f) return 6u;
+    return 7u;
+}
+
+/* Encode rows that have already passed the model's E2M1 QAT. The packed
+ * exponent word is consumed directly by the SM121 block-scaled MMA. */
+__global__ static void indexer_mxf4_encode_rows_kernel(
+        const float * __restrict__ src,
+        unsigned char * __restrict__ codes,
+        uint32_t * __restrict__ scales,
+        uint32_t rows) {
+    const uint32_t row =
+        (blockIdx.x * blockDim.x + threadIdx.x) >> 5u;
+    const uint32_t lane = threadIdx.x & 31u;
+    if (row >= rows) return;
+
+    const float *xr = src + (uint64_t)row * DS4_MXF4_INDEXER_DIM;
+    float values[4];
+    float amax = 0.0f;
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        values[i] = xr[lane * 4u + i];
+        amax = fmaxf(amax, fabsf(values[i]));
+    }
+#pragma unroll
+    for (uint32_t off = 4u; off != 0u; off >>= 1u) {
+        amax = fmaxf(amax,
+                     __shfl_xor_sync(0xffffffffu, amax, off, 8));
+    }
+
+    uint32_t exponent = 127u;
+    if (amax > 0.0f) {
+        const uint32_t bits = __float_as_uint(amax / 6.0f);
+        exponent = (bits >> 23u) & 0xffu;
+        if ((bits & 0x7fffffu) != 0u) exponent++;
+        exponent = min(max(exponent, 1u), 254u);
+    }
+    const float reciprocal =
+        __uint_as_float((254u - exponent) << 23u);
+    uint32_t packed = 0u;
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        const uint32_t level =
+            indexer_mxf4_nearest_level(fabsf(values[i]) * reciprocal);
+        packed |= (level | (values[i] < 0.0f ? 8u : 0u)) << (4 * i);
+    }
+    ((uint16_t *)codes)[(uint64_t)row * 32u + lane] = (uint16_t)packed;
+
+    const uint32_t e1 = __shfl_sync(0xffffffffu, exponent, 8);
+    const uint32_t e2 = __shfl_sync(0xffffffffu, exponent, 16);
+    const uint32_t e3 = __shfl_sync(0xffffffffu, exponent, 24);
+    if (lane == 0u) {
+        scales[row] = exponent | (e1 << 8u) | (e2 << 16u) | (e3 << 24u);
+    }
+}
+
+__device__ static inline void indexer_mxf4_mma(
+        float out[4],
+        const uint32_t a[4],
+        uint32_t b0,
+        uint32_t b1,
+        uint32_t scale_a,
+        uint32_t scale_b) {
+    asm volatile(
+        "mma.sync.aligned.kind::mxf4.block_scale.scale_vec::2X"
+        ".m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0 "
+        "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3}, "
+        "{%10}, {0, 0}, {%11}, {0, 0};\n"
+        : "+f"(out[0]), "+f"(out[1]), "+f"(out[2]), "+f"(out[3])
+        : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]),
+          "r"(b0), "r"(b1), "r"(scale_a), "r"(scale_b));
+}
+
+__device__ __forceinline__ static void indexer_cp_async_u32(
+        uint32_t *dst,
+        const void *src,
+        bool valid) {
+    const unsigned smem = (unsigned)__cvta_generic_to_shared(dst);
+    asm volatile("cp.async.ca.shared.global [%0], [%1], 4, %2;\n"
+                 :: "r"(smem), "l"(src), "r"(valid ? 4u : 0u));
+}
+
+__device__ __forceinline__ static void indexer_cp_commit(void) {
+    asm volatile("cp.async.commit_group;\n");
+}
+
+__device__ __forceinline__ static void indexer_cp_wait(void) {
+    asm volatile("cp.async.wait_group 0;\n");
+}
+
+/* CUDA SM121 implementation adapted from entrpi/batched-serving's v3
+ * scorer and Marco Palaferri's original 16-token staging geometry. */
+__global__ static void __launch_bounds__(512) indexer_scores_mxf4_kernel(
+        float *scores,
+        const unsigned char * __restrict__ q_codes,
+        const uint32_t * __restrict__ q_scales,
+        const float * __restrict__ weights,
+        uint32_t n_comp,
+        uint32_t n_tokens,
+        uint32_t pos0,
+        uint32_t ratio,
+        float scale,
+        const unsigned char * __restrict__ k_codes,
+        const uint32_t * __restrict__ k_scales) {
+    constexpr uint32_t HEAD_GROUP = 16u;
+    const uint32_t tid = threadIdx.x;
+    const uint32_t warp = tid >> 5u;
+    const uint32_t lane = tid & 31u;
+    const uint32_t lane_in_group = lane & 3u;
+    const uint32_t tile_t = blockIdx.y * 16u;
+    const uint32_t tile_c = blockIdx.x * 256u;
+
+    const uint32_t last_token = min(tile_t + 16u, n_tokens);
+    const uint32_t max_visible = last_token > tile_t
+        ? min((pos0 + last_token) / ratio, n_comp) : 0u;
+    if (tile_c >= max_visible) {
+        for (uint32_t i = tid; i < 16u * 256u; i += 512u) {
+            const uint32_t row = i >> 8u;
+            const uint32_t col = i & 255u;
+            const uint32_t token = tile_t + row;
+            const uint32_t comp = tile_c + col;
+            if (token < n_tokens && comp < n_comp) {
+                scores[(uint64_t)token * n_comp + comp] = -INFINITY;
+            }
+        }
+        return;
+    }
+
+    __shared__ __align__(16) uint32_t q_shared[2][16][8][32];
+    __shared__ uint32_t scale_shared[2][16][16];
+    __shared__ float weight_shared[2][16][16];
+
+    uint32_t b_frag[2][4];
+    uint32_t scale_b[2][2];
+#pragma unroll
+    for (uint32_t cg = 0; cg < 2u; cg++) {
+        const uint32_t col =
+            tile_c + (cg * 16u + warp) * 8u + (lane >> 2u);
+        if (col < n_comp) {
+            const uint32_t *words =
+                (const uint32_t *)(k_codes + (uint64_t)col * 64u);
+            b_frag[cg][0] = words[lane_in_group];
+            b_frag[cg][1] = words[4u + lane_in_group];
+            b_frag[cg][2] = words[8u + lane_in_group];
+            b_frag[cg][3] = words[12u + lane_in_group];
+            const uint32_t packed_scale = k_scales[col];
+            scale_b[cg][0] = packed_scale & 0xffffu;
+            scale_b[cg][1] = packed_scale >> 16u;
+        } else {
+            b_frag[cg][0] = b_frag[cg][1] = 0u;
+            b_frag[cg][2] = b_frag[cg][3] = 0u;
+            scale_b[cg][0] = scale_b[cg][1] = 127u | (127u << 8u);
+        }
+    }
+
+    auto stage = [&](uint32_t head0, uint32_t buffer) {
+        for (uint32_t i = tid; i < HEAD_GROUP * 16u * 17u; i += 512u) {
+            const uint32_t hh = i / (16u * 17u);
+            const uint32_t rem = i - hh * (16u * 17u);
+            const uint32_t row = rem / 17u;
+            const uint32_t word = rem - row * 17u;
+            const uint32_t token = tile_t + row;
+            const bool valid = token < n_tokens;
+            const uint64_t qrow =
+                (uint64_t)token * DS4_MXF4_INDEXER_HEADS + head0 + hh;
+            const void *src;
+            uint32_t *dst;
+            if (word < 16u) {
+                src = valid
+                    ? (const void *)(q_codes + qrow * 64u + word * 4u)
+                    : (const void *)q_codes;
+                dst = &q_shared[buffer][hh][row >> 1u]
+                    [(row & 1u) * 16u + (word & 3u) * 4u + (word >> 2u)];
+            } else {
+                src = valid ? (const void *)(q_scales + qrow)
+                            : (const void *)q_scales;
+                dst = &scale_shared[buffer][hh][row];
+            }
+            indexer_cp_async_u32(dst, src, valid);
+        }
+        for (uint32_t i = tid; i < HEAD_GROUP * 16u; i += 512u) {
+            const uint32_t hh = i >> 4u;
+            const uint32_t row = i & 15u;
+            const uint32_t token = tile_t + row;
+            const bool valid = token < n_tokens;
+            const void *src = valid
+                ? (const void *)(weights +
+                    (uint64_t)token * DS4_MXF4_INDEXER_HEADS + head0 + hh)
+                : (const void *)weights;
+            indexer_cp_async_u32(
+                (uint32_t *)&weight_shared[buffer][hh][row], src, valid);
+        }
+    };
+
+    stage(0u, 0u);
+    indexer_cp_commit();
+    indexer_cp_wait();
+    __syncthreads();
+
+    float accum[2][4];
+#pragma unroll
+    for (uint32_t cg = 0; cg < 2u; cg++) {
+        accum[cg][0] = accum[cg][1] = 0.0f;
+        accum[cg][2] = accum[cg][3] = 0.0f;
+    }
+
+    const uint32_t row0 = lane >> 2u;
+    const uint32_t scale_row = (lane & 1u) * 8u + row0;
+    for (uint32_t group = 0;
+         group < DS4_MXF4_INDEXER_HEADS / HEAD_GROUP;
+         group++) {
+        const uint32_t current = group & 1u;
+        if (group + 1u < DS4_MXF4_INDEXER_HEADS / HEAD_GROUP) {
+            stage((group + 1u) * HEAD_GROUP, current ^ 1u);
+            indexer_cp_commit();
+        }
+#pragma unroll
+        for (uint32_t hh = 0; hh < HEAD_GROUP; hh++) {
+            const uint4 a0 = *reinterpret_cast<const uint4 *>(
+                &q_shared[current][hh][row0 >> 1u]
+                    [(row0 & 1u) * 16u + lane_in_group * 4u]);
+            const uint4 a1 = *reinterpret_cast<const uint4 *>(
+                &q_shared[current][hh][(row0 + 8u) >> 1u]
+                    [(row0 & 1u) * 16u + lane_in_group * 4u]);
+            const uint32_t packed_scale =
+                scale_shared[current][hh][scale_row];
+            const uint32_t scale_a0 = packed_scale & 0xffffu;
+            const uint32_t scale_a1 = packed_scale >> 16u;
+            const float w0 = weight_shared[current][hh][row0];
+            const float w1 = weight_shared[current][hh][row0 + 8u];
+            const uint32_t a_lo[4] = {a0.x, a1.x, a0.y, a1.y};
+            const uint32_t a_hi[4] = {a0.z, a1.z, a0.w, a1.w};
+#pragma unroll
+            for (uint32_t cg = 0; cg < 2u; cg++) {
+                float product[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                indexer_mxf4_mma(product, a_lo,
+                                 b_frag[cg][0], b_frag[cg][1],
+                                 scale_a0, scale_b[cg][0]);
+                indexer_mxf4_mma(product, a_hi,
+                                 b_frag[cg][2], b_frag[cg][3],
+                                 scale_a1, scale_b[cg][1]);
+                accum[cg][0] += fmaxf(product[0], 0.0f) * w0;
+                accum[cg][1] += fmaxf(product[1], 0.0f) * w0;
+                accum[cg][2] += fmaxf(product[2], 0.0f) * w1;
+                accum[cg][3] += fmaxf(product[3], 0.0f) * w1;
+            }
+        }
+        if (group + 1u < DS4_MXF4_INDEXER_HEADS / HEAD_GROUP) {
+            indexer_cp_wait();
+            __syncthreads();
+        }
+    }
+
+    const uint32_t token0 = tile_t + row0;
+    const uint32_t token1 = token0 + 8u;
+    const uint32_t visible0 = (pos0 + token0 + 1u) / ratio;
+    const uint32_t visible1 = (pos0 + token1 + 1u) / ratio;
+#pragma unroll
+    for (uint32_t cg = 0; cg < 2u; cg++) {
+        const uint32_t col0 = tile_c +
+            (cg * 16u + warp) * 8u + lane_in_group * 2u;
+#pragma unroll
+        for (uint32_t j = 0; j < 2u; j++) {
+            const uint32_t col = col0 + j;
+            if (col >= n_comp) continue;
+            if (token0 < n_tokens) {
+                scores[(uint64_t)token0 * n_comp + col] =
+                    col >= visible0 ? -INFINITY : accum[cg][j] * scale;
+            }
+            if (token1 < n_tokens) {
+                scores[(uint64_t)token1 * n_comp + col] =
+                    col >= visible1 ? -INFINITY : accum[cg][2u + j] * scale;
+            }
+        }
+    }
+}
+#endif
+
+#ifdef DS4_CUDA_HAVE_MXF4
+static void *indexer_mxf4_scratch_alloc(uint64_t bytes) {
+    if (g_indexer_mxf4_scratch_bytes >= bytes) {
+        return g_indexer_mxf4_scratch;
+    }
+
+    int device = -1;
+    if (!cuda_ok(cudaGetDevice(&device),
+                 "get device for indexer mxf4 scratch")) {
+        return NULL;
+    }
+    if (g_indexer_mxf4_scratch) {
+        if (!cuda_ok(cudaDeviceSynchronize(),
+                     "synchronize indexer mxf4 scratch growth")) {
+            return NULL;
+        }
+        (void)cudaFree(g_indexer_mxf4_scratch);
+        g_indexer_mxf4_scratch = NULL;
+        g_indexer_mxf4_scratch_bytes = 0;
+        g_indexer_mxf4_scratch_device = -1;
+    }
+    if (!cuda_ok(cudaMalloc(&g_indexer_mxf4_scratch, (size_t)bytes),
+                 "allocate indexer mxf4 scratch")) {
+        g_indexer_mxf4_scratch = NULL;
+        return NULL;
+    }
+    g_indexer_mxf4_scratch_bytes = bytes;
+    g_indexer_mxf4_scratch_device = device;
+    return g_indexer_mxf4_scratch;
+}
+#endif
+
+/* Return 1 when the SM121 path handled the call, 0 to use the established
+ * scorer, and -1 on a launch failure. */
+static int indexer_scores_mxf4_try(
+        ds4_gpu_tensor *scores,
+        const ds4_gpu_tensor *q,
+        const ds4_gpu_tensor *weights,
+        const ds4_gpu_tensor *index_comp,
+        uint32_t n_comp,
+        uint32_t n_tokens,
+        uint32_t pos0,
+        uint32_t n_head,
+        uint32_t head_dim,
+        uint32_t ratio,
+        float scale) {
+#ifndef DS4_CUDA_HAVE_MXF4
+    (void)scores; (void)q; (void)weights; (void)index_comp;
+    (void)n_comp; (void)n_tokens; (void)pos0; (void)n_head;
+    (void)head_dim; (void)ratio; (void)scale;
+    return 0;
+#else
+    if (g_quality_mode || getenv("DS4_CUDA_NO_INDEXER_MXF4") != NULL ||
+        g_n_gpus != 1 || ds4_tensor_device_idx(scores) != 0 ||
+        n_head != DS4_MXF4_INDEXER_HEADS ||
+        head_dim != DS4_MXF4_INDEXER_DIM || ratio != 4u ||
+        n_comp < 1024u || n_tokens < 32u) {
+        return 0;
+    }
+    cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+    if (cudaStreamIsCapturing(0, &capture) != cudaSuccess ||
+        capture != cudaStreamCaptureStatusNone) {
+        return 0;
+    }
+
+    const uint64_t q_rows64 =
+        (uint64_t)n_tokens * DS4_MXF4_INDEXER_HEADS;
+    if (q_rows64 > UINT32_MAX) return 0;
+    const uint32_t q_rows = (uint32_t)q_rows64;
+    const uint64_t k_codes_bytes = ((uint64_t)n_comp * 64u + 255u) & ~255ull;
+    const uint64_t k_scales_bytes = ((uint64_t)n_comp * 4u + 255u) & ~255ull;
+    const uint64_t q_codes_bytes = (q_rows64 * 64u + 255u) & ~255ull;
+    const uint64_t q_scales_bytes = (q_rows64 * 4u + 255u) & ~255ull;
+    const uint64_t scratch_bytes = k_codes_bytes + k_scales_bytes +
+                                   q_codes_bytes + q_scales_bytes;
+    unsigned char *scratch = (unsigned char *)
+        indexer_mxf4_scratch_alloc(scratch_bytes);
+    if (!scratch) return 0;
+
+    unsigned char *k_codes = scratch;
+    uint32_t *k_scales = (uint32_t *)(scratch + k_codes_bytes);
+    unsigned char *q_codes = scratch + k_codes_bytes + k_scales_bytes;
+    uint32_t *q_scales = (uint32_t *)(q_codes + q_codes_bytes);
+
+    indexer_mxf4_encode_rows_kernel<<<
+        (uint32_t)(((uint64_t)n_comp * 32u + 255u) / 256u), 256>>>(
+            (const float *)index_comp->ptr, k_codes, k_scales, n_comp);
+    if (!cuda_ok(cudaGetLastError(), "indexer mxf4 K encode launch")) {
+        return -1;
+    }
+    indexer_mxf4_encode_rows_kernel<<<
+        (uint32_t)(((uint64_t)q_rows * 32u + 255u) / 256u), 256>>>(
+            (const float *)q->ptr, q_codes, q_scales, q_rows);
+    if (!cuda_ok(cudaGetLastError(), "indexer mxf4 Q encode launch")) {
+        return -1;
+    }
+
+    dim3 grid((n_comp + 255u) / 256u,
+              (n_tokens + 15u) / 16u, 1u);
+    indexer_scores_mxf4_kernel<<<grid, 512>>>(
+        (float *)scores->ptr, q_codes, q_scales,
+        (const float *)weights->ptr, n_comp, n_tokens, pos0, ratio,
+        scale, k_codes, k_scales);
+    if (!cuda_ok(cudaGetLastError(), "indexer mxf4 score launch")) {
+        return -1;
+    }
+    return 1;
+#endif
+}
+
 __global__ static void indexer_topk_kernel(uint32_t *selected, const float *scores, uint32_t n_comp, uint32_t n_tokens, uint32_t top_k) {
     uint32_t t = blockIdx.x;
     if (t >= n_tokens || threadIdx.x != 0) return;
@@ -12042,6 +12455,10 @@ static int indexer_scores_launch(
         return 0;
     }
     if (causal && ratio == 0) return 0;
+    const int mxf4 = indexer_scores_mxf4_try(
+        scores, q, weights, index_comp, n_comp, n_tokens, pos0,
+        n_head, head_dim, ratio, scale);
+    if (mxf4 != 0) return mxf4 > 0;
     if (n_tokens == 1u && head_dim == 128u && n_head == 64u &&
         getenv("DS4_CUDA_NO_INDEXER_DIRECT_ONE") == NULL) {
         indexer_score_one_direct_kernel<<<n_comp, 128>>>((float *)scores->ptr,
