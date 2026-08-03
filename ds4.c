@@ -35870,6 +35870,7 @@ struct ds4_engine {
      * Zero / negative = legacy 4096 fallback (single-tier paths and any
      * caller that doesn't set the option observe the prior behavior). */
     int            placement_ctx_hint;
+    int            placement_session_count_hint;
 };
 
 static uint64_t ds4_engine_dynamic_expert_cache_bytes(
@@ -39516,7 +39517,7 @@ static bool glm_graph_alloc_slice(
                                                  g->layer_end);
     if (g->ctx_size > g->ctx_cap) {
         fprintf(stderr,
-                "ds4: GLM Metal session ctx=%u (model max=%u); "
+                "ds4: GLM session ctx=%u (model max=%u); "
                 "full-attention prefill/work cap=%u; compact indexed decode is used beyond the cap\n",
                 g->ctx_size,
                 glm_graph_model_context_limit(),
@@ -39633,7 +39634,7 @@ static bool glm_graph_alloc_slice(
     do { \
         (var) = ds4_gpu_tensor_alloc((bytes_)); \
         if (!(var)) { \
-            fprintf(stderr, "ds4: GLM Metal graph could not allocate %s\n", #var); \
+            fprintf(stderr, "ds4: GLM graph could not allocate %s\n", #var); \
             ok = false; \
         } \
     } while (0)
@@ -47583,6 +47584,16 @@ static bool engine_glm_layer_uses_full_indexer(uint32_t il) {
     return il >= 6u && ((il - 6u) % 4u) == 0u;
 }
 
+static uint32_t engine_placement_session_count(const ds4_engine *e) {
+    return e && e->placement_session_count_hint > 1
+        ? (uint32_t)e->placement_session_count_hint : 1u;
+}
+
+static size_t engine_size_mul_sat(size_t bytes, uint32_t count) {
+    if (count != 0u && bytes > SIZE_MAX / count) return SIZE_MAX;
+    return bytes * count;
+}
+
 /* GLM keeps one compact DSA row for every logical context position. These
  * caches are allocated on the same tier as their transformer layer, so they
  * must be priced per layer by the multi-GPU packer. */
@@ -47687,8 +47698,10 @@ static size_t engine_per_tier_graph_overhead_bytes(const ds4_engine *e) {
         const ds4_context_memory mem =
             glm_graph_context_memory_estimate_for_compact_cap(
                     ctx, work_ctx, compact_cap, ssd_streaming);
-        return mem.scratch_bytes > SIZE_MAX ?
+        const size_t scratch = mem.scratch_bytes > SIZE_MAX ?
             SIZE_MAX : (size_t)mem.scratch_bytes;
+        return engine_size_mul_sat(scratch,
+                                   engine_placement_session_count(e));
     }
 #endif
 
@@ -54865,6 +54878,9 @@ static int engine_compute_entry_bytes(const ds4_engine *e, size_t *out) {
      * is accounted separately (see engine_per_tier_graph_overhead_bytes
      * and its pre-subtract in engine_classify_multi_tier). */
     const int est_ctx = (e->placement_ctx_hint > 0) ? e->placement_ctx_hint : 4096;
+    const uint32_t session_count =
+        DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA ?
+        engine_placement_session_count(e) : 1u;
     ds4_context_memory mem =
         ds4_context_memory_estimate_with_prefill(DS4_BACKEND_CUDA,
                                                  est_ctx,
@@ -54874,15 +54890,20 @@ static int engine_compute_entry_bytes(const ds4_engine *e, size_t *out) {
          * re-derived per layer so placement follows the active model's
          * allocation geometry. */
         for (uint32_t il = 0; il < (uint32_t)DS4_N_LAYER; il++) {
-            out[il + 1] +=
+            const size_t per_session =
                 DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA ?
                 engine_glm_per_layer_kv_bytes_planner(il, est_ctx) :
                 engine_per_layer_kv_bytes_planner(il, est_ctx,
                                                   e->prefill_chunk);
+            const size_t cache_bytes =
+                engine_size_mul_sat(per_session, session_count);
+            out[il + 1] = out[il + 1] > SIZE_MAX - cache_bytes ?
+                SIZE_MAX : out[il + 1] + cache_bytes;
         }
     } else {
         /* Fallback: 128 MiB per layer as a static estimate. */
-        const size_t fallback_per_layer = (size_t)128ull * 1024ull * 1024ull;
+        const size_t fallback_per_layer = engine_size_mul_sat(
+                (size_t)128ull * 1024ull * 1024ull, session_count);
         for (uint32_t i = 1; i <= DS4_N_LAYER; i++) out[i] += fallback_per_layer;
     }
     return 0;
@@ -55717,6 +55738,7 @@ static int ds4_test_make_engine(
     memset(eng, 0, sizeof(*eng));
     eng->model.fd = -1;
     eng->placement_ctx_hint = placement_ctx_hint;
+    eng->placement_session_count_hint = 1;
     eng->model.n_tensors = (uint64_t)(n_tensors > 0 ? n_tensors : 0);
     if (n_tensors <= 0) return 0;
     eng->model.tensors = calloc((size_t)n_tensors,
@@ -55885,6 +55907,32 @@ size_t ds4_test_compute_entry_bytes_sum(
             tensors, n_tensors, placement_ctx_hint, 0);
 }
 
+size_t ds4_test_compute_glm_entry_bytes_sum_with_sessions(
+        const ds4_test_fake_tensor *tensors,
+        int n_tensors,
+        int placement_ctx_hint,
+        int placement_session_count_hint) {
+    const ds4_shape saved_shape = g_ds4_shape;
+    g_ds4_shape = DS4_SHAPE_GLM52;
+    ds4_engine eng;
+    if (ds4_test_make_engine(&eng, tensors, n_tensors,
+                             placement_ctx_hint) != 0) {
+        g_ds4_shape = saved_shape;
+        return 0;
+    }
+    eng.placement_session_count_hint = placement_session_count_hint;
+    size_t entry_bytes[DS4_MAX_LAYER + 2];
+    size_t sum = 0;
+    if (engine_compute_entry_bytes(&eng, entry_bytes) == 0) {
+        for (uint32_t i = 0; i < (uint32_t)DS4_N_LAYER + 2u; i++) {
+            sum += entry_bytes[i];
+        }
+    }
+    free(eng.model.tensors);
+    g_ds4_shape = saved_shape;
+    return sum;
+}
+
 size_t ds4_test_glm_per_layer_kv_bytes(uint32_t layer, int ctx_size) {
     const ds4_shape saved_shape = g_ds4_shape;
     g_ds4_shape = DS4_SHAPE_GLM52;
@@ -55990,6 +56038,7 @@ static int ds4_engine_open_internal(ds4_engine **out,
     }
     if (opt->n_threads > 0) g_requested_threads = (uint32_t)opt->n_threads;
     e->placement_ctx_hint = opt->placement_ctx_hint;
+    e->placement_session_count_hint = opt->placement_session_count_hint;
     e->share_session_prefill_workspace = opt->share_session_prefill_workspace;
     ds4_acquire_instance_lock();
 

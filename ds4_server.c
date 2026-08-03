@@ -12896,6 +12896,8 @@ int main(int argc, char **argv) {
 
     cfg.engine.context_size = cfg.ctx_size;
     cfg.engine.placement_ctx_hint = cfg.ctx_size;
+    cfg.engine.placement_session_count_hint =
+        cfg.batched_sessions > 0 ? cfg.batched_sessions : 1;
     cfg.engine.share_session_prefill_workspace = cfg.batched_sessions > 0;
     ds4_engine *engine = NULL;
     if (cfg.gpu_vram_arg || cfg.gpu_devices_arg) {
