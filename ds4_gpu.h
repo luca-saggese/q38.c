@@ -211,6 +211,14 @@ int ds4_gpu_stream_expert_cache_seed_experts(
         const int32_t                     *expert_ids,
         const uint32_t                    *expert_priorities,
         uint32_t                           n_experts);
+#ifdef __APPLE__
+/* Seed from mapped weights with blits appended to the active command buffer. */
+int ds4_gpu_stream_expert_cache_seed_experts_gpu_copy(
+        const ds4_gpu_stream_expert_table *table,
+        const int32_t                     *expert_ids,
+        const uint32_t                    *expert_priorities,
+        uint32_t                           n_experts);
+#endif
 void ds4_gpu_print_memory_report(const char *label);
 
 /* Tensor-parallel per-layer gates (Metal only).  The encoder calls

@@ -19,6 +19,7 @@ static void die(const char *msg) {
 static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s MODEL manifest.tsv OUT.tsv [ctx] "
+            "[--quality] "
             "[--ssd-streaming] [--ssd-streaming-cold] "
             "[--ssd-streaming-cache-experts N|NGB] "
             "[--ssd-streaming-preload-experts N]\n",
@@ -517,6 +518,7 @@ int main(int argc, char **argv) {
     const char *out_path = argv[3];
     int ctx_size = 4096;
     bool ctx_set = false;
+    bool quality = false;
     bool ssd_streaming = false;
     bool ssd_streaming_cold = false;
     uint32_t ssd_streaming_cache_experts = 0;
@@ -525,7 +527,9 @@ int main(int argc, char **argv) {
 
     for (int i = 4; i < argc; i++) {
         const char *arg = argv[i];
-        if (!strcmp(arg, "--ssd-streaming")) {
+        if (!strcmp(arg, "--quality")) {
+            quality = true;
+        } else if (!strcmp(arg, "--ssd-streaming")) {
             ssd_streaming = true;
         } else if (!strcmp(arg, "--ssd-streaming-cold")) {
             ssd_streaming_cold = true;
@@ -564,7 +568,7 @@ int main(int argc, char **argv) {
         .ssd_streaming_cache_bytes = ssd_streaming_cache_bytes,
         .ssd_streaming_preload_experts = ssd_streaming_preload_experts,
         .warm_weights = false,
-        .quality = false,
+        .quality = quality,
         .ssd_streaming = ssd_streaming,
         .ssd_streaming_cold = ssd_streaming_cold,
     };
