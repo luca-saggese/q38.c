@@ -20443,7 +20443,12 @@ static bool metal_graph_decode_cuda_selected_slots_expected(
         layer->ffn_up_exps->type == DS4_TENSOR_IQ2_XXS &&
         layer->ffn_down_exps->type == DS4_TENSOR_Q2_K &&
         getenv("DS4_METAL_DISABLE_IQ2_SELECTED_EXPERT_VIEWS") == NULL;
-    return q4 || iq2;
+    const bool mxfp4 =
+        layer->ffn_gate_exps->type == DS4_TENSOR_MXFP4 &&
+        layer->ffn_up_exps->type == DS4_TENSOR_MXFP4 &&
+        layer->ffn_down_exps->type == DS4_TENSOR_MXFP4 &&
+        getenv("DS4_METAL_DISABLE_MXFP4_SELECTED_EXPERT_VIEWS") == NULL;
+    return q4 || iq2 || mxfp4;
 #else
     (void)g;
     (void)layer;

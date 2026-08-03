@@ -155,6 +155,15 @@ int ds4_mmq_q4_K_dense(
     int           K,
     cudaStream_t  stream);
 
+int ds4_mmq_mxfp4_dense(
+    const void  * W_mxfp4,
+    const float * X_f32,
+    float       * out_f32,
+    int           M,
+    int           N,
+    int           K,
+    cudaStream_t  stream);
+
 // MoE matmul entry points. For each (token, slot-within-token's-top-k) pair
 // the kernel computes:
 //
@@ -241,6 +250,18 @@ int ds4_mmq_q2_K_moe_soa(
     cudaStream_t    stream);
 
 int ds4_mmq_q4_K_moe(
+    const void    * W,
+    const float   * X_f32,
+    const int32_t * ids,
+    float         * out_f32,
+    int             M,
+    int             K,
+    int             n_tokens,
+    int             n_experts,
+    int             n_expert_used,
+    cudaStream_t    stream);
+
+int ds4_mmq_mxfp4_moe(
     const void    * W,
     const float   * X_f32,
     const int32_t * ids,
@@ -369,6 +390,20 @@ int ds4_mmq_q4_K_moe_pair(
     int             n_expert_used,
     cudaStream_t    stream);
 
+int ds4_mmq_mxfp4_moe_pair(
+    const void    * W_a,
+    const void    * W_b,
+    const float   * X_f32,
+    const int32_t * ids,
+    float         * out_a,
+    float         * out_b,
+    int             M,
+    int             K,
+    int             n_tokens,
+    int             n_experts,
+    int             n_expert_used,
+    cudaStream_t    stream);
+
 // MoE vector matmul entries (Step 6). Same signature and semantics as the
 // ds4_mmq_<type>_moe entries above, but route through llama.cpp's mmvq
 // kernels instead of mmq. mmvq is structurally optimised for small batch
@@ -426,6 +461,18 @@ int ds4_mmq_iq2_xxs_moe_vec(
     cudaStream_t    stream);
 
 int ds4_mmq_q4_K_moe_vec(
+    const void    * W,
+    const float   * X_f32,
+    const int32_t * ids,
+    float         * out_f32,
+    int             M,
+    int             K,
+    int             n_tokens,
+    int             n_experts,
+    int             n_expert_used,
+    cudaStream_t    stream);
+
+int ds4_mmq_mxfp4_moe_vec(
     const void    * W,
     const float   * X_f32,
     const int32_t * ids,
@@ -620,6 +667,18 @@ int ds4_mmq_q4_K_moe_down_sum6_vec(
     int             n_expert_used,
     cudaStream_t    stream);
 
+int ds4_mmq_mxfp4_moe_down_sum6_vec(
+    const void    * W,
+    const float   * X_f32,
+    const int32_t * ids,
+    float         * out_f32,
+    int             M,
+    int             K,
+    int             n_tokens,
+    int             n_experts,
+    int             n_expert_used,
+    cudaStream_t    stream);
+
 // Fused gate+up+SwiGLU vector entries for routed MoE with top_k=6. These use
 // canonical Q8_1 activation quantization and compute weighted mid directly:
 //
@@ -660,6 +719,21 @@ int ds4_mmq_iq2_xxs_moe_gate_up_mid_vec(
     cudaStream_t    stream);
 
 int ds4_mmq_q4_K_moe_gate_up_mid_vec(
+    const void    * W_gate,
+    const void    * W_up,
+    const float   * X_f32,
+    const int32_t * ids,
+    const float   * weights,
+    float         * mid_f32,
+    int             M,
+    int             K,
+    int             n_tokens,
+    int             n_experts,
+    int             n_expert_used,
+    float           clamp,
+    cudaStream_t    stream);
+
+int ds4_mmq_mxfp4_moe_gate_up_mid_vec(
     const void    * W_gate,
     const void    * W_up,
     const float   * X_f32,

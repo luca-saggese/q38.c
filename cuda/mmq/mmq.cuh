@@ -14,6 +14,8 @@ using namespace ggml_cuda_mma;
 #define MMQ_ITER_K_FP4         512
 #define MMQ_NWARPS               8
 
+static constexpr int QK_FP4_MMQ = 8 * QK_MXFP4;
+
 typedef void (*load_tiles_mmq_t)(const char * __restrict__ x, int * x_tile, const int kbx0, const int i_max, const int stride);
 typedef void (*vec_dot_mmq_t)(const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00);
 typedef void (*mmq_write_back_t)(const float * __restrict__ sum, const int32_t * __restrict__ get_rows_to_sorted,

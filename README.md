@@ -105,8 +105,14 @@ Download one main model. **Prefer the imatrix versions.**
 ./download_model.sh q2-imatrix   # 96/128 GB RAM machines, imatrix-tuned q2
 ./download_model.sh q2-q4-imatrix  # 96/128 GB RAM machines, q2 with last 6 layers q4
 ./download_model.sh q4-imatrix   # >= 256 GB RAM machines, imatrix-tuned q4
+./download_model.sh mxfp4        # native MXFP4 experts, about 156 GB
 ./download_model.sh pro-q2-imatrix  # 512 GB RAM machines, PRO q2 imatrix quant
 ```
+
+The MXFP4 GGUF preserves DeepSeek's released MXFP4 routed-expert weights rather
+than requantizing them. It runs on Metal and CUDA; Blackwell CUDA devices use
+native FP4 matrix instructions and FP4 activations for batched expert work.
+Decode and other CUDA devices use Q8 activations.
 
 For the full PRO Q4 distributed run, download one half on each machine:
 

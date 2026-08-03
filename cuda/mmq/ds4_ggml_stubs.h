@@ -277,7 +277,10 @@ inline int64_t ggml_blck_size(enum ggml_type t) {
         case GGML_TYPE_Q8_0:
         case GGML_TYPE_Q8_1:
         case GGML_TYPE_IQ4_NL:
+        case GGML_TYPE_MXFP4:
             return 32;
+        case GGML_TYPE_NVFP4:
+            return 64;
         case GGML_TYPE_Q2_K:
         case GGML_TYPE_Q3_K:
         case GGML_TYPE_Q4_K:
@@ -292,8 +295,6 @@ inline int64_t ggml_blck_size(enum ggml_type t) {
         case GGML_TYPE_IQ1_S:
         case GGML_TYPE_IQ1_M:
         case GGML_TYPE_IQ4_XS:
-        case GGML_TYPE_MXFP4:
-        case GGML_TYPE_NVFP4:
         case GGML_TYPE_Q1_0:
             return 256;
         default:

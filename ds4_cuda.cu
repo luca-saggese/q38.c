@@ -1113,6 +1113,38 @@ static int cuda_use_mmq(void) {
     return use;
 }
 
+/* MXFP4 has no dequant+cublas fallback, so it must retain MMQ on multi-GPU
+ * placements where the optional Q8/IQ2 prefill tier stays disabled. MMQ
+ * resolves the active CUDA device on every call; initialization only warms
+ * its device-info singleton. The experimental global persistent scratch is
+ * intentionally rejected because one pointer cannot span CUDA devices. */
+static int cuda_use_mxfp4_mmq(void) {
+    static int init = 0;
+    static int use = 0;
+    if (!init) {
+        init = 1;
+        const char *s = getenv("DS4_CUDA_MMQ");
+        if (s && s[0] == '0') {
+            fprintf(stderr,
+                    "ds4: DS4_CUDA_MMQ=0 - MXFP4 MMQ disabled\n");
+        } else if (g_n_gpus > 1 &&
+                   getenv("DS4_CUDA_MMQ_Q81_PERSISTENT") != NULL) {
+            fprintf(stderr,
+                    "ds4: persistent MMQ Q8_1 scratch is unavailable with multi-GPU MXFP4\n");
+        } else {
+            int device = 0;
+            if (cudaGetDevice(&device) == cudaSuccess &&
+                ds4_mmq_init(device) == 0) {
+                use = 1;
+            } else {
+                fprintf(stderr,
+                        "ds4: ds4_mmq_init failed - MXFP4 unavailable\n");
+            }
+        }
+    }
+    return use;
+}
+
 /* mmq pipeline helpers, ported from the fork: SwiGLU + clamp + router
  * weight in the (token, slot, feature) layout ds4_mmq_*_moe writes, and
  * the guarded per-token slot sum. */
@@ -1144,7 +1176,9 @@ __global__ static void moe_mmq_swiglu_weighted_clamp_kernel(
     mid_out[gid] = s * u * w;
 }
 
-__global__ static void moe_mmq_sum_kernel(float *out, const float *down, uint32_t out_dim, uint32_t n_expert, uint32_t n_tokens, uint32_t guard_nonfinite) {
+__global__ static void moe_mmq_sum_kernel(float *out, const float *down,
+        const int32_t *selected, uint32_t out_dim, uint32_t n_expert,
+        uint32_t n_tokens, uint32_t guard_nonfinite) {
     uint64_t gid = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
     uint64_t n = (uint64_t)n_tokens * out_dim;
     if (gid >= n) return;
@@ -1152,6 +1186,7 @@ __global__ static void moe_mmq_sum_kernel(float *out, const float *down, uint32_
     uint32_t row = gid - (uint64_t)tok * out_dim;
     float acc = 0.0f;
     for (uint32_t e = 0; e < n_expert; e++) {
+        if (selected && selected[(uint64_t)tok * n_expert + e] < 0) continue;
         const float v = down[((uint64_t)tok * n_expert + e) * out_dim + row];
         if (!guard_nonfinite || isfinite(v)) acc += v;
     }
@@ -19414,6 +19449,22 @@ __device__ __forceinline__ static bool moe_owned_local_expert(
     return true;
 }
 
+__global__ static void mxfp4_prepare_owned_assignments_kernel(
+        int32_t *local_ids,
+        float *local_weights,
+        const int32_t *selected,
+        const float *weights,
+        uint32_t expert_base,
+        uint32_t expert_count) {
+    const uint32_t slot = threadIdx.x;
+    if (slot >= 6u) return;
+    uint32_t local_expert = 0;
+    const bool owned = moe_owned_local_expert(
+            selected[slot], expert_base, expert_count, &local_expert);
+    local_ids[slot] = owned ? (int32_t)local_expert : -1;
+    local_weights[slot] = owned ? weights[slot] : 0.0f;
+}
+
 /* Quantize only selected slots owned by this expert-parallel rank.  Rows keep
  * their original slot index so the final rank-local reduction can visit slots
  * in canonical order without compaction or a host synchronization. */
@@ -21495,6 +21546,56 @@ __device__ __forceinline__ static int moe_owned_packed_component(
     return -1;
 }
 
+/* One thread owns an output column and loads all source slots before writing.
+ * This permits packed_out == slots for the non-peer-copy fallback. */
+__global__ static void moe_down_owned_pack_f32_slots_kernel(
+        float *packed_out,
+        const float *slots,
+        const int32_t *selected,
+        uint32_t out_dim,
+        uint32_t expert_base,
+        uint32_t expert_count) {
+    const uint32_t col =
+        (uint32_t)((uint64_t)blockIdx.x * blockDim.x + threadIdx.x);
+    if (col >= out_dim) return;
+
+    float slotv[6];
+    #pragma unroll
+    for (uint32_t slot = 0; slot < 6u; slot++) {
+        slotv[slot] = slots[(uint64_t)slot * out_dim + col];
+    }
+
+    float packed[4];
+    #pragma unroll
+    for (uint32_t packed_slot = 0; packed_slot < 4u; packed_slot++) {
+        bool prefix_pair = false;
+        const int first_slot = moe_owned_packed_component(
+                selected, packed_slot / 2u, packed_slot & 1u,
+                expert_base, expert_count, &prefix_pair);
+        if (first_slot < 0) {
+            packed[packed_slot] = 0.0f;
+        } else if (prefix_pair) {
+            float value = __fadd_rn(0.0f, slotv[first_slot]);
+            packed[packed_slot] = __fadd_rn(value, slotv[first_slot + 1]);
+        } else {
+            packed[packed_slot] = slotv[first_slot];
+        }
+    }
+
+    #pragma unroll
+    for (uint32_t packed_slot = 0; packed_slot < 4u; packed_slot++) {
+        packed_out[(uint64_t)packed_slot * out_dim + col] = packed[packed_slot];
+    }
+}
+
+__global__ static void moe_down_owned_copy_f32_slots_kernel(
+        float *dst,
+        const float *src,
+        uint64_t count) {
+    const uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < count) dst[i] = src[i];
+}
+
 __global__ static void moe_down_owned_packed_qwarp32_kernel(
         float *packed_out,
         const char *down_base,
@@ -23479,12 +23580,14 @@ static int routed_moe_launch(
         return 0;
     }
     const int q4k_path = (gate_type == 12u && down_type == 12u);
-    if (!q4k_path && (gate_type != 16u || down_type != 10u)) return 0;
+    const int iq2_path = (gate_type == 16u && down_type == 10u);
+    const int mxfp4_path = (gate_type == 39u && down_type == 39u);
+    if (!q4k_path && !iq2_path && !mxfp4_path) return 0;
 
     /* The aligned artifacts replace the raw expert tensors on integrated
      * CUDA systems.  Route both prefill and decode before resolving a raw
      * pointer, otherwise the fallback cache would duplicate tens of GiB. */
-    if (!q4k_path && !owned_filtered && !g_ssd_streaming_mode &&
+    if (iq2_path && !owned_filtered && !g_ssd_streaming_mode &&
         cuda_aligned_iq2_enabled() && cuda_aligned_q2k_enabled()) {
         const uint64_t gate_total = (uint64_t)n_total_expert * gate_expert_bytes;
         const uint64_t down_total = (uint64_t)n_total_expert * down_expert_bytes;
@@ -23549,7 +23652,8 @@ static int routed_moe_launch(
                 moe_mmq_sum_kernel<<<
                     (uint32_t)((n + 255u) / 256u), 256, 0, aligned_stream>>>(
                     (float *)out->ptr, (const float *)down->ptr,
-                    out_dim, n_expert, n_tokens, /*guard_nonfinite=*/1);
+                    NULL, out_dim, n_expert, n_tokens,
+                    /*guard_nonfinite=*/1);
                 if (cuda_ok(cudaGetLastError(), "aligned moe sum launch")) {
                     static int logged = 0;
                     if (!logged) {
@@ -23568,6 +23672,143 @@ static int routed_moe_launch(
             if (cuda_model_map_replaces_complete(model_map)) return 0;
         }
     }
+
+    /* Native MXFP4 routed experts use the vendored MMVQ decode kernels and
+     * MMQ matrix kernels. On Blackwell the latter dispatch to FP4 MMA; older
+     * CUDA devices use the mathematically equivalent DP4A implementation.
+     * SSD streaming presents a compact table containing only the selected
+     * experts, together with IDs remapped into that table. */
+    if (mxfp4_path) {
+        if (!cuda_use_mxfp4_mmq()) {
+            fprintf(stderr, "ds4: CUDA MXFP4 requires the MMQ backend\n");
+            return 0;
+        }
+        const uint64_t gate_total =
+            (uint64_t)n_total_expert * gate_expert_bytes;
+        const uint64_t down_total =
+            (uint64_t)n_total_expert * down_expert_bytes;
+        if (gate_total > model_size - gate_offset ||
+            gate_total > model_size - up_offset ||
+            down_total > model_size - down_offset) {
+            return 0;
+        }
+
+        const uint64_t slot_count = (uint64_t)n_tokens * n_expert;
+        const int logical_tier = ds4_tensor_device_idx(out);
+        const int use_stream_selected_cache =
+            allow_streaming &&
+            g_ssd_streaming_mode &&
+            g_stream_selected_cache.valid &&
+            g_stream_selected_cache.logical_tier == logical_tier &&
+            g_stream_selected_cache.model_map == model_map &&
+            g_stream_selected_cache.layer == layer_index &&
+            g_stream_selected_cache.n_total_expert == n_total_expert &&
+            g_stream_selected_cache.slot_count >= slot_count &&
+            g_stream_selected_cache.gate_offset == gate_offset &&
+            g_stream_selected_cache.up_offset == up_offset &&
+            g_stream_selected_cache.down_offset == down_offset &&
+            g_stream_selected_cache.gate_expert_bytes == gate_expert_bytes &&
+            g_stream_selected_cache.down_expert_bytes == down_expert_bytes &&
+            g_stream_selected_cache.gate_ptr &&
+            g_stream_selected_cache.up_ptr &&
+            g_stream_selected_cache.down_ptr &&
+            g_stream_selected_cache.slot_selected_tensor.ptr &&
+            g_stream_selected_cache.slot_selected_tensor.bytes >=
+                slot_count * sizeof(int32_t);
+        if (g_ssd_streaming_mode && allow_streaming &&
+            !use_stream_selected_cache) {
+            fprintf(stderr,
+                    "ds4: CUDA streaming MXFP4 experts are unavailable for layer %u\n",
+                    layer_index);
+            return 0;
+        }
+
+        const ds4_gpu_tensor *mx_selected = use_stream_selected_cache ?
+            &g_stream_selected_cache.slot_selected_tensor : selected;
+        const uint32_t weight_experts = use_stream_selected_cache ?
+            g_stream_selected_cache.compact_count : n_total_expert;
+        const char *gate_w = use_stream_selected_cache ?
+            g_stream_selected_cache.gate_ptr :
+            cuda_resolve_weight_ptr(model_map, gate_offset, gate_total,
+                                    logical_tier, "mxfp4 moe gate");
+        const char *up_w = use_stream_selected_cache ?
+            g_stream_selected_cache.up_ptr :
+            cuda_resolve_weight_ptr(model_map, up_offset, gate_total,
+                                    logical_tier, "mxfp4 moe up");
+        const char *down_w = use_stream_selected_cache ?
+            g_stream_selected_cache.down_ptr :
+            cuda_resolve_weight_ptr(model_map, down_offset, down_total,
+                                    logical_tier, "mxfp4 moe down");
+        if (!gate_w || !up_w || !down_w || weight_experts == 0u) return 0;
+
+        const cudaStream_t stream =
+            n_tokens == 1u ? cuda_decode_stream() : (cudaStream_t)0;
+        int rc = -1;
+        if (n_tokens == 1u && n_expert == 6u) {
+            rc = ds4_mmq_mxfp4_moe_gate_up_mid_vec(
+                gate_w, up_w, (const float *)x->ptr,
+                (const int32_t *)mx_selected->ptr,
+                (const float *)weights->ptr, (float *)mid->ptr,
+                (int)expert_mid_dim, (int)expert_in_dim,
+                (int)n_tokens, (int)weight_experts, (int)n_expert,
+                clamp, stream);
+            if (rc == 0) {
+                rc = ds4_mmq_mxfp4_moe_down_sum6_vec(
+                    down_w, (const float *)mid->ptr,
+                    (const int32_t *)mx_selected->ptr, (float *)out->ptr,
+                    (int)out_dim, (int)expert_mid_dim,
+                    (int)n_tokens, (int)weight_experts, (int)n_expert,
+                    stream);
+            }
+        } else {
+            rc = ds4_mmq_mxfp4_moe_pair(
+                gate_w, up_w, (const float *)x->ptr,
+                (const int32_t *)mx_selected->ptr,
+                (float *)gate->ptr, (float *)up->ptr,
+                (int)expert_mid_dim, (int)expert_in_dim,
+                (int)n_tokens, (int)weight_experts, (int)n_expert,
+                stream);
+            if (rc == 0) {
+                const uint64_t mid_floats =
+                    slot_count * expert_mid_dim;
+                moe_mmq_swiglu_weighted_clamp_kernel<<<
+                    (uint32_t)((mid_floats + 255u) / 256u), 256, 0, stream>>>(
+                    (float *)mid->ptr,
+                    (const float *)gate->ptr, (const float *)up->ptr,
+                    (const float *)weights->ptr,
+                    expert_mid_dim, n_tokens, n_expert, clamp);
+                rc = cuda_ok(cudaGetLastError(),
+                             "mxfp4 moe swiglu launch") ? 0 : -1;
+            }
+            if (rc == 0) {
+                rc = ds4_mmq_mxfp4_moe(
+                    down_w, (const float *)mid->ptr,
+                    (const int32_t *)mx_selected->ptr,
+                    (float *)down->ptr,
+                    (int)out_dim, (int)expert_mid_dim,
+                    (int)slot_count, (int)weight_experts,
+                    /*n_expert_used=*/1, stream);
+            }
+            if (rc == 0) {
+                const uint64_t n = (uint64_t)n_tokens * out_dim;
+                moe_mmq_sum_kernel<<<
+                    (uint32_t)((n + 255u) / 256u), 256, 0, stream>>>(
+                    (float *)out->ptr, (const float *)down->ptr,
+                    owned_filtered
+                        ? (const int32_t *)mx_selected->ptr
+                        : NULL,
+                    out_dim, n_expert, n_tokens, /*guard_nonfinite=*/1);
+                rc = cuda_ok(cudaGetLastError(),
+                             "mxfp4 moe sum launch") ? 0 : -1;
+            }
+        }
+        if (rc == 0) return 1;
+        fprintf(stderr,
+                "ds4: CUDA MXFP4 routed-MoE returned %d "
+                "(layer=%u n_tokens=%u)\n",
+                rc, layer_index, n_tokens);
+        return 0;
+    }
     /* mmq routed-MoE prefill tier (ported from the Entrpi/ds4 fork).
      * IQ2_XXS gate/up pair (one shared activation quantize + routing
      * pass) -> SwiGLU + clamp + router weight -> Q2_K down, treating
@@ -23576,7 +23817,7 @@ static int routed_moe_launch(
      * [n_tokens, n_expert, *] by the validation above.  Any entry
      * failure falls through to the legacy sorted-pairs path (the
      * buffers are scratch there too). */
-    if (!q4k_path && n_tokens > 1u && !owned_filtered && cuda_use_mmq()) {
+    if (iq2_path && n_tokens > 1u && !owned_filtered && cuda_use_mmq()) {
         const uint64_t gate_total = (uint64_t)n_total_expert * gate_expert_bytes;
         const uint64_t down_total = (uint64_t)n_total_expert * down_expert_bytes;
         const int mmq_tier = ds4_tensor_device_idx(out);
@@ -23615,7 +23856,8 @@ static int routed_moe_launch(
                 const uint64_t n = (uint64_t)n_tokens * out_dim;
                 moe_mmq_sum_kernel<<<(uint32_t)((n + 255) / 256), 256>>>(
                         (float *)out->ptr, (const float *)down->ptr,
-                        out_dim, n_expert, n_tokens, /*guard_nonfinite=*/1);
+                        NULL, out_dim, n_expert, n_tokens,
+                        /*guard_nonfinite=*/1);
                 if (cuda_ok(cudaGetLastError(), "mmq moe sum launch")) return 1;
                 rc = -1;
             }
@@ -24786,17 +25028,23 @@ extern "C" int ds4_gpu_routed_moe_one_owned_tensor(
     }
     if (pack_fixed3 && resident_expert_base == 0u) return 0;
     const bool q4k_path = gate_type == 12u && down_type == 12u;
-    if (!q4k_path && (gate_type != 16u || down_type != 10u)) return 0;
+    const bool mxfp4_path = gate_type == 39u && down_type == 39u;
+    if (!q4k_path && !mxfp4_path &&
+        (gate_type != 16u || down_type != 10u)) {
+        return 0;
+    }
     if (q4k_path && getenv("DS4_CUDA_MOE_WRITE_GATE_UP") != NULL) {
         fprintf(stderr, "ds4: CUDA owned Q4 decode does not support gate/up auxiliary output\n");
         return 0;
     }
-    if (!q4k_path && getenv("DS4_CUDA_MOE_NO_DECODE_LUT_GATE") != NULL) {
+    if (!q4k_path && !mxfp4_path &&
+        getenv("DS4_CUDA_MOE_NO_DECODE_LUT_GATE") != NULL) {
         fprintf(stderr, "ds4: CUDA owned IQ2 decode requires the LUT gate path\n");
         return 0;
     }
     const bool write_aux =
-        !q4k_path && getenv("DS4_CUDA_MOE_WRITE_GATE_UP") != NULL;
+        !q4k_path && !mxfp4_path &&
+        getenv("DS4_CUDA_MOE_WRITE_GATE_UP") != NULL;
 
     if (resident_expert_base > UINT64_MAX / gate_expert_bytes ||
         resident_expert_count > UINT64_MAX / gate_expert_bytes ||
@@ -24829,12 +25077,97 @@ extern "C" int ds4_gpu_routed_moe_one_owned_tensor(
             logical_tier, "moe_owned_down");
     if (!gate_w || !up_w || !down_w) return 0;
 
+    const uint64_t down_output_bytes =
+        (uint64_t)(pack_fixed3 ? 4u : 6u) * out_dim * sizeof(float);
+    if (mxfp4_path) {
+        const uint64_t slot_bytes = 6ull * out_dim * sizeof(float);
+        if (!cuda_use_mxfp4_mmq() ||
+            gate->bytes < 6u * sizeof(int32_t) ||
+            up->bytes < 6u * sizeof(float) ||
+            down->bytes < slot_bytes ||
+            (down_output && down_output->bytes < down_output_bytes)) {
+            return 0;
+        }
+
+        cudaStream_t stream = cuda_decode_stream();
+        int32_t *local_ids = (int32_t *)gate->ptr;
+        float *local_weights = (float *)up->ptr;
+        mxfp4_prepare_owned_assignments_kernel<<<1, 32, 0, stream>>>(
+                local_ids,
+                local_weights,
+                (const int32_t *)selected->ptr,
+                (const float *)weights->ptr,
+                resident_expert_base,
+                resident_expert_count);
+        if (!cuda_ok(cudaGetLastError(),
+                     "owned MXFP4 assignment prepare launch")) {
+            return 0;
+        }
+        if (ds4_mmq_mxfp4_moe_gate_up_mid_vec(
+                    gate_w,
+                    up_w,
+                    (const float *)x->ptr,
+                    local_ids,
+                    local_weights,
+                    (float *)mid->ptr,
+                    expert_mid_dim,
+                    expert_in_dim,
+                    1,
+                    resident_expert_count,
+                    6,
+                    clamp,
+                    stream) != 0) {
+            return 0;
+        }
+
+        if (ds4_mmq_mxfp4_moe_vec(
+                    down_w,
+                    (const float *)mid->ptr,
+                    local_ids,
+                    (float *)down->ptr,
+                    out_dim,
+                    expert_mid_dim,
+                    6,
+                    resident_expert_count,
+                    1,
+                    stream) != 0) {
+            return 0;
+        }
+        if (pack_fixed3) {
+            float *packed_dst = down_output
+                ? (float *)down_output->ptr
+                : (float *)down->ptr;
+            moe_down_owned_pack_f32_slots_kernel<<<
+                    (out_dim + 255u) / 256u, 256, 0, stream>>>(
+                    packed_dst,
+                    (const float *)down->ptr,
+                    (const int32_t *)selected->ptr,
+                    out_dim,
+                    resident_expert_base,
+                    resident_expert_count);
+            if (!cuda_ok(cudaGetLastError(),
+                         "owned MXFP4 down pack launch")) {
+                return 0;
+            }
+        } else if (down_output) {
+            const uint64_t slot_count = 6ull * out_dim;
+            moe_down_owned_copy_f32_slots_kernel<<<
+                    (slot_count + 255u) / 256u, 256, 0, stream>>>(
+                    (float *)down_output->ptr,
+                    (const float *)down->ptr,
+                    slot_count);
+            if (!cuda_ok(cudaGetLastError(),
+                         "owned MXFP4 down peer copy launch")) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+
     const uint32_t xq_blocks = expert_in_dim / CUDA_QK_K;
     const uint32_t midq_blocks = expert_mid_dim / CUDA_QK_K;
     const uint64_t xq_bytes = (uint64_t)xq_blocks * sizeof(cuda_block_q8_K);
     const uint64_t midq_bytes = 6ull * midq_blocks * sizeof(cuda_block_q8_K);
-    const uint64_t down_output_bytes =
-        (uint64_t)(pack_fixed3 ? 4u : 6u) * out_dim * sizeof(float);
     const uint64_t aux_bytes = 6ull * expert_mid_dim * sizeof(float);
     const uint64_t shared_q8_blocks = expert_in_dim / 32u;
     const uint64_t shared_q8_bytes = shared_q8_blocks * 32u;

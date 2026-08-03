@@ -6,6 +6,7 @@ GLM_ANTIREZ_REPO="antirez/GLM-5.2-GGUF"
 REPO="antirez/deepseek-v4-gguf"
 Q2_IMATRIX_FILE="DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf"
 Q4_IMATRIX_FILE="DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix.gguf"
+MXFP4_FILE="DeepSeek-V4-Flash-MXFP4Experts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-mxfp4-0731.gguf"
 Q2_Q4_IMATRIX_FILE="DeepSeek-V4-Flash-Layers37-42Q4KExperts-OtherExpertLayersIQ2XXSGateUp-Q2KDown-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-fixed.gguf"
 PRO_Q2_IMATRIX_FILE="DeepSeek-V4-Pro-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-Instruct-imatrix.gguf"
 PRO_Q4_LAYERS00_30_FILE="DeepSeek-V4-Pro-Q4K-Layers00-30.gguf"
@@ -35,6 +36,7 @@ Usage:
   ./download_model.sh q2-imatrix [--token TOKEN]
   ./download_model.sh q2-q4-imatrix [--token TOKEN]
   ./download_model.sh q4-imatrix [--token TOKEN]
+  ./download_model.sh mxfp4 [--token TOKEN]
   ./download_model.sh pro-q2-imatrix [--token TOKEN]
   ./download_model.sh pro-q4-layers00-30 [--token TOKEN]
   ./download_model.sh pro-q4-layers31-output [--token TOKEN]
@@ -61,6 +63,11 @@ Targets:
   q4-imatrix
        4-bit routed experts, about 153 GB on disk.
        Recommended model for machines with 256 GB RAM or more.
+
+  mxfp4
+       Native DeepSeek V4 Flash MXFP4 routed experts, about 156 GB on disk.
+       Supported by Metal and CUDA; Blackwell uses FP4 tensor cores for batched
+       expert work, while CUDA decode keeps Q8 activations.
 
   pro-q2-imatrix
        DeepSeek V4 PRO q2 imatrix quant, as a single GGUF file. About 430 GB
@@ -146,6 +153,7 @@ case "$MODEL" in
     q2-imatrix) MODEL_FILE=$Q2_IMATRIX_FILE ;;
     q2-q4-imatrix) MODEL_FILE=$Q2_Q4_IMATRIX_FILE ;;
     q4-imatrix) MODEL_FILE=$Q4_IMATRIX_FILE ;;
+    mxfp4) MODEL_FILE=$MXFP4_FILE; FORCE_HF_DOWNLOAD=1 ;;
     pro-q2-imatrix) MODEL_FILE=$PRO_Q2_IMATRIX_FILE ;;
     pro-q4-layers00-30) MODEL_FILE=$PRO_Q4_LAYERS00_30_FILE; LINK_MODEL=0 ;;
     pro-q4-layers31-output) MODEL_FILE=$PRO_Q4_LAYERS31_OUTPUT_FILE; LINK_MODEL=0 ;;

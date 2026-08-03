@@ -450,6 +450,19 @@ ggml_backend_cuda_context * get_ctx_for_device(int device) {
 }
 
 template <ggml_type type>
+bool ds4_mmq_k_tile_supported(const char *tag, int K, int cc) {
+    if constexpr (type == GGML_TYPE_MXFP4 || type == GGML_TYPE_NVFP4) {
+        if (blackwell_mma_available(cc) && K % MMQ_ITER_K_FP4 != 0) {
+            fprintf(stderr,
+                    "%s: Blackwell FP4 K=%d must be a multiple of %d\n",
+                    tag, K, MMQ_ITER_K_FP4);
+            return false;
+        }
+    }
+    return true;
+}
+
+template <ggml_type type>
 int ds4_mmq_dense_impl(
         const char  * tag,
         const void  * W,
@@ -477,6 +490,7 @@ int ds4_mmq_dense_impl(
 
     const int dev = ggml_cuda_get_device();
     const int cc  = ggml_cuda_info().devices[dev].cc;
+    if (!ds4_mmq_k_tile_supported<type>(tag, K, cc)) return -1;
 
     ggml_backend_cuda_context * ctx = get_ctx_for_device(dev);
     if (!ctx) {
@@ -493,18 +507,23 @@ int ds4_mmq_dense_impl(
      * impls already do this (graph-capture fix); the batched impls were missed. */
     ds4_pool_set_stream(stream);
 
-    // 1. Quantize the F32 activation into the mmq Q8_1 format. The
-    //    target_type parameter only affects the activation scale strategy
-    //    that the quantizer picks (matched to the weight type's K-block
-    //    layout); the output buffer is always Q8_1.
+    // 1. Quantize F32 activations into the format consumed by MMQ. Blackwell
+    //    MXFP4 uses native FP4 tensor cores; other paths use MMQ Q8_1.
     const int64_t ne00         = K;
     const int64_t ne10_padded  = GGML_PAD((int64_t)K, MATRIX_ROW_PADDING);
     const int64_t ne11         = N;
     const int64_t ne12         = 1;
     const int64_t ne13         = 1;
 
+    const bool use_native_fp4 =
+        type == GGML_TYPE_MXFP4 && blackwell_mma_available(cc);
+    const size_t y_block_size = use_native_fp4
+        ? sizeof(block_fp4_mmq) : sizeof(block_q8_1_mmq);
+    const size_t y_values_per_block = use_native_fp4
+        ? QK_FP4_MMQ : 4 * QK8_1;
     const size_t nbytes_src1_q8_1 =
-        ne13 * ne12 * ne11 * ne10_padded * sizeof(block_q8_1) / QK8_1 +
+        ne13 * ne12 * ne11 * ne10_padded * y_block_size /
+            y_values_per_block +
         get_mmq_x_max_host(cc) * sizeof(block_q8_1_mmq);
 
     ggml_cuda_pool_alloc<char> src1_q8_1(ctx->pool(), nbytes_src1_q8_1);
@@ -523,11 +542,19 @@ int ds4_mmq_dense_impl(
     // (a zero q8_1 block contributes 0 to the dot product).
     ybuf_memset(src1_q8_1.get(), nbytes_src1_q8_1, stream);
 
-    quantize_mmq_q8_1_cuda(
-        X_f32, /*ids=*/nullptr, (void *)src1_q8_1.get(),
-        type, /*ne00=*/K, /*s11=*/(int64_t)K, /*s12=*/0, /*s13=*/0,
-        /*ne0=*/ne10_padded, /*ne1=*/ne11, /*ne2=*/ne12, /*ne3=*/ne13,
-        stream);
+    if (use_native_fp4) {
+        quantize_mmq_fp4_cuda(
+            X_f32, /*ids=*/nullptr, (void *)src1_q8_1.get(),
+            type, /*ne00=*/K, /*s11=*/(int64_t)K, /*s12=*/0, /*s13=*/0,
+            /*ne0=*/ne10_padded, /*ne1=*/ne11, /*ne2=*/ne12, /*ne3=*/ne13,
+            stream);
+    } else {
+        quantize_mmq_q8_1_cuda(
+            X_f32, /*ids=*/nullptr, (void *)src1_q8_1.get(),
+            type, /*ne00=*/K, /*s11=*/(int64_t)K, /*s12=*/0, /*s13=*/0,
+            /*ne0=*/ne10_padded, /*ne1=*/ne11, /*ne2=*/ne12, /*ne3=*/ne13,
+            stream);
+    }
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -541,7 +568,8 @@ int ds4_mmq_dense_impl(
     const int64_t blck   = ggml_blck_size(type);
     const int64_t s01    = (int64_t)K / blck;
     const int64_t s1     = (int64_t)M;
-    const int64_t s12    = ne11 * ne10_padded * sizeof(block_q8_1) / (QK8_1 * sizeof(int));
+    const int64_t s12    = ne11 * ne10_padded * y_block_size /
+                           (y_values_per_block * sizeof(int));
     const int64_t s13    = ne12 * s12;
 
     const bool use_stream_k =
@@ -800,6 +828,12 @@ extern "C" int ds4_mmq_q4_K_dense(
     return ds4_mmq_dense_impl<GGML_TYPE_Q4_K>("ds4_mmq_q4_K_dense", W, X, out, M, N, K, stream);
 }
 
+extern "C" int ds4_mmq_mxfp4_dense(
+        const void * W, const float * X, float * out,
+        int M, int N, int K, cudaStream_t stream) {
+    return ds4_mmq_dense_impl<GGML_TYPE_MXFP4>("ds4_mmq_mxfp4_dense", W, X, out, M, N, K, stream);
+}
+
 // ----------------------------------------------------------------------------
 // MoE matmul implementation, shared across all three quant types.
 //
@@ -860,6 +894,7 @@ int ds4_mmq_moe_impl(
 
     const int dev = ggml_cuda_get_device();
     const int cc  = ggml_cuda_info().devices[dev].cc;
+    if (!ds4_mmq_k_tile_supported<type>(tag, K, cc)) return -1;
 
     ggml_backend_cuda_context * ctx = get_ctx_for_device(dev);
     if (!ctx) {
@@ -927,9 +962,16 @@ int ds4_mmq_moe_impl(
         return -2;
     }
 
-    // 2. Gather + quantize the activation into Q8_1.
+    // 2. Gather + quantize activations. Native Blackwell MXFP4 consumes FP4;
+    //    all other MMQ kernels consume Q8_1.
+    const bool use_native_fp4 =
+        type == GGML_TYPE_MXFP4 && blackwell_mma_available(cc);
+    const size_t y_block_size = use_native_fp4
+        ? sizeof(block_fp4_mmq) : sizeof(block_q8_1_mmq);
+    const size_t y_values_per_block = use_native_fp4
+        ? QK_FP4_MMQ : 4 * QK8_1;
     const size_t nbytes_src1_q8_1 =
-        ne_get_rows * ne10_padded * sizeof(block_q8_1) / QK8_1 +
+        ne_get_rows * ne10_padded * y_block_size / y_values_per_block +
         get_mmq_x_max_host(cc) * sizeof(block_q8_1_mmq);
     ggml_cuda_pool_alloc<char> src1_q8_1(ctx->pool(), nbytes_src1_q8_1);
 
@@ -948,15 +990,24 @@ int ds4_mmq_moe_impl(
     const int64_t s12_src = (int64_t)K * ne11;                          // stride between channels = K*1
     const int64_t s13_src = (int64_t)K * ne11 * ne12;                   // stride between samples
 
-    quantize_mmq_q8_1_cuda(
-        X_f32, ids_src1.get(), (void *)src1_q8_1.get(),
-        type, /*ne00=*/K, s11_src, s12_src, s13_src,
-        /*ne0=*/ne10_padded, /*ne1=*/ne_get_rows, /*ne2=*/1, /*ne3=*/1,
-        stream);
+    if (use_native_fp4) {
+        quantize_mmq_fp4_cuda(
+            X_f32, ids_src1.get(), (void *)src1_q8_1.get(),
+            type, /*ne00=*/K, s11_src, s12_src, s13_src,
+            /*ne0=*/ne10_padded, /*ne1=*/ne_get_rows, /*ne2=*/1, /*ne3=*/1,
+            stream);
+    } else {
+        quantize_mmq_q8_1_cuda(
+            X_f32, ids_src1.get(), (void *)src1_q8_1.get(),
+            type, /*ne00=*/K, s11_src, s12_src, s13_src,
+            /*ne0=*/ne10_padded, /*ne1=*/ne_get_rows, /*ne2=*/1, /*ne3=*/1,
+            stream);
+    }
 
     err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "%s: quantize_mmq_q8_1_cuda failed: %s\n", tag, cudaGetErrorString(err));
+        fprintf(stderr, "%s: MMQ activation quantize failed: %s\n",
+                tag, cudaGetErrorString(err));
         return -3;
     }
 
@@ -973,7 +1024,8 @@ int ds4_mmq_moe_impl(
     // In MoE mode the kernel zeroes out the channel-stride contribution to
     // offset_y after reading expert_bounds, so the value is permissive -
     // but we set it consistently with upstream.
-    const int64_t s12_mmq = ne11 * ne10_padded * sizeof(block_q8_1) / (QK8_1 * sizeof(int));
+    const int64_t s12_mmq = ne11 * ne10_padded * y_block_size /
+                            (y_values_per_block * sizeof(int));
     const int64_t s13_mmq = ne12 * s12_mmq;
 
     const bool use_stream_k =
@@ -1198,6 +1250,7 @@ int ds4_mmq_moe_pair_impl(
 
     const int dev = ggml_cuda_get_device();
     const int cc  = ggml_cuda_info().devices[dev].cc;
+    if (!ds4_mmq_k_tile_supported<type>(tag, K, cc)) return -1;
 
     ggml_backend_cuda_context * ctx = get_ctx_for_device(dev);
     if (!ctx) {
@@ -1225,8 +1278,14 @@ int ds4_mmq_moe_pair_impl(
     void *direct_work = nullptr;
     size_t direct_work_bytes = 0;
 
+    const bool use_native_fp4 =
+        type == GGML_TYPE_MXFP4 && blackwell_mma_available(cc);
+    const size_t y_block_size = use_native_fp4
+        ? sizeof(block_fp4_mmq) : sizeof(block_q8_1_mmq);
+    const size_t y_values_per_block = use_native_fp4
+        ? QK_FP4_MMQ : 4 * QK8_1;
     const size_t nbytes_src1_q8_1 =
-        ne_get_rows * ne10_padded * sizeof(block_q8_1) / QK8_1 +
+        ne_get_rows * ne10_padded * y_block_size / y_values_per_block +
         get_mmq_x_max_host(cc) * sizeof(block_q8_1_mmq);
     size_t direct_down_q8_bytes = 0;
     if (direct_gateup_q8) {
@@ -1373,15 +1432,24 @@ int ds4_mmq_moe_pair_impl(
                 ds4_mmq_nvtx_payload((uint32_t)quant_rows, (uint32_t)K),
                 nvtx_prefill);
         ybuf_memset(src1_q8_1, nbytes_src1_q8_1, stream);
-        quantize_mmq_q8_1_cuda(
-            X_f32, moe_yind ? nullptr : ids_src1, (void *)src1_q8_1,
-            type, /*ne00=*/K, s11_src, s12_src, s13_src,
-            /*ne0=*/ne10_padded, /*ne1=*/quant_rows, /*ne2=*/1, /*ne3=*/1,
-            stream);
+        if (use_native_fp4) {
+            quantize_mmq_fp4_cuda(
+                X_f32, moe_yind ? nullptr : ids_src1, (void *)src1_q8_1,
+                type, /*ne00=*/K, s11_src, s12_src, s13_src,
+                /*ne0=*/ne10_padded, /*ne1=*/quant_rows, /*ne2=*/1, /*ne3=*/1,
+                stream);
+        } else {
+            quantize_mmq_q8_1_cuda(
+                X_f32, moe_yind ? nullptr : ids_src1, (void *)src1_q8_1,
+                type, /*ne00=*/K, s11_src, s12_src, s13_src,
+                /*ne0=*/ne10_padded, /*ne1=*/quant_rows, /*ne2=*/1, /*ne3=*/1,
+                stream);
+        }
 
         err = cudaGetLastError();
         if (err != cudaSuccess) {
-            fprintf(stderr, "%s: quantize_mmq_q8_1_cuda failed: %s\n", tag, cudaGetErrorString(err));
+            fprintf(stderr, "%s: MMQ activation quantize failed: %s\n",
+                    tag, cudaGetErrorString(err));
             return -3;
         }
     }
@@ -1500,7 +1568,8 @@ int ds4_mmq_moe_pair_impl(
     }
 
     const int64_t s1      = (int64_t)M;
-    const int64_t s12_mmq = ne11 * ne10_padded * sizeof(block_q8_1) / (QK8_1 * sizeof(int));
+    const int64_t s12_mmq = ne11 * ne10_padded * y_block_size /
+                            (y_values_per_block * sizeof(int));
     const int64_t s13_mmq = ne12 * s12_mmq;
 
     if (out_memset_enabled()) {
@@ -1785,6 +1854,14 @@ extern "C" int ds4_mmq_q4_K_moe(
                                             n_tokens, n_experts, n_expert_used, stream);
 }
 
+extern "C" int ds4_mmq_mxfp4_moe(
+        const void * W, const float * X, const int32_t * ids, float * out,
+        int M, int K, int n_tokens, int n_experts, int n_expert_used,
+        cudaStream_t stream) {
+    return ds4_mmq_moe_impl<GGML_TYPE_MXFP4>("ds4_mmq_mxfp4_moe", W, X, ids, out, M, K,
+                                             n_tokens, n_experts, n_expert_used, stream);
+}
+
 extern "C" int ds4_mmq_iq2_xxs_moe_pair(
         const void * W_a, const void * W_b,
         const float * X, const int32_t * ids, float * out_a, float * out_b,
@@ -1953,6 +2030,16 @@ extern "C" int ds4_mmq_q4_K_moe_pair(
         cudaStream_t stream) {
     return ds4_mmq_moe_pair_impl<GGML_TYPE_Q4_K>(
         "ds4_mmq_q4_K_moe_pair", W_a, W_b, X, ids, out_a, out_b,
+        M, K, n_tokens, n_experts, n_expert_used, stream);
+}
+
+extern "C" int ds4_mmq_mxfp4_moe_pair(
+        const void * W_a, const void * W_b,
+        const float * X, const int32_t * ids, float * out_a, float * out_b,
+        int M, int K, int n_tokens, int n_experts, int n_expert_used,
+        cudaStream_t stream) {
+    return ds4_mmq_moe_pair_impl<GGML_TYPE_MXFP4>(
+        "ds4_mmq_mxfp4_moe_pair", W_a, W_b, X, ids, out_a, out_b,
         M, K, n_tokens, n_experts, n_expert_used, stream);
 }
 
@@ -2904,6 +2991,7 @@ template <ggml_type type> struct ds4_mmq_vdr_mmvq_value;
 template <> struct ds4_mmq_vdr_mmvq_value<GGML_TYPE_IQ2_XXS> { static constexpr int value = VDR_IQ2_XXS_Q8_1_MMVQ; };
 template <> struct ds4_mmq_vdr_mmvq_value<GGML_TYPE_Q2_K>    { static constexpr int value = VDR_Q2_K_Q8_1_MMVQ; };
 template <> struct ds4_mmq_vdr_mmvq_value<GGML_TYPE_Q4_K>    { static constexpr int value = VDR_Q4_K_Q8_1_MMVQ; };
+template <> struct ds4_mmq_vdr_mmvq_value<GGML_TYPE_MXFP4>   { static constexpr int value = VDR_MXFP4_Q8_1_MMVQ; };
 
 template <ggml_type type>
 static __device__ __forceinline__ float ds4_mmq_vec_dot_q8_1(
@@ -2915,9 +3003,11 @@ static __device__ __forceinline__ float ds4_mmq_vec_dot_q8_1(
         return vec_dot_iq2_xxs_q8_1(W, X_q8, kbx, iqs);
     } else if constexpr (type == GGML_TYPE_Q2_K) {
         return vec_dot_q2_K_q8_1(W, X_q8, kbx, iqs);
-    } else {
-        static_assert(type == GGML_TYPE_Q4_K, "unsupported fused vector type");
+    } else if constexpr (type == GGML_TYPE_Q4_K) {
         return vec_dot_q4_K_q8_1(W, X_q8, kbx, iqs);
+    } else {
+        static_assert(type == GGML_TYPE_MXFP4, "unsupported fused vector type");
+        return vec_dot_mxfp4_q8_1(W, X_q8, kbx, iqs);
     }
 }
 
@@ -3505,6 +3595,15 @@ extern "C" int ds4_mmq_q4_K_moe_vec(
         cudaStream_t stream) {
     return ds4_mmq_moe_vec_impl<GGML_TYPE_Q4_K>(
         "ds4_mmq_q4_K_moe_vec", W, X, ids, out, M, K,
+        n_tokens, n_experts, n_expert_used, stream);
+}
+
+extern "C" int ds4_mmq_mxfp4_moe_vec(
+        const void * W, const float * X, const int32_t * ids, float * out,
+        int M, int K, int n_tokens, int n_experts, int n_expert_used,
+        cudaStream_t stream) {
+    return ds4_mmq_moe_vec_impl<GGML_TYPE_MXFP4>(
+        "ds4_mmq_mxfp4_moe_vec", W, X, ids, out, M, K,
         n_tokens, n_experts, n_expert_used, stream);
 }
 
@@ -4311,6 +4410,15 @@ extern "C" int ds4_mmq_q4_K_moe_down_sum6_vec(
         n_tokens, n_experts, n_expert_used, stream);
 }
 
+extern "C" int ds4_mmq_mxfp4_moe_down_sum6_vec(
+        const void * W, const float * X, const int32_t * ids, float * out,
+        int M, int K, int n_tokens, int n_experts, int n_expert_used,
+        cudaStream_t stream) {
+    return ds4_mmq_moe_down_sum6_vec_impl<GGML_TYPE_MXFP4>(
+        "ds4_mmq_mxfp4_moe_down_sum6_vec", W, X, ids, out, M, K,
+        n_tokens, n_experts, n_expert_used, stream);
+}
+
 extern "C" int ds4_mmq_iq2_xxs_moe_gate_up_mid_vec(
         const void * W_gate, const void * W_up,
         const float * X, const int32_t * ids, const float * weights, float * mid,
@@ -4328,6 +4436,16 @@ extern "C" int ds4_mmq_q4_K_moe_gate_up_mid_vec(
         float clamp, cudaStream_t stream) {
     return ds4_mmq_moe_gate_up_mid_vec_impl<GGML_TYPE_Q4_K>(
         "ds4_mmq_q4_K_moe_gate_up_mid_vec", W_gate, W_up, X, ids, weights, mid,
+        M, K, n_tokens, n_experts, n_expert_used, clamp, stream);
+}
+
+extern "C" int ds4_mmq_mxfp4_moe_gate_up_mid_vec(
+        const void * W_gate, const void * W_up,
+        const float * X, const int32_t * ids, const float * weights, float * mid,
+        int M, int K, int n_tokens, int n_experts, int n_expert_used,
+        float clamp, cudaStream_t stream) {
+    return ds4_mmq_moe_gate_up_mid_vec_impl<GGML_TYPE_MXFP4>(
+        "ds4_mmq_mxfp4_moe_gate_up_mid_vec", W_gate, W_up, X, ids, weights, mid,
         M, K, n_tokens, n_experts, n_expert_used, clamp, stream);
 }
 
@@ -4389,4 +4507,6 @@ template void mul_mat_q_case<GGML_TYPE_Q2_K>(
 template void mul_mat_q_case<GGML_TYPE_IQ2_XXS>(
     ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream);
 template void mul_mat_q_case<GGML_TYPE_Q4_K>(
+    ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream);
+template void mul_mat_q_case<GGML_TYPE_MXFP4>(
     ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream);

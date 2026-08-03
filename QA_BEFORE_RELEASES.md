@@ -85,6 +85,12 @@ top-logprob slices, so do not replace them with one sampled chat answer.
   short prompts and long-prompt attention cases.
 - Run the 100-case DeepSeek V4 Flash fixture for every released Flash GGUF:
   `gguf-tools/quality-testing/score_official /path/to/deepseek-v4-flash.gguf gguf-tools/quality-testing/data/flash/manifest.tsv /tmp/flash.tsv 4096`.
+- Treat the native MXFP4 Flash GGUF as a separate release artifact. Run the
+  same 100-case fixture on Metal, resident CUDA, and CUDA SSD streaming when
+  those backends are advertised; compare each result with the Metal baseline.
+  For resident multi-GPU CUDA, pass the normal placement flags to the scorer,
+  for example `--gpu-vram auto --gpu-devices 0,2,4,6,1,3,5,7
+  --cuda-tensor-parallel`.
 - Run the 100-case GLM 5.2 OpenRouter fixture for every released GLM GGUF:
   `gguf-tools/quality-testing/score_official models/GLM-5.2-UD-Q4_K_XL.gguf gguf-tools/quality-testing/data/glm52-openrouter-100/manifest.tsv /tmp/glm52-q4.tsv 4096`.
   Current Q4 XL reference band: first-token match `95/100`, API top-1 agreement
@@ -124,6 +130,9 @@ Use the normal Flash GGUF that 128 GB users run.
   run `ds4-bench` with `speed-bench/promessi_sposi.txt` and compare prefill,
   generation speed, and KV bytes with the last known good numbers for the same
   machine.
+- For native MXFP4 changes, run `make mxfp4-dot-test test-mxfp4-metal`, then a
+  short greedy prompt and the section 3 continuation fixture with the MXFP4
+  GGUF. The synthetic fused-MoE test and full-model quality gate must both pass.
 
 ### DSpark / DeepSpec Runtime
 
@@ -302,6 +311,18 @@ release-ready without this pass.
   without compiler warnings.
 - Run:
   `make cuda-regression`.
+- For native MXFP4 changes, run
+  `make test-mxfp4-cuda CUDA_ARCH=native` on the multi-GPU CUDA host and
+  `make test-mxfp4-cuda CUDA_ARCH=sm_121` on DGX Spark. Dense MMQ, routed MMQ,
+  routed MMVQ, fused gate/up, and fused down must pass. The Spark run must also
+  pass the Blackwell K-tile guard. This synthetic parity test does not replace
+  full-model continuation scoring.
+- Run the native MXFP4 GGUF resident on the multi-GPU host and with
+  `--ssd-streaming` on DGX Spark. Use the same greedy prompt and continuation
+  fixture on both. Record prefill and generation speed, require finite logits,
+  and compare quality with the Metal MXFP4 result. Blackwell MMQ quantizes
+  activations to native FP4 for batched work; decode MMVQ keeps Q8 activations,
+  so quality must be checked rather than inferred from kernel-only parity.
 - Run a short CLI prompt with the Flash GGUF and record generation t/s.
 - Run a longer prompt that exercises routed experts past a few thousand tokens.
 - On the eight-GPU CUDA host, run the full-vocabulary decode oracle:
