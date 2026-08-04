@@ -17950,6 +17950,46 @@ static bool metal_graph_cuda_stream_prefill_batch_selected_addr_enabled(
 #endif
 }
 
+static bool metal_graph_stream_prefill_batch_selected_addr_layer_supported(
+        const ds4_weights *weights,
+        uint32_t           il) {
+    if (!weights || il >= DS4_N_LAYER) return false;
+
+    const ds4_layer_weights *layer = &weights->layer[il];
+    if (!layer->ffn_gate_exps || !layer->ffn_up_exps ||
+        !layer->ffn_down_exps) {
+        return false;
+    }
+
+#ifdef DS4_ROCM_BUILD
+    const bool selected_iq2 =
+        glm_stream_selected_expert_cache_supported(layer, il);
+    const bool selected_q2 =
+        layer->ffn_gate_exps->type == DS4_TENSOR_Q2_K &&
+        layer->ffn_up_exps->type == DS4_TENSOR_Q2_K &&
+        layer->ffn_down_exps->type == DS4_TENSOR_Q2_K &&
+        glm_stream_expert_cache_addr_layout_supported(weights, layer, il);
+    return selected_iq2 || selected_q2;
+#elif defined(__APPLE__)
+    return DS4_N_EXPERT_USED == 6 &&
+           layer->ffn_gate_exps->type == DS4_TENSOR_IQ2_XXS &&
+           layer->ffn_up_exps->type == DS4_TENSOR_IQ2_XXS &&
+           layer->ffn_down_exps->type == DS4_TENSOR_Q2_K;
+#elif !defined(DS4_NO_GPU)
+    const bool q4 =
+        layer->ffn_gate_exps->type == DS4_TENSOR_Q4_K &&
+        layer->ffn_up_exps->type == DS4_TENSOR_Q4_K &&
+        layer->ffn_down_exps->type == DS4_TENSOR_Q4_K;
+    const bool iq2 =
+        layer->ffn_gate_exps->type == DS4_TENSOR_IQ2_XXS &&
+        layer->ffn_up_exps->type == DS4_TENSOR_IQ2_XXS &&
+        layer->ffn_down_exps->type == DS4_TENSOR_Q2_K;
+    return q4 || iq2;
+#else
+    return false;
+#endif
+}
+
 #ifdef DS4_ROCM_BUILD
 enum { DS4_ROCM_STREAM_PREFILL_FULL_LAYER_MIN_TOKENS = 1024 };
 enum { DS4_ROCM_STREAM_PREFILL_FULL_LAYER_MAX_SEED_TOKENS = 8 };
@@ -33658,6 +33698,9 @@ static bool metal_graph_prefill_layer_major(
     memset(&rocm_full_layer_load, 0, sizeof(rocm_full_layer_load));
 #endif
     if (g->ssd_streaming && DS4_N_LAYER > 0) {
+        const bool layer_selected_addr =
+            batch_selected_addr &&
+            metal_graph_stream_prefill_batch_selected_addr_layer_supported(weights, 0);
         if (layer_prepare) {
             if (!metal_graph_stream_prepare_start_if_needed(g,
                                                             model,
@@ -33667,13 +33710,13 @@ static bool metal_graph_prefill_layer_major(
                                                             layer_madvise,
                                                             layer_pread,
                                                             layer_readahead,
-                                                            batch_selected_addr,
+                                                            layer_selected_addr,
                                                             layer_prepare_slots,
                                                             layer_prepare_ahead)) {
                 return false;
             }
         } else {
-            if (batch_selected_addr) {
+            if (layer_selected_addr) {
                 metal_graph_stream_readahead_layer_decode(model, weights, 0);
             } else {
                 metal_graph_stream_readahead_layer(model, weights, 0);
@@ -33729,6 +33772,9 @@ static bool metal_graph_prefill_layer_major(
 
     for (uint32_t il = 0; ok && il < DS4_N_LAYER; il++) {
         double layer_elapsed = 0.0;
+        const bool layer_selected_addr =
+            batch_selected_addr &&
+            metal_graph_stream_prefill_batch_selected_addr_layer_supported(weights, il);
         if (layer_prepare &&
             !metal_graph_stream_prepare_join_layer(g,
                                                    model,
@@ -33738,7 +33784,7 @@ static bool metal_graph_prefill_layer_major(
                                                    layer_madvise,
                                                    layer_pread,
                                                    layer_readahead,
-                                                   batch_selected_addr,
+                                                   layer_selected_addr,
                                                    layer_prepare_slots,
                                                    layer_prepare_ahead)) {
             ok = false;
@@ -33773,7 +33819,7 @@ static bool metal_graph_prefill_layer_major(
 #endif
         if (g->ssd_streaming) {
             g->streaming_static_decode_map_current = false;
-            bool decode_only_map = batch_selected_addr;
+            bool decode_only_map = layer_selected_addr;
 #ifdef DS4_ROCM_BUILD
             decode_only_map = decode_only_map || rocm_full_layer_stream_prefill;
 #endif
@@ -33791,15 +33837,21 @@ static bool metal_graph_prefill_layer_major(
                 for (uint32_t ahead = 1; ahead <= layer_prepare_ahead; ahead++) {
                     if (il + ahead >= DS4_N_LAYER) break;
                     started_future = true;
+                    const uint32_t future_il = il + ahead;
+                    const bool future_selected_addr =
+                        batch_selected_addr &&
+                        metal_graph_stream_prefill_batch_selected_addr_layer_supported(
+                            weights,
+                            future_il);
                     if (!metal_graph_stream_prepare_start_if_needed(g,
                                                                     model,
                                                                     weights,
-                                                                    il + ahead,
+                                                                    future_il,
                                                                     n_tokens,
                                                                     layer_madvise,
                                                                     layer_pread,
                                                                     layer_readahead,
-                                                                    batch_selected_addr,
+                                                                    future_selected_addr,
                                                                     layer_prepare_slots,
                                                                     layer_prepare_ahead)) {
                         ok = false;
@@ -33811,7 +33863,12 @@ static bool metal_graph_prefill_layer_major(
                     metal_graph_stream_readahead_output(model, weights);
                 }
             } else if (!layer_prepare && il + 1 < DS4_N_LAYER) {
-                if (batch_selected_addr) {
+                const bool next_selected_addr =
+                    batch_selected_addr &&
+                    metal_graph_stream_prefill_batch_selected_addr_layer_supported(
+                        weights,
+                        il + 1);
+                if (next_selected_addr) {
                     metal_graph_stream_readahead_layer_decode(model, weights, il + 1);
                 } else {
                     metal_graph_stream_readahead_layer(model, weights, il + 1);
@@ -33874,7 +33931,7 @@ static bool metal_graph_prefill_layer_major(
                                                                           il,
                                                                           n_tokens);
 #ifdef __APPLE__
-            if (ok) {
+            if (ok && !layer_selected_addr) {
                 ok = metal_graph_seed_streaming_expert_cache_layer_from_mapped_hotlist(
                         g,
                         model,
@@ -33933,7 +33990,7 @@ static bool metal_graph_prefill_layer_major(
                                                                           il,
                                                                           n_tokens);
 #ifdef __APPLE__
-            if (ok) {
+            if (ok && !layer_selected_addr) {
                 ok = metal_graph_seed_streaming_expert_cache_layer_from_mapped_hotlist(
                         g,
                         model,
@@ -33977,6 +34034,11 @@ static bool metal_graph_prefill_layer_major(
             layer_prepare &&
             !layer_prepare_overlap) {
             if (il + 1 < DS4_N_LAYER) {
+                const bool next_selected_addr =
+                    batch_selected_addr &&
+                    metal_graph_stream_prefill_batch_selected_addr_layer_supported(
+                        weights,
+                        il + 1);
                 if (!metal_graph_stream_prepare_start_if_needed(g,
                                                                 model,
                                                                 weights,
@@ -33985,7 +34047,7 @@ static bool metal_graph_prefill_layer_major(
                                                                 layer_madvise,
                                                                 layer_pread,
                                                                 layer_readahead,
-                                                                batch_selected_addr,
+                                                                next_selected_addr,
                                                                 layer_prepare_slots,
                                                                 layer_prepare_ahead)) {
                     ok = false;
@@ -58494,7 +58556,12 @@ int ds4_session_eval_layer_slice(ds4_session *s,
     if (g->ssd_streaming) {
         for (uint32_t il = layer_start; ok && il <= layer_end; il++) {
             g->streaming_static_decode_map_current = false;
-            ok = batch_selected_addr ?
+            const bool layer_selected_addr =
+                batch_selected_addr &&
+                metal_graph_stream_prefill_batch_selected_addr_layer_supported(
+                    &e->weights,
+                    il);
+            ok = layer_selected_addr ?
                  metal_graph_stream_map_layer_decode(&e->model, &e->weights, il) :
                  metal_graph_stream_map_layer(&e->model, &e->weights, il);
             if (ok) ok = ds4_gpu_begin_commands() != 0;
