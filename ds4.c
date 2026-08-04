@@ -61673,78 +61673,10 @@ static int ds4_session_eval_dspark_speculative_argmax(
         }
     }
 
-    /* Greedy-identity fix: the verify batch's compressor-frontier writes
-     * come from a batched multi-token GEMM (ds4_gpu_matmul_f16_pair_tensor),
-     * which is numerically distinct from ordinary single-token decode's
-     * fused projection+store kernel
-     * (ds4_gpu_matmul_f16_pair_compressor_store_tensor). Previously, a full
-     * accept (commit_drafts == draft_n) took a fast path that committed the
-     * batch-verify's KV/compressor-frontier state directly, so accepted
-     * tokens' state silently diverged from what plain decode would have
-     * produced -- this eventually flips an argmax tie on longer
-     * generations, breaking --temp 0 greedy-identity vs. no-drafter decode.
-     * There is no separate fast-accept branch any more: every accept (full
-     * or partial) falls through to the rollback+replay path below, which
-     * re-derives each accepted token's KV/compressor state one token at a
-     * time through the same single-token decode kernel
-     * (metal_graph_eval_token_raw_swa) plain greedy decode uses, so the
-     * post-accept state -- and the logits read off it -- are bit-identical
-     * to pure decode for the same tokens. This costs one extra fused
-     * single-token kernel launch (plus its surrounding forward pass) per
-     * accepted token per block; on a net-loss drafter workload this makes
-     * DSpark's already-negative throughput case worse, but correctness
-     * comes first. When there is no drafter, draft_n is never reached (the
-     * caller returns earlier), so this path has zero effect. */
-
-    /*
-     * Keep the verifier's exact intermediate frontier on a partial accept
-     * instead of restoring the old state and decoding accepted drafts again.
-     * TP still uses the mirrored replay protocol until it can transmit this
-     * commit mode.
-     */
-    if (ok && !tp_verify_sent &&
-        commit_drafts > 0 && commit_drafts < draft_n &&
-        commit_drafts <= (int)DS4_SPEC_PREFIX_SLOTS) {
-        const double read_t0 = stats_enabled ? now_sec() : 0.0;
-        bool prefix_ok = metal_graph_read_spec_logits_row(
-                &s->graph, (uint32_t)(commit_drafts - 1), row_logits);
-        if (stats_enabled) {
-            s->dspark_stats.verify_read_ms += (now_sec() - read_t0) * 1000.0;
-        }
-        s->checkpoint.len = start;
-        ds4_session_dspark_capture_invalidate(s);
-        if (prefix_ok) {
-            prefix_ok = spec_frontier_commit_prefix(
-                    s, (uint32_t)commit_drafts);
-        }
-        if (prefix_ok) {
-            memcpy(s->logits, row_logits,
-                   (size_t)DS4_N_VOCAB * sizeof(s->logits[0]));
-            int emitted_drafts = 0;
-            for (int i = 0; i < commit_drafts && n_accept < accepted_cap; i++) {
-                token_vec_push(&s->checkpoint, drafts[i]);
-                accepted[n_accept++] = drafts[i];
-                emitted_drafts++;
-                if (drafts[i] == eos_token) break;
-            }
-            s->checkpoint_valid = true;
-            ds4_session_dspark_capture_note_checkpoint(s);
-            if (stats_enabled) {
-                s->dspark_stats.partial_accepts++;
-                s->dspark_stats.accepted_draft_tokens +=
-                    (uint64_t)emitted_drafts;
-                ds4_dspark_stats_note_len(
-                        s->dspark_stats.accepted_len_hist,
-                        (uint32_t)emitted_drafts);
-            }
-            ds4_session_dspark_scheduler_note(
-                    s, (uint32_t)emitted_drafts, false,
-                    DS4_DSPARK_SCHED_EXTRA_MS());
-            spec_frontier_free(&frontier);
-            DS4_DSPARK_STATS_FINISH();
-            return n_accept;
-        }
-    }
+    /* Batch verification and ordinary decode update compressor state with
+     * different kernels. Restore the pre-verify frontier and replay every
+     * accepted draft through ordinary decode, including partial accepts, so
+     * speculative decoding retains the target model's greedy token stream. */
 
     if (verifier_may_have_mutated) {
         s->checkpoint.len = start;
