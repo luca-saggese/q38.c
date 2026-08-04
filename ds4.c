@@ -20179,7 +20179,25 @@ static bool metal_graph_use_streaming_iq2_cpu_router(void) {
            getenv("DS4_METAL_DISABLE_STREAMING_IQ2_CPU_ROUTER") == NULL;
 }
 
-static bool metal_graph_use_q4_selected_shared_overlap(void) {
+static bool metal_graph_use_q4_selected_shared_overlap(
+        const ds4_gpu_graph *g) {
+#ifdef DS4_ROCM_BUILD
+    /*
+     * ROCm SSD streaming maps only the selected routed experts, not the full
+     * Q4 expert table.  Stage that compact selection while the shared expert
+     * runs so decode reaches the existing pointer-backed MoE path.
+     *
+     * GLM owns a separate routed-MoE graph and must retain its validated
+     * selected-expert policy.
+     */
+    if (g &&
+        g->ssd_streaming &&
+        DS4_MODEL_FAMILY != DS4_MODEL_FAMILY_GLM_DSA) {
+        return true;
+    }
+#else
+    (void)g;
+#endif
     static int cache = -1;
     return metal_graph_env_flag("DS4_METAL_Q4_SELECTED_OVERLAP_SHARED", &cache);
 }
@@ -23606,7 +23624,7 @@ static bool metal_graph_encode_decode_layer_phase(
      * needs the unfused gate/up/swiglu/down sequence. */
     const bool tp_split_shared = g->tp_world == 2;
     const bool q4_selected_shared_overlap =
-        metal_graph_use_q4_selected_shared_overlap() &&
+        metal_graph_use_q4_selected_shared_overlap(g) &&
         metal_graph_decode_q4_selected_slots_expected(g,
                                                       layer,
                                                       layer->ffn_gate_exps->bytes,
@@ -34011,6 +34029,17 @@ static bool metal_graph_prefill_layer_major(
     if (show_progress) fputc('\n', stderr);
     metal_graph_stream_prefill_selected_profile_summary(g);
 #ifdef DS4_ROCM_BUILD
+    /*
+     * The final layer can use its fully mapped prefill table after the
+     * asynchronous selected-expert loader has already queued a resident-cache
+     * batch.  Drain that completed batch before hotlist seeding starts another
+     * read-pool job set, otherwise both callers wait forever for ownership of
+     * the single ROCm streaming read pool.
+     */
+    if (g->ssd_streaming &&
+        !ds4_gpu_stream_expert_cache_finish_pending_batch()) {
+        return false;
+    }
     (void)ds4_gpu_stream_expert_cache_release_layer_cache();
     if (g->ssd_streaming) ds4_gpu_release_q8_f16_cache();
 #endif
@@ -56471,6 +56500,15 @@ static int ds4_engine_open_internal(ds4_engine **out,
             }
             e->metal_ready = true;
             ds4_gpu_set_quality(e->quality);
+#ifdef DS4_ROCM_BUILD
+            /*
+             * The ROCm Q8 decode selector must know that a multi-tier model
+             * is GLM before any layer dispatch.  The single-tier path sets
+             * the same model-family state below.
+             */
+            ds4_gpu_set_glm_model(
+                    DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA);
+#endif
             (void)ds4_gpu_set_model_fd(e->model.fd);
 
             if (engine_install_gpu_placement(e) != 0) {
@@ -60510,7 +60548,7 @@ static bool metal_graph_native_session_batch_shared_supported(
         !items || count < 2 || !e || e->tp.active ||
         e->support_kind != DS4_SUPPORT_NONE ||
         metal_graph_use_reference_shared_down_hc() ||
-        metal_graph_use_q4_selected_shared_overlap() ||
+        metal_graph_use_q4_selected_shared_overlap(NULL) ||
         metal_graph_use_pro_q4_cpu_router() ||
         getenv("DS4_METAL_ENABLE_Q8_DECODE_EXACT_VIEWS") != NULL) {
         return false;
@@ -64984,15 +65022,28 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
     }
 
     /*
-     * The useful N=2 verifier is the tiny batch path: it verifies two target
-     * positions in one layer-major pass and commits prefix-1 directly on a
-     * partial accept.  Like the rest of the non-quality Metal path, it may pick
-     * a different greedy token when batched reductions perturb nearly-tied
-     * logits.  --quality / DS4_MTP_STRICT selects the exact decode verifier,
-     * which preserves the one-token target stream but is not a speed win.
+     * Metal normally benefits from the tiny-batch verifier: it checks two
+     * target positions in one layer-major pass and commits prefix-1 directly
+     * on a partial accept. Like the rest of the non-quality Metal path, it may
+     * pick a different greedy token when batched reductions perturb nearly
+     * tied logits.
+     *
+     * ROCm is different. Its DeepSeek one-token graph uses the prequantized Q8
+     * decode kernels, while the generic N=2 batch graph uses full-F32
+     * activations and loses the paired and HC-expand decode fusions. Running
+     * the exact two-row verifier reuses those Q8 kernels and is faster.
+     * DS4_MTP_BATCH_VERIFY remains an explicit diagnostic rollback to the
+     * generic batch verifier.
      */
+#ifdef DS4_ROCM_BUILD
+    const bool prefer_decode2_exact = true;
+#else
+    const bool prefer_decode2_exact = false;
+#endif
     const bool use_decode2_exact =
-        draft_n == 2 && strict_mtp && getenv("DS4_MTP_BATCH_VERIFY") == NULL;
+        draft_n == 2 &&
+        (strict_mtp || prefer_decode2_exact) &&
+        getenv("DS4_MTP_BATCH_VERIFY") == NULL;
     if (use_decode2_exact) {
         ds4_spec_frontier frontier;
         memset(&frontier, 0, sizeof(frontier));

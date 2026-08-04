@@ -204,6 +204,7 @@ int ds4_gpu_stream_expert_cache_seed_from_layer_selected(
         uint32_t                          n_tokens,
         uint32_t                          n_seed_tokens,
         uint32_t                          n_selected);
+int ds4_gpu_stream_expert_cache_finish_pending_batch(void);
 int ds4_gpu_stream_expert_cache_release_layer_cache(void);
 #endif
 int ds4_gpu_stream_expert_cache_seed_experts(
