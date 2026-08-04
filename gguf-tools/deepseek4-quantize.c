@@ -693,6 +693,23 @@ static int64_t value_nelements(const st_value *v) {
     return n;
 }
 
+static size_t checked_shape_product(int64_t a, int64_t b, const char *what) {
+    if (a < 0 || b < 0 ||
+        (b != 0 && (a > INT64_MAX / b || (uint64_t)a > SIZE_MAX / (uint64_t)b))) {
+        fprintf(stderr, "error: %s shape is too large\n", what);
+        exit(1);
+    }
+    return (size_t)a * (size_t)b;
+}
+
+static size_t checked_size_product(size_t a, size_t b, const char *what) {
+    if (b != 0 && a > SIZE_MAX / b) {
+        fprintf(stderr, "error: %s allocation is too large\n", what);
+        exit(1);
+    }
+    return a * b;
+}
+
 static float *tensor_to_f32(const st_value *t, int64_t *n_out) {
     const int64_t n = value_nelements(t);
     float *out = xmalloc((size_t)n * sizeof(float));
@@ -733,10 +750,12 @@ static float *dequant_fp8_weight(const st_value *w, const st_value *scale, int64
      * declares a large shape but a tiny data_offsets range makes the loops read
      * past the end of w->data / scale->data (heap-buffer-overflow read). One
      * byte per element for F8_E4M3 weights and F8_E8M0 scales. */
-    if (w->nbytes < (size_t)out_dim * (size_t)in_dim ||
-        scale->nbytes < (size_t)scale_rows * (size_t)scale_cols)
+    const size_t weight_elems = checked_shape_product(out_dim, in_dim, "FP8 tensor");
+    const size_t scale_elems = checked_shape_product(scale_rows, scale_cols, "FP8 scale");
+    if (w->nbytes < weight_elems || scale->nbytes < scale_elems)
         die("FP8 tensor data smaller than its declared shape");
-    float *out = xmalloc((size_t)out_dim * (size_t)in_dim * sizeof(float));
+    float *out = xmalloc(checked_size_product(weight_elems, sizeof(float),
+                                              "FP8 output"));
     for (int64_t ob = 0; ob < scale_rows; ob++) {
         for (int64_t ib = 0; ib < scale_cols; ib++) {
             const float s = e8m0_to_f32(scale->data[(size_t)ob * (size_t)scale_cols + (size_t)ib]);
@@ -762,6 +781,7 @@ static float *dequant_fp4_weight(const st_value *w, const st_value *scale, int64
     if (w->n_dims != 2 || scale->n_dims != 2) die("FP4 tensor must be 2D");
     const int64_t out_dim = w->shape[0];
     const int64_t packed_in = w->shape[1];
+    if (packed_in < 0 || packed_in > INT64_MAX / 2) die("FP4 shape is too large");
     const int64_t in_dim = packed_in * 2;
     if (in_dim % 32) die("FP4 in_dim is not divisible by 32");
     const int64_t n_blocks = in_dim / 32;
@@ -771,10 +791,13 @@ static float *dequant_fp4_weight(const st_value *w, const st_value *scale, int64
      * under a large declared shape cannot drive an out-of-bounds read. The I8
      * weight packs two 4-bit values per byte -> out_dim * packed_in bytes; the
      * F8_E8M0 scale is one byte per block. */
-    if (w->nbytes < (size_t)out_dim * (size_t)packed_in ||
-        scale->nbytes < (size_t)out_dim * (size_t)n_blocks)
+    const size_t weight_bytes = checked_shape_product(out_dim, packed_in, "FP4 tensor");
+    const size_t scale_bytes = checked_shape_product(out_dim, n_blocks, "FP4 scale");
+    if (w->nbytes < weight_bytes || scale->nbytes < scale_bytes)
         die("FP4 tensor data smaller than its declared shape");
-    float *out = xmalloc((size_t)out_dim * (size_t)in_dim * sizeof(float));
+    const size_t output_elems = checked_shape_product(out_dim, in_dim, "FP4 output");
+    float *out = xmalloc(checked_size_product(output_elems, sizeof(float),
+                                              "FP4 output"));
     for (int64_t r = 0; r < out_dim; r++) {
         for (int64_t b = 0; b < n_blocks; b++) {
             const float s = e8m0_to_f32(scale->data[(size_t)r * (size_t)n_blocks + (size_t)b]);
