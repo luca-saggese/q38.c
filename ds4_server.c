@@ -4802,7 +4802,7 @@ static void split_reasoning_content(const char *text, size_t n, char **content_o
     free(s);
 }
 
-/* LOCAL PATCH (not upstream): unterminated reasoning is not an answer.
+/* Unterminated reasoning is not an answer.
  *
  * When generation hits the token cap before </think> arrives, the old behaviour
  * routed the whole unterminated buffer into content, so a truncated reasoning
@@ -16559,6 +16559,66 @@ static void test_json_string_handles_surrogates(void) {
     free(s);
 }
 
+static void test_json_int_handles_non_finite_values(void) {
+    const char *p = "NaN";
+    int value = -1;
+    TEST_ASSERT(json_int(&p, &value));
+    TEST_ASSERT(value == 0);
+
+    p = "Infinity";
+    TEST_ASSERT(json_int(&p, &value));
+    TEST_ASSERT(value == INT_MAX);
+
+    p = "-Infinity";
+    TEST_ASSERT(json_int(&p, &value));
+    TEST_ASSERT(value == 0);
+}
+
+static void test_tool_history_validation_handles_large_replays(void) {
+    chat_msgs responses = {0};
+    chat_msgs anthropic = {0};
+    for (int i = 0; i < 4096; i++) {
+        char id[48];
+        snprintf(id, sizeof(id), "call_%d", i);
+
+        chat_msg ra = {.role = xstrdup("assistant"),
+                       .reasoning = xstrdup("checked")};
+        tool_call rtc = {.id = xstrdup(id), .name = xstrdup("run"),
+                         .arguments = xstrdup("{}")};
+        tool_calls_push(&ra.calls, rtc);
+        chat_msgs_push(&responses, ra);
+        chat_msg rt = {.role = xstrdup("tool"),
+                       .tool_call_id = xstrdup(id),
+                       .content = xstrdup("ok")};
+        chat_msgs_push(&responses, rt);
+
+        chat_msg aa = {.role = xstrdup("assistant")};
+        tool_call atc = {.id = xstrdup(id), .name = xstrdup("run"),
+                         .arguments = xstrdup("{}")};
+        tool_calls_push(&aa.calls, atc);
+        chat_msgs_push(&anthropic, aa);
+        chat_msg at = {.role = xstrdup("user"),
+                       .tool_call_id = xstrdup(id),
+                       .content = xstrdup("ok")};
+        chat_msgs_push(&anthropic, at);
+    }
+
+    char err[160] = {0};
+    bool needs_live = false;
+    bool needs_reasoning = false;
+    TEST_ASSERT(responses_validate_tool_outputs(
+        NULL, &responses, DS4_THINK_HIGH, &needs_live, &needs_reasoning,
+        err, sizeof(err)));
+    TEST_ASSERT(!needs_live);
+    TEST_ASSERT(!needs_reasoning);
+    TEST_ASSERT(anthropic_validate_tool_results(
+        NULL, &anthropic, &needs_live, err, sizeof(err)));
+    TEST_ASSERT(!needs_live);
+
+    chat_msgs_free(&responses);
+    chat_msgs_free(&anthropic);
+}
+
 static void test_model_metadata_clamps_completion_to_context(void) {
     buf b = {0};
     append_model_json_values(&b, "deepseek-v4-flash", "DeepSeek V4 Flash",
@@ -17807,6 +17867,8 @@ static void ds4_server_unit_tests_run(void) {
     test_request_parsers_reject_malformed_duplicate_owned_fields();
     test_json_parser_handles_tool_heavy_requests();
     test_json_string_handles_surrogates();
+    test_json_int_handles_non_finite_values();
+    test_tool_history_validation_handles_large_replays();
     test_model_metadata_clamps_completion_to_context();
     test_live_prefix_rewind_target();
     test_client_socket_nonblocking_flag();

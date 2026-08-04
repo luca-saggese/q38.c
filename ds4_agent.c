@@ -6978,9 +6978,43 @@ static void test_agent_read_default_lines_follow_context(void) {
                       AGENT_READ_DEFAULT_LINES_LARGE);
 }
 
+static void test_agent_cache_rejects_impossible_lengths(void) {
+    FILE *fp = tmpfile();
+    AGENT_TEST_ASSERT(fp != NULL);
+    if (!fp) return;
+
+    AGENT_TEST_ASSERT(fputc('x', fp) != EOF);
+    rewind(fp);
+    char *text = NULL;
+    char err[128] = {0};
+    AGENT_TEST_ASSERT(!agent_kv_read_text(fp, UINT32_MAX, &text,
+                                         err, sizeof(err)));
+    AGENT_TEST_ASSERT(text == NULL);
+    AGENT_TEST_ASSERT(strstr(err, "truncated cached text") != NULL);
+    fclose(fp);
+
+    fp = tmpfile();
+    AGENT_TEST_ASSERT(fp != NULL);
+    if (!fp) return;
+    uint8_t tb[4];
+    ds4_kvstore_le_put32(tb, UINT32_MAX);
+    AGENT_TEST_ASSERT(fwrite(tb, 1, sizeof(tb), fp) == sizeof(tb));
+    rewind(fp);
+    ds4_kvstore_entry hdr = {0};
+    char *title = NULL;
+    err[0] = '\0';
+    AGENT_TEST_ASSERT(!agent_kv_read_title_trailer(fp, &hdr, &title,
+                                                   err, sizeof(err)));
+    AGENT_TEST_ASSERT(title == NULL);
+    AGENT_TEST_ASSERT(strstr(err, "truncated agent session title trailer") != NULL);
+    AGENT_TEST_ASSERT(ftello(fp) == 0);
+    fclose(fp);
+}
+
 static void ds4_agent_unit_tests_run(void) {
     test_agent_edit_upto_tail_newline_is_not_part_of_anchor();
     test_agent_edit_upto_requires_tail_after_newline_strip();
+    test_agent_cache_rejects_impossible_lengths();
     test_agent_read_default_lines_follow_context();
     test_agent_glm_template_policy();
     test_agent_glm_tools_prompt_is_native();
