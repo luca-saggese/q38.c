@@ -38690,6 +38690,25 @@ static bool glm_graph_layer_uses_generic_routed_moe(
            l->ffn_gate_exps->type == DS4_TENSOR_IQ2_XXS;
 }
 
+static bool glm_tp_validate_ownership_kernels(
+        const ds4_weights *weights,
+        uint32_t          *bad_layer,
+        uint32_t          *bad_type) {
+    if (!weights) return false;
+    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
+        const ds4_layer_weights *l = &weights->layer[il];
+        if (!l->ffn_gate_exps) continue;
+        if (glm_graph_layer_uses_generic_routed_moe(l) ||
+            l->ffn_gate_exps->type == DS4_TENSOR_Q2_K) {
+            continue;
+        }
+        if (bad_layer) *bad_layer = il;
+        if (bad_type) *bad_type = l->ffn_gate_exps->type;
+        return false;
+    }
+    return true;
+}
+
 static bool glm_graph_stream_map_token(
         ds4_glm_gpu_graph *g,
         const ds4_model   *model,
@@ -56238,6 +56257,22 @@ static int ds4_engine_open_internal(ds4_engine **out,
         opt->tp.role != DS4_TP_NONE &&
         !e->ssd_streaming;
     const int tp_shard_rank = opt->tp.role == DS4_TP_WORKER ? 1 : 0;
+    if (tp_shard && DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
+        uint32_t bad_layer = 0;
+        uint32_t bad_type = 0;
+        if (!glm_tp_validate_ownership_kernels(&e->weights,
+                                               &bad_layer,
+                                               &bad_type)) {
+            fprintf(stderr,
+                    "ds4: GLM tensor parallelism lacks ownership-aware "
+                    "kernels for routed expert type %u in layer %u\n",
+                    bad_type,
+                    bad_layer);
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
+    }
     g_tp_shard_model_bytes = 0;
     if (tp_shard) {
         ds4_model_map_span_vec shard_spans;
