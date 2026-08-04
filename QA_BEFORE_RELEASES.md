@@ -158,14 +158,18 @@ model loading, and scheduler paths.  Run these whenever DSpark support,
 speculative verification, confidence/scheduler policy, target hidden capture,
 tiny routed-MoE verifier kernels, or shared `--mtp` support-model code changes:
 
+Use the 0731 DSpark support GGUF only with a Flash 0731 target. A support model
+from another checkpoint can have plausible acceptance statistics while
+producing a different greedy continuation.
+
 - Default greedy acceptance fixture:
-  `DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
+  `DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
 - 64-token guardrail:
-  `DS4_DSPARK_FIXTURE_TOKENS=64 DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
+  `DS4_DSPARK_FIXTURE_TOKENS=64 DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
 - Fixed-block partial-accept fallback:
-  `DS4_DSPARK_FIXTURE_CONFIDENCE=0 DS4_DSPARK_FIXTURE_TOKENS=8 DS4_DSPARK_FIXTURE_REQUIRE_PARTIAL=1 DS4_DSPARK_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-acceptance`.
+  `DS4_DSPARK_FIXTURE_CONFIDENCE=0 DS4_DSPARK_FIXTURE_TOKENS=8 DS4_DSPARK_FIXTURE_REQUIRE_PARTIAL=1 DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
 - DSpark verifier invariant smoke:
-  `DS4_TEST_MODEL=/Users/antirez/ds4/ds4flash.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support.gguf make dspark-verify-depth`.
+  `DS4_TEST_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-verify-depth`.
 - If shared support-model or verifier structures changed, also run legacy MTP:
   `make mtp-verify-depth` with `DS4_TEST_MTP` set to a one-stage MTP support
   GGUF, or confirm the target skips only because the optional file is missing.
@@ -306,7 +310,7 @@ SSD streaming is a capacity path, so test both correctness and user experience.
   with boosted Q4 routed-expert layers and a prompt long enough to exercise the
   selected-address prefill path; it must not fail with "model range is not
   covered by mapped model views":
-  `./ds4 -m gguf/DeepSeek-V4-Flash-Layers37-42Q4KExperts-OtherExpertLayersIQ2XXSGateUp-Q2KDown-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-fixed.gguf --ssd-streaming --ssd-streaming-cache-experts 16GB --ctx 4096 --tokens 1 --nothink --prompt-file /tmp/ds4_600tok_prompt.txt`.
+  `./ds4 -m gguf/DeepSeek-V4-Flash-Layers37-42Q4KExperts-OtherExpertLayersIQ2XXSGateUp-Q2KDown-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-fixed-0731.gguf --ssd-streaming --ssd-streaming-cache-experts 16GB --ctx 4096 --tokens 1 --nothink --prompt-file /tmp/ds4_600tok_prompt.txt`.
 - Cold streaming measurement:
   run once with `--ssd-streaming-cold` and verify no deadlock, missing expert,
   or impossible slowdown.
@@ -388,12 +392,12 @@ a substitute for CUDA or Metal release testing.
   `make clean && make strix-halo`.
 - Require the ROCm build to complete without compiler warnings.
 - Use the q2 Flash imatrix GGUF for release smoke tests:
-  `DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf`.
+  `DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf`.
 - Do not use the mixed q2-q4 or Q4 Flash GGUFs for routine Strix Halo QA yet.
   They are dangerous on this machine for now because the ROCm path can hit
   system OOM instead of failing cleanly.
 - Run a short CLI prompt:
-  `./ds4 -m gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix.gguf --ctx 4096 --nothink -p "Reply with exactly: OK"`.
+  `./ds4 -m gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf --ctx 4096 --nothink -p "Reply with exactly: OK"`.
 - For DeepSeek Flash decode, confirm the default path uses prequantized Q8
   activations. Repeat the same greedy run with
   `DS4_ROCM_DSV4_PREQUANT_DECODE=0` only as a diagnostic control. The default

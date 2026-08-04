@@ -20,7 +20,7 @@ ROCM_SRCS := $(wildcard rocm/*.cuh)
 DS4_TEST_MODEL ?= ds4flash.gguf
 DS4_TEST_MTP ?= gguf/DeepSeek-V4-Flash-MTP-Q4K-Q8_0-F32.gguf
 DS4_DSPARK_MODEL ?= $(DS4_TEST_MODEL)
-DS4_DSPARK_SUPPORT ?= gguf/DeepSeek-V4-Flash-DSpark-support.gguf
+DS4_DSPARK_SUPPORT ?= gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf
 
 ifeq ($(UNAME_S),Darwin)
 METAL_LDLIBS := $(LDLIBS) -framework Foundation -framework Metal
@@ -437,7 +437,7 @@ dspark-verify-depth: ds4_test
 		echo "dspark-verify-depth: skipped, missing model $(DS4_TEST_MODEL)"; \
 	elif [ ! -f "$(DS4_DSPARK_SUPPORT)" ]; then \
 		echo "dspark-verify-depth: skipped, missing DSpark support $(DS4_DSPARK_SUPPORT)"; \
-		echo "dspark-verify-depth: run make dspark-support or set DS4_DSPARK_SUPPORT=FILE"; \
+		echo "dspark-verify-depth: run ./download_model.sh ds4f-dspark or set DS4_DSPARK_SUPPORT=FILE"; \
 	else \
 		DS4_TEST_MODEL="$(DS4_TEST_MODEL)" DS4_TEST_DSPARK="$(DS4_DSPARK_SUPPORT)" ./ds4_test --dspark-verify-depth; \
 	fi
@@ -447,7 +447,7 @@ mtp-verify-depth: ds4_test
 		echo "mtp-verify-depth: skipped, missing model $(DS4_TEST_MODEL)"; \
 	elif [ ! -f "$(DS4_TEST_MTP)" ]; then \
 		echo "mtp-verify-depth: skipped, missing MTP support $(DS4_TEST_MTP)"; \
-		echo "mtp-verify-depth: run ./download_model.sh mtp or set DS4_TEST_MTP=FILE"; \
+		echo "mtp-verify-depth: set DS4_TEST_MTP=FILE to a legacy support GGUF"; \
 	else \
 		DS4_TEST_MODEL="$(DS4_TEST_MODEL)" DS4_TEST_MTP="$(DS4_TEST_MTP)" ./ds4_test --mtp-verify-depth; \
 	fi

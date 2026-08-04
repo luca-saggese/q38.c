@@ -102,10 +102,10 @@ projections, routing) are left untouched to guarantee quality.
 Download one main model. **Prefer the imatrix versions.**
 
 ```sh
-./download_model.sh q2-imatrix   # 96/128 GB RAM machines, imatrix-tuned q2
-./download_model.sh q2-q4-imatrix  # 96/128 GB RAM machines, q2 with last 6 layers q4
-./download_model.sh q4-imatrix   # >= 256 GB RAM machines, imatrix-tuned q4
-./download_model.sh mxfp4        # native MXFP4 experts, about 156 GB
+./download_model.sh ds4f-q2      # 96/128 GB RAM machines
+./download_model.sh ds4f-q2-q4   # q2 with the last 6 expert layers at q4
+./download_model.sh ds4f-q4      # >= 256 GB RAM machines
+./download_model.sh ds4f-mxfp4   # native MXFP4 experts, about 156 GB
 ./download_model.sh pro-q2-imatrix  # 512 GB RAM machines, PRO q2 imatrix quant
 ```
 
@@ -135,12 +135,6 @@ model-building work and can take a long time on the full DeepSeek V4 Flash
 weights. Flash GGUF generation is supported by the local tools. PRO GGUF
 production currently still depends on the external `llama.cpp`-based workflow;
 native tooling can be added later.
-
-`./download_model.sh mtp` fetches the optional speculative decoding support
-GGUF for Flash. It can be used with q2-imatrix, q2-q4-imatrix, and q4-imatrix,
-but must be enabled explicitly with `--mtp`. The current MTP/speculative
-decoding path is still experimental: it is correctness-gated and currently
-provides at most a slight speedup, not a meaningful generation-speed win.
 
 GLM 5.2 support is limited to the GGUF files tested by this branch:
 
@@ -205,16 +199,17 @@ free. Predictable continuations, especially code, tend to benefit most;
 low-yield prompts can be no faster or even slower. DSpark is therefore still
 experimental and explicitly opt-in.
 
-The released DSpark checkpoint is packaged here as a separate support GGUF of
-about 5.6 GiB. It is not a standalone model. Download it once:
+The DSpark checkpoint for Flash 0731 is packaged here as a separate support
+GGUF of about 5.6 GiB. It is not a standalone model. Download it once:
 
 ```sh
-./download_model.sh dspark-support
+./download_model.sh ds4f-dspark
 ```
 
-The same support file can be used with the Flash `q2-imatrix`,
-`q2-q4-imatrix`, and `q4-imatrix` models listed above. For now **DeepSeek
-V4 PRO** is not supported. On Metal, the main model may be resident or use
+The support file can be used with the 0731 Flash `ds4f-q2`, `ds4f-q2-q4`, and
+`ds4f-q4` models listed above. It is checkpoint-specific
+and must not be paired with an older Flash model. For now **DeepSeek V4 PRO**
+is not supported. On Metal, the main model may be resident or use
 `--ssd-streaming`; the support model still adds its own weights and runtime
 state to the memory requirement. DSpark replaces the legacy one-stage MTP
 support model for that run rather than stacking with it.
@@ -223,7 +218,7 @@ Run it with greedy decoding:
 
 ```sh
 ./ds4 -m ds4flash.gguf \
-  --mtp gguf/DeepSeek-V4-Flash-DSpark-support.gguf \
+  --mtp gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf \
   --dspark --temp 0
 ```
 
@@ -311,7 +306,7 @@ the hot expert preload enabled for normal use; use `--ssd-streaming-cold` and
 On 64GB MacBooks, start with the 2-bit Flash GGUF and a moderate expert cache:
 
 ```sh
-./download_model.sh q2-imatrix
+./download_model.sh ds4f-q2
 
 ./ds4 \
   -m ./ds4flash.gguf \
@@ -708,14 +703,14 @@ unsupported grouped routed shapes use the exact fallback and have lower
 aggregate serving throughput. Download and build the L40S target with:
 
 ```sh
-./download_model.sh q4-imatrix
+./download_model.sh ds4f-q4
 make cuda CUDA_ARCH=sm_89
 ```
 
 This is the interactive-agent setup used on the eight-L40S server:
 
 ```sh
-MODEL=gguf/DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix.gguf
+MODEL=gguf/DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix-0731.gguf
 
 ./ds4-agent --cuda --cuda-tensor-parallel \
   --gpu-vram auto \
