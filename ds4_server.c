@@ -2089,7 +2089,7 @@ static void append_tools_prompt_text(buf *b, const char *tool_schemas) {
         "Preserve characters such as `>`, `&`, and `&&` exactly; never replace normal string characters with XML or HTML entity escapes. "
         "Only if a string value itself contains the exact closing parameter tag `</｜DSML｜parameter>`, write that tag as `&lt;/｜DSML｜parameter>` inside the value. "
         "For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\n"
-        "If thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\n"
+        "When thinking mode is enabled, finish reasoning with </think> before any tool calls or final response.\n\n"
         "Otherwise, output directly after </think> with tool calls or final response.\n\n"
         "### Available Tool Schemas\n\n");
     buf_puts(b, tool_schemas);
@@ -5642,6 +5642,7 @@ typedef struct {
     size_t emit_pos;
     bool active;
     bool checked_think_prefix;
+    bool guard_second_reasoning;
     bool sent_reasoning;
     bool sent_content;
     openai_tool_stream tool;
@@ -5651,6 +5652,8 @@ static void openai_stream_start(const request *r, openai_stream *st) {
     memset(st, 0, sizeof(*st));
     st->active = true;
     st->mode = ds4_think_mode_enabled(r->think_mode) ? OPENAI_STREAM_THINKING : OPENAI_STREAM_TEXT;
+    st->guard_second_reasoning =
+        ds4_think_mode_enabled(r->think_mode) && r->has_tools;
 }
 
 static void openai_tool_stream_free(openai_tool_stream *ts) {
@@ -6477,6 +6480,26 @@ static bool openai_sse_stream_update(int fd, server *s, const request *r, const 
     }
 
     if (st->mode == OPENAI_STREAM_TEXT) {
+        if (st->guard_second_reasoning) {
+            const char *close = strstr(raw + st->emit_pos, "</think>");
+            const char *tool = r->has_tools ?
+                find_any_tool_start(raw + st->emit_pos) : NULL;
+            if (close && (!tool || close < tool)) {
+                const size_t limit = (size_t)(close - raw);
+                if (limit > st->emit_pos &&
+                    !sse_chat_delta_n(fd, r, id, "reasoning_content",
+                                      raw + st->emit_pos,
+                                      limit - st->emit_pos)) return false;
+                if (limit > st->emit_pos) st->sent_reasoning = true;
+                st->emit_pos = limit + strlen("</think>");
+                st->guard_second_reasoning = false;
+            } else if (!tool && !final) {
+                return true;
+            } else {
+                st->guard_second_reasoning = false;
+            }
+        }
+
         const char *tool = r->has_tools ? find_any_tool_start(raw + st->emit_pos) : NULL;
         size_t limit = text_stream_safe_limit(raw, st->emit_pos, raw_len,
                                               r->has_tools, final);
@@ -7542,6 +7565,7 @@ typedef struct {
     size_t emit_pos;
     bool active;
     bool checked_think_prefix;
+    bool guard_second_reasoning;
     bool sent_thinking;
     bool sent_text;
     anthropic_tool_stream tool;
@@ -7567,6 +7591,8 @@ static bool anthropic_sse_start_live(int fd, const request *r, const char *id,
     memset(st, 0, sizeof(*st));
     st->active = ok;
     st->mode = ds4_think_mode_enabled(r->think_mode) ? ANTH_STREAM_THINKING : ANTH_STREAM_TEXT;
+    st->guard_second_reasoning =
+        ds4_think_mode_enabled(r->think_mode) && r->has_tools;
     return ok;
 }
 
@@ -8055,6 +8081,29 @@ static bool anthropic_sse_stream_update(int fd, server *s, const request *r, con
     }
 
     if (st->mode == ANTH_STREAM_TEXT) {
+        if (st->guard_second_reasoning) {
+            const char *close = strstr(raw + st->emit_pos, "</think>");
+            const char *tool = r->has_tools ?
+                find_any_tool_start(raw + st->emit_pos) : NULL;
+            if (close && (!tool || close < tool)) {
+                const size_t limit = (size_t)(close - raw);
+                if (limit > st->emit_pos) {
+                    if (!anthropic_sse_open_block(fd, st, ANTH_BLOCK_THINKING)) return false;
+                    if (!anthropic_sse_delta_live(fd, st, ANTH_BLOCK_THINKING,
+                                                  raw + st->emit_pos,
+                                                  limit - st->emit_pos)) return false;
+                    st->sent_thinking = true;
+                }
+                if (!anthropic_sse_close_block_live(fd, id, st)) return false;
+                st->emit_pos = limit + strlen("</think>");
+                st->guard_second_reasoning = false;
+            } else if (!tool && !final) {
+                return true;
+            } else {
+                st->guard_second_reasoning = false;
+            }
+        }
+
         const char *tool = r->has_tools ? find_any_tool_start(raw + st->emit_pos) : NULL;
         size_t limit = text_stream_safe_limit(raw, st->emit_pos, raw_len,
                                               r->has_tools, final);
@@ -13765,6 +13814,43 @@ static void test_anthropic_live_stream_sends_incremental_blocks(void) {
     close(sv[1]);
 }
 
+static void test_anthropic_stream_reroutes_second_reasoning_pass(void) {
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) return;
+
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_ANTHROPIC;
+    r.stream = true;
+    r.think_mode = DS4_THINK_HIGH;
+    r.has_tools = true;
+
+    anthropic_stream st;
+    TEST_ASSERT(anthropic_sse_start_live(sv[0], &r, "msg_second_think", 5, &st));
+    const char *partial = "first pass</think>escaped draft";
+    TEST_ASSERT(anthropic_sse_stream_update(sv[0], NULL, &r, "msg_second_think",
+                                            &st, partial, strlen(partial), false));
+    const char *complete = "first pass</think>escaped draft</think>final answer";
+    TEST_ASSERT(anthropic_sse_finish_live(sv[0], NULL, &r, "msg_second_think",
+                                          &st, complete, strlen(complete), NULL,
+                                          "stop", 9));
+    shutdown(sv[0], SHUT_WR);
+    char *out = read_socket_text(sv[1]);
+
+    TEST_ASSERT(strstr(out, "\"thinking\":\"first pass\"") != NULL);
+    TEST_ASSERT(strstr(out, "\"thinking\":\"escaped draft\"") != NULL);
+    TEST_ASSERT(strstr(out, "\"text\":\"final answer\"") != NULL);
+    TEST_ASSERT(strstr(out, "\"text\":\"escaped draft") == NULL);
+    TEST_ASSERT(strstr(out, "</think>") == NULL);
+
+    free(out);
+    anthropic_stream_free(&st);
+    request_free(&r);
+    close(sv[0]);
+    close(sv[1]);
+}
+
 static void test_anthropic_tool_stream_sends_live_tool_use(void) {
     int sv[2];
     TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
@@ -13953,6 +14039,44 @@ static void test_openai_tool_stream_sends_incremental_text(void) {
 
     free(out);
     tool_calls_free(&calls);
+    request_free(&r);
+    close(sv[0]);
+    close(sv[1]);
+}
+
+static void test_openai_stream_reroutes_second_reasoning_pass(void) {
+    int sv[2];
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) return;
+
+    request r;
+    request_init(&r, REQ_CHAT, 128);
+    r.api = API_OPENAI;
+    r.stream = true;
+    r.think_mode = DS4_THINK_HIGH;
+    r.has_tools = true;
+
+    openai_stream st;
+    openai_stream_start(&r, &st);
+    const char *partial = "<think>first pass</think>escaped draft";
+    TEST_ASSERT(openai_sse_stream_update(sv[0], NULL, &r, "chatcmpl_second_think",
+                                         &st, partial, strlen(partial), false));
+    const char *complete =
+        "<think>first pass</think>escaped draft</think>final answer";
+    TEST_ASSERT(openai_sse_finish_live(sv[0], NULL, &r, "chatcmpl_second_think",
+                                       &st, complete, strlen(complete), NULL,
+                                       "stop", 5, 9));
+    shutdown(sv[0], SHUT_WR);
+    char *out = read_socket_text(sv[1]);
+
+    TEST_ASSERT(strstr(out, "\"reasoning_content\":\"first pass\"") != NULL);
+    TEST_ASSERT(strstr(out, "\"reasoning_content\":\"escaped draft\"") != NULL);
+    TEST_ASSERT(strstr(out, "\"content\":\"final answer\"") != NULL);
+    TEST_ASSERT(strstr(out, "\"content\":\"escaped draft") == NULL);
+    TEST_ASSERT(strstr(out, "</think>") == NULL);
+
+    free(out);
+    openai_stream_free(&st);
     request_free(&r);
     close(sv[0]);
     close(sv[1]);
@@ -17608,9 +17732,11 @@ static void ds4_server_unit_tests_run(void) {
     test_cors_preflight_response_is_no_content();
     test_cors_sse_headers();
     test_anthropic_live_stream_sends_incremental_blocks();
+    test_anthropic_stream_reroutes_second_reasoning_pass();
     test_anthropic_usage_reports_cache_details();
     test_anthropic_tool_stream_sends_live_tool_use();
     test_openai_tool_stream_sends_incremental_text();
+    test_openai_stream_reroutes_second_reasoning_pass();
     test_openai_stream_usage_reports_cache_details();
     test_responses_usage_reports_cache_details();
     test_openai_chat_stream_splits_reasoning_without_tools();
