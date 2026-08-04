@@ -9709,6 +9709,7 @@ typedef struct {
     int old_pos;
     int prompt_len;
     int common;
+    int rewind_to;
     int start;
     int count;
     int live_id[TRACE_CACHE_WINDOW];
@@ -9724,6 +9725,7 @@ static void trace_cache_capture(
 {
     memset(d, 0, sizeof(*d));
     d->valid = true;
+    d->rewind_to = -1;
     d->old_pos = old_pos;
     d->prompt_len = prompt ? prompt->len : 0;
     d->common = common;
@@ -9750,9 +9752,17 @@ static void trace_cache_capture(
 static const char *trace_cache_miss_reason(const trace_cache_diag *d) {
     if (!d || !d->valid) return "unknown";
     if (d->old_pos == 0) return "no-live-checkpoint";
+    if (d->rewind_to >= 0) return "live-prefix-rewind";
     if (d->common != d->old_pos) return "token-mismatch";
     if (d->prompt_len < d->old_pos) return "incoming-prompt-shorter-than-live-checkpoint";
     return "live-prefix-match";
+}
+
+static bool trace_cache_memory_reusable(const trace_cache_diag *d) {
+    return d && d->valid &&
+           (d->rewind_to >= 0 ||
+            (d->old_pos > 0 && d->common == d->old_pos &&
+             d->prompt_len >= d->old_pos));
 }
 
 static void trace_write_escaped_bytes(FILE *fp, const char *p, size_t len) {
@@ -9815,8 +9825,7 @@ static void trace_write_cache_diag(
             d && d->valid ? d->old_pos : 0,
             d && d->valid ? d->prompt_len : 0,
             d && d->valid ? d->common : 0,
-            d && d->valid && d->old_pos > 0 &&
-                d->common == d->old_pos && d->prompt_len >= d->old_pos ? 1 : 0,
+            trace_cache_memory_reusable(d) ? 1 : 0,
             trace_cache_miss_reason(d),
             tool_replay ? tool_replay->mem : 0,
             tool_replay ? tool_replay->disk : 0,
@@ -9828,7 +9837,7 @@ static void trace_write_cache_diag(
     if (disk_path && disk_path[0]) fprintf(s->trace, "disk_cache_file: %s\n", disk_path);
 
     if (!d || !d->valid || d->old_pos == 0 ||
-        (d->common == d->old_pos && d->prompt_len >= d->old_pos))
+        trace_cache_memory_reusable(d))
     {
         return;
     }
@@ -9854,6 +9863,13 @@ static void trace_write_cache_diag(
         trace_write_token(s->trace, s->engine, prompt);
         fputc('\n', s->trace);
     }
+}
+
+static int live_prefix_rewind_target(bool backend_can_rewind,
+                                     int old_pos, int prompt_len, int common) {
+    if (!backend_can_rewind || prompt_len <= 1 || prompt_len >= old_pos) return -1;
+    if (common != prompt_len) return -1;
+    return prompt_len - 1;
 }
 
 static void trace_time(FILE *fp) {
@@ -11074,8 +11090,23 @@ static void generate_job(server *s, server_slot *slot, job *j) {
                    "Anthropic continuation state is not available; retry by replaying the full messages history");
         return;
     } else if (cached == 0) {
-        cached = common == old_pos && j->req.prompt.len >= old_pos ? common : 0;
-        cache_source = cached > 0 ? "memory-token" : "none";
+        const int rewind_to = live_prefix_rewind_target(
+            ds4_engine_is_glm_dsa(s->engine), old_pos,
+            j->req.prompt.len, common);
+        if (rewind_to >= 0) {
+            pthread_mutex_lock(&s->inference_mu);
+            ds4_session_rewind(slot->session, rewind_to);
+            pthread_mutex_unlock(&s->inference_mu);
+            cached = rewind_to;
+            cache_source = "memory-rewind";
+            cache_diag.rewind_to = rewind_to;
+            server_log(DS4_LOG_KVCACHE,
+                       "ds4-server: rewound GLM live prefix from %d to %d; final prompt token will be reevaluated",
+                       old_pos, rewind_to);
+        } else {
+            cached = common == old_pos && j->req.prompt.len >= old_pos ? common : 0;
+            cache_source = cached > 0 ? "memory-token" : "none";
+        }
     }
     if (cached == 0) {
         int thinking_cached =
@@ -16405,6 +16436,15 @@ static void test_model_metadata_clamps_completion_to_context(void) {
     buf_free(&b);
 }
 
+static void test_live_prefix_rewind_target(void) {
+    TEST_ASSERT(live_prefix_rewind_target(true, 17, 8, 8) == 7);
+    TEST_ASSERT(live_prefix_rewind_target(true, 49826, 48379, 48379) == 48378);
+    TEST_ASSERT(live_prefix_rewind_target(false, 17, 8, 8) == -1);
+    TEST_ASSERT(live_prefix_rewind_target(true, 17, 8, 7) == -1);
+    TEST_ASSERT(live_prefix_rewind_target(true, 8, 8, 8) == -1);
+    TEST_ASSERT(live_prefix_rewind_target(true, 17, 1, 1) == -1);
+}
+
 static void test_client_socket_nonblocking_flag(void) {
     int sv[2];
     TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
@@ -17624,6 +17664,7 @@ static void ds4_server_unit_tests_run(void) {
     test_json_parser_handles_tool_heavy_requests();
     test_json_string_handles_surrogates();
     test_model_metadata_clamps_completion_to_context();
+    test_live_prefix_rewind_target();
     test_client_socket_nonblocking_flag();
     test_thinking_state_tracks_prompt_and_generated_tags();
     test_thinking_checkpoint_remember_gate();
