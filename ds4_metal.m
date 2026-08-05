@@ -27499,6 +27499,13 @@ static id<MTLComputePipelineState> ds4_gpu_routed_mv_pipeline(uint32_t type) {
     }
 }
 
+/* TensorOps routed-MoE prefill uses bits 0/1/2 for gate/up/down. Unsupported
+ * tensor types keep their established kernels. --quality and the global
+ * Metal4 comparison switch retain the reference path. */
+static int ds4_gpu_routed_mm_mpp_mask(void) {
+    return ds4_gpu_mpp_available() ? 7 : 0;
+}
+
 static id<MTLComputePipelineState> ds4_gpu_routed_mm_pipeline(uint32_t type) {
     switch (type) {
     case DS4_METAL_TENSOR_Q8_0:
@@ -38363,6 +38370,8 @@ int ds4_gpu_routed_moe_batch_tensor(
          */
         const bool use_mm_id_pair_swiglu =
             use_mm_id &&
+            !(gate_type == DS4_METAL_TENSOR_IQ2_XXS &&
+              (ds4_gpu_routed_mm_mpp_mask() & 3) == 3) &&
             g_tp_split_world != 2 &&    /* pair-swiglu mm kernel lacks expert ownership */
             request_mid_f16 &&
             n_expert == 6 &&
@@ -38400,6 +38409,23 @@ int ds4_gpu_routed_moe_batch_tensor(
             down_mm_pipeline = request_mid_f16 ?
                 ds4_gpu_routed_mm_f16_rhs_pipeline(down_type) :
                 ds4_gpu_routed_mm_pipeline(down_type);
+            const int mpp_mask = ds4_gpu_routed_mm_mpp_mask();
+            if (mpp_mask && gate_type == DS4_METAL_TENSOR_IQ2_XXS) {
+                id<MTLComputePipelineState> mpp =
+                    ds4_gpu_get_mul_mm_id_pipeline("kernel_mul_mm_id_iq2_xxs_f32_mpp", false);
+                if (mpp) {
+                    if (mpp_mask & 1) gate_mm_pipeline = mpp;
+                    if (mpp_mask & 2) up_mm_pipeline = mpp;
+                }
+            }
+            if ((mpp_mask & 4) && request_mid_f16 &&
+                (down_type == DS4_METAL_TENSOR_Q2_K || down_type == DS4_METAL_TENSOR_IQ2_XXS)) {
+                id<MTLComputePipelineState> mpp = ds4_gpu_get_mul_mm_id_pipeline(
+                    down_type == DS4_METAL_TENSOR_Q2_K ?
+                        "kernel_mul_mm_id_q2_K_f16_mpp" :
+                        "kernel_mul_mm_id_iq2_xxs_f16_mpp", false);
+                if (mpp) down_mm_pipeline = mpp;
+            }
             if (use_mm_id_pair_swiglu) {
                 pair_swiglu_mm_pipeline =
                     ds4_gpu_get_pipeline(
