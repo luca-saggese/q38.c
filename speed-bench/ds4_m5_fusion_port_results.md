@@ -145,3 +145,16 @@ full `make test` green.
 Remaining unfused emit-path work: the pool pipeline (pack + softmax +
 product + 8-lane sum_rows).  The sum_rows 8-thread simd topology is
 delicate to replicate exactly; expected value ~+0.2-0.3%.
+
+
+### Round-3 final tip (09c53a5): 8 official replicas
+
+Adds the M5 admission of the compressor exact softmax+product fusion
+(+0.10-0.24% controlled; flat when first screened pre-finalize).
+
+decode gen_tps: 40.38/40.66/40.94/40.95/40.96/40.99/41.01/41.04
+    median 40.96 tok/s  (+4.0% vs the 39.39 session baseline)
+steady decode:  median 41.19 tok/s (+4.0% vs 39.60)
+prefill:        785-788 (no regression)
+first token:    ~27.2 ms med
+All frontier hashes canonical; focused tests and full make test green.
