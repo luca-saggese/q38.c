@@ -100,9 +100,12 @@ numbers in the QA report so omissions are visible.
    `gguf-tools/deepseek4-quantize` under ASan and UBSan. Truncated files,
    impossible dimensions, and overflowing tensor sizes must be rejected.
 5. With a checkpoint-matched DSpark drafter, compare temperature-zero output
-   against a no-drafter run for 400 and 800 accepted target tokens. Output must
-   be byte-identical. Record acceptance and decode speed because correctness
-   replay can change the useful speedup.
+   against a no-drafter run for 400 and 800 generated tokens. Record the first
+   output difference, acceptance, direct commits, replay fallbacks, and decode
+   speed. Byte identity is not required: DSpark commits the batched verifier
+   state, whose floating-point operation order differs from one-token decode.
+   Verifier errors, invalid text, or a material continuation-quality regression
+   remain release blockers. Use `--dspark-strict` for the target-only control.
 6. Exercise unterminated and twice-closed reasoning in streaming and
    non-streaming OpenAI, Responses, and Anthropic requests, with and without
    tools. Reasoning must never leak into answer content.
@@ -219,20 +222,27 @@ Use the 0731 DSpark support GGUF only with a Flash 0731 target. A support model
 from another checkpoint can have plausible acceptance statistics while
 producing a different greedy continuation.
 
+Normal DSpark runs commit accepted target-verifier state directly. The batched
+verifier and one-token decode use the same graph with different floating-point
+operation order, so `output_match=0` against the baseline is diagnostic rather
+than a failure. `--dspark-strict` remains the byte-identical target-only mode.
+
 - Default greedy acceptance fixture:
   `DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
 - 64-token guardrail:
   `DS4_DSPARK_FIXTURE_TOKENS=64 DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
-- Fixed-block partial-accept fallback:
+- Fixed-block direct partial commit:
   `DS4_DSPARK_FIXTURE_CONFIDENCE=0 DS4_DSPARK_FIXTURE_TOKENS=8 DS4_DSPARK_FIXTURE_REQUIRE_PARTIAL=1 DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
 - DSpark verifier invariant smoke:
   `DS4_TEST_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-verify-depth`.
 - If shared support-model or verifier structures changed, also run legacy MTP:
   `make mtp-verify-depth` with `DS4_TEST_MTP` set to a one-stage MTP support
   GGUF, or confirm the target skips only because the optional file is missing.
-- Record `c_add` `accepted_draft`, `errors=0`, `verify_layer`, and `net_saved`
-  for both 32-token and 64-token runs.  A faster run with lower proposal
-  quality is a regression unless it was an intentional scheduler change.
+- Record `c_add` `accepted_draft`, `direct_full`, `direct_partial`,
+  `replay_fallbacks`, `errors=0`, `verify_layer`, `net_saved`, and
+  `output_match` for both 32-token and 64-token runs. At least one direct commit
+  must occur. A faster run with lower proposal quality is a regression unless
+  it was an intentional scheduler change.
 - If verifier MoE kernels changed, run one diagnostic `c_add` profile with
   `DS4_DSPARK_VERIFY_SELECTED_PROFILE=1` or the Metal MoE stage profiler and
   record the selected-expert footprint or stage timing in the DSpark log.

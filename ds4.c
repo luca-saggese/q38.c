@@ -48193,6 +48193,9 @@ typedef struct ds4_dspark_spec_stats {
     uint64_t accepted_draft_tokens;
     uint64_t full_accepts;
     uint64_t partial_accepts;
+    uint64_t direct_full_commits;
+    uint64_t direct_partial_commits;
+    uint64_t replay_fallbacks;
     uint64_t first_misses;
     uint64_t no_draft;
     uint64_t no_room;
@@ -56549,6 +56552,12 @@ static int ds4_engine_open_internal(ds4_engine **out,
                     e->dspark_weights.missing_tensors,
                     e->dspark_weights.invalid_tensors,
                     e->dspark_weights.metadata_errors);
+            if (e->dspark && !e->quality && !e->dspark_strict) {
+                fprintf(stderr,
+                        "ds4: DSpark direct verifier-state commits enabled; "
+                        "greedy output may differ from one-token decode due "
+                        "to batched floating-point operation order\n");
+            }
         } else {
             fprintf(stderr,
                     "ds4: unsupported --mtp support model %s (detected=%s); "
@@ -57365,7 +57374,8 @@ static void ds4_session_print_dspark_stats(const ds4_session *s) {
     fprintf(stderr,
             "ds4: DSpark stats cycles=%llu first_tokens=%llu proposed=%llu "
             "accepted_draft=%llu accept_rate=%.2f%% avg_accept=%.3f "
-            "full=%llu partial=%llu miss_first=%llu no_draft=%llu "
+            "full=%llu partial=%llu direct_full=%llu direct_partial=%llu "
+            "replay_fallbacks=%llu miss_first=%llu no_draft=%llu "
             "no_room=%llu invalid=%llu scheduler_skips=%llu "
             "tail_skips=%llu verifier_unavailable=%llu errors=%llu time_ms propose=%.3f "
             "prop_stage0=%.3f prop_setup=%.3f prop_cache=%.3f "
@@ -57384,6 +57394,9 @@ static void ds4_session_print_dspark_stats(const ds4_session *s) {
             avg_accept,
             (unsigned long long)st->full_accepts,
             (unsigned long long)st->partial_accepts,
+            (unsigned long long)st->direct_full_commits,
+            (unsigned long long)st->direct_partial_commits,
+            (unsigned long long)st->replay_fallbacks,
             (unsigned long long)st->first_misses,
             (unsigned long long)st->no_draft,
             (unsigned long long)st->no_room,
@@ -61708,10 +61721,119 @@ static int ds4_session_eval_dspark_speculative_argmax(
         }
     }
 
-    /* Batch verification and ordinary decode update compressor state with
-     * different kernels. Restore the pre-verify frontier and replay every
-     * accepted draft through ordinary decode, including partial accepts, so
-     * speculative decoding retains the target model's greedy token stream. */
+    /* The batched verifier and ordinary one-token decode execute the same
+     * model graph with different floating-point reduction orders. Keep the
+     * verifier state when it can be committed safely: DSpark is an opt-in
+     * execution mode and does not promise byte-identical output to ordinary
+     * decode. A failed direct commit still falls back to rollback and replay. */
+
+    bool final_logits_ok = false;
+    if (ok && commit_drafts == draft_n) {
+        const double read_t0 = stats_enabled ? now_sec() : 0.0;
+        final_logits_ok = metal_graph_read_spec_logits_row(
+                &s->graph, (uint32_t)(draft_n - 1), row_logits);
+        if (stats_enabled) {
+            s->dspark_stats.verify_read_ms +=
+                (now_sec() - read_t0) * 1000.0;
+        }
+    }
+
+    if (ok && commit_drafts == draft_n && final_logits_ok) {
+        if (tp_verify_sent &&
+            !ds4_tp_send_verify_commit(e->tp.ctx, 1, 0)) {
+            snprintf(err, errlen, "tp: verify commit send failed");
+            s->checkpoint_valid = false;
+            spec_frontier_free(&frontier);
+            DS4_DSPARK_STATS_FINISH();
+            return -1;
+        }
+        memcpy(s->logits, row_logits,
+               (size_t)DS4_N_VOCAB * sizeof(s->logits[0]));
+        int emitted_drafts = 0;
+        for (int i = 0; i < draft_n && n_accept < accepted_cap; i++) {
+            accepted[n_accept++] = drafts[i];
+            emitted_drafts++;
+            if (drafts[i] == eos_token) break;
+        }
+        s->checkpoint_valid = true;
+        ds4_session_dspark_capture_note_checkpoint(s);
+        if (stats_enabled) {
+            s->dspark_stats.full_accepts++;
+            s->dspark_stats.direct_full_commits++;
+            s->dspark_stats.accepted_draft_tokens +=
+                (uint64_t)emitted_drafts;
+            ds4_dspark_stats_note_len(s->dspark_stats.accepted_len_hist,
+                                      (uint32_t)emitted_drafts);
+        }
+        ds4_session_dspark_scheduler_note(
+                s, (uint32_t)emitted_drafts, false,
+                DS4_DSPARK_SCHED_EXTRA_MS());
+        if (spec_log) {
+            fprintf(stderr,
+                    "ds4: DSpark spec direct-full drafted=%d accepted=%d\n",
+                    draft_n,
+                    n_accept);
+        }
+        spec_frontier_free(&frontier);
+        DS4_DSPARK_STATS_FINISH();
+        return n_accept;
+    }
+
+    /* Prefix snapshots make partial accepts cheap on one host. TP workers do
+     * not yet receive these intermediate snapshots, so TP partial accepts use
+     * the existing mirrored replay fallback. */
+    if (ok && !tp_verify_sent &&
+        commit_drafts > 0 && commit_drafts < draft_n &&
+        commit_drafts <= (int)DS4_SPEC_PREFIX_SLOTS) {
+        const double read_t0 = stats_enabled ? now_sec() : 0.0;
+        bool prefix_ok = metal_graph_read_spec_logits_row(
+                &s->graph, (uint32_t)(commit_drafts - 1), row_logits);
+        if (stats_enabled) {
+            s->dspark_stats.verify_read_ms +=
+                (now_sec() - read_t0) * 1000.0;
+        }
+        s->checkpoint.len = start;
+        ds4_session_dspark_capture_invalidate(s);
+        if (prefix_ok) {
+            prefix_ok = spec_frontier_commit_prefix(
+                    s, (uint32_t)commit_drafts);
+        }
+        if (prefix_ok) {
+            memcpy(s->logits, row_logits,
+                   (size_t)DS4_N_VOCAB * sizeof(s->logits[0]));
+            int emitted_drafts = 0;
+            for (int i = 0; i < commit_drafts && n_accept < accepted_cap; i++) {
+                token_vec_push(&s->checkpoint, drafts[i]);
+                accepted[n_accept++] = drafts[i];
+                emitted_drafts++;
+                if (drafts[i] == eos_token) break;
+            }
+            s->checkpoint_valid = true;
+            ds4_session_dspark_capture_note_checkpoint(s);
+            if (stats_enabled) {
+                s->dspark_stats.partial_accepts++;
+                s->dspark_stats.direct_partial_commits++;
+                s->dspark_stats.accepted_draft_tokens +=
+                    (uint64_t)emitted_drafts;
+                ds4_dspark_stats_note_len(
+                        s->dspark_stats.accepted_len_hist,
+                        (uint32_t)emitted_drafts);
+            }
+            ds4_session_dspark_scheduler_note(
+                    s, (uint32_t)emitted_drafts, false,
+                    DS4_DSPARK_SCHED_EXTRA_MS());
+            if (spec_log) {
+                fprintf(stderr,
+                        "ds4: DSpark spec direct-partial drafted=%d committed=%d accepted=%d\n",
+                        draft_n,
+                        emitted_drafts,
+                        n_accept);
+            }
+            spec_frontier_free(&frontier);
+            DS4_DSPARK_STATS_FINISH();
+            return n_accept;
+        }
+    }
 
     if (verifier_may_have_mutated) {
         s->checkpoint.len = start;
@@ -61774,6 +61896,9 @@ static int ds4_session_eval_dspark_speculative_argmax(
     }
     const double replay_t0 = stats_enabled ? now_sec() : 0.0;
     int replayed_drafts = 0;
+    if (stats_enabled && replay_budget > 0) {
+        s->dspark_stats.replay_fallbacks++;
+    }
     for (int i = 0; i < replay_budget; i++) {
         ok = metal_graph_eval_token_raw_swa(&s->graph,
                                             &e->model,
