@@ -22065,9 +22065,81 @@ static bool metal_graph_encode_decode_layer_phase(
      * dispatch launches. Deferring the RoPE and running it inside the
      * finalizer removes one dispatch per layer. */
     bool fuse_kv_rope_store = false;
+    bool qkv_pair_quad_fused = false;
     if (!resume_after_qkv) {
     bool qkv_pair_projected = resume_after_qa_kv_raw;
-    if (!resume_after_qa_kv_raw && ok && qkv_rms_fused &&
+    /* M5 decode fusion: the q_a/kv Q8 pair and the four F16 compressor
+     * projections all read the same normalized attention input and write
+     * disjoint outputs, so one dispatch covers both stages with unchanged
+     * per-row reduction trees (see the kernel comment).  Restricted to the
+     * resident FULL phase so split-phase / CUDA / SSD flows keep their
+     * original ordering. */
+    if (!resume_after_qa_kv_raw && ok && qkv_rms_fused && compressed &&
+        phase == METAL_DECODE_LAYER_FULL &&
+        !g->ssd_streaming && !g->ssd_streaming_cold &&
+        ds4_layer_compress_ratio(il) == 4u &&
+        layer->attn_q_a->type == DS4_TENSOR_Q8_0 &&
+        layer->attn_kv->type == DS4_TENSOR_Q8_0 &&
+        g->cuda_qkv_pair && !metal_graph_use_reference_qkv_pair_proj() &&
+        !metal_graph_use_reference_compressor_pair_proj() &&
+        layer->attn_compressor_kv && layer->attn_compressor_gate &&
+        layer->attn_compressor_ape &&
+        layer->attn_compressor_kv->type == DS4_TENSOR_F16 &&
+        layer->attn_compressor_gate->type == DS4_TENSOR_F16 &&
+        layer->attn_compressor_kv->dim[0] == DS4_N_EMBD &&
+        layer->attn_compressor_gate->dim[0] == DS4_N_EMBD &&
+        layer->attn_compressor_kv->dim[1] == 2u * DS4_N_HEAD_DIM &&
+        layer->attn_compressor_gate->dim[1] == 2u * DS4_N_HEAD_DIM &&
+        layer->indexer_compressor_kv && layer->indexer_compressor_gate &&
+        layer->indexer_compressor_ape &&
+        layer->indexer_compressor_kv->type == DS4_TENSOR_F16 &&
+        layer->indexer_compressor_gate->type == DS4_TENSOR_F16 &&
+        layer->indexer_compressor_kv->dim[0] == DS4_N_EMBD &&
+        layer->indexer_compressor_gate->dim[0] == DS4_N_EMBD &&
+        layer->indexer_compressor_kv->dim[1] == 2u * DS4_N_INDEXER_HEAD_DIM &&
+        layer->indexer_compressor_gate->dim[1] == 2u * DS4_N_INDEXER_HEAD_DIM &&
+        getenv("DS4_METAL_DISABLE_M5_QKV_PAIR_QUAD_FUSE") == NULL &&
+        (ds4_gpu_device_is_m5_apple_silicon() ||
+         getenv("DS4_METAL_ENABLE_QKV_PAIR_QUAD_FUSE") != NULL)) {
+        const int fused = ds4_gpu_qkv_pair_quad_compressor_store_tensor(
+                metal_graph_qr(g),
+                metal_graph_kv_raw(g),
+                metal_graph_comp_kv_cur(g),
+                metal_graph_comp_sc_cur(g),
+                metal_graph_index_comp_kv_cur(g),
+                metal_graph_index_comp_sc_cur(g),
+                g->layer_attn_state_kv[il],
+                g->layer_attn_state_score[il],
+                g->layer_index_state_kv[il],
+                g->layer_index_state_score[il],
+                model->map,
+                model->size,
+                layer->attn_q_a->abs_offset,
+                layer->attn_kv->abs_offset,
+                layer->attn_compressor_kv->abs_offset,
+                layer->attn_compressor_gate->abs_offset,
+                layer->indexer_compressor_kv->abs_offset,
+                layer->indexer_compressor_gate->abs_offset,
+                layer->attn_compressor_ape->abs_offset,
+                layer->attn_compressor_ape->type,
+                layer->indexer_compressor_ape->abs_offset,
+                layer->indexer_compressor_ape->type,
+                DS4_N_EMBD,
+                q_rank,
+                DS4_N_HEAD_DIM,
+                2u * DS4_N_HEAD_DIM,
+                2u * DS4_N_INDEXER_HEAD_DIM,
+                metal_graph_attn_norm(g),
+                4u,
+                pos);
+        if (fused < 0) {
+            ok = false;
+        } else if (fused > 0) {
+            qkv_pair_projected = true;
+            qkv_pair_quad_fused = true;
+        }
+    }
+    if (!resume_after_qa_kv_raw && ok && !qkv_pair_quad_fused && qkv_rms_fused &&
         layer->attn_q_a->type == DS4_TENSOR_Q8_0 &&
         layer->attn_kv->type == DS4_TENSOR_Q8_0 &&
         g->cuda_qkv_pair && !metal_graph_use_reference_qkv_pair_proj()) {
@@ -22362,8 +22434,9 @@ static bool metal_graph_encode_decode_layer_phase(
          * the normalized input and the F16 matvec shape, so a single dispatch
          * covers all four matrices with unchanged per-row reduction trees.
          * Removes one dispatch per decode layer. */
-        int quad_store = 0;
-        if (ok && ratio == 4u && !metal_graph_use_reference_compressor_pair_proj() &&
+        int quad_store = qkv_pair_quad_fused ? 1 : 0;
+        if (!qkv_pair_quad_fused &&
+            ok && ratio == 4u && !metal_graph_use_reference_compressor_pair_proj() &&
             getenv("DS4_METAL_DISABLE_PRE_M5_COMPRESSOR_QUAD_STORE") == NULL &&
             (ds4_gpu_device_is_pre_m5_apple_silicon() ||
              ds4_gpu_device_is_m5_apple_silicon() ||
