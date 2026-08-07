@@ -22134,7 +22134,8 @@ static int ds4_gpu_encode_dsv4_softmax_pool_one_comp_ggml_reduce(
         getenv("DS4_METAL_ENABLE_COMPRESSOR_EXACT_REDUCTION_FUSION") != NULL;
     const bool use_pre_m5_exact_reduction_fusion_default =
         !g_ssd_streaming_mode &&
-        ds4_gpu_device_is_pre_m5_apple_silicon() &&
+        (ds4_gpu_device_is_pre_m5_apple_silicon() ||
+         ds4_gpu_device_is_m5_apple_silicon()) &&
         getenv("DS4_METAL_DISABLE_PRE_M5_COMPRESSOR_EXACT_REDUCTION_FUSION") == NULL &&
         getenv("DS4_METAL_DISABLE_M3_COMPRESSOR_EXACT_REDUCTION_FUSION") == NULL;
     const bool request_exact_reduction_fusion =
