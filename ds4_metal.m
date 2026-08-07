@@ -2357,6 +2357,12 @@ int ds4_gpu_device_is_pre_m5_apple_silicon(void) {
             g_metal_device_name[8] == ' ');
 }
 
+int ds4_gpu_device_is_m5_apple_silicon(void) {
+    return strncmp(g_metal_device_name, "Apple M5", 8) == 0 &&
+           (g_metal_device_name[8] == '\0' ||
+            g_metal_device_name[8] == ' ');
+}
+
 static int ds4_gpu_compile_tensor_probe(void) {
 #if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
     if (!g_device) return 0;
@@ -22140,7 +22146,8 @@ static int ds4_gpu_compressor_ratio4_decode_pack_mode(uint32_t head_dim) {
         getenv("DS4_METAL_ENABLE_COMPRESSOR_RATIO4_DECODE_PACK_FUSION") != NULL;
     const bool default_shape = head_dim == 128u || head_dim == 512u;
     const bool default_pre_m5 =
-        ds4_gpu_device_is_pre_m5_apple_silicon() && default_shape;
+        (ds4_gpu_device_is_pre_m5_apple_silicon() ||
+         ds4_gpu_device_is_m5_apple_silicon()) && default_shape;
     if ((!force &&
          (getenv("DS4_METAL_DISABLE_PRE_M5_COMPRESSOR_RATIO4_DECODE_PACK_FUSION") != NULL ||
           getenv("DS4_METAL_DISABLE_M3_COMPRESSOR_RATIO4_DECODE_PACK_FUSION") != NULL)) ||
@@ -31198,7 +31205,7 @@ static int ds4_gpu_encode_router_select(
             getenv("DS4_METAL_ENABLE_ROUTER_TRANSFORM_FINALIZE_FUSION") != NULL;
         const bool use_pre_m5_transform_finalize_fusion_default =
             !g_ssd_streaming_mode &&
-            pre_m5_device &&
+            (pre_m5_device || ds4_gpu_device_name_contains("M5")) &&
             getenv("DS4_METAL_DISABLE_PRE_M5_ROUTER_TRANSFORM_FINALIZE_FUSION") == NULL &&
             getenv("DS4_METAL_DISABLE_M3_ROUTER_TRANSFORM_FINALIZE_FUSION") == NULL;
         const bool use_transform_finalize_fusion =
