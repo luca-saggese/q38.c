@@ -59,3 +59,49 @@ prefill regression. Machine drift between distant windows reached
 - raw zero attention mask: -0.06%
 - output Q8 nr4 + HC sum/norm fusion + HC weights4 (combined): -0.9%
 - Q8 decode exact views (alone): -0.6%
+
+
+## Round 2: attempt to push decode past 41 tok/s (2026-08-07)
+
+Final revalidated state (committed tree, 3 official replicas):
+decode 40.64/40.56/40.63 (median 40.63), steady 40.82, prefill
+753-779 (drift window), first token ~27.3-28.1 ms, all frontier
+hashes canonical. **41 tok/s was not reached with exact methods.**
+
+Everything below was measured and left OUT of the tree:
+
+- Q8 r4 matvec (DS4_METAL_Q8_MV_ROWS=4): initially appeared to give
+  decode 43.7/steady 44.1, but that was row-skipping corruption: the
+  q_a/kv pair kernel and the hc_expand4 kernels have compile-time
+  NR0=2 geometry and skip rows when the dispatch reports nr0=4.
+  CAUTION: the official frontier hash covers only prefill logits;
+  decode-token exactness is covered only by the A/B harness
+  exact_rows and ds4_test --metal-tensor-equivalence greedy checks.
+  With the pair/hc_expand dispatches pinned to nr0=2, r4 singles are
+  bit-exact but flat (40.2-40.4 both ways). Reverted.
+- IQ2 pair-SwiGLU / Q2_K sum6 nsg=1 and nsg=4 decode variants (new
+  pipelines; NSG!=2 needs the collective grid/sign table load in
+  kernel_mul_mv_id_iq2_xxs_pair_swiglu_f32 scaled as nval=8/NSG):
+  bit-exact, flat (nsg1 -0.16%, nsg4 -0.07%). Reverted.
+- DS4_METAL_Q8_DECODE_MPP (NAX matmul at n_tok=1): not bit-exact on
+  M5 (different accumulation order) - rejected.
+- Decode pipeline fast lookup extended to the IQ2XXS/Q2K tape
+  (one-line probe): exact, +0.01% - host is not the bottleneck at
+  ~98% GPU busy. Reverted.
+- Split schedules 2/0, 8/0, 12/0, 4/16, 8/16, 2/16, 6/12: all within
+  +/-0.15%; 4/0 remains optimal.
+- DS4_METAL_ENABLE_HC_RMS_SCALE_PROJ / GATHERED_KV_STAGE /
+  DECODE_NORM_EXACT_VIEWS / F32_DECODE_EXACT_VIEWS / SHARED_KV_PAD /
+  UNRETAINED_COMMAND_BUFFERS: all flat (|delta| <= 0.15%).
+- DS4_METAL_DISABLE_METAL4: prefill 784 -> 390 (NAX tensor matmuls are
+  the prefill driver), decode slightly worse. Keep Metal 4 on.
+- MTP speculative decode (Q4K MTP module, --mtp-draft 1..4, greedy
+  exact verify): draft 1 ~= baseline (41.6 vs 41.5 t/s CLI short
+  prompt), drafts 2-4 progressively slower (28.2, 23.5 t/s). Verify
+  cost exceeds acceptance gains on this config.
+
+Structural work that could plausibly beat 41 (out of session scope):
+NAX/tensor-op IQ2XXS MoE kernels (prefill routed_moe is 40% of layer
+time; decode pair_swiglu is the largest decode matvec), Metal
+command-buffer replay for the fixed decode tape, or relaxing the
+bit-exactness discipline (e.g. NAX Q8 decode matmuls).
