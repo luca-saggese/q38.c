@@ -5585,6 +5585,13 @@ typedef struct {
     float beta_slow;
 } ds4_gpu_rope_affine_pair_args;
 
+/* Matches ds4_metal_args_dsv4_comp_finalize in dsv4_rope.metal. */
+typedef struct {
+    ds4_gpu_rope_affine_pair_args rope;
+    float    rms_eps;
+    uint32_t pad0;
+} ds4_gpu_comp_finalize_args;
+
 /* Set by ds4.c immediately before the decode attention call when the inverse
  * RoPE tail is deferred into the reduce kernel. Cleared by the encoder. */
 static ds4_gpu_rope_affine_pair_args g_decode_attn_rope_args;
@@ -19768,6 +19775,131 @@ int ds4_gpu_matmul_f16_quad_compressor_store_tensor(
     return 1;
 }
 
+/* Decode-only emit-path fusion: finalize the freshly pooled attention and
+ * indexer compressor rows (norm + rope + fp8/commit + qat) in one dispatch
+ * instead of seven.  Bit-exact vs the separate dispatches; see the kernel
+ * comment.  Returns 1 when the fused dispatch ran, 0 to fall back. */
+int ds4_gpu_dsv4_comp_row_finalize_tensor(
+        ds4_gpu_tensor       *attn_stage,
+        ds4_gpu_tensor       *attn_cache,
+        uint32_t              attn_comp_row,
+        uint64_t              attn_norm_offset,
+        ds4_gpu_tensor       *index_cache,
+        uint32_t              index_comp_row,
+        uint64_t              index_norm_offset,
+        ds4_gpu_tensor       *attn_state_kv,
+        ds4_gpu_tensor       *attn_state_score,
+        ds4_gpu_tensor       *index_state_kv,
+        ds4_gpu_tensor       *index_state_score,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint32_t              pos,
+        uint32_t              n_rot,
+        uint32_t              n_ctx_orig,
+        float                 freq_base,
+        float                 freq_scale,
+        float                 ext_factor,
+        float                 attn_factor,
+        float                 beta_fast,
+        float                 beta_slow,
+        float                 rms_eps) {
+    if (!g_initialized && !ds4_gpu_init()) return 0;
+    if (!attn_stage || !attn_cache || !index_cache || !model_map) return 0;
+
+    @autoreleasepool {
+        const uint64_t attn_norm_bytes = 512u * sizeof(float);
+        const uint64_t index_norm_bytes = 128u * sizeof(float);
+        if (attn_norm_offset > model_size ||
+            attn_norm_bytes > model_size - attn_norm_offset ||
+            index_norm_offset > model_size ||
+            index_norm_bytes > model_size - index_norm_offset) {
+            return 0;
+        }
+        if (!attn_state_kv || !attn_state_score || !index_state_kv ||
+            !index_state_score) return 0;
+        if (ds4_gpu_tensor_bytes(attn_state_kv) < 8u * 1024u * sizeof(float) ||
+            ds4_gpu_tensor_bytes(attn_state_score) < 8u * 1024u * sizeof(float) ||
+            ds4_gpu_tensor_bytes(index_state_kv) < 8u * 256u * sizeof(float) ||
+            ds4_gpu_tensor_bytes(index_state_score) < 8u * 256u * sizeof(float)) {
+            return 0;
+        }
+        if (ds4_gpu_tensor_bytes(attn_stage) < 512u * sizeof(float) ||
+            ds4_gpu_tensor_bytes(index_cache) <
+                ((uint64_t)index_comp_row + 1u) * 128u * sizeof(float) ||
+            ds4_gpu_tensor_bytes(attn_cache) <
+                ((uint64_t)attn_comp_row + 1u) * 512u * sizeof(uint16_t)) {
+            return 0;
+        }
+
+        uint64_t attn_norm_inner = 0, index_norm_inner = 0;
+        id<MTLBuffer> anbuf = ds4_gpu_wrap_model_range(
+            model_map, model_size, attn_norm_offset, attn_norm_bytes, &attn_norm_inner);
+        id<MTLBuffer> inbuf = ds4_gpu_wrap_model_range(
+            model_map, model_size, index_norm_offset, index_norm_bytes, &index_norm_inner);
+        if (!anbuf || !inbuf) return 0;
+
+        id<MTLComputePipelineState> pipeline =
+            ds4_gpu_get_pipeline("kernel_dsv4_comp_row_finalize_f32");
+        if (!pipeline) return 0;
+
+        ds4_gpu_comp_finalize_args fin_args = {
+            .rope = {
+                .row_bytes = 0,
+                .token_bytes = 0,
+                .head_dim = 0,
+                .n_dims = (int32_t)n_rot,
+                .n_ctx_orig = (int32_t)n_ctx_orig,
+                .inverse = 0,
+                .pos0 = pos,
+                .pos_step = 0,
+                .freq_base = freq_base,
+                .freq_scale = freq_scale,
+                .ext_factor = ext_factor,
+                .attn_factor = attn_factor,
+                .beta_fast = beta_fast,
+                .beta_slow = beta_slow,
+            },
+            .rms_eps = rms_eps,
+            .pad0 = 0,
+        };
+
+        int owned = 0;
+        id<MTLCommandBuffer> cb = ds4_gpu_command_buffer(&owned);
+        if (!cb) return 0;
+        id<MTLComputeCommandEncoder> enc = ds4_gpu_compute_encoder(cb);
+        [enc setComputePipelineState:pipeline];
+        [enc setBytes:&fin_args length:sizeof(fin_args) atIndex:0];
+        [enc setBuffer:ds4_gpu_tensor_buffer(attn_stage)
+                offset:ds4_gpu_tensor_offset(attn_stage) atIndex:1];
+        [enc setBuffer:anbuf offset:(NSUInteger)attn_norm_inner atIndex:2];
+        [enc setBuffer:ds4_gpu_tensor_buffer(attn_cache)
+                offset:ds4_gpu_tensor_offset(attn_cache) +
+                        (NSUInteger)attn_comp_row * 512u * sizeof(uint16_t) atIndex:3];
+        [enc setBuffer:ds4_gpu_tensor_buffer(index_cache)
+                offset:ds4_gpu_tensor_offset(index_cache) +
+                        (NSUInteger)index_comp_row * 128u * sizeof(float) atIndex:4];
+        [enc setBuffer:inbuf offset:(NSUInteger)index_norm_inner atIndex:5];
+        [enc setBuffer:ds4_gpu_tensor_buffer(attn_state_kv)
+                offset:ds4_gpu_tensor_offset(attn_state_kv) atIndex:6];
+        [enc setBuffer:ds4_gpu_tensor_buffer(attn_state_score)
+                offset:ds4_gpu_tensor_offset(attn_state_score) atIndex:7];
+        [enc setBuffer:ds4_gpu_tensor_buffer(index_state_kv)
+                offset:ds4_gpu_tensor_offset(index_state_kv) atIndex:8];
+        [enc setBuffer:ds4_gpu_tensor_buffer(index_state_score)
+                offset:ds4_gpu_tensor_offset(index_state_score) atIndex:9];
+        [enc setThreadgroupMemoryLength:256u * sizeof(float) atIndex:0];
+        [enc dispatchThreadgroups:MTLSizeMake(2u + (4u * 1024u + 4u * 256u + 255u) / 256u, 1, 1)
+             threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        ds4_gpu_end_compute_encoder(cb, enc);
+
+        if (!ds4_gpu_finish_command_buffer(cb, owned, "compressor row finalize")) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 /* Decode-only fusion: q_a/kv Q8 pair projection + F16 quad compressor
  * projection/store in one dispatch (both read the same normalized input).
  * Bit-exact vs the separate dispatches; see the kernel comment.  Returns
@@ -23575,7 +23707,8 @@ int ds4_gpu_compressor_update_tensor(
         float                   beta_slow,
         float                   rms_eps,
         bool                    state_already_stored,
-        bool                    decode_one_token) {
+        bool                    decode_one_token,
+        bool                    defer_finalize) {
     if (!g_initialized && !ds4_gpu_init()) return 0;
     if (!kv_cur || !sc_cur || !state_kv || !state_score || !comp_cache ||
         !model_map || head_dim == 0 || ratio == 0 ||
@@ -23666,7 +23799,11 @@ int ds4_gpu_compressor_update_tensor(
                                                   ratio,
                                                   decode_one_token);
         if (ok) ok = ds4_gpu_finish_command_buffer(cb, owned, "compressor DS4 softmax pool");
-        if (ok) {
+        /* When the caller runs the fused finalize dispatch afterwards, the
+         * pooled row is consumed un-normalized there; skip the standalone
+         * norm+rope so the work happens exactly once.  The state shift still
+         * runs: it only moves the rolling state rows. */
+        if (ok && !defer_finalize) {
             ok = ds4_gpu_rms_norm_weight_rows_tensor(comp_row_view,
                                                        comp_row_view,
                                                        model_map,
@@ -23676,7 +23813,7 @@ int ds4_gpu_compressor_update_tensor(
                                                        1,
                                                        rms_eps) != 0;
         }
-        if (ok) {
+        if (ok && !defer_finalize) {
             const uint32_t comp_pos = pos + 1u - ratio;
             ok = ds4_gpu_rope_tail_tensor(comp_row_view,
                                             1,
@@ -23693,7 +23830,7 @@ int ds4_gpu_compressor_update_tensor(
                                             beta_fast,
                                             beta_slow) != 0;
         }
-        if (ok && ratio == 4u) {
+        if (ok && ratio == 4u && !defer_finalize) {
             cb = ds4_gpu_command_buffer(&owned);
             ok = cb &&
                  ds4_gpu_encode_compressor_shift_ratio4(cb,

@@ -840,6 +840,34 @@ int ds4_gpu_matmul_f16_quad_compressor_store_tensor(
         uint32_t              ratio,
         uint32_t              pos);
 
+/* Decode-only M5 fusion: emit-path compressor row finalize (norm + rope +
+ * fp8/commit + indexer qat) in one dispatch.  Bit-exact vs the separate
+ * dispatches.  Returns 1 when fused, 0 to fall back. */
+int ds4_gpu_dsv4_comp_row_finalize_tensor(
+        ds4_gpu_tensor       *attn_stage,
+        ds4_gpu_tensor       *attn_cache,
+        uint32_t              attn_comp_row,
+        uint64_t              attn_norm_offset,
+        ds4_gpu_tensor       *index_cache,
+        uint32_t              index_comp_row,
+        uint64_t              index_norm_offset,
+        ds4_gpu_tensor       *attn_state_kv,
+        ds4_gpu_tensor       *attn_state_score,
+        ds4_gpu_tensor       *index_state_kv,
+        ds4_gpu_tensor       *index_state_score,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint32_t              pos,
+        uint32_t              n_rot,
+        uint32_t              n_ctx_orig,
+        float                 freq_base,
+        float                 freq_scale,
+        float                 ext_factor,
+        float                 attn_factor,
+        float                 beta_fast,
+        float                 beta_slow,
+        float                 rms_eps);
+
 /* Decode-only M5 fusion: q_a/kv Q8 pair projection + F16 quad compressor
  * projection/store in one dispatch.  Bit-exact vs the separate dispatches.
  * Returns 1 when fused, 0 to fall back, -1 on error. */
@@ -1735,7 +1763,8 @@ int ds4_gpu_compressor_update_tensor(
         float                   beta_slow,
         float                   rms_eps,
         bool                    state_already_stored,
-        bool                    decode_one_token);
+        bool                    decode_one_token,
+        bool                    defer_finalize);
 
 int ds4_gpu_compressor_store_batch_tensor(
         const ds4_gpu_tensor *kv,

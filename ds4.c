@@ -22527,6 +22527,26 @@ static bool metal_graph_encode_decode_layer_phase(
         }
         DS4_METAL_PROFILE_DECODE_STAGE("compressor_proj");
         const uint32_t comp_row = g->layer_n_comp[il];
+        /* Emit-path finalize fusion (M5 decode): the pooled attention and
+         * indexer compressor rows each need norm + RoPE + quantize (+ F16
+         * commit for attention) — seven tiny single-row dispatches per layer
+         * every ratio-th token.  The fused kernel runs them as one
+         * two-threadgroup dispatch with each standalone kernel's reduction
+         * tree preserved bit-exactly (see kernel_dsv4_comp_row_finalize_f32).
+         * The updates below then stop after the pool (and the state shift). */
+        const bool comp_finalize_fuse =
+            ok && emit && ratio == 4u && DS4_GPU_ATTN_COMP_CACHE_F16 &&
+            phase == METAL_DECODE_LAYER_FULL &&
+            !g->ssd_streaming && !g->ssd_streaming_cold &&
+            DS4_N_HEAD_DIM == 512u && DS4_N_INDEXER_HEAD_DIM == 128u &&
+            layer->attn_compressor_norm &&
+            layer->attn_compressor_norm->type == DS4_TENSOR_F32 &&
+            layer->indexer_compressor_norm &&
+            layer->indexer_compressor_norm->type == DS4_TENSOR_F32 &&
+            ds4_gpu_kv_rope_fp8_fuse_available() != 0 &&
+            getenv("DS4_METAL_DISABLE_M5_COMP_FINALIZE_FUSE") == NULL &&
+            (ds4_gpu_device_is_m5_apple_silicon() ||
+             getenv("DS4_METAL_ENABLE_COMP_FINALIZE_FUSE") != NULL);
         if (ok) ok = ds4_gpu_compressor_update_tensor(metal_graph_comp_kv_cur(g),
                                                         metal_graph_comp_sc_cur(g),
                                                         g->layer_attn_state_kv[il],
@@ -22552,9 +22572,10 @@ static bool metal_graph_encode_decode_layer_phase(
                                                         DS4_ROPE_YARN_BETA_SLOW,
                                                         DS4_RMS_EPS,
                                                         comp_state_already_stored,
-                                                        true) != 0;
+                                                        true,
+                                                        comp_finalize_fuse) != 0;
         DS4_METAL_PROFILE_DECODE_STAGE("compressor_update");
-        if (ok && emit) {
+        if (ok && emit && !comp_finalize_fuse) {
             ds4_gpu_tensor *comp_row_view = metal_graph_attn_comp_row_view(g, il, comp_row);
             if (!comp_row_view) {
                 ok = false;
@@ -22660,9 +22681,41 @@ static bool metal_graph_encode_decode_layer_phase(
                                                             DS4_ROPE_YARN_BETA_SLOW,
                                                             DS4_RMS_EPS,
                                                             index_state_already_stored,
-                                                            true) != 0;
+                                                            true,
+                                                            comp_finalize_fuse) != 0;
             DS4_METAL_PROFILE_DECODE_STAGE("indexer_compressor_update");
-            if (ok && emit) {
+            if (ok && emit && comp_finalize_fuse) {
+                /* One dispatch finalizes both pooled compressor rows; the
+                 * attention row lives at offset 0 of the staging tensor and
+                 * commits to the F16 cache, the indexer row finalizes in
+                 * place.  A missing pipeline fails loudly rather than
+                 * skipping the finalize the updates deferred. */
+                ok = ds4_gpu_dsv4_comp_row_finalize_tensor(
+                        metal_graph_attn_comp_stage(g),
+                        g->layer_attn_comp_cache[il],
+                        comp_row,
+                        layer->attn_compressor_norm->abs_offset,
+                        g->layer_index_comp_cache[il],
+                        index_row,
+                        layer->indexer_compressor_norm->abs_offset,
+                        g->layer_attn_state_kv[il],
+                        g->layer_attn_state_score[il],
+                        g->layer_index_state_kv[il],
+                        g->layer_index_state_score[il],
+                        model->map,
+                        model->size,
+                        pos + 1u - ratio,
+                        DS4_N_ROT,
+                        compressed ? (uint32_t)DS4_ROPE_ORIG_CTX : 0u,
+                        freq_base,
+                        freq_scale,
+                        ext_factor,
+                        attn_factor,
+                        DS4_ROPE_YARN_BETA_FAST,
+                        DS4_ROPE_YARN_BETA_SLOW,
+                        DS4_RMS_EPS) == 1;
+            }
+            if (ok && emit && !comp_finalize_fuse) {
 #if defined(__APPLE__)
                 ds4_gpu_tensor *index_row_view = ds4_gpu_tensor_view(
                         g->layer_index_comp_cache[il],
@@ -28515,6 +28568,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                             DS4_ROPE_YARN_BETA_SLOW,
                                                             DS4_RMS_EPS,
                                                             false,
+                                                            false,
                                                             false) != 0;
                     if (ok && emit) {
                         ds4_gpu_tensor *comp_row_view = metal_graph_attn_comp_row_view(g, il, comp_row);
@@ -28814,6 +28868,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                                 DS4_ROPE_YARN_BETA_FAST,
                                                                 DS4_ROPE_YARN_BETA_SLOW,
                                                                 DS4_RMS_EPS,
+                                                                false,
                                                                 false,
                                                                 false) != 0;
                         if (ok && emit) {
