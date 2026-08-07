@@ -523,6 +523,10 @@ clients.
 - Test OpenAI chat completion, OpenAI Responses, and Anthropic messages.
 - Test SSE streaming with thinking enabled and disabled.
 - Test keepalive during long prefill and confirm clients do not time out.
+- In batched mode, close clients while their requests are queued, prefilling,
+  and streaming decode. Repeat across OpenAI chat, Responses, Anthropic, and
+  completions. Abandoned work must stop at the next backend-safe boundary, and
+  a valid request after each cancellation must complete normally.
 - Only after receiving explicit permission for this QA pass, start
   `ds4-server` on the eight-L40S CUDA TP target with the release TP options and
   verify all 16 100k-context sessions allocate. Startup must report a

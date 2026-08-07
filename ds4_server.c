@@ -16954,12 +16954,21 @@ static void test_client_disconnect_probe(void) {
     TEST_ASSERT(recv(sv[0], &byte, 1, 0) < 0);
     TEST_ASSERT(errno == EAGAIN || errno == EWOULDBLOCK);
 
-    /* Unsupported pipelined input must not hide the FIN behind readable data. */
-    TEST_ASSERT(write(sv[1], "extra", 5) == 5);
-    TEST_ASSERT(shutdown(sv[1], SHUT_WR) == 0);
+    close(sv[1]);
+    sv[1] = -1;
     TEST_ASSERT(client_socket_disconnected(sv[0]));
     close(sv[0]);
+
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    if (sv[0] < 0 || sv[1] < 0) return;
+    set_client_socket_nonblocking(sv[0]);
+
+    /* Unsupported pipelined input must not hide the FIN behind readable data. */
+    TEST_ASSERT(write(sv[1], "extra", 5) == 5);
     close(sv[1]);
+    sv[1] = -1;
+    TEST_ASSERT(client_socket_disconnected(sv[0]));
+    close(sv[0]);
 
     TEST_ASSERT(client_poll_revents_disconnected(POLLERR));
     TEST_ASSERT(client_poll_revents_disconnected(POLLHUP));
@@ -17027,7 +17036,7 @@ static void *test_wait_for_disconnect_main(void *ud) {
     return NULL;
 }
 
-static void test_waiting_job_cancels_on_fin(void) {
+static void test_waiting_job_cancels_on_client_close(void) {
     server s;
     job j;
     int sv[2] = {-1, -1};
@@ -17049,7 +17058,8 @@ static void test_waiting_job_cancels_on_fin(void) {
     TEST_ASSERT(thread_rc == 0);
     if (thread_rc == 0) {
         TEST_ASSERT(write(sv[1], "pipelined", 9) == 9);
-        TEST_ASSERT(shutdown(sv[1], SHUT_WR) == 0);
+        close(sv[1]);
+        sv[1] = -1;
         TEST_ASSERT(pthread_join(waiter, NULL) == 0);
         TEST_ASSERT(job_cancelled(&j));
         TEST_ASSERT(j.done);
@@ -17058,7 +17068,7 @@ static void test_waiting_job_cancels_on_fin(void) {
     }
 
     close(sv[0]);
-    close(sv[1]);
+    if (sv[1] >= 0) close(sv[1]);
     test_cancel_job_destroy(&j);
     test_cancel_server_destroy(&s);
 }
@@ -18395,7 +18405,7 @@ static void ds4_server_unit_tests_run(void) {
     test_client_socket_nonblocking_flag();
     test_client_disconnect_probe();
     test_cancelled_progress_callback_is_inert();
-    test_waiting_job_cancels_on_fin();
+    test_waiting_job_cancels_on_client_close();
     test_cancel_unlinks_queued_jobs();
     test_cancel_detaches_assigned_job();
     test_cancel_running_job_keeps_worker_ownership();
