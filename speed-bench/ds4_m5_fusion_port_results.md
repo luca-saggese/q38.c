@@ -105,3 +105,43 @@ NAX/tensor-op IQ2XXS MoE kernels (prefill routed_moe is 40% of layer
 time; decode pair_swiglu is the largest decode matvec), Metal
 command-buffer replay for the fixed decode tape, or relaxing the
 bit-exactness discipline (e.g. NAX Q8 decode matmuls).
+
+
+## Round 3: two more exact M5 fusions — decode crosses 41 (steady)
+
+Commits 7a3b9ca and 0d0a78b (ds4f-q2, M5 Max):
+
+1. **q_a/kv pair + quad compressor store merge**: the Q8 q_a/kv pair
+   projection and the four F16 compressor projections all read the same
+   normalized attention input; one dispatch with two virtual NSG=4
+   cohorts per threadgroup for the Q8 range and the verbatim quad
+   ranges.  Controlled A/B +0.44%/+0.57%; official interleaved pairs
+   +0.40%/+1.48%.
+2. **Emit-path compressor finalize merge**: every 4th token, each
+   layer's eleven tiny single-row dispatches (norm, rope, FP8
+   round-trip + F16 commit for the attention row; norm, rope,
+   Hadamard+FP4 QAT for the indexer row; both ratio-4 state shifts)
+   become ONE dispatch (22 threadgroups).  Six controlled inverse A/B
+   runs all positive (+0.36%..+0.59%), every block bit-exact.
+
+Also measured and reverted: q_b + indexer q_b compound merge (exact,
+flat: +0.03% — the indexer chain is idle below top_k=512 at the 2K
+benchmark window, and cohort-packing the 24 MB q_b matvec offsets the
+launch saving), unpacked cohort variants (flat).
+
+### Final numbers (6 official replicas, drift-controlled window)
+
+| metric | session baseline | final | delta |
+|---|---:|---:|---:|
+| prefill | 784.13 | 790.2 med | +0.8% |
+| decode gen_tps | 39.39 | **40.85 med (40.37-41.05)** | **+3.7%** |
+| steady decode | 39.60 | **41.05 med (40.54-41.25)** | **+3.7%** |
+| first token | 28.33 ms | 27.0 ms med | -4.7% |
+
+All frontier hashes canonical
+(eb794f497861d7d9e373665f6e115d8ebe4e17c13c431aa7e318282f16a0f21d);
+full `make test` green.
+
+Remaining unfused emit-path work: the pool pipeline (pack + softmax +
+product + 8-lane sum_rows).  The sum_rows 8-thread simd topology is
+delicate to replicate exactly; expected value ~+0.2-0.3%.
