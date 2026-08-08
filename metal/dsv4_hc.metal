@@ -1122,3 +1122,111 @@ kernel void kernel_dsv4_hc_rms_norm_mix_f16(
     helper_mv_reduce_and_write<NR0>(dst_f32, sumf_mv, r0, args.out_dim,
                                     tiisg, sgitg, (threadgroup char *)mv_shmem);
 }
+
+// M5 specialization: pack two exact NR0=2 HC-mix producer groups into one
+// 512-thread group. Two independent eight-simdgroup clusters retain the
+// matvec reductions while the exact RMS scale is redundantly formed six,
+// rather than twelve, times.
+kernel void kernel_dsv4_hc_rms_norm_mix_f16_cluster2(
+        constant ds4_metal_args_hc_norm_mix & args,
+        device const char  * x,
+        device const char  * weight,
+        device       char  * dst,
+        threadgroup  char  * shmem [[threadgroup(0)]],
+        uint3  tgpig [[threadgroup_position_in_grid]],
+        ushort tiisg [[thread_index_in_simdgroup]],
+        ushort sgitg [[simdgroup_index_in_threadgroup]]) {
+    constexpr short NSG_CLUSTER = 8;
+    constexpr short NCLUSTER = 2;
+    constexpr short NSG_TOTAL = NSG_CLUSTER * NCLUSTER;
+    constexpr short NW = N_SIMDWIDTH;
+    constexpr short NR0 = 2;
+    constexpr short NB = 32;
+    constexpr short NF = 16;
+    constexpr short NF4 = NF/4;
+    constexpr uint VTHREADS = 1024u;
+    constexpr short VSLICES = VTHREADS/(NSG_TOTAL*NW);
+
+    const uint n = (uint)args.n;
+    const uint n4 = n >> 2;
+    device const float4 *x4 = (device const float4 *)x;
+    threadgroup float *norm_shmem = (threadgroup float *)shmem;
+    threadgroup float *mv_shmem = norm_shmem + NW;
+
+    // Exact 1024-virtual-thread RMS reduction, now folded two ways over
+    // the 16 physical simdgroups instead of four ways over eight.
+    for (short v = 0; v < VSLICES; ++v) {
+        const uint vt = (uint)(sgitg + NSG_TOTAL*v)*NW + tiisg;
+        float sumf = 0.0f;
+        for (uint i00 = vt; i00 < n4; i00 += VTHREADS) {
+            sumf += dot(x4[i00], x4[i00]);
+        }
+        sumf = simd_sum(sumf);
+        if (tiisg == 0) {
+            norm_shmem[sgitg + NSG_TOTAL*v] = sumf;
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float total = norm_shmem[tiisg];
+    total = simd_sum(total);
+    const float mean = total/(float)args.n;
+    const float scale = 1.0f/sqrt(mean + args.eps);
+
+    // Two independent eight-simdgroup clusters reproduce two original
+    // NR0=2 matvec threadgroups inside this 512-thread threadgroup.
+    const short cluster = sgitg / NSG_CLUSTER;
+    const short local_sg = sgitg - cluster*NSG_CLUSTER;
+    const int nb = args.n/NB;
+    const int r0 = (int)tgpig.x*(NCLUSTER*NR0) + cluster*NR0;
+
+    device const half4 *ax4[NR0];
+    FOR_UNROLL (short row = 0; row < NR0; ++row) {
+        ax4[row] = (device const half4 *)
+            (weight + (uint64_t)(r0 + row)*(uint64_t)n*sizeof(half));
+    }
+
+    float sumf_mv[NR0] = { 0.f };
+    const short ix = tiisg/(NW/NF);
+    const short il = tiisg%(NW/NF);
+    const int ib0 = local_sg*NF + ix;
+    for (int ib = ib0; ib < nb; ib += NSG_CLUSTER*NF) {
+        float4 yl4[NF4];
+        FOR_UNROLL (short i = 0; i < NF4; ++i) {
+            yl4[i] = x4[(ib*NB + il*NF)/4 + i]*scale;
+        }
+        FOR_UNROLL (short row = 0; row < NR0; ++row) {
+            device const half4 *xb4 = ax4[row] + (ib*NB + il*NF)/4;
+            float sumq = 0.f;
+            FOR_UNROLL (short i = 0; i < NF4; ++i) {
+                sumq += dot(float4(xb4[i]), yl4[i]);
+            }
+            sumf_mv[row] += sumq;
+        }
+    }
+
+    threadgroup float *cluster_shmem[NR0];
+    FOR_UNROLL (short row = 0; row < NR0; ++row) {
+        cluster_shmem[row] = mv_shmem +
+            ((uint)cluster*NR0 + row)*NW;
+        if (local_sg == 0) {
+            cluster_shmem[row][tiisg] = 0.0f;
+        }
+        sumf_mv[row] = simd_sum(sumf_mv[row]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    FOR_UNROLL (short row = 0; row < NR0; ++row) {
+        if (tiisg == 0) {
+            cluster_shmem[row][local_sg] = sumf_mv[row];
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    device float *mixes_f32 = (device float *)dst;
+    FOR_UNROLL (short row = 0; row < NR0; ++row) {
+        const float tot = simd_sum(cluster_shmem[row][tiisg]);
+        if (tiisg == 0 && local_sg == 0 && r0 + row < args.out_dim) {
+            mixes_f32[r0 + row] = tot;
+        }
+    }
+}

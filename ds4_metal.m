@@ -41979,9 +41979,19 @@ int ds4_gpu_hc_rms_norm_mix_f16_tensor(
                                                       &weight_inner);
         if (!wbuf) return 0;
 
-        id<MTLComputePipelineState> pipeline =
-            ds4_gpu_get_pipeline("kernel_dsv4_hc_rms_norm_mix_f16");
-        if (!pipeline) return 0;
+        const bool use_cluster2 =
+            (ds4_gpu_device_is_m5_apple_silicon() ||
+             getenv("DS4_METAL_ENABLE_HC_NORM_MIX_CLUSTER2") != NULL) &&
+            getenv("DS4_METAL_DISABLE_M5_HC_NORM_MIX_CLUSTER2") == NULL;
+        id<MTLComputePipelineState> pipeline = ds4_gpu_get_pipeline(
+            use_cluster2 ? "kernel_dsv4_hc_rms_norm_mix_f16_cluster2" :
+                           "kernel_dsv4_hc_rms_norm_mix_f16");
+        if (!pipeline ||
+            (use_cluster2 && pipeline.maxTotalThreadsPerThreadgroup < 512u)) {
+            return 0;
+        }
+        const NSUInteger shared_floats =
+            use_cluster2 ? 32u + 32u * 2u * 2u : 32u + 32u * 2u;
 
         ds4_gpu_hc_norm_mix_args args = {
             .n = (int32_t)n,
@@ -41999,9 +42009,13 @@ int ds4_gpu_hc_rms_norm_mix_f16_tensor(
         [enc setBuffer:xbuf offset:ds4_gpu_tensor_offset(x) atIndex:1];
         [enc setBuffer:wbuf offset:(NSUInteger)weight_inner atIndex:2];
         [enc setBuffer:outbuf offset:ds4_gpu_tensor_offset(out) atIndex:3];
-        [enc setThreadgroupMemoryLength:(32u + 32u * 2u) * sizeof(float) atIndex:0];
-        [enc dispatchThreadgroups:MTLSizeMake((out_dim + 1u) / 2u, 1, 1)
-             threadsPerThreadgroup:MTLSizeMake(32, 8, 1)];
+        [enc setThreadgroupMemoryLength:shared_floats * sizeof(float) atIndex:0];
+        [enc dispatchThreadgroups:
+             MTLSizeMake(use_cluster2 ? (out_dim + 3u) / 4u :
+                                        (out_dim + 1u) / 2u,
+                         1, 1)
+             threadsPerThreadgroup:
+             MTLSizeMake(32, use_cluster2 ? 16 : 8, 1)];
         ds4_gpu_end_compute_encoder(cb, enc);
 
         if (!ds4_gpu_finish_command_buffer(cb, owned, "fused HC norm/mix")) return 0;
