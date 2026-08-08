@@ -2388,6 +2388,23 @@ int ds4_gpu_device_is_m5_apple_silicon(void) {
             g_metal_device_name[8] == ' ');
 }
 
+/* Keep per-feature and aggregate pre-M5 rollbacks dominant over experimental
+ * force-enables. M5 default admission is unchanged and disables are dominant. */
+static bool ds4_gpu_ported_m5_decode_feature_enabled(
+        const char *pre_m5_disable_env,
+        const char *m5_disable_env,
+        const char *force_enable_env) {
+    if (m5_disable_env && getenv(m5_disable_env) != NULL) return false;
+    const bool pre_m5 = ds4_gpu_device_is_pre_m5_apple_silicon();
+    if (pre_m5 &&
+        (getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_PORTS") != NULL ||
+         (pre_m5_disable_env && getenv(pre_m5_disable_env) != NULL))) {
+        return false;
+    }
+    return pre_m5 || ds4_gpu_device_is_m5_apple_silicon() ||
+           (force_enable_env && getenv(force_enable_env) != NULL);
+}
+
 static int ds4_gpu_compile_tensor_probe(void) {
 #if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
     if (!g_device) return 0;
@@ -23126,11 +23143,12 @@ static int ds4_gpu_encode_compressor_ratio4_decode_pack_ggml(
 
     const bool force_exact_pool =
         getenv("DS4_METAL_ENABLE_COMPRESSOR_EXACT_POOL_RATIO4") != NULL;
-    const bool default_m5_exact_pool =
-        ds4_gpu_device_is_m5_apple_silicon() &&
-        getenv("DS4_METAL_DISABLE_M5_COMPRESSOR_EXACT_POOL_RATIO4") == NULL;
-    if ((head_dim == 128u || head_dim == 512u) &&
-        (force_exact_pool || default_m5_exact_pool)) {
+    const bool exact_pool_enabled =
+        ds4_gpu_ported_m5_decode_feature_enabled(
+            "DS4_METAL_DISABLE_PRE_M5_COMPRESSOR_EXACT_POOL_RATIO4",
+            "DS4_METAL_DISABLE_M5_COMPRESSOR_EXACT_POOL_RATIO4",
+            "DS4_METAL_ENABLE_COMPRESSOR_EXACT_POOL_RATIO4");
+    if ((head_dim == 128u || head_dim == 512u) && exact_pool_enabled) {
         id<MTLComputePipelineState> exact_pool_pipeline = ds4_gpu_hot_pipeline(
             g_dsv4_compressor_exact_pool_ratio4_pipeline,
             "kernel_dsv4_compressor_exact_pool_ratio4_decode_ggml");
@@ -27792,8 +27810,11 @@ static int ds4_gpu_encode_flash_attention_gathered_heads(
     const NSUInteger tmp_bytes = nrows * (NSUInteger)head_dim * (NSUInteger)nwg * sizeof(float) +
                                  nrows * (2u * (NSUInteger)nwg) * sizeof(float);
 
-    const bool m5_packed_shape =
-        ds4_gpu_device_is_m5_apple_silicon() &&
+    const bool packed_shape =
+        ds4_gpu_ported_m5_decode_feature_enabled(
+            "DS4_METAL_DISABLE_PRE_M5_FLASH_ATTN_PACKED32_REDUCE",
+            NULL,
+            "DS4_METAL_ENABLE_FLASH_ATTN_PACKED32_REDUCE") &&
         !g_quality_mode && use_mask == 0u && comp_kv_f16 != 0u && n_comp != 0u &&
         n_head == 64u && head_dim == 512u && nsg == 1u && nwg == 32u &&
         n_keys <= 1024u && g_decode_attn_rope_fuse != 0 &&
@@ -27804,7 +27825,7 @@ static int ds4_gpu_encode_flash_attention_gathered_heads(
     const bool m5_persistent_zero_mask =
         ds4_gpu_device_is_m5_apple_silicon() &&
         getenv("DS4_METAL_DISABLE_M5_PERSISTENT_ZERO_ATTN_MASK") == NULL &&
-        (!m5_packed_shape ||
+        (!packed_shape ||
          getenv("DS4_METAL_DISABLE_M5_PACKED_ZERO_MASK") == NULL);
     const bool use_persistent_zero_mask =
         use_mask == 0u &&
@@ -27851,7 +27872,7 @@ static int ds4_gpu_encode_flash_attention_gathered_heads(
         (32u * 32u + 2u * 32u + 32u) * sizeof(float) +
         32u * 33u * 4u * sizeof(float);
     const bool packed_requested =
-        m5_packed_shape &&
+        packed_shape &&
         getenv("DS4_METAL_DISABLE_M5_FLASH_ATTN_PACKED32_REDUCE") == NULL;
 
     id<MTLComputePipelineState> packed_pipeline = nil;

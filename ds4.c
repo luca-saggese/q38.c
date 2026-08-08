@@ -21810,6 +21810,31 @@ typedef enum {
     METAL_DECODE_LAYER_FROM_ROUTER,
 } metal_decode_layer_phase;
 
+/* M5 ports default to the existing standard M1-M4 Metal path.  Rollbacks
+ * dominate the benchmark force-enables on pre-M5 devices so the aggregate
+ * switch is a reliable whole-bundle control. */
+static bool metal_graph_ported_m5_decode_feature_enabled(
+        const char *pre_m5_disable_env,
+        const char *m5_disable_env,
+        const char *force_enable_env) {
+#if defined(__APPLE__)
+    if (m5_disable_env && getenv(m5_disable_env) != NULL) return false;
+    const bool pre_m5 = ds4_gpu_device_is_pre_m5_apple_silicon();
+    if (pre_m5 &&
+        (getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_PORTS") != NULL ||
+         (pre_m5_disable_env && getenv(pre_m5_disable_env) != NULL))) {
+        return false;
+    }
+    return pre_m5 || ds4_gpu_device_is_m5_apple_silicon() ||
+           (force_enable_env && getenv(force_enable_env) != NULL);
+#else
+    (void)pre_m5_disable_env;
+    (void)m5_disable_env;
+    (void)force_enable_env;
+    return false;
+#endif
+}
+
 static bool metal_graph_encode_decode_layer_phase(
         ds4_gpu_graph  *g,
         const ds4_model        *model,
@@ -21889,7 +21914,10 @@ static bool metal_graph_encode_decode_layer_phase(
 #if defined(__APPLE__)
     const bool parallel_ffn_route_eligible =
         phase == METAL_DECODE_LAYER_FULL &&
-        ds4_gpu_device_is_m5_apple_silicon() &&
+        metal_graph_ported_m5_decode_feature_enabled(
+            "DS4_METAL_DISABLE_PRE_M5_PARALLEL_FULL_FFN",
+            "DS4_METAL_DISABLE_M5_PARALLEL_FULL_FFN",
+            "DS4_METAL_ENABLE_PARALLEL_FULL_FFN") &&
         !g->quality && g->tp_world < 2 &&
         !g->ssd_streaming && !g->ssd_streaming_cold &&
         !g->cuda_tp_decode && !g->cuda_tp_moe && !g->cuda_tp_shared &&
@@ -21912,7 +21940,6 @@ static bool metal_graph_encode_decode_layer_phase(
 #endif
     const bool parallel_full_ffn_eligible =
         parallel_ffn_route_eligible &&
-        getenv("DS4_METAL_DISABLE_M5_PARALLEL_FULL_FFN") == NULL &&
         getenv("DS4_METAL_Q8_MV_NSG") == NULL &&
         getenv("DS4_METAL_Q8_MV_ROWS") == NULL &&
         fuse_shared_gate_up &&
@@ -22041,8 +22068,10 @@ static bool metal_graph_encode_decode_layer_phase(
 #if defined(__APPLE__)
         const bool fuse_producer_pre_norm =
             fuse_norm_mix && fuse_hc_norm &&
-            ds4_gpu_device_is_m5_apple_silicon() &&
-            getenv("DS4_METAL_DISABLE_M5_HC_PRODUCER_PRE_NORM_FUSE") == NULL;
+            metal_graph_ported_m5_decode_feature_enabled(
+                "DS4_METAL_DISABLE_PRE_M5_HC_PRODUCER_PRE_NORM_FUSE",
+                "DS4_METAL_DISABLE_M5_HC_PRODUCER_PRE_NORM_FUSE",
+                "DS4_METAL_ENABLE_HC_PRODUCER_PRE_NORM_FUSE");
         if (fuse_producer_pre_norm) {
             const int fused =
                 ds4_gpu_hc_rms_norm_mix_split_norm_f16_tensor(
@@ -22162,7 +22191,7 @@ static bool metal_graph_encode_decode_layer_phase(
     bool qkv_pair_quad_fused = false;
     if (!resume_after_qkv) {
     bool qkv_pair_projected = resume_after_qa_kv_raw;
-    /* M5 decode fusion: the q_a/kv Q8 pair and the four F16 compressor
+    /* M1-M5 decode fusion: the q_a/kv Q8 pair and the four F16 compressor
      * projections all read the same normalized attention input and write
      * disjoint outputs, so one dispatch covers both stages with unchanged
      * per-row reduction trees (see the kernel comment).  Restricted to the
@@ -22192,9 +22221,10 @@ static bool metal_graph_encode_decode_layer_phase(
         layer->indexer_compressor_gate->dim[0] == DS4_N_EMBD &&
         layer->indexer_compressor_kv->dim[1] == 2u * DS4_N_INDEXER_HEAD_DIM &&
         layer->indexer_compressor_gate->dim[1] == 2u * DS4_N_INDEXER_HEAD_DIM &&
-        getenv("DS4_METAL_DISABLE_M5_QKV_PAIR_QUAD_FUSE") == NULL &&
-        (ds4_gpu_device_is_m5_apple_silicon() ||
-         getenv("DS4_METAL_ENABLE_QKV_PAIR_QUAD_FUSE") != NULL)) {
+        metal_graph_ported_m5_decode_feature_enabled(
+            "DS4_METAL_DISABLE_PRE_M5_QKV_PAIR_QUAD_FUSE",
+            "DS4_METAL_DISABLE_M5_QKV_PAIR_QUAD_FUSE",
+            "DS4_METAL_ENABLE_QKV_PAIR_QUAD_FUSE")) {
         const int fused = ds4_gpu_qkv_pair_quad_compressor_store_tensor(
                 metal_graph_qr(g),
                 metal_graph_kv_raw(g),
@@ -22250,8 +22280,10 @@ static bool metal_graph_encode_decode_layer_phase(
         layer->attn_compressor_gate->dim[0] == DS4_N_EMBD &&
         layer->attn_compressor_kv->dim[1] == DS4_N_HEAD_DIM &&
         layer->attn_compressor_gate->dim[1] == DS4_N_HEAD_DIM &&
-        getenv("DS4_METAL_DISABLE_M5_QKV_PAIR_COMPRESSOR_FUSE") == NULL &&
-        ds4_gpu_device_is_m5_apple_silicon()) {
+        metal_graph_ported_m5_decode_feature_enabled(
+            "DS4_METAL_DISABLE_PRE_M5_QKV_PAIR_COMPRESSOR_FUSE",
+            "DS4_METAL_DISABLE_M5_QKV_PAIR_COMPRESSOR_FUSE",
+            "DS4_METAL_ENABLE_QKV_PAIR_COMPRESSOR_FUSE")) {
         const int fused = ds4_gpu_qkv_pair_quad_compressor_store_tensor(
                 metal_graph_qr(g),
                 metal_graph_kv_raw(g),
@@ -22678,7 +22710,7 @@ static bool metal_graph_encode_decode_layer_phase(
         }
         DS4_METAL_PROFILE_DECODE_STAGE("compressor_proj");
         const uint32_t comp_row = g->layer_n_comp[il];
-        /* Emit-path finalize fusion (M5 decode): the pooled attention and
+        /* Eligible Metal decode emit-path fusion: the pooled attention and
          * indexer compressor rows each need norm + RoPE + quantize (+ F16
          * commit for attention) — seven tiny single-row dispatches per layer
          * every ratio-th token.  The fused kernel runs them as one
@@ -22695,9 +22727,10 @@ static bool metal_graph_encode_decode_layer_phase(
             layer->indexer_compressor_norm &&
             layer->indexer_compressor_norm->type == DS4_TENSOR_F32 &&
             ds4_gpu_kv_rope_fp8_fuse_available() != 0 &&
-            getenv("DS4_METAL_DISABLE_M5_COMP_FINALIZE_FUSE") == NULL &&
-            (ds4_gpu_device_is_m5_apple_silicon() ||
-             getenv("DS4_METAL_ENABLE_COMP_FINALIZE_FUSE") != NULL);
+            metal_graph_ported_m5_decode_feature_enabled(
+                "DS4_METAL_DISABLE_PRE_M5_COMP_FINALIZE_FUSE",
+                "DS4_METAL_DISABLE_M5_COMP_FINALIZE_FUSE",
+                "DS4_METAL_ENABLE_COMP_FINALIZE_FUSE");
         if (ok) ok = ds4_gpu_compressor_update_tensor(metal_graph_comp_kv_cur(g),
                                                         metal_graph_comp_sc_cur(g),
                                                         g->layer_attn_state_kv[il],
@@ -23611,8 +23644,10 @@ static bool metal_graph_encode_decode_layer_phase(
 #if defined(__APPLE__)
         const bool fuse_producer_pre_norm =
             fuse_norm_mix && fuse_hc_norm &&
-            ds4_gpu_device_is_m5_apple_silicon() &&
-            getenv("DS4_METAL_DISABLE_M5_HC_PRODUCER_PRE_NORM_FUSE") == NULL;
+            metal_graph_ported_m5_decode_feature_enabled(
+                "DS4_METAL_DISABLE_PRE_M5_HC_PRODUCER_PRE_NORM_FUSE",
+                "DS4_METAL_DISABLE_M5_HC_PRODUCER_PRE_NORM_FUSE",
+                "DS4_METAL_ENABLE_HC_PRODUCER_PRE_NORM_FUSE");
         if (fuse_producer_pre_norm) {
             const int fused =
                 ds4_gpu_hc_rms_norm_mix_split_norm_f16_tensor(
@@ -26759,6 +26794,46 @@ static int metal_graph_first_token_full_test(
  * flow and their CPU reads stay outside these generation entry points.
  */
 
+static bool metal_graph_pre_m5_q2_decode_schedule_eligible(
+        const ds4_gpu_graph *g,
+        const ds4_weights   *weights,
+        uint32_t             pos,
+        bool                 allow_split_flush) {
+#if defined(__APPLE__)
+    if (!g || !weights || !allow_split_flush || DS4_N_LAYER <= 32u ||
+        !ds4_gpu_device_is_pre_m5_apple_silicon() ||
+        pos < 128u || pos >= 2816u ||
+        g->quality || g->ssd_streaming || g->ssd_streaming_cold ||
+        g->placement != NULL || g->tp_world > 1u ||
+        getenv("DS4_METAL_DISABLE_PRE_M5_Q2_DECODE_SPLIT2_32") != NULL ||
+        getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_PORTS") != NULL) {
+        return false;
+    }
+    const ds4_layer_weights *layer = &weights->layer[4];
+    return layer->ffn_gate_exps && layer->ffn_up_exps &&
+           layer->ffn_down_exps &&
+           layer->ffn_gate_exps->type == DS4_TENSOR_IQ2_XXS &&
+           layer->ffn_up_exps->type == DS4_TENSOR_IQ2_XXS &&
+           layer->ffn_down_exps->type == DS4_TENSOR_Q2_K &&
+           DS4_N_EXPERT == 256u && DS4_N_EXPERT_USED == 6u &&
+           layer->ffn_gate_exps->dim[0] == 4096u &&
+           layer->ffn_gate_exps->dim[1] == 2048u &&
+           layer->ffn_up_exps->dim[0] == 4096u &&
+           layer->ffn_up_exps->dim[1] == 2048u &&
+           layer->ffn_down_exps->dim[0] == 2048u &&
+           layer->ffn_down_exps->dim[1] == 4096u &&
+           routed_expert_row_bytes(layer->ffn_gate_exps) == 1056u &&
+           routed_expert_row_bytes(layer->ffn_up_exps) == 1056u &&
+           routed_expert_row_bytes(layer->ffn_down_exps) == 672u;
+#else
+    (void)g;
+    (void)weights;
+    (void)pos;
+    (void)allow_split_flush;
+    return false;
+#endif
+}
+
 static uint32_t metal_graph_token_split_after_layers(void) {
     uint32_t split_after_layers = 4;
 #ifndef DS4_ROCM_BUILD
@@ -26781,6 +26856,14 @@ static uint32_t metal_graph_token_adaptive_split_after_layers(
     const uint32_t split_after_layers =
         metal_graph_token_split_after_layers();
 #if defined(__APPLE__)
+    /* In the validated 128..2815 Q2 window, routed decode exposes enough GPU
+     * work after layer two to overlap encoding before the layer-32 flush. */
+    const char *split_env = getenv("DS4_METAL_GRAPH_TOKEN_SPLIT_LAYERS");
+    if ((!split_env || !split_env[0]) &&
+        metal_graph_pre_m5_q2_decode_schedule_eligible(
+            g, weights, pos, allow_split_flush)) {
+        return 2u;
+    }
     /* Layer 4 is a routed layer in the fixed DS4 tape and remains available in
      * the resident full-model path this schedule targets. */
     const ds4_layer_weights *layer = weights ? &weights->layer[4] : NULL;
@@ -26893,13 +26976,10 @@ static uint32_t metal_graph_token_second_split_after_layers(void) {
     return split_after_layers;
 }
 
-/* Automatic second command-buffer split for the same eligible resident MXFP4
- * pre-M5 decode window as the adaptive first split.  At the 2K decode window
- * the single 38-39 layer tail command buffer is fully encoded later than the
- * first buffer's GPU work finishes, leaving a GPU idle bubble; flushing the
- * middle command buffer after layer 16 lets it start while the tail is still
- * being encoded.  Only command-buffer boundaries move, so kernel math,
- * ordering, and outputs are unchanged.  An explicit
+/* Automatic second command-buffer splits for eligible resident pre-M5 decode.
+ * They close the idle bubble left while the host encodes a long tail after the
+ * first submission. Only command-buffer boundaries move, so kernel math,
+ * ordering, and outputs are unchanged. An explicit
  * DS4_METAL_GRAPH_TOKEN_SECOND_SPLIT_LAYERS always wins. */
 static uint32_t metal_graph_token_adaptive_second_split_after_layers(
         const ds4_gpu_graph *g,
@@ -26908,8 +26988,15 @@ static uint32_t metal_graph_token_adaptive_second_split_after_layers(
         uint32_t             env_second_split_after_layers,
         bool                 allow_split_flush) {
 #if defined(__APPLE__)
-    if (env_second_split_after_layers != 0u) {
+    const char *second_split_env =
+        getenv("DS4_METAL_GRAPH_TOKEN_SECOND_SPLIT_LAYERS");
+    if (second_split_env && second_split_env[0]) {
         return env_second_split_after_layers;
+    }
+    if (metal_graph_token_split_after_layers() != 0u &&
+        metal_graph_pre_m5_q2_decode_schedule_eligible(
+            g, weights, pos, allow_split_flush)) {
+        return 32u;
     }
     /* Mirror the R4 adaptive-first-split guards: layer 4 is a routed layer in
      * the fixed DS4 tape and stands in for the resident full-model path this
