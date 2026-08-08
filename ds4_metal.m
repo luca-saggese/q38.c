@@ -17842,7 +17842,12 @@ int ds4_gpu_indexer_topk_tensor(
             fprintf(stderr, "ds4: Metal graph indexer top-k received undersized buffers\n");
             return 0;
         }
-        if (top_k == 512u && n_comp > 1024u && n_tokens >= 32u) {
+        /* The streaming selector's atomic append/compaction path is not
+         * reproducible for wide resumed-prefill rows on current Metal. Use the
+         * deterministic argsort/merge implementation unless explicitly
+         * requested for isolated benchmarking. */
+        if (top_k == 512u && n_comp > 1024u && n_tokens >= 32u &&
+            getenv("DS4_METAL_ENABLE_STREAMING_TOPK512") != NULL) {
             ds4_gpu_kargs_argsort args = {
                 .ne00 = (int32_t)n_comp,
                 .ne01 = (int32_t)n_tokens,

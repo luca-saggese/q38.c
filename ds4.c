@@ -21856,6 +21856,11 @@ static bool metal_graph_encode_decode_layer_phase(
          ds4_gpu_device_is_m5_apple_silicon() ||
          getenv("DS4_METAL_ENABLE_ATTN_INV_ROPE_FUSE") != NULL) &&
         ds4_gpu_decode_attn_rope_fuse_available() != 0;
+    /* The backend's consumed flag is process-global and remains true after a
+     * gathered-attention layer. Track whether this layer actually armed the
+     * fusion so a following indexed-attention layer cannot mistake that stale
+     * flag for its own and skip the required standalone inverse RoPE. */
+    bool attn_inv_rope_fuse_armed = false;
     /* switch to this layer's home tier before any Class P
      * accessor reads. Single-tier (placement == NULL): no-op. */
     if (g->placement) {
@@ -23281,6 +23286,7 @@ static bool metal_graph_encode_decode_layer_phase(
                     compressed ? (uint32_t)DS4_ROPE_ORIG_CTX : 0,
                     true, freq_base, freq_scale, ext_factor, attn_factor,
                     DS4_ROPE_YARN_BETA_FAST, DS4_ROPE_YARN_BETA_SLOW);
+                attn_inv_rope_fuse_armed = true;
             }
             ok = ds4_gpu_attention_decode_heads_tensor(metal_graph_heads(g),
                                                          model->map, model->size,
@@ -23298,7 +23304,7 @@ static bool metal_graph_encode_decode_layer_phase(
     }
     }
     if (ok && !cuda_tp_attn_heads_active && !attn_inv_rope_done &&
-        !(fuse_attn_inv_rope && ds4_gpu_decode_attn_rope_fuse_used())) {
+        !(attn_inv_rope_fuse_armed && ds4_gpu_decode_attn_rope_fuse_used())) {
         ok = ds4_gpu_rope_tail_tensor(metal_graph_heads(g),
                                       1, tp_heads, DS4_N_HEAD_DIM,
                                       DS4_N_ROT, pos,
