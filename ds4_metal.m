@@ -27326,17 +27326,62 @@ static int ds4_gpu_encode_flash_attention_gathered_heads(
         (ds4_gpu_device_name_contains("M3") ||
          getenv("DS4_METAL_ENABLE_SHARED_KV_PAD") != NULL) &&
         getenv("DS4_METAL_DISABLE_M3_SHARED_KV_PAD") == NULL;
-    id<MTLComputePipelineState> vec_pipeline =
-        ds4_gpu_get_flash_attn_vec_pipeline("kernel_flash_attn_ext_vec_f16_dk512_dv512",
-                                              true, true, false, false, has_kvpad,
-                                              use_shared_kvpad,
-                                              (int32_t)head_dim,
-                                              (int32_t)head_dim,
-                                              (int32_t)nsg,
-                                              (int32_t)nwg);
-    id<MTLComputePipelineState> reduce_pipeline =
-        ds4_gpu_get_flash_attn_reduce_pipeline((int32_t)head_dim, (int32_t)nwg);
-    if (!vec_pipeline || !reduce_pipeline) return 0;
+    const NSUInteger packed_threads = 8u * 32u;
+    const NSUInteger packed_shared_bytes =
+        512u * sizeof(uint16_t) +
+        8u * 128u * sizeof(uint16_t) +
+        (32u * 32u + 2u * 32u + 32u) * sizeof(float) +
+        32u * 33u * 4u * sizeof(float);
+    const bool packed_requested =
+        ds4_gpu_device_is_m5_apple_silicon() &&
+        getenv("DS4_METAL_DISABLE_M5_FLASH_ATTN_PACKED32_REDUCE") == NULL &&
+        !g_quality_mode && use_mask == 0u && comp_kv_f16 != 0u && n_comp != 0u &&
+        n_head == 64u && head_dim == 512u && nsg == 1u && nwg == 32u &&
+        n_keys <= 1024u && g_decode_attn_rope_fuse != 0 &&
+        g_decode_attn_rope_args.head_dim == 512 &&
+        g_decode_attn_rope_args.n_dims == 64 &&
+        g_decode_attn_rope_args.row_bytes == 2048 &&
+        g_decode_attn_rope_args.inverse != 0;
+
+    id<MTLComputePipelineState> packed_pipeline = nil;
+    if (packed_requested) {
+        packed_pipeline = ds4_gpu_get_flash_attn_vec_pipeline(
+            "kernel_dsv4_flash_attn_vec_packed32_reduce_rope_f16_dk512_dv512",
+            true, true, false, false, has_kvpad, use_shared_kvpad,
+            (int32_t)head_dim, (int32_t)head_dim, 1, 32);
+    }
+    const NSUInteger max_tgmem = [g_device maxThreadgroupMemoryLength];
+    const bool use_packed =
+        packed_pipeline != nil &&
+        packed_pipeline.threadExecutionWidth == 32u &&
+        packed_pipeline.maxTotalThreadsPerThreadgroup >= packed_threads &&
+        (max_tgmem == 0u || max_tgmem >= packed_shared_bytes);
+    if (packed_requested &&
+        getenv("DS4_METAL_TRACE_M5_FLASH_ATTN_PACKED32_REDUCE") != NULL) {
+        fprintf(stderr,
+                "ds4: packed FA use=%d max_threads=%lu tew=%lu tgmem=%lu need=%lu\n",
+                use_packed ? 1 : 0,
+                (unsigned long)(packed_pipeline ?
+                    packed_pipeline.maxTotalThreadsPerThreadgroup : 0u),
+                (unsigned long)(packed_pipeline ?
+                    packed_pipeline.threadExecutionWidth : 0u),
+                (unsigned long)max_tgmem,
+                (unsigned long)packed_shared_bytes);
+    }
+
+    id<MTLComputePipelineState> vec_pipeline = nil;
+    id<MTLComputePipelineState> reduce_pipeline = nil;
+    if (!use_packed) {
+        vec_pipeline = ds4_gpu_get_flash_attn_vec_pipeline(
+            "kernel_flash_attn_ext_vec_f16_dk512_dv512",
+            true, true, false, false, has_kvpad, use_shared_kvpad,
+            (int32_t)head_dim, (int32_t)head_dim,
+            (int32_t)nsg, (int32_t)nwg);
+        reduce_pipeline =
+            ds4_gpu_get_flash_attn_reduce_pipeline((int32_t)head_dim,
+                                                     (int32_t)nwg);
+        if (!vec_pipeline || !reduce_pipeline) return 0;
+    }
 
     if (!use_persistent_zero_mask &&
         !ds4_gpu_encode_fill_f16_1d(cb, flash_mask_buffer, 0, n_keys, 0.0f)) {
@@ -27453,6 +27498,29 @@ static int ds4_gpu_encode_flash_attention_gathered_heads(
                                      4u * ncpsg +
                                      2u * ds4_gpu_align_up_ns(head_dim, 128u)) * nsg;
     const NSUInteger shared_bytes = ds4_gpu_align_up_ns(shared_elems * (sizeof(float) / 2u), 16u);
+
+    if (use_packed) {
+        id<MTLComputeCommandEncoder> packed_enc = ds4_gpu_compute_encoder(cb);
+        [packed_enc setComputePipelineState:packed_pipeline];
+        [packed_enc setBytes:&vec_args length:sizeof(vec_args) atIndex:0];
+        [packed_enc setBuffer:qbuf offset:ds4_gpu_tensor_offset(q) atIndex:1];
+        [packed_enc setBuffer:g_flash_attn_kv_buffer offset:0 atIndex:2];
+        [packed_enc setBuffer:g_flash_attn_kv_buffer offset:0 atIndex:3];
+        [packed_enc setBuffer:flash_mask_buffer offset:0 atIndex:4];
+        [packed_enc setBuffer:sinks_buf offset:sinks_offset atIndex:5];
+        [packed_enc setBuffer:g_flash_attn_pad_buffer offset:0 atIndex:6];
+        [packed_enc setBuffer:headsbuf
+                        offset:ds4_gpu_tensor_offset(heads) atIndex:7];
+        [packed_enc setBytes:&g_decode_attn_rope_args
+                       length:sizeof(g_decode_attn_rope_args) atIndex:8];
+        [packed_enc setThreadgroupMemoryLength:packed_shared_bytes atIndex:0];
+        [packed_enc dispatchThreadgroups:MTLSizeMake(nrows, 1, 1)
+                      threadsPerThreadgroup:MTLSizeMake(packed_threads, 1, 1)];
+        ds4_gpu_end_compute_encoder(cb, packed_enc);
+        g_decode_attn_rope_fuse = 0;
+        g_decode_attn_rope_fuse_used = 1;
+        return 1;
+    }
 
     id<MTLComputeCommandEncoder> enc = ds4_gpu_compute_encoder(cb);
     [enc setComputePipelineState:vec_pipeline];
