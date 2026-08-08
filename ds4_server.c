@@ -6489,16 +6489,23 @@ static bool openai_sse_stream_update(int fd, server *s, const request *r, const 
         const char *tool = r->has_tools ?
             find_any_tool_start(raw + st->emit_pos) : NULL;
         const bool tool_before_close = tool && (!close || tool < close);
+        const char *tool_end = tool_before_close ? find_any_tool_end(tool) : NULL;
         const bool complete_tool =
-            tool_before_close && find_any_tool_end(tool) != NULL;
+            tool_end && (!close || tool_end < close);
         size_t limit;
-        if (tool_before_close) {
+        if (complete_tool) {
             limit = trim_tool_separator_ws(raw, st->emit_pos,
                                            (size_t)(tool - raw));
         } else if (close) {
+            /* An incomplete marker that remains inside a closed think block is
+             * reasoning text, not an executable call. */
             limit = (size_t)(close - raw);
         } else if (final) {
+            /* Match non-stream parsing: flush incomplete DSML as reasoning. */
             limit = raw_len;
+        } else if (tool_before_close) {
+            limit = trim_tool_separator_ws(raw, st->emit_pos,
+                                           (size_t)(tool - raw));
         } else {
             const size_t hold = strlen("</think>") - 1;
             limit = raw_len > hold ? raw_len - hold : st->emit_pos;
@@ -6513,11 +6520,9 @@ static bool openai_sse_stream_update(int fd, server *s, const request *r, const 
             st->emit_pos = limit;
         }
 
-        if (tool_before_close) {
-            if (complete_tool) {
-                st->emit_pos = (size_t)(tool - raw);
-                st->mode = OPENAI_STREAM_SUPPRESS;
-            }
+        if (complete_tool) {
+            st->emit_pos = (size_t)(tool - raw);
+            st->mode = OPENAI_STREAM_SUPPRESS;
             return true;
         }
 
@@ -7222,16 +7227,20 @@ static bool responses_sse_stream_update(int fd, const request *r,
         const char *tool = r->has_tools ?
             find_any_tool_start(raw + st->emit_pos) : NULL;
         const bool tool_before_close = tool && (!close || tool < close);
+        const char *tool_end = tool_before_close ? find_any_tool_end(tool) : NULL;
         const bool complete_tool =
-            tool_before_close && find_any_tool_end(tool) != NULL;
+            tool_end && (!close || tool_end < close);
         size_t limit;
-        if (tool_before_close) {
+        if (complete_tool) {
             limit = trim_tool_separator_ws(raw, st->emit_pos,
                                            (size_t)(tool - raw));
         } else if (close) {
             limit = (size_t)(close - raw);
         } else if (final) {
             limit = raw_len;
+        } else if (tool_before_close) {
+            limit = trim_tool_separator_ws(raw, st->emit_pos,
+                                           (size_t)(tool - raw));
         } else {
             const size_t hold = strlen("</think>") - 1;
             limit = raw_len > hold ? raw_len - hold : st->emit_pos;
@@ -7258,11 +7267,9 @@ static bool responses_sse_stream_update(int fd, const request *r,
             st->emit_pos = limit;
         }
 
-        if (tool_before_close) {
-            if (complete_tool) {
-                st->emit_pos = (size_t)(tool - raw);
-                st->mode = RESP_STREAM_SUPPRESS;
-            }
+        if (complete_tool) {
+            st->emit_pos = (size_t)(tool - raw);
+            st->mode = RESP_STREAM_SUPPRESS;
             return true;
         }
 
@@ -8118,16 +8125,20 @@ static bool anthropic_sse_stream_update(int fd, server *s, const request *r, con
         const char *tool = r->has_tools ?
             find_any_tool_start(raw + st->emit_pos) : NULL;
         const bool tool_before_close = tool && (!close || tool < close);
+        const char *tool_end = tool_before_close ? find_any_tool_end(tool) : NULL;
         const bool complete_tool =
-            tool_before_close && find_any_tool_end(tool) != NULL;
+            tool_end && (!close || tool_end < close);
         size_t limit;
-        if (tool_before_close) {
+        if (complete_tool) {
             limit = trim_tool_separator_ws(raw, st->emit_pos,
                                            (size_t)(tool - raw));
         } else if (close) {
             limit = (size_t)(close - raw);
         } else if (final) {
             limit = raw_len;
+        } else if (tool_before_close) {
+            limit = trim_tool_separator_ws(raw, st->emit_pos,
+                                           (size_t)(tool - raw));
         } else {
             const size_t hold = strlen("</think>") - 1;
             limit = raw_len > hold ? raw_len - hold : st->emit_pos;
@@ -8143,12 +8154,10 @@ static bool anthropic_sse_stream_update(int fd, server *s, const request *r, con
             st->emit_pos = limit;
         }
 
-        if (tool_before_close) {
-            if (complete_tool) {
-                if (!anthropic_sse_close_block_live(fd, id, st)) return false;
-                st->emit_pos = (size_t)(tool - raw);
-                st->mode = ANTH_STREAM_SUPPRESS;
-            }
+        if (complete_tool) {
+            if (!anthropic_sse_close_block_live(fd, id, st)) return false;
+            st->emit_pos = (size_t)(tool - raw);
+            st->mode = ANTH_STREAM_SUPPRESS;
             return true;
         }
 
@@ -10255,21 +10264,29 @@ static thinking_state thinking_state_from_prompt(const request *r) {
     return st;
 }
 
+typedef enum {
+    THINK_TOOL_NONE = 0,
+    THINK_TOOL_STARTED,
+    THINK_TOOL_COMPLETE,
+} think_tool_status;
+
 /* A completed tool block inside unclosed reasoning can be recovered without
  * predicting what the model will emit after an injected close marker. Keep a
- * short overlap until the opening appears, then wait for its matching end. */
-static bool complete_tool_call_inside_thinking(const char *text, size_t len,
-                                               size_t *scan_from) {
-    if (!text || !scan_from) return false;
+ * short overlap until the opening appears, then remember a partial block so
+ * end-of-decode repair does not silently discard it. */
+static think_tool_status tool_call_status_inside_thinking(const char *text,
+                                                          size_t len,
+                                                          size_t *scan_from) {
+    if (!text || !scan_from) return THINK_TOOL_NONE;
     if (*scan_from > len) *scan_from = len;
     const char *start = find_any_tool_start(text + *scan_from);
     if (!start) {
         const size_t hold = 80;
         *scan_from = len > hold ? len - hold : 0;
-        return false;
+        return THINK_TOOL_NONE;
     }
     *scan_from = (size_t)(start - text);
-    return find_any_tool_end(start) != NULL;
+    return find_any_tool_end(start) ? THINK_TOOL_COMPLETE : THINK_TOOL_STARTED;
 }
 
 static int server_eval_token(server *s, server_slot *slot, int token,
@@ -11511,6 +11528,7 @@ decode_again:
     const bool thinking_gates_tool_markers = ds4_think_mode_enabled(j->req.think_mode);
     bool tool_scan_waiting_for_think_close =
         thinking_gates_tool_markers && thinking.inside;
+    bool partial_tool_inside_thinking = false;
     size_t think_recovery_scan_from = 0;
     dsml_decode_tracker dsml_tracker;
     dsml_decode_tracker_init(&dsml_tracker);
@@ -11662,10 +11680,13 @@ decode_again:
                 if (thinking_gates_tool_markers && thinking.inside) {
                     /* Do not act on an opening marker alone: it can be quoted
                      * protocol text. A complete block is unambiguous enough to
-                     * recover without asking the model to restart it after an
-                     * injected close marker. */
-                    if (complete_tool_call_inside_thinking(
-                            text.ptr, text.len, &think_recovery_scan_from)) {
+                     * recover immediately; remember a partial block only while
+                     * reasoning stays open so EOF can use ordinary DSML repair. */
+                    const think_tool_status status =
+                        tool_call_status_inside_thinking(
+                            text.ptr, text.len, &think_recovery_scan_from);
+                    partial_tool_inside_thinking = status == THINK_TOOL_STARTED;
+                    if (status == THINK_TOOL_COMPLETE) {
                         saw_tool_start = true;
                         saw_tool_end = true;
                         finish = "tool_calls";
@@ -11689,6 +11710,7 @@ decode_again:
                         tool_scan_from = think_end ? (size_t)((think_end + 8) - text.ptr) : text.len;
                         if (tool_scan_from > text.len) tool_scan_from = text.len;
                         tool_scan_waiting_for_think_close = false;
+                        partial_tool_inside_thinking = false;
                     }
                     if (tool_scan_from > text.len) tool_scan_from = text.len;
                     const char *tool_scan = text.ptr ? text.ptr + tool_scan_from : "";
@@ -11764,6 +11786,14 @@ decode_again:
     if (g_stop_requested && strcmp(finish, "error") != 0) {
         finish = "error";
         snprintf(err, sizeof(err), "shutdown requested");
+    }
+
+    if (thinking_gates_tool_markers && thinking.inside &&
+        partial_tool_inside_thinking) {
+        saw_tool_start = true;
+        trace_event(s, trace_id,
+                    "found unterminated tool call inside unclosed reasoning after %d generated tokens",
+                    completion);
     }
 
     if (j->req.kind == REQ_CHAT && j->req.has_tools &&

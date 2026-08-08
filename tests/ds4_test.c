@@ -6370,6 +6370,40 @@ static char *test_tool_result_request_json(const char *assistant_content,
     return buf_take(&b);
 }
 
+static char *test_openai_reasoning_stream_wire(const char *raw,
+                                                  openai_stream_mode *mode_out) {
+    int fd[2] = {-1, -1};
+    TEST_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, fd) == 0);
+    if (fd[0] < 0 || fd[1] < 0) return NULL;
+
+    request r = {0};
+    r.model = xstrdup("deepseek-v4-flash");
+    r.has_tools = true;
+    r.think_mode = DS4_THINK_HIGH;
+    openai_stream stream = {0};
+    openai_stream_start(&r, &stream);
+    server s = {0};
+    bool ok = openai_sse_stream_update(fd[0], &s, &r, "test-stream",
+                                       &stream, raw, strlen(raw), true);
+    TEST_ASSERT(ok);
+    if (mode_out) *mode_out = stream.mode;
+    shutdown(fd[0], SHUT_WR);
+
+    buf wire = {0};
+    char chunk[4096];
+    ssize_t n;
+    while ((n = recv(fd[1], chunk, sizeof(chunk), 0)) > 0) {
+        buf_append(&wire, chunk, (size_t)n);
+    }
+    TEST_ASSERT(n == 0);
+
+    close(fd[0]);
+    close(fd[1]);
+    openai_stream_free(&stream);
+    free(r.model);
+    return buf_take(&wire);
+}
+
 /* A complete tool call inside unclosed reasoning is recovered directly. The
  * detector must wait for the complete block, and the parser must keep only the
  * preceding prose in reasoning_content. */
@@ -6384,14 +6418,15 @@ static void test_think_tool_recovery(void) {
 
     buf text = {0};
     size_t scan_from = 0;
-    bool complete = false;
+    think_tool_status status = THINK_TOOL_NONE;
     for (size_t i = 0; generated[i]; i++) {
         buf_append(&text, generated + i, 1);
-        complete = complete_tool_call_inside_thinking(text.ptr, text.len,
-                                                      &scan_from);
-        TEST_ASSERT(complete == (generated[i + 1] == '\0'));
+        status = tool_call_status_inside_thinking(text.ptr, text.len,
+                                                  &scan_from);
+        TEST_ASSERT((status == THINK_TOOL_COMPLETE) ==
+                    (generated[i + 1] == '\0'));
     }
-    TEST_ASSERT(complete);
+    TEST_ASSERT(status == THINK_TOOL_COMPLETE);
 
     char *content = NULL;
     char *reasoning = NULL;
@@ -6406,12 +6441,68 @@ static void test_think_tool_recovery(void) {
 
     fprintf(stderr,
             "ds4-test: think-tool-recovery complete=%d calls=%d name=%s\n",
-            complete ? 1 : 0, calls.len, calls.len ? calls.v[0].name : "-");
+            status == THINK_TOOL_COMPLETE ? 1 : 0,
+            calls.len, calls.len ? calls.v[0].name : "-");
 
     free(content);
     free(reasoning);
     tool_calls_free(&calls);
     buf_free(&text);
+
+    const char *truncated =
+        "The user wants a directory listing.\n\n"
+        DS4_TOOL_CALLS_START "\n"
+        DS4_INVOKE_START " name=\"list_files\">\n"
+        DS4_PARAM_START " name=\"path\" string=\"true\">." DS4_PARAM_END "\n"
+        DS4_INVOKE_END;
+    scan_from = 0;
+    status = tool_call_status_inside_thinking(truncated, strlen(truncated),
+                                              &scan_from);
+    TEST_ASSERT(status == THINK_TOOL_STARTED);
+
+    buf repaired = {0};
+    TEST_ASSERT(try_repair_dsml(truncated, strlen(truncated), &repaired));
+    content = NULL;
+    reasoning = NULL;
+    memset(&calls, 0, sizeof(calls));
+    parsed = parse_generated_message_ex(repaired.ptr, true,
+                                        &content, &reasoning, &calls);
+    TEST_ASSERT(parsed);
+    TEST_ASSERT(calls.len == 1);
+    TEST_ASSERT(calls.len == 1 && !strcmp(calls.v[0].name, "list_files"));
+    TEST_ASSERT(content && content[0] == '\0');
+    TEST_ASSERT(reasoning &&
+                !strcmp(reasoning, "The user wants a directory listing."));
+
+    free(content);
+    free(reasoning);
+    tool_calls_free(&calls);
+    buf_free(&repaired);
+
+    openai_stream_mode stream_mode = OPENAI_STREAM_THINKING;
+    char *wire = test_openai_reasoning_stream_wire(truncated, &stream_mode);
+    TEST_ASSERT(wire != NULL);
+    TEST_ASSERT(stream_mode == OPENAI_STREAM_SUPPRESS);
+    TEST_ASSERT(wire && strstr(wire, "reasoning_content"));
+    TEST_ASSERT(wire && strstr(wire, "list_files"));
+    free(wire);
+
+    const char *closed_in_reasoning =
+        "plan\n\n" DS4_TOOL_CALLS_START "\nnot a call</think>VISIBLE";
+    wire = test_openai_reasoning_stream_wire(closed_in_reasoning, &stream_mode);
+    TEST_ASSERT(wire != NULL);
+    TEST_ASSERT(stream_mode == OPENAI_STREAM_SUPPRESS);
+    TEST_ASSERT(wire && strstr(wire, "reasoning_content"));
+    TEST_ASSERT(wire && strstr(wire, "tool_calls"));
+    TEST_ASSERT(wire && strstr(wire, "VISIBLE"));
+    free(wire);
+
+    wire = test_openai_reasoning_stream_wire(generated, &stream_mode);
+    TEST_ASSERT(wire != NULL);
+    TEST_ASSERT(stream_mode == OPENAI_STREAM_SUPPRESS);
+    TEST_ASSERT(wire && strstr(wire, "reasoning_content"));
+    TEST_ASSERT(!wire || !strstr(wire, "list_files"));
+    free(wire);
 }
 
 typedef struct {
