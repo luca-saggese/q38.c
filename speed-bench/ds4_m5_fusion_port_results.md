@@ -202,3 +202,76 @@ with no prefill regression. All eight frontier hashes are the canonical
 `eb794f497861d7d9e373665f6e115d8ebe4e17c13c431aa7e318282f16a0f21d`.
 Full `make test`, focused Metal kernels, tensor equivalence, MXFP4 Metal,
 and CLI smoke generation pass on the committed code.
+
+
+## Round 5: exact concurrent FFN and HC continuation cross 45 tok/s
+
+The M5 decode path now defaults to a narrowly admitted, same-command-buffer
+`MTLDispatchTypeConcurrent` schedule for the resident ds4f-q2 FFN. Shared
+Q8 gate/up and routed IQ2XXS pair-SwiGLU launch independently, explicit
+resource barriers close each producer/consumer level, and the concurrent
+encoder is ended before the final HC consumer. The gate is restricted to the
+proven single-device IQ2XXS/Q2_K, top-6, one-token shape and declines custom
+Q8 matvec geometry. Rollback:
+`DS4_METAL_DISABLE_M5_PARALLEL_FULL_FFN=1`.
+
+Additional exact M5 work in this round:
+
+- a two-row IQ2XXS pair-SwiGLU packing/epilogue path;
+- aligned vector HC expansion for the fixed Q8_0 shape;
+- ratio-128 admission for the QKV pair/compressor compound kernel;
+- persistent zero attention-mask reuse on M5;
+- fused router projection/select with per-output cross-threadgroup completion;
+- a compound HC norm/mix producer whose six legacy 512-thread producer
+  groups continue into the pre/post/Sinkhorn split and exact 4096-wide
+  RMSNorm. TG0 performs the legacy pre-collapse/RMS tree, TG1 the post
+  transform, and TG2-5 use a fenced four-way completion protocol for the
+  comb transform. Rollback:
+  `DS4_METAL_DISABLE_M5_HC_PRODUCER_PRE_NORM_FUSE=1`.
+
+Completion counters are cached with a bounded `NSCache`, retained with each
+in-flight command batch, and invalidated (not CPU-reset in place) after a
+Metal command-buffer error. This prevents stale partial counters from being
+reused and avoids retaining graph buffers across session churn.
+
+The proposed Q-head RMSNorm/forward-RoPE continuation into gathered F16 KV
+staging was implemented and evaluated, but rejected and removed: both the
+256-thread virtualized form and an exact-topology 128-thread form changed
+full-vocabulary decode logits. The standalone Q kernel's compiled arithmetic
+could not be reproduced bit-for-bit inside the compound kernel.
+
+### Controlled exactness and performance
+
+The HC producer/pre-norm continuation improved the 1024-prefix, 256-token
+balanced harness from 45.11 to **45.66 tok/s** (+1.22%) with
+`exact_rows=265`, `exact_floats=34259200`, and
+`exact_selected_ids=264`. Earlier forward/inverse 2048-prefix runs measured
+44.76 to **45.30 tok/s** and 44.74 to **45.24 tok/s**, also exact. Router and
+persistent-mask inverse A/B checks were exact and independently positive in
+the final tree.
+
+### Official 2048-context result (8 cooled replicas)
+
+| metric | median | min-max |
+|---|---:|---:|
+| prefill | 791.39 tok/s | 790.03-792.71 |
+| decode gen_tps | **45.25 tok/s** | 44.90-45.33 |
+| steady decode | **45.47 tok/s** | 45.12-45.58 |
+| first token | 24.48 ms | 23.97-25.10 |
+
+A no-environment-override replica reached **45.33 tok/s** overall and
+**45.58 tok/s** steady. Two later system-loaded validation replicas measured
+44.66/44.76 overall (44.93/45.03 steady) while retaining the canonical hash;
+the median across all ten replicas remained **45.20 tok/s** overall and
+**45.43 tok/s** steady. Every replica produced the canonical frontier
+SHA-256
+`eb794f497861d7d9e373665f6e115d8ebe4e17c13c431aa7e318282f16a0f21d`.
+This is +14.9% decode versus the 39.39 tok/s session baseline and +5.8%
+versus the committed Round-4 median.
+
+Validation passed: full `make test`, Metal kernel numerics, five-case Metal
+tensor equivalence with zero logit delta, MXFP4 Metal, multi-session Metal
+batch exactness, CPU-only build, deterministic CLI generation, and the live
+two-turn tool regression. Both fast and exact tool paths produced one tool
+call on turn 1 and a normal `stop` with zero tool calls after replaying the
+matching result on turn 2.

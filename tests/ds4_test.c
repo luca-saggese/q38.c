@@ -87,6 +87,16 @@ static void test_restore_canonical_streaming_prefill(
                      saved.batch_selected_addr);
 }
 
+static ds4_backend test_model_backend(void) {
+    const char *backend = getenv("DS4_TEST_BACKEND");
+    if (backend && !strcmp(backend, "cpu")) return DS4_BACKEND_CPU;
+#ifdef __APPLE__
+    return DS4_BACKEND_METAL;
+#else
+    return DS4_BACKEND_CUDA;
+#endif
+}
+
 static ds4_engine *test_open_engine(bool quality) {
     ds4_engine *engine = NULL;
     /* DS4_TEST_MTP loads the MTP head on the fast engine so the speculative
@@ -94,11 +104,7 @@ static ds4_engine *test_open_engine(bool quality) {
     const char *mtp = getenv("DS4_TEST_MTP");
     ds4_engine_options opt = {
         .model_path = test_model_path(),
-#ifdef __APPLE__
-        .backend = DS4_BACKEND_METAL,
-#else
-        .backend = DS4_BACKEND_CUDA,
-#endif
+        .backend = test_model_backend(),
         .quality = quality,
         .ssd_streaming = test_env_bool("DS4_TEST_SSD_STREAMING"),
         .ssd_streaming_cold = test_env_bool("DS4_TEST_SSD_STREAMING_COLD"),
@@ -1202,7 +1208,7 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
                         ref_comp, model_raw, model_bytes, ape_offset, ape_type,
                         norm_offset, 0, head_dim, ratio, pos, 0, 0, 0,
                         10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f,
-                        1.0e-6f, false, test_decode_pack) != 0);
+                        1.0e-6f, false, test_decode_pack, false) != 0);
 
         TEST_ASSERT(ds4_gpu_matmul_f16_pair_compressor_store_tensor(
                         fused_kv, fused_score,
@@ -1224,7 +1230,7 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
                         ape_offset, ape_type, norm_offset, 0,
                         head_dim, ratio, pos, 0, 0, 0,
                         10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f,
-                        1.0e-6f, true, test_decode_pack) != 0);
+                        1.0e-6f, true, test_decode_pack, false) != 0);
 
         TEST_ASSERT(ds4_gpu_tensor_read(
                         ref_kv, 0, ref_kv_host, out_bytes) != 0);
@@ -6305,24 +6311,63 @@ static void test_streaming_decode_prefill_correctness(void) {
     for (int i = 0; i < ncase; i++) test_mpp_eq_case_free(&cases[i]);
 }
 
+#define TEST_LIST_FILES_USER_PROMPT \
+    "Use the list_files tool to list the current directory exactly once, " \
+    "then report the listed files and stop."
+
+#define TEST_LIST_FILES_TOOL_JSON \
+    "{\"type\":\"function\",\"function\":{" \
+        "\"name\":\"list_files\"," \
+        "\"description\":\"List files in a directory.\"," \
+        "\"parameters\":{\"type\":\"object\",\"properties\":{" \
+            "\"path\":{\"type\":\"string\",\"description\":\"Directory path to list.\"}" \
+        "},\"required\":[\"path\"]}" \
+    "}}"
+
+#define TEST_LIST_FILES_RESULT "[\"README.md\",\"Makefile\",\"ds4.c\",\"metal\"]"
+
 static const char *test_tool_call_request_json(void) {
     return
         "{"
         "\"model\":\"deepseek-v4-flash\","
-        "\"messages\":[{\"role\":\"user\",\"content\":\"List the files in the current directory. Use the provided tool; do not answer in prose.\"}],"
-        "\"tools\":[{\"type\":\"function\",\"function\":{"
-            "\"name\":\"list_files\","
-            "\"description\":\"List files in a directory.\","
-            "\"parameters\":{\"type\":\"object\",\"properties\":{"
-                "\"path\":{\"type\":\"string\",\"description\":\"Directory path to list.\"}"
-            "},\"required\":[\"path\"]}"
-        "}}],"
+        "\"messages\":[{\"role\":\"user\",\"content\":\""
+            TEST_LIST_FILES_USER_PROMPT
+        "\"}],"
+        "\"tools\":[" TEST_LIST_FILES_TOOL_JSON "],"
         "\"tool_choice\":\"auto\","
         "\"think\":false,"
         "\"temperature\":0,"
         "\"max_tokens\":256,"
         "\"stream\":false"
         "}";
+}
+
+static char *test_tool_result_request_json(const char *assistant_content,
+                                           const tool_call *call) {
+    if (!call || !call->id || !call->id[0]) return NULL;
+
+    buf b = {0};
+    buf_puts(&b,
+        "{\"model\":\"deepseek-v4-flash\",\"messages\":["
+        "{\"role\":\"user\",\"content\":");
+    json_escape(&b, TEST_LIST_FILES_USER_PROMPT);
+    buf_puts(&b, "},{\"role\":\"assistant\",\"content\":");
+    json_escape(&b, assistant_content ? assistant_content : "");
+    buf_puts(&b, ",\"tool_calls\":[{\"id\":");
+    json_escape(&b, call->id);
+    buf_puts(&b, ",\"type\":\"function\",\"function\":{\"name\":");
+    json_escape(&b, call->name ? call->name : "");
+    buf_puts(&b, ",\"arguments\":");
+    json_escape(&b, call->arguments ? call->arguments : "{}");
+    buf_puts(&b, "}}]},{\"role\":\"tool\",\"tool_call_id\":");
+    json_escape(&b, call->id);
+    buf_puts(&b, ",\"content\":");
+    json_escape(&b, TEST_LIST_FILES_RESULT);
+    buf_puts(&b,
+        "}],\"tools\":[" TEST_LIST_FILES_TOOL_JSON "],"
+        "\"tool_choice\":\"auto\",\"think\":false,"
+        "\"temperature\":0,\"max_tokens\":256,\"stream\":false}");
+    return buf_take(&b);
 }
 
 /* A complete tool call inside unclosed reasoning is recovered directly. The
@@ -6369,59 +6414,188 @@ static void test_think_tool_recovery(void) {
     buf_free(&text);
 }
 
-static void test_tool_call_quality_one(bool quality) {
-    ds4_engine *engine = test_get_engine(quality);
-    if (!engine) return;
+typedef struct {
+    char *raw;
+    char *content;
+    char *reasoning;
+    tool_calls calls;
+    const char *finish;
+} test_chat_turn;
 
-    request r;
-    char err[160];
-    TEST_ASSERT(parse_chat_request(engine, NULL, test_tool_call_request_json(),
-                                   512, 32768, &r, err, sizeof(err)));
+static void test_chat_turn_free(test_chat_turn *turn) {
+    if (!turn) return;
+    free(turn->raw);
+    free(turn->content);
+    free(turn->reasoning);
+    tool_calls_free(&turn->calls);
+    memset(turn, 0, sizeof(*turn));
+}
 
-    ds4_session *session = NULL;
-    TEST_ASSERT(ds4_session_create(&session, engine, 32768) == 0);
-    if (!session) {
-        request_free(&r);
-        return;
+/* Run the same greedy stop/tool-marker/response parse path needed by the server,
+ * while keeping one session alive so the next request genuinely continues from
+ * this sampled turn. */
+static bool test_generate_chat_turn(ds4_engine *engine, ds4_session *session,
+                                    const request *r, test_chat_turn *turn) {
+    memset(turn, 0, sizeof(*turn));
+    char err[160] = {0};
+    if (ds4_session_sync(session, &r->prompt, err, sizeof(err)) != 0) {
+        fprintf(stderr, "ds4-test: tool-call sync failed: %s\n", err);
+        turn->finish = "error";
+        return false;
     }
-    TEST_ASSERT(ds4_session_sync(session, &r.prompt, err, sizeof(err)) == 0);
 
     buf text = {0};
     uint64_t rng = 123;
-    bool decode_ok = true;
+    const char *finish = "length";
     bool saw_tool_start = false;
     bool saw_tool_end = false;
-    for (int i = 0; i < r.max_tokens; i++) {
-        int token = ds4_session_sample(session, r.temperature, r.top_k,
-                                       r.top_p, r.min_p, &rng);
+    bool decode_ok = true;
+
+    for (int i = 0; i < r->max_tokens; i++) {
+        int token = ds4_session_sample(session, r->temperature, r->top_k,
+                                       r->top_p, r->min_p, &rng);
+        if (ds4_token_is_stop_for_think_mode(engine, token, r->think_mode)) {
+            finish = "stop";
+            break;
+        }
+        if (ds4_session_eval(session, token, err, sizeof(err)) != 0) {
+            finish = "error";
+            decode_ok = false;
+            break;
+        }
+
         size_t piece_len = 0;
         char *piece = ds4_token_text(engine, token, &piece_len);
         buf_append(&text, piece, piece_len);
         free(piece);
-        observe_tool_markers(text.ptr ? text.ptr : "", &saw_tool_start, &saw_tool_end, NULL);
-        if (saw_tool_end) break;
-        if (ds4_session_eval(session, token, err, sizeof(err)) != 0) {
-            decode_ok = false;
-            break;
+        if (r->has_tools) {
+            observe_tool_markers(text.ptr ? text.ptr : "",
+                                 &saw_tool_start, &saw_tool_end, NULL);
+            if (saw_tool_end) {
+                finish = "tool_calls";
+                break;
+            }
         }
     }
 
-    char *content = NULL;
-    char *reasoning = NULL;
-    tool_calls calls = {0};
-    bool parsed = parse_generated_message_ex(text.ptr ? text.ptr : "",
-                                             false, &content, &reasoning, &calls);
-    TEST_ASSERT(decode_ok);
-    TEST_ASSERT(parsed);
-    TEST_ASSERT(calls.len > 0);
-    TEST_ASSERT(calls.len > 0 && !strcmp(calls.v[0].name, "list_files"));
+    turn->raw = buf_take(&text);
+    turn->finish = finish;
+    if (!decode_ok) {
+        fprintf(stderr, "ds4-test: tool-call decode failed: %s\n", err);
+        return false;
+    }
 
-    free(content);
-    free(reasoning);
-    tool_calls_free(&calls);
-    buf_free(&text);
+    bool recovered = false;
+    bool parsed = parse_generated_message_for_response_for_syntax(
+        r->model_syntax,
+        turn->raw ? turn->raw : "",
+        r->has_tools,
+        saw_tool_start,
+        ds4_think_mode_enabled(r->think_mode),
+        &turn->finish,
+        err,
+        sizeof(err),
+        &turn->content,
+        &turn->reasoning,
+        &turn->calls,
+        &recovered);
+    if (turn->calls.len > 0) turn->finish = "tool_calls";
+    if (!parsed) {
+        fprintf(stderr,
+                "ds4-test: generated message parse failed: %s recovered=%d raw=%s\n",
+                err, recovered ? 1 : 0, turn->raw ? turn->raw : "");
+    }
+    return parsed;
+}
+
+static void test_tool_call_quality_one(bool quality) {
+    ds4_engine *engine = test_get_engine(quality);
+    if (!engine) return;
+
+    server s = {0};
+    s.engine = engine;
+    pthread_mutex_init(&s.tool_mu, NULL);
+
+    request first_request = {0};
+    request second_request = {0};
+    ds4_session *session = NULL;
+    test_chat_turn first = {0};
+    test_chat_turn second = {0};
+    char *second_body = NULL;
+    char err[160] = {0};
+
+    bool request_ok = parse_chat_request(engine, &s,
+                                         test_tool_call_request_json(),
+                                         512, 32768, &first_request,
+                                         err, sizeof(err));
+    TEST_ASSERT(request_ok);
+    if (!request_ok) goto done;
+
+    bool session_ok = ds4_session_create(&session, engine, 32768) == 0;
+    TEST_ASSERT(session_ok);
+    if (!session_ok) goto done;
+
+    bool first_ok = test_generate_chat_turn(engine, session,
+                                            &first_request, &first);
+    TEST_ASSERT(first_ok);
+    TEST_ASSERT(first.finish && !strcmp(first.finish, "tool_calls"));
+    TEST_ASSERT(first.calls.len == 1);
+    TEST_ASSERT(first.calls.len == 1 && first.calls.v[0].name &&
+                !strcmp(first.calls.v[0].name, "list_files"));
+    TEST_ASSERT(first.calls.raw_tool_text && first.calls.raw_tool_text[0]);
+    if (!first_ok || first.calls.len != 1 ||
+        !first.calls.v[0].name ||
+        strcmp(first.calls.v[0].name, "list_files") ||
+        !first.calls.raw_tool_text || !first.calls.raw_tool_text[0]) {
+        goto done;
+    }
+
+    /* Use the real response-side id assignment and exact sampled-DSML memory.
+     * The same id is serialized on both the assistant call and tool result. */
+    assign_tool_call_ids(&s, &first.calls, API_OPENAI);
+    TEST_ASSERT(first.calls.v[0].id && first.calls.v[0].id[0]);
+    if (!first.calls.v[0].id || !first.calls.v[0].id[0]) goto done;
+    tool_memory_remember(&s, &first.calls);
+
+    second_body = test_tool_result_request_json(first.content,
+                                                &first.calls.v[0]);
+    TEST_ASSERT(second_body != NULL);
+    if (!second_body) goto done;
+
+    err[0] = '\0';
+    request_ok = parse_chat_request(engine, &s, second_body,
+                                    512, 32768, &second_request,
+                                    err, sizeof(err));
+    TEST_ASSERT(request_ok);
+    if (!request_ok) goto done;
+    TEST_ASSERT(second_request.tool_replay.mem == 1);
+    TEST_ASSERT(second_request.tool_replay.disk == 0);
+    TEST_ASSERT(second_request.tool_replay.canonical == 0);
+    TEST_ASSERT(second_request.tool_replay.missing_ids == 0);
+
+    bool second_ok = test_generate_chat_turn(engine, session,
+                                             &second_request, &second);
+    TEST_ASSERT(second_ok);
+    TEST_ASSERT(second.finish && !strcmp(second.finish, "stop"));
+    TEST_ASSERT(second.calls.len == 0);
+    TEST_ASSERT(second.content && second.content[0]);
+
+    fprintf(stderr,
+            "ds4-test: post-tool-result turn1 finish_reason=%s tool_calls=%d "
+            "turn2 finish_reason=%s tool_calls=%d replay_mem=%d\n",
+            first.finish ? first.finish : "-", first.calls.len,
+            second.finish ? second.finish : "-", second.calls.len,
+            second_request.tool_replay.mem);
+
+done:
+    free(second_body);
+    test_chat_turn_free(&second);
+    test_chat_turn_free(&first);
     ds4_session_free(session);
-    request_free(&r);
+    request_free(&second_request);
+    request_free(&first_request);
+    tool_memory_free(&s.tool_mem);
+    pthread_mutex_destroy(&s.tool_mu);
 }
 
 static void test_tool_call_quality(void) {
@@ -6687,7 +6861,7 @@ typedef struct {
 static const ds4_test_entry test_entries[] = {
 #ifndef DS4_NO_GPU
     {"--long-context", "long-context", "long-context story fact-recall regression", test_long_story_fact_recall},
-    {"--tool-call-quality", "tool-call-quality", "model emits valid DSML tool calls", test_tool_call_quality},
+    {"--tool-call-quality", "tool-call-quality", "model tool call and post-result stop regression", test_tool_call_quality},
     {"--think-tool-recovery", "think-tool-recovery", "recover a complete tool call emitted inside unclosed reasoning", test_think_tool_recovery},
     {"--logprob-vectors", "logprob-vectors", "official API top-logprob vector comparison on the standard Metal path", test_official_logprob_vectors},
     {"--metal-ssd-streaming-cache-pressure", "metal-ssd-streaming-cache-pressure", "Metal SSD-streaming layer-batched decode cache-pressure repro for issue #384", test_metal_ssd_streaming_cache_pressure},
@@ -6720,6 +6894,7 @@ static void test_print_help(const char *prog) {
     puts("      Show this help.");
     puts("\nEnvironment:");
     puts("  DS4_TEST_MODEL=FILE        Model path. Default: ds4flash.gguf");
+    puts("  DS4_TEST_BACKEND=cpu       Run model tests on CPU instead of Metal/CUDA.");
     puts("  DS4_TEST_SSD_STREAMING=1   Run model tests through Metal SSD streaming.");
     puts("  DS4_TEST_SSD_STREAMING_CACHE_GB=N  Streaming routed expert cache in GiB.");
     puts("  DS4_TEST_SSD_STREAMING_CACHE_EXPERTS=N  Streaming routed expert cache count.");

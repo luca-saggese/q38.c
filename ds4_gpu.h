@@ -78,6 +78,24 @@ int ds4_gpu_begin_commands(void);
 int ds4_gpu_flush_encoder(void);
 int ds4_gpu_flush_commands(void);
 int ds4_gpu_commands_active(void);
+#ifdef __APPLE__
+int ds4_gpu_parallel_ffn_finish(void);
+void ds4_gpu_parallel_ffn_abort(void);
+int ds4_gpu_parallel_ffn_start(
+        ds4_gpu_tensor       *gate,
+        ds4_gpu_tensor       *up,
+        ds4_gpu_tensor       *mid,
+        ds4_gpu_tensor       *shared_out,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              gate_offset,
+        uint64_t              up_offset,
+        uint64_t              down_offset,
+        uint32_t              model_dim,
+        uint32_t              shared_dim,
+        const ds4_gpu_tensor *x,
+        float                 clamp);
+#endif
 int ds4_gpu_signal_selected_readback_ready(uint64_t *event_value);
 int ds4_gpu_commit_and_wait_selected_readback(uint64_t event_value, const char *label);
 int ds4_gpu_wait_selected_readback_ready(uint64_t event_value, const char *label);
@@ -681,7 +699,21 @@ int ds4_gpu_router_shared_gate_up_q8_0_tensor(
         uint64_t              router_out_dim,
         uint64_t              out_dim,
         const ds4_gpu_tensor *x,
-        float                 clamp);
+        float                 clamp,
+        bool                  router_only);
+#ifdef __APPLE__
+int ds4_gpu_router_project_select_fused_tensor(
+        ds4_gpu_tensor       *router_logits,
+        ds4_gpu_tensor       *probs,
+        ds4_gpu_tensor       *selected,
+        ds4_gpu_tensor       *weights,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              router_weight_offset,
+        uint64_t              bias_offset,
+        bool                  has_bias,
+        const ds4_gpu_tensor *x);
+#endif
 int ds4_gpu_shared_mid_swiglu_q8_0_decode_exact_tensor(
         ds4_gpu_tensor       *mid,
         const void             *model_map,
@@ -2642,6 +2674,29 @@ int ds4_gpu_hc_rms_scale_project_f16_tensor(
         uint32_t                n_rows,
         float                   eps);
 
+#ifdef __APPLE__
+int ds4_gpu_hc_rms_norm_mix_split_norm_f16_tensor(
+        ds4_gpu_tensor       *mix,
+        ds4_gpu_tensor       *out,
+        ds4_gpu_tensor       *norm_out,
+        ds4_gpu_tensor       *split,
+        const ds4_gpu_tensor *residual_hc,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              mix_weight_offset,
+        uint64_t              scale_offset,
+        uint64_t              base_offset,
+        uint64_t              norm_weight_offset,
+        uint32_t              n,
+        uint32_t              mix_dim,
+        uint32_t              n_embd,
+        uint32_t              n_hc,
+        uint32_t              sinkhorn_iters,
+        float                 eps,
+        float                 hc_eps,
+        float                 norm_eps);
+
+#endif
 int ds4_gpu_output_hc_weights_tensor(
         ds4_gpu_tensor       *out,
         const ds4_gpu_tensor *pre,
