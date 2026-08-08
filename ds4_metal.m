@@ -167,6 +167,7 @@ static id<MTLComputePipelineState> g_dsv4_ratio4_shift_pipeline;
 static id<MTLComputePipelineState> g_dsv4_compressor_pack_ratio4_pipeline;
 static id<MTLComputePipelineState> g_dsv4_compressor_pack_ratio4_decode_ggml_pipeline;
 static id<MTLComputePipelineState> g_dsv4_compressor_exact_softmax_product_pipeline;
+static id<MTLComputePipelineState> g_dsv4_compressor_exact_pool_ratio4_pipeline;
 static id<MTLComputePipelineState> g_dsv4_softmax_pool_ratio4_direct_pipeline;
 static id<MTLComputePipelineState> g_dsv4_softmax_pool_pipeline;
 static id<MTLComputePipelineState> g_soft_max_f32_pipeline;
@@ -8423,6 +8424,9 @@ int ds4_gpu_init(void) {
         g_dsv4_compressor_exact_softmax_product_pipeline =
             ds4_gpu_get_pipeline(
                 "kernel_dsv4_compressor_exact_softmax_product_ratio4");
+        g_dsv4_compressor_exact_pool_ratio4_pipeline =
+            ds4_gpu_get_pipeline(
+                "kernel_dsv4_compressor_exact_pool_ratio4_decode_ggml");
         g_dsv4_softmax_pool_ratio4_direct_pipeline =
             ds4_gpu_get_pipeline("kernel_dsv4_softmax_pool_ratio4_direct");
         g_rms_norm_scale_pipeline =
@@ -9976,6 +9980,7 @@ void ds4_gpu_cleanup(void) {
         g_dsv4_compressor_pack_ratio4_pipeline = nil;
         g_dsv4_compressor_pack_ratio4_decode_ggml_pipeline = nil;
         g_dsv4_compressor_exact_softmax_product_pipeline = nil;
+        g_dsv4_compressor_exact_pool_ratio4_pipeline = nil;
         g_dsv4_softmax_pool_ratio4_direct_pipeline = nil;
         g_dsv4_softmax_pool_pipeline = nil;
         g_soft_max_f32_pipeline = nil;
@@ -22615,6 +22620,67 @@ static int ds4_gpu_encode_compressor_ratio4_decode_pack_ggml(
     if (!cb || !out || !statekvbuf || !statescbuf || head_dim == 0u ||
         !ds4_gpu_ensure_compressor_pool_ggml_scratch(8u, head_dim)) {
         return 0;
+    }
+
+    const bool force_exact_pool =
+        getenv("DS4_METAL_ENABLE_COMPRESSOR_EXACT_POOL_RATIO4") != NULL;
+    const bool default_m5_exact_pool =
+        ds4_gpu_device_is_m5_apple_silicon() &&
+        getenv("DS4_METAL_DISABLE_M5_COMPRESSOR_EXACT_POOL_RATIO4") == NULL;
+    if ((head_dim == 128u || head_dim == 512u) &&
+        (force_exact_pool || default_m5_exact_pool)) {
+        id<MTLComputePipelineState> exact_pool_pipeline = ds4_gpu_hot_pipeline(
+            g_dsv4_compressor_exact_pool_ratio4_pipeline,
+            "kernel_dsv4_compressor_exact_pool_ratio4_decode_ggml");
+        id<MTLBuffer> outbuf = ds4_gpu_tensor_buffer(out);
+        const NSUInteger out_offset = ds4_gpu_tensor_offset(out);
+        const uint64_t state_bytes = 16ull * head_dim * sizeof(float);
+        const uint64_t out_bytes = (uint64_t)head_dim * sizeof(float);
+        const bool overlap =
+            ds4_gpu_buffer_ranges_overlap(outbuf, out_offset, out_bytes,
+                                          statekvbuf, state_kv_offset,
+                                          state_bytes) ||
+            ds4_gpu_buffer_ranges_overlap(outbuf, out_offset, out_bytes,
+                                          statescbuf, state_score_offset,
+                                          state_bytes);
+        if (exact_pool_pipeline && outbuf && !overlap &&
+            exact_pool_pipeline.threadExecutionWidth == 32u &&
+            exact_pool_pipeline.maxTotalThreadsPerThreadgroup >= 32u) {
+            if (getenv(
+                    "DS4_METAL_TEST_POISON_COMPRESSOR_EXACT_REDUCTION_SCRATCH") != NULL) {
+                const uint32_t poison_bits = 0x7fc01234u;
+                float poison;
+                memcpy(&poison, &poison_bits, sizeof(poison));
+                if (!ds4_gpu_encode_fill_f32_rows(cb,
+                                                   g_compressor_pool_softmax_buffer,
+                                                   0,
+                                                   8u,
+                                                   head_dim,
+                                                   poison)) {
+                    return 0;
+                }
+            }
+            ds4_gpu_dsv4_compressor_pack_ratio4_args args = {
+                .head_dim = head_dim,
+                .n_comp = 1u,
+                .replay = 1u,
+                .n_threads = 32u,
+            };
+            id<MTLComputeCommandEncoder> enc = ds4_gpu_compute_encoder(cb);
+            [enc setComputePipelineState:exact_pool_pipeline];
+            [enc setBytes:&args length:sizeof(args) atIndex:0];
+            [enc setBuffer:statekvbuf offset:state_kv_offset atIndex:1];
+            [enc setBuffer:statescbuf offset:state_score_offset atIndex:2];
+            [enc setBuffer:g_compressor_pool_softmax_buffer offset:0 atIndex:3];
+            [enc setBuffer:g_compressor_pool_product_buffer offset:0 atIndex:4];
+            [enc setBuffer:outbuf offset:out_offset atIndex:5];
+            [enc setThreadgroupMemoryLength:32u * sizeof(float) atIndex:0];
+            [enc dispatchThreadgroups:MTLSizeMake(head_dim, 1, 1)
+                 threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+            ds4_gpu_end_compute_encoder(cb, enc);
+            return 1;
+        }
+        if (force_exact_pool) return 0;
     }
 
     id<MTLComputePipelineState> pipeline = ds4_gpu_hot_pipeline(
