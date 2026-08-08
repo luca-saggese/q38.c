@@ -158,3 +158,47 @@ steady decode:  median 41.19 tok/s (+4.0% vs 39.60)
 prefill:        785-788 (no regression)
 first token:    ~27.2 ms med
 All frontier hashes canonical; focused tests and full make test green.
+
+## Round 4: packed exact attention pushes official decode past 42
+
+Code commits 8b16674, 43c137e, and 457437d (ds4f-q2, M5 Max):
+
+1. **Exact ratio-4 compressor pool**: fuses pack, exact softmax/product,
+   and the original active-eight-lane row sum into one dispatch while
+   retaining device F32 materialization. Controlled gain +0.15-0.29%.
+2. **Clustered HC norm/mix producer**: two independent eight-simdgroup
+   NR0=2 clusters share a 512-thread group and retain the exact
+   1024-virtual-thread RMS tree. Controlled gain +0.69-0.85%.
+3. **Packed exact FlashAttention reduction**: eight physical simdgroups
+   time-slice the 32 legacy split-K groups, materialize their exact F32
+   weights and `(S,M)` statistics in threadgroup memory, form coalesced
+   V partials through a padded 32x33 plane, run the original 32-lane
+   reduction tree, and apply the shared inverse-RoPE helper. This removes
+   the 4.2 MB/layer device partial round trip and one dispatch. The narrow
+   default gate requires M5, F16 512-wide K/V, one unmasked query, 64
+   heads, live inverse-RoPE fusion, and at most 1024 keys; all other shapes
+   retain the legacy path. Rollback:
+   `DS4_METAL_DISABLE_M5_FLASH_ATTN_PACKED32_REDUCE=1`.
+
+The packed attention path was exact over forward and inverse 1024-token
+A/B runs (`exact_rows=1041`, `exact_floats=134580480`,
+`exact_selected_ids=1040`) and improved controlled decode by 3.95% in
+both orders (short blocks +4.4-4.5%). The proposed IQ2/Q2 `sum8`
+sidecar was also implemented and exact, but rejected: the producer-side
+version was -0.32% and a standalone coalesced sidecar was effectively
+flat.
+
+### Final numbers (8 official replicas)
+
+| metric | median | min-max |
+|---|---:|---:|
+| prefill | 784.46 tok/s | 782.14-787.59 |
+| decode gen_tps | **42.76 tok/s** | 42.58-43.05 |
+| steady decode | **42.97 tok/s** | 42.81-43.24 |
+| first token | 26.16 ms | 25.61-26.48 |
+
+This is +8.6% decode and +8.5% steady decode versus the session baseline,
+with no prefill regression. All eight frontier hashes are the canonical
+`eb794f497861d7d9e373665f6e115d8ebe4e17c13c431aa7e318282f16a0f21d`.
+Full `make test`, focused Metal kernels, tensor equivalence, MXFP4 Metal,
+and CLI smoke generation pass on the committed code.
