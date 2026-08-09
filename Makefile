@@ -65,7 +65,7 @@ endif
 .PHONY: all help clean test test-metal-session-batch test-mxfp4-cuda test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
 
 ifeq ($(UNAME_S),Darwin)
-.PHONY: metal-decode-schedule-bench metal-prefill-variant-bench
+.PHONY: metal-decode-schedule-bench metal-prefill-variant-bench check-mxfp4-half-lut
 
 all: ds4 ds4-server ds4-bench ds4-eval ds4-agent
 
@@ -76,6 +76,8 @@ help:
 	@echo "  make test         Build and run tests"
 	@echo "  make metal-decode-schedule-bench  Build the balanced Metal decode schedule benchmark"
 	@echo "  make metal-prefill-variant-bench  Build the balanced Metal prefill variant benchmark"
+	@echo "  make check-mxfp4-half-lut  Verify the checked-in MXFP4 half LUT matches the generator"
+	@echo "  make test-mxfp4-metal  Check the MXFP4 half LUT, then run Metal MXFP4 exactness tests"
 	@echo "  make dspark-verify-depth  Run DSpark speculative verification smoke if support GGUF is present"
 	@echo "  make mtp-verify-depth  Run legacy MTP speculative verification smoke if MTP GGUF is present"
 	@echo "  make clean        Remove build outputs"
@@ -129,7 +131,10 @@ tests/test_mxfp4_metal.o: tests/test_mxfp4_metal.c ds4_gpu.h
 tests/test_mxfp4_metal: tests/test_mxfp4_metal.o ds4_metal.o
 	$(CC) $(CFLAGS) -o $@ $^ $(METAL_LDLIBS)
 
-test-mxfp4-metal: tests/test_mxfp4_metal
+check-mxfp4-half-lut:
+	python3 metal/generate_mxfp4_half_lut.py --check
+
+test-mxfp4-metal: check-mxfp4-half-lut tests/test_mxfp4_metal
 	./tests/test_mxfp4_metal
 
 cpu: ds4_cli_cpu.o ds4_server_cpu.o ds4_bench_cpu.o ds4_eval_cpu.o ds4_agent_cpu.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o rax.o ds4_gpu_args_cpu.o $(CPU_CORE_OBJS)
