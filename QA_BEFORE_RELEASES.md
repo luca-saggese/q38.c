@@ -475,6 +475,15 @@ a substitute for CUDA or Metal release testing.
   `DS4_ROCM_DSV4_PREQUANT_DECODE=0` only as a diagnostic control. The default
   must be materially faster and must still pass the continuation-quality gate.
   GLM and `--quality` must stay on the full-FP32 activation path.
+- Test DSpark with the matched 0731 target and support files:
+  `DS4_BIN=./ds4 DS4_DSPARK_MODEL=gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf DS4_DSPARK_FIXTURE_TOKENS=64 sh tests/dspark_acceptance_fixture.sh`.
+  Require proposals, accepted draft tokens, at least one direct state commit,
+  zero verifier errors, and zero replay fallbacks. Record ordinary and DSpark
+  generation speed separately. When direct verifier-state handling changes,
+  also compare with a test-only build of its immediate replay predecessor; the
+  direct build must be faster. DSpark is not currently expected to beat
+  ordinary ROCm decode, so do not describe it as a ROCm speedup without a new
+  measurement.
 - Run one longer prompt if ROCm kernels, backend hooks, tensor loading, model
   cache, KV cache, or graph prefill code changed.
 - Run the GLM Q2 release model through ROCm SSD streaming with at least four
@@ -629,8 +638,10 @@ claims across different models or contexts.
 | Mac Studio M3 Ultra 512 GB, Metal | Flash q4, 12,018-token prompt | 448.82 t/s | 26.62 t/s |
 | Two M5 Max 128 GB Macs, Metal TP over TB5 RDMA | GLM 5.2 IQ2_XXS, 4,096-token context | about 94 t/s | 15.4 t/s |
 | DGX Spark GB10, CUDA | Flash q2, 7,047-token prompt | 343.81 t/s | 13.75 t/s |
-| Strix Halo gfx1151, ROCm | Flash IQ2 resident, short section 9 smoke | - | 16.78 t/s; FP32 rollback 9.43 t/s |
+| DGX Spark GB10, CUDA | Flash q2 DSpark, 64-token C fixture | - | 24.48 t/s direct; 13.93 t/s replay predecessor |
+| Strix Halo gfx1151, ROCm | Flash IQ2 resident, short section 9 smoke | - | 17.27 t/s; FP32 rollback 9.70 t/s |
 | Strix Halo gfx1151, ROCm | Flash IQ2 resident, 4,096-token context | - | 14.82 t/s; FP32 rollback 8.76 t/s |
+| Strix Halo gfx1151, ROCm | Flash IQ2 DSpark, 64-token C fixture | - | 11.40 t/s direct; 9.77 t/s replay predecessor; 16.70 t/s ordinary |
 | 8x L40S, CUDA TP | Flash q4, 2,048-token prefill benchmark | 1,524.84 t/s | 46.93 t/s |
 | 8x L40S, CUDA TP | Flash q4, 16-row decode oracle | - | 126.0 aggregate t/s |
 
