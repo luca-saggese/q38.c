@@ -19947,6 +19947,19 @@ static bool metal_graph_check_hc_norm_fusion(
     return ok && restart_ok;
 }
 
+extern int ds4_gpu_kv_rope_fp8_fuse_available(void);
+extern int ds4_gpu_decode_attn_rope_fuse_available(void);
+extern int ds4_gpu_decode_attn_rope_fuse_used(void);
+extern void ds4_gpu_set_decode_attn_rope_fuse(
+        uint32_t head_dim, uint32_t n_rot, uint32_t pos0, uint32_t n_ctx_orig,
+        bool inverse, float freq_base, float freq_scale, float ext_factor,
+        float attn_factor, float beta_fast, float beta_slow);
+extern int ds4_gpu_kv_rope_fp8_store_raw_tensor(
+        ds4_gpu_tensor *kv, ds4_gpu_tensor *raw_cache, uint32_t raw_cap,
+        uint32_t row, uint32_t head_dim, uint32_t n_rot, uint32_t pos0,
+        uint32_t n_ctx_orig, bool inverse, float freq_base, float freq_scale,
+        float ext_factor, float attn_factor, float beta_fast, float beta_slow);
+
 static bool metal_graph_decode_kv_store(
         ds4_gpu_tensor *kv,
         ds4_gpu_tensor *raw_cache,
@@ -21797,6 +21810,14 @@ static bool metal_graph_encode_decode_layer_phase(
         uint32_t                n_raw,
         int                     token,
         metal_decode_layer_phase phase) {
+    /* Defer the post-attention inverse RoPE tail into the FlashAttention reduce
+     * kernel, which already owns each head's whole row. Removes one
+     * 64-threadgroup dispatch per layer. */
+    const bool fuse_attn_inv_rope =
+        getenv("DS4_METAL_DISABLE_PRE_M5_ATTN_INV_ROPE_FUSE") == NULL &&
+        (ds4_gpu_device_is_pre_m5_apple_silicon() ||
+         getenv("DS4_METAL_ENABLE_ATTN_INV_ROPE_FUSE") != NULL) &&
+        ds4_gpu_decode_attn_rope_fuse_available() != 0;
     /* switch to this layer's home tier before any Class P
      * accessor reads. Single-tier (placement == NULL): no-op. */
     if (g->placement) {
@@ -22005,6 +22026,11 @@ static bool metal_graph_encode_decode_layer_phase(
     if (phase == METAL_DECODE_LAYER_TO_QKV) return ok;
     }
     if (!resume_after_attn) {
+    /* Fuse the KV RoPE tail into the FP8/raw finalizer: both were single
+     * 64-thread threadgroups on the same 2 KB row, so the pair paid two full
+     * dispatch launches. Deferring the RoPE and running it inside the
+     * finalizer removes one dispatch per layer. */
+    bool fuse_kv_rope_store = false;
     if (!resume_after_qkv) {
     bool qkv_pair_projected = resume_after_qa_kv_raw;
     if (!resume_after_qa_kv_raw && ok && qkv_rms_fused &&
@@ -22182,7 +22208,15 @@ static bool metal_graph_encode_decode_layer_phase(
         }
     }
     const bool tp_ablate_kv = metal_graph_tp_ablate("kv");
-    if (ok && !tp_ablate_kv && !kv_rope_fused) {
+    fuse_kv_rope_store =
+        !tp_ablate_kv && !kv_rope_fused &&
+        !metal_graph_use_reference_kv_decode() &&
+        !resume_after_kv_store &&
+        getenv("DS4_METAL_DISABLE_PRE_M5_KV_ROPE_FP8_FUSE") == NULL &&
+        (ds4_gpu_device_is_pre_m5_apple_silicon() ||
+         getenv("DS4_METAL_ENABLE_KV_ROPE_FP8_FUSE") != NULL) &&
+        ds4_gpu_kv_rope_fp8_fuse_available() != 0;
+    if (ok && !tp_ablate_kv && !kv_rope_fused && !fuse_kv_rope_store) {
         ok = ds4_gpu_rope_tail_tensor(metal_graph_kv(g), 1,
                                       DS4_N_HEAD_KV, DS4_N_HEAD_DIM,
                                       DS4_N_ROT, pos,
@@ -22199,7 +22233,16 @@ static bool metal_graph_encode_decode_layer_phase(
     if (!resume_after_kv_store) {
         /* The common no-debug path may fuse KV RMS with RoPE above. KV
          * storage starts here after metal_graph_kv(g) contains the RoPE row. */
-        if (ok) ok = metal_graph_decode_kv_store(metal_graph_kv(g), raw_cache, raw_cap, raw_row);
+        if (ok) {
+            ok = fuse_kv_rope_store
+                ? (ds4_gpu_kv_rope_fp8_store_raw_tensor(
+                       metal_graph_kv(g), raw_cache, raw_cap, raw_row,
+                       DS4_N_HEAD_DIM, DS4_N_ROT, pos,
+                       compressed ? (uint32_t)DS4_ROPE_ORIG_CTX : 0,
+                       false, freq_base, freq_scale, ext_factor, attn_factor,
+                       DS4_ROPE_YARN_BETA_FAST, DS4_ROPE_YARN_BETA_SLOW) != 0)
+                : metal_graph_decode_kv_store(metal_graph_kv(g), raw_cache, raw_cap, raw_row);
+        }
         if (ok) ok = metal_graph_cuda_tp_attn_cache_sync_raw_row(g, il, raw_row);
         DS4_METAL_PROFILE_DECODE_STAGE("kv_path");
         if (ok) {
@@ -22787,6 +22830,17 @@ static bool metal_graph_encode_decode_layer_phase(
                                                                 &decode_index_stage_t0);
             }
         } else {
+            /* Defer the inverse RoPE tail into the FlashAttention reduce: each
+             * reduce threadgroup already owns one head's entire row, so the
+             * rotation is an intra-threadgroup dependency and the separate
+             * 64-threadgroup RoPE dispatch disappears. */
+            if (fuse_attn_inv_rope) {
+                ds4_gpu_set_decode_attn_rope_fuse(
+                    DS4_N_HEAD_DIM, DS4_N_ROT, pos,
+                    compressed ? (uint32_t)DS4_ROPE_ORIG_CTX : 0,
+                    true, freq_base, freq_scale, ext_factor, attn_factor,
+                    DS4_ROPE_YARN_BETA_FAST, DS4_ROPE_YARN_BETA_SLOW);
+            }
             ok = ds4_gpu_attention_decode_heads_tensor(metal_graph_heads(g),
                                                          model->map, model->size,
                                                          layer->attn_sinks->abs_offset + (uint64_t)tp_head0 * (layer->attn_sinks->bytes / DS4_N_HEAD),
@@ -22802,7 +22856,8 @@ static bool metal_graph_encode_decode_layer_phase(
         }
     }
     }
-    if (ok && !cuda_tp_attn_heads_active && !attn_inv_rope_done) {
+    if (ok && !cuda_tp_attn_heads_active && !attn_inv_rope_done &&
+        !(fuse_attn_inv_rope && ds4_gpu_decode_attn_rope_fuse_used())) {
         ok = ds4_gpu_rope_tail_tensor(metal_graph_heads(g),
                                       1, tp_heads, DS4_N_HEAD_DIM,
                                       DS4_N_ROT, pos,

@@ -137,6 +137,8 @@ static id<MTLComputePipelineState> g_moe_mul_mv_id_mxfp4_sum6_pipeline_nsg1_tg_m
 static id<MTLComputePipelineState> g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_pipeline_nsg1;
 static id<MTLComputePipelineState> g_moe_mul_mv_id_mxfp4_sum6_fixed_route_pipeline_nsg1;
 static id<MTLComputePipelineState> g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_pipeline_nsg1;
+static id<MTLComputePipelineState> g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_static_pipeline_nsg1;
+static id<MTLComputePipelineState> g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_static_pipeline_nsg1;
 static id<MTLComputePipelineState> g_moe_mul_mv_slots6_mxfp4_pair_swiglu_pipeline;
 static id<MTLComputePipelineState> g_moe_mul_mv_slots6_mxfp4_sum6_pipeline;
 static id<MTLComputePipelineState> g_moe_mul_mv_addr_iq2_xxs_pair_swiglu_pipeline;
@@ -160,6 +162,7 @@ static id<MTLComputePipelineState> g_rope_tail_inplace_pair_affine_pipeline;
 static id<MTLComputePipelineState> g_dsv4_fp8_kv_quantize_pipeline;
 static id<MTLComputePipelineState> g_dsv4_indexer_qat_pipeline;
 static id<MTLComputePipelineState> g_dsv4_kv_fp8_store_pipeline;
+static id<MTLComputePipelineState> g_dsv4_kv_rope_fp8_store_pipeline;
 static id<MTLComputePipelineState> g_dsv4_ratio4_shift_pipeline;
 static id<MTLComputePipelineState> g_dsv4_compressor_pack_ratio4_pipeline;
 static id<MTLComputePipelineState> g_dsv4_compressor_pack_ratio4_decode_ggml_pipeline;
@@ -3321,6 +3324,56 @@ static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_vec_pipeline(
     return pipeline;
 }
 
+/* Pipeline for the RoPE-fused decode reduce. Same function constants as the
+ * plain reduce so the split-K geometry is identical. */
+static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_reduce_rope_pipeline(
+        int32_t dv,
+        int32_t nwg) {
+    static int32_t memo_dv, memo_nwg;
+    static id<MTLComputePipelineState> memo_pipeline;
+    if (memo_pipeline && memo_dv == dv && memo_nwg == nwg) {
+        return memo_pipeline;
+    }
+    NSString *key = [NSString stringWithFormat:@"kernel_flash_attn_ext_vec_reduce_rope_dv=%d_nwg=%d",
+                     (int)dv, (int)nwg];
+    id<MTLComputePipelineState> cached = [g_pipeline_cache objectForKey:key];
+    if (cached) {
+        memo_dv = dv; memo_nwg = nwg; memo_pipeline = cached;
+        return cached;
+    }
+    MTLFunctionConstantValues *constants = [[MTLFunctionConstantValues alloc] init];
+    [constants setConstantValue:&dv  type:MTLDataTypeInt atIndex:500];
+    [constants setConstantValue:&nwg type:MTLDataTypeInt atIndex:501];
+    NSError *error = nil;
+    id<MTLFunction> fn = [g_library newFunctionWithName:@"kernel_flash_attn_ext_vec_reduce_rope"
+                                         constantValues:constants
+                                                  error:&error];
+    if (!fn) {
+        fprintf(stderr, "ds4: Metal kernel_flash_attn_ext_vec_reduce_rope not found: %s\n",
+                [[error localizedDescription] UTF8String]);
+        return nil;
+    }
+    error = nil;
+    id<MTLComputePipelineState> pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
+    if (!pipeline) {
+        fprintf(stderr, "ds4: Metal kernel_flash_attn_ext_vec_reduce_rope pipeline failed: %s\n",
+                [[error localizedDescription] UTF8String]);
+        return nil;
+    }
+    [g_pipeline_cache setObject:pipeline forKey:key];
+    memo_dv = dv; memo_nwg = nwg; memo_pipeline = pipeline;
+    return pipeline;
+}
+
+int ds4_gpu_decode_attn_rope_fuse_available(void) {
+    if (!g_initialized && !ds4_gpu_init()) return 0;
+    if (g_rope_tail_inplace_pair_affine_pipeline == nil) return 0;
+    if (getenv("DS4_METAL_DISABLE_M3_INPLACE_ROPE_PAIR") != NULL) return 0;
+    if (getenv("DS4_METAL_DISABLE_M3_AFFINE_ROPE_PAIR") != NULL) return 0;
+    if (!ds4_gpu_device_name_contains("M3") && !ds4_gpu_device_name_contains("M5")) return 0;
+    return 1;
+}
+
 static id<MTLComputePipelineState> ds4_gpu_get_flash_attn_reduce_pipeline(
         int32_t dv,
         int32_t nwg) {
@@ -5526,6 +5579,45 @@ typedef struct {
     float beta_slow;
 } ds4_gpu_rope_affine_pair_args;
 
+/* Set by ds4.c immediately before the decode attention call when the inverse
+ * RoPE tail is deferred into the reduce kernel. Cleared by the encoder. */
+static ds4_gpu_rope_affine_pair_args g_decode_attn_rope_args;
+static int g_decode_attn_rope_fuse;
+/* Set only by the encoder that actually applied the deferred rotation, so ds4.c
+ * can fall back to the standalone RoPE on any attention path that does not
+ * consume it (for example ratio-0 layers that take the raw-heads encoder). */
+static int g_decode_attn_rope_fuse_used;
+
+void ds4_gpu_set_decode_attn_rope_fuse(
+        uint32_t head_dim, uint32_t n_rot, uint32_t pos0, uint32_t n_ctx_orig,
+        bool inverse, float freq_base, float freq_scale, float ext_factor,
+        float attn_factor, float beta_fast, float beta_slow) {
+    const uint64_t row_bytes = (uint64_t)head_dim * sizeof(float);
+    g_decode_attn_rope_args = (ds4_gpu_rope_affine_pair_args) {
+        .row_bytes = row_bytes,
+        .token_bytes = row_bytes,
+        .head_dim = (int32_t)head_dim,
+        .n_dims = (int32_t)n_rot,
+        .n_ctx_orig = (int32_t)n_ctx_orig,
+        .inverse = inverse ? 1 : 0,
+        .pos0 = pos0,
+        .pos_step = 1,
+        .freq_base = freq_base,
+        .freq_scale = freq_scale,
+        .ext_factor = ext_factor,
+        .attn_factor = attn_factor,
+        .beta_fast = beta_fast,
+        .beta_slow = beta_slow,
+    };
+    g_decode_attn_rope_fuse = 1;
+    g_decode_attn_rope_fuse_used = 0;
+}
+
+int ds4_gpu_decode_attn_rope_fuse_used(void) {
+    return g_decode_attn_rope_fuse_used;
+}
+
+
 _Static_assert(sizeof(ds4_gpu_rope_affine_pair_args) == 64,
                "Metal affine RoPE argument ABI changed");
 
@@ -6683,6 +6775,23 @@ int ds4_gpu_init(void) {
             return 0;
         }
 
+        fn = [library newFunctionWithName:@"kernel_dsv4_kv_rope_fp8_store_f32"];
+        if (!fn) {
+            fprintf(stderr, "ds4: Metal kernel_dsv4_kv_rope_fp8_store_f32 function not found\n");
+            g_queue = nil;
+            g_device = nil;
+            return 0;
+        }
+        error = nil;
+        g_dsv4_kv_rope_fp8_store_pipeline = [g_device newComputePipelineStateWithFunction:fn error:&error];
+        if (!g_dsv4_kv_rope_fp8_store_pipeline) {
+            fprintf(stderr, "ds4: Metal kernel_dsv4_kv_rope_fp8_store_f32 pipeline failed: %s\n",
+                    [[error localizedDescription] UTF8String]);
+            g_queue = nil;
+            g_device = nil;
+            return 0;
+        }
+
         fn = [library newFunctionWithName:@"kernel_dsv4_ratio4_shift_f32"];
         if (!fn) {
             fprintf(stderr, "ds4: Metal kernel_dsv4_ratio4_shift_f32 function not found\n");
@@ -7612,13 +7721,21 @@ int ds4_gpu_init(void) {
         g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_pipeline_nsg1 =
             ds4_gpu_new_mul_mv_tg_multiple_pipeline(
                 "kernel_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_f32", 1);
+        g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_static_pipeline_nsg1 =
+            ds4_gpu_new_mul_mv_tg_multiple_pipeline(
+                "kernel_mul_mv_id_mxfp4_pair_swiglu_fixed_route_static_f32", 1);
+        g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_static_pipeline_nsg1 =
+            ds4_gpu_new_mul_mv_tg_multiple_pipeline(
+                "kernel_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_static_f32", 1);
         if (!g_moe_mul_mv_id_mxfp4_pair_swiglu_pipeline_nsg1 ||
             !g_moe_mul_mv_id_mxfp4_sum6_pipeline_nsg1 ||
             !g_moe_mul_mv_id_mxfp4_pair_swiglu_pipeline_nsg1_tg_multiple ||
             !g_moe_mul_mv_id_mxfp4_sum6_pipeline_nsg1_tg_multiple ||
             !g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_pipeline_nsg1 ||
             !g_moe_mul_mv_id_mxfp4_sum6_fixed_route_pipeline_nsg1 ||
-            !g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_pipeline_nsg1) {
+            !g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_pipeline_nsg1 ||
+            !g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_static_pipeline_nsg1 ||
+            !g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_static_pipeline_nsg1) {
             g_queue = nil;
             g_device = nil;
             return 0;
@@ -9816,6 +9933,8 @@ void ds4_gpu_cleanup(void) {
         g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_pipeline_nsg1 = nil;
         g_moe_mul_mv_id_mxfp4_sum6_fixed_route_pipeline_nsg1 = nil;
         g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_pipeline_nsg1 = nil;
+        g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_static_pipeline_nsg1 = nil;
+        g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_static_pipeline_nsg1 = nil;
         g_moe_mul_mv_slots6_mxfp4_pair_swiglu_pipeline = nil;
         g_moe_mul_mv_slots6_mxfp4_sum6_pipeline = nil;
         g_moe_mul_mv_addr_iq2_xxs_pair_swiglu_pipeline = nil;
@@ -9839,6 +9958,7 @@ void ds4_gpu_cleanup(void) {
         g_dsv4_fp8_kv_quantize_pipeline = nil;
         g_dsv4_indexer_qat_pipeline = nil;
         g_dsv4_kv_fp8_store_pipeline = nil;
+        g_dsv4_kv_rope_fp8_store_pipeline = nil;
         g_dsv4_ratio4_shift_pipeline = nil;
         g_dsv4_compressor_pack_ratio4_pipeline = nil;
         g_dsv4_compressor_pack_ratio4_decode_ggml_pipeline = nil;
@@ -20575,6 +20695,100 @@ int ds4_gpu_store_raw_kv_tensor(
 /* Release decode fused KV finalizer.  Reference paths are selected by the C
  * graph driver; this Objective-C entry point always means "use the fused
  * Metal kernel." */
+/* The fused KV RoPE/FP8 kernel replicates the affine decode RoPE specialisation,
+ * so it is only valid where that specialisation is the path in use. */
+int ds4_gpu_kv_rope_fp8_fuse_available(void) {
+    if (!g_initialized && !ds4_gpu_init()) return 0;
+    if (g_dsv4_kv_rope_fp8_store_pipeline == nil) return 0;
+    if (g_rope_tail_inplace_pair_affine_pipeline == nil) return 0;
+    if (getenv("DS4_METAL_DISABLE_M3_INPLACE_ROPE_PAIR") != NULL) return 0;
+    if (getenv("DS4_METAL_DISABLE_M3_AFFINE_ROPE_PAIR") != NULL) return 0;
+    if (!ds4_gpu_device_name_contains("M3") && !ds4_gpu_device_name_contains("M5")) return 0;
+    return 1;
+}
+
+/* Decode-only fusion: one dispatch does the KV RoPE tail and the FP8/raw
+ * finalizer that previously cost two. Same arithmetic, same order; gated and
+ * verified against full-vocabulary logits. */
+int ds4_gpu_kv_rope_fp8_store_raw_tensor(
+        ds4_gpu_tensor *kv,
+        ds4_gpu_tensor *raw_cache,
+        uint32_t          raw_cap,
+        uint32_t          row,
+        uint32_t          head_dim,
+        uint32_t          n_rot,
+        uint32_t          pos0,
+        uint32_t          n_ctx_orig,
+        bool              inverse,
+        float             freq_base,
+        float             freq_scale,
+        float             ext_factor,
+        float             attn_factor,
+        float             beta_fast,
+        float             beta_slow) {
+    if (!g_initialized && !ds4_gpu_init()) return 0;
+    if (!kv || !raw_cache || raw_cap == 0 || row >= raw_cap || head_dim == 0 ||
+        n_rot > head_dim || (n_rot & 1u) != 0 || raw_cap > INT32_MAX ||
+        g_dsv4_kv_rope_fp8_store_pipeline == nil) {
+        return 0;
+    }
+
+    @autoreleasepool {
+        id<MTLBuffer> kvbuf = ds4_gpu_tensor_buffer(kv);
+        id<MTLBuffer> rawbuf = ds4_gpu_tensor_buffer(raw_cache);
+        const uint64_t kv_bytes = (uint64_t)head_dim * sizeof(float);
+        const uint64_t raw_bytes = (uint64_t)raw_cap * head_dim * sizeof(float);
+        if (!kvbuf || !rawbuf ||
+            ds4_gpu_tensor_bytes(kv) < kv_bytes ||
+            ds4_gpu_tensor_bytes(raw_cache) < raw_bytes) {
+            fprintf(stderr, "ds4: Metal fused KV RoPE/FP8 store received undersized buffers\n");
+            return 0;
+        }
+
+        ds4_gpu_dsv4_kv_fp8_store_args args = {
+            .head_dim = (int32_t)head_dim,
+            .n_rot = (int32_t)n_rot,
+            .raw_row = (int32_t)row,
+        };
+        const uint64_t row_bytes = (uint64_t)head_dim * sizeof(float);
+        ds4_gpu_rope_affine_pair_args rope = {
+            .row_bytes = row_bytes,
+            .token_bytes = row_bytes,
+            .head_dim = (int32_t)head_dim,
+            .n_dims = (int32_t)n_rot,
+            .n_ctx_orig = (int32_t)n_ctx_orig,
+            .inverse = inverse ? 1 : 0,
+            .pos0 = pos0,
+            .pos_step = 1,
+            .freq_base = freq_base,
+            .freq_scale = freq_scale,
+            .ext_factor = ext_factor,
+            .attn_factor = attn_factor,
+            .beta_fast = beta_fast,
+            .beta_slow = beta_slow,
+        };
+
+        int owned = 0;
+        id<MTLCommandBuffer> cb = ds4_gpu_command_buffer(&owned);
+        if (!cb) return 0;
+
+        id<MTLComputeCommandEncoder> enc = ds4_gpu_compute_encoder(cb);
+        [enc setComputePipelineState:g_dsv4_kv_rope_fp8_store_pipeline];
+        [enc setBytes:&args length:sizeof(args) atIndex:0];
+        [enc setBytes:&rope length:sizeof(rope) atIndex:1];
+        [enc setBuffer:kvbuf offset:ds4_gpu_tensor_offset(kv) atIndex:2];
+        [enc setBuffer:rawbuf offset:ds4_gpu_tensor_offset(raw_cache) atIndex:3];
+        [enc setThreadgroupMemoryLength:64u * sizeof(float) atIndex:0];
+        [enc dispatchThreadgroups:MTLSizeMake(1, 1, 1)
+             threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+        ds4_gpu_end_compute_encoder(cb, enc);
+
+        if (!ds4_gpu_finish_command_buffer(cb, owned, "KV RoPE/FP8 store fused")) return 0;
+    }
+
+    return 1;
+}
+
 int ds4_gpu_kv_fp8_store_raw_tensor(
         ds4_gpu_tensor *kv,
         ds4_gpu_tensor *raw_cache,
@@ -26492,11 +26706,26 @@ static int ds4_gpu_encode_flash_attention_gathered_heads(
     ds4_gpu_flash_attn_reduce_args reduce_args = {
         .nrows = (int32_t)nrows,
     };
+    /* When ds4.c defers the inverse RoPE tail, the reduce threadgroup that owns
+     * a head's whole row rotates it in place, removing a dispatch per layer. */
+    const int fuse_rope = g_decode_attn_rope_fuse;
+    g_decode_attn_rope_fuse = 0;
+    if (fuse_rope) g_decode_attn_rope_fuse_used = 1;
+    id<MTLComputePipelineState> reduce_pso = reduce_pipeline;
+    if (fuse_rope) {
+        reduce_pso = ds4_gpu_get_flash_attn_reduce_rope_pipeline((int32_t)head_dim,
+                                                                   (int32_t)nwg);
+        if (!reduce_pso) return 0;
+    }
     enc = ds4_gpu_compute_encoder(cb);
-    [enc setComputePipelineState:reduce_pipeline];
+    [enc setComputePipelineState:reduce_pso];
     [enc setBytes:&reduce_args length:sizeof(reduce_args) atIndex:0];
     [enc setBuffer:g_flash_attn_tmp_buffer offset:0 atIndex:1];
     [enc setBuffer:headsbuf offset:ds4_gpu_tensor_offset(heads) atIndex:2];
+    if (fuse_rope) {
+        [enc setBytes:&g_decode_attn_rope_args
+               length:sizeof(g_decode_attn_rope_args) atIndex:3];
+    }
     [enc dispatchThreadgroups:MTLSizeMake(nrows, 1, 1)
          threadsPerThreadgroup:MTLSizeMake(32u * nwg, 1, 1)];
     ds4_gpu_end_compute_encoder(cb, enc);
@@ -36726,6 +36955,27 @@ int ds4_gpu_routed_moe_one_tensor(
             down_args.ne0 == 4096 &&
             down_args.nr0 == 2 &&
             g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_pipeline_nsg1 != nil;
+        /* Compile-time trip counts for the one-token fixed-route decode MoE
+         * kernels.  Every shape the specialized kernels assume is proven above
+         * (gate ne00 4096 / row bytes 2176; down ne00 2048 / row bytes 1088 /
+         * nei0 6), so the specialization only removes runtime loop bounds; the
+         * per-lane K walk and accumulate order stay byte-identical. */
+        const bool mxfp4_moe_decode_static_trip_enabled =
+            ds4_gpu_device_is_pre_m5_apple_silicon() ||
+            getenv("DS4_METAL_ENABLE_MXFP4_MOE_DECODE_STATIC_TRIP") != NULL;
+        const bool use_mxfp4_moe_decode_static_trip_pair =
+            use_mxfp4_moe_decode_fixed_route_pair &&
+            mxfp4_moe_decode_static_trip_enabled &&
+            getenv("DS4_METAL_DISABLE_PRE_M5_MXFP4_MOE_DECODE_STATIC_TRIP") == NULL &&
+            gate_args.ne00 == 4096 &&
+            gate_args.nb01 == 2176 &&
+            g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_static_pipeline_nsg1 != nil;
+        const bool use_mxfp4_moe_decode_static_trip_down =
+            use_mxfp4_moe_decode_sum6_full_rows &&
+            use_mxfp4_moe_decode_static_trip_pair &&
+            down_args.nb01 == 1088 &&
+            down_args.nei0 == 6 &&
+            g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_static_pipeline_nsg1 != nil;
         id<MTLComputePipelineState> pair_swiglu_pipeline = nil;
         if (gate_type == DS4_METAL_TENSOR_IQ2_XXS) {
             pair_swiglu_pipeline = g_moe_mul_mv_id_iq2_xxs_pair_swiglu_pipeline;
@@ -36735,6 +36985,8 @@ int ds4_gpu_routed_moe_one_tensor(
             pair_swiglu_pipeline = g_moe_mul_mv_id_mxfp4_pair_swiglu_pipeline;
             if (ds4_gpu_mxfp4_moe_decode_nsg1_enabled(n_tokens)) {
                 pair_swiglu_pipeline =
+                    use_mxfp4_moe_decode_static_trip_pair ?
+                        g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_static_pipeline_nsg1 :
                     use_mxfp4_moe_decode_fixed_route_pair ?
                         g_moe_mul_mv_id_mxfp4_pair_swiglu_fixed_route_pipeline_nsg1 :
                         (use_mxfp4_moe_decode_tg_multiple ?
@@ -36757,6 +37009,8 @@ int ds4_gpu_routed_moe_one_tensor(
             down_sum6_pipeline = g_moe_mul_mv_id_mxfp4_sum6_pipeline;
             if (ds4_gpu_mxfp4_moe_decode_nsg1_enabled(n_tokens)) {
                 down_sum6_pipeline =
+                    use_mxfp4_moe_decode_static_trip_down ?
+                        g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_static_pipeline_nsg1 :
                     use_mxfp4_moe_decode_sum6_full_rows ?
                         g_moe_mul_mv_id_mxfp4_sum6_fixed_route_full_rows_pipeline_nsg1 :
                         (use_mxfp4_moe_decode_fixed_route_sum6 ?
@@ -39548,16 +39802,39 @@ int ds4_gpu_routed_moe_batch_tensor(
                 if (mpp) down_mm_pipeline = mpp;
             }
             if (use_mm_id_pair_swiglu) {
+                /* Exact half-domain block scaling for the resident MXFP4 pair
+                 * tile: E8M0 is a power of two and every E2M1 magnitude is
+                 * exact in binary16, so inside the guarded exponent band the
+                 * half product is the identical once-rounded value while the
+                 * per-element f32->f16 narrowing and the 64-byte float table
+                 * disappear. Outside the band the kernel keeps the established
+                 * float arithmetic. */
+                const bool mxfp4_mm_id_pair_half_scale_enabled =
+                    ds4_gpu_device_is_pre_m5_apple_silicon() ||
+                    getenv("DS4_METAL_ENABLE_MXFP4_MM_ID_PAIR_HALF_SCALE") != NULL;
+                const bool use_mxfp4_mm_id_pair_half_scale =
+                    gate_type == DS4_METAL_TENSOR_MXFP4 &&
+                    mxfp4_mm_id_pair_half_scale_enabled &&
+                    getenv("DS4_METAL_DISABLE_PRE_M5_MXFP4_MM_ID_PAIR_HALF_SCALE") == NULL &&
+                    !g_quality_mode &&
+                    !g_ssd_streaming_mode &&
+                    g_tp_split_world == 1;
                 pair_swiglu_mm_pipeline =
                     ds4_gpu_get_pipeline(
                         gate_type == DS4_METAL_TENSOR_Q4_K ?
                             "kernel_mul_mm_id_q4_K_pair_swiglu_f16" :
                         gate_type == DS4_METAL_TENSOR_MXFP4 ?
                             (use_mxfp4_mm_id_pair_swiglu_compact_tile ?
-                                "kernel_mul_mm_id_mxfp4_pair_swiglu_f16_compact_tail_cull" :
+                                (use_mxfp4_mm_id_pair_half_scale ?
+                                    "kernel_mul_mm_id_mxfp4_pair_swiglu_f16_compact_tail_cull_half_scale" :
+                                    "kernel_mul_mm_id_mxfp4_pair_swiglu_f16_compact_tail_cull") :
                              use_mxfp4_mm_id_pair_tail_simdgroup_cull ?
-                                "kernel_mul_mm_id_mxfp4_pair_swiglu_f16_tail_cull" :
-                                "kernel_mul_mm_id_mxfp4_pair_swiglu_f16") :
+                                (use_mxfp4_mm_id_pair_half_scale ?
+                                    "kernel_mul_mm_id_mxfp4_pair_swiglu_f16_tail_cull_half_scale" :
+                                    "kernel_mul_mm_id_mxfp4_pair_swiglu_f16_tail_cull") :
+                                (use_mxfp4_mm_id_pair_half_scale ?
+                                    "kernel_mul_mm_id_mxfp4_pair_swiglu_f16_half_scale" :
+                                    "kernel_mul_mm_id_mxfp4_pair_swiglu_f16")) :
                             "kernel_mul_mm_id_iq2_xxs_pair_swiglu_f16");
             }
             if (!map_pipeline || !gate_mm_pipeline || !up_mm_pipeline || !down_mm_pipeline ||
