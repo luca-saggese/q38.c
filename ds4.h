@@ -150,6 +150,7 @@ typedef struct {
     bool glm_mtp_timing;
     bool dspark;
     bool dspark_strict;
+    bool dspark_exact_sampling;
     bool dspark_confidence_threshold_set;
     bool cuda_tensor_parallel;
     bool ssd_streaming;
@@ -429,8 +430,9 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
                                         int max_tokens, int eos_token,
                                         int *accepted, int accepted_cap,
                                         char *err, size_t errlen);
-/* Evaluate one already-sampled target token and, for DSpark, speculatively
- * extend it using exact stochastic p/q acceptance under the same filters. */
+/* Evaluate one already-sampled target token and speculatively extend it.
+ * Positive-temperature DSpark normally commits greedily verified draft
+ * tokens; dspark_exact_sampling selects exact stochastic p/q acceptance. */
 int ds4_session_eval_speculative(ds4_session *s, int first_token,
                                  int max_tokens, int eos_token,
                                  float temperature, int top_k,

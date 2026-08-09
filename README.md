@@ -241,16 +241,28 @@ Run it with the normal sampling defaults:
 ```
 
 `--mtp` supplies the support GGUF, while `--dspark` selects the DSpark runtime.
-The default confidence threshold is `0.6` on Metal and `0.7` on CUDA and ROCm;
-it prunes suffixes that are unlikely to repay their verification cost.
+The default confidence threshold is `0.6` on Metal and `0.7` on CUDA and ROCm.
+It prunes suffixes that are unlikely to repay their verification cost.
 `--dspark-confidence 0` forces fixed five-token blocks and is intended for
-diagnostics. Sampled decoding uses a stricter `0.8` default. DFlash proposes
-its most likely token; the target accepts it with the probability assigned by
-the requested temperature, top-p, top-k, and min-p filters. On rejection, the
-replacement is sampled from the remaining target distribution. This preserves
-ordinary target sampling rather than treating a draft as ground truth.
-Add `--temp 0` for greedy decoding. `--quality` and `--dspark-strict` keep
-target-only decoding, which is useful for reproducibility checks.
+diagnostics.
+
+At a non-zero temperature, ordinary `--dspark` uses opportunistic sampling.
+Tokens evaluated normally are sampled with the requested temperature, top-p,
+top-k, and min-p. DFlash then proposes a greedy suffix, and every token that
+matches the target's greedy continuation is committed directly. Sampling
+resumes at the first mismatch. This is deliberately more deterministic than
+ordinary temperature sampling. On an M5 Max it retained enough of the greedy
+DSpark gain to improve a predictable code continuation by about 8% at
+temperature 1. A single M3 Max run was slightly slower, the same test was
+nearly neutral on DGX Spark, and it was slower on Strix Halo, where
+verification is more expensive.
+
+Use `--dspark-exact-sampling` when the output must follow the ordinary target
+distribution. Exact mode accepts each greedy DFlash proposal with its target
+probability and, on rejection, samples from the remaining target distribution.
+It uses a stricter `0.8` confidence threshold by default. Add `--temp 0` for
+fully greedy decoding. `--quality` and `--dspark-strict` keep target-only
+decoding, which is useful for reproducibility checks.
 The same DSpark flags work with `ds4-agent` and with non-batched
 `ds4-server` requests. Session-batched serving currently uses ordinary target
 decoding.

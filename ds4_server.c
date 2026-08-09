@@ -13138,6 +13138,9 @@ static server_config parse_options(int argc, char **argv) {
         } else if (!strcmp(arg, "--dspark-strict")) {
             c.engine.dspark = true;
             c.engine.dspark_strict = true;
+        } else if (!strcmp(arg, "--dspark-exact-sampling")) {
+            c.engine.dspark = true;
+            c.engine.dspark_exact_sampling = true;
         } else if (!strcmp(arg, "-c") || !strcmp(arg, "--ctx")) {
             c.ctx_size = parse_int_arg(need_arg(&i, argc, argv, arg), arg);
         } else if (!strcmp(arg, "-n") || !strcmp(arg, "--tokens")) {

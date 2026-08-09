@@ -33409,66 +33409,6 @@ static bool dspark_apply_markov_greedy_probe(
     return true;
 }
 
-static bool dspark_sample_corrected_row(
-        float                         *logits,
-        const ds4_model               *dspark_model,
-        const ds4_dspark_stage_weights *final,
-        const float                   *markov_state,
-        float                         *markov_bias,
-        int32_t                       *token_out) {
-    if (!logits || !dspark_model || !final || !markov_state || !markov_bias ||
-        !token_out) {
-        return false;
-    }
-    if (!dspark_markov_bias_disabled()) {
-        matvec_any(markov_bias, dspark_model, final->markov_w2, markov_state);
-        for (uint32_t i = 0; i < DS4_N_VOCAB; i++) logits[i] += markov_bias[i];
-    }
-    /* A point-mass proposal at the drafter's argmax is still a valid q for
-     * speculative sampling. It avoids a vocabulary softmax for every draft
-     * row and makes rejected first tokens cheap to identify before verify. */
-    *token_out = (int32_t)dspark_argmax_f32(logits, DS4_N_VOCAB);
-    return true;
-}
-
-static bool dspark_apply_markov_stochastic(
-        float                         *logits,
-        const ds4_model               *dspark_model,
-        const ds4_dspark_weights      *dw,
-        int                            first_prev_token,
-        float                         *markov_state,
-        float                         *markov_bias,
-        int32_t                        proposal[DS4_DSPARK_MAX_BLOCK_SIZE],
-        uint32_t                      *proposal_len) {
-    if (proposal_len) *proposal_len = 0;
-    if (!logits || !dspark_model || !dw || !markov_state || !markov_bias ||
-        !proposal || first_prev_token < 0 ||
-        (uint32_t)first_prev_token >= DS4_N_VOCAB ||
-        !dspark_markov_probe_ready(dw)) {
-        return false;
-    }
-    const ds4_dspark_stage_weights *final =
-        &dw->stage[dw->n_stages - 1u];
-    int32_t prev_token = first_prev_token;
-    for (uint32_t draft = 0; draft < dw->block_size; draft++) {
-        if (!dspark_dense_row_to_f32(markov_state, dspark_model,
-                                     final->markov_w1,
-                                     (uint32_t)prev_token)) {
-            return false;
-        }
-        float *row = logits + (uint64_t)draft * DS4_N_VOCAB;
-        int32_t token = -1;
-        if (!dspark_sample_corrected_row(row, dspark_model, final,
-                                         markov_state, markov_bias, &token)) {
-            return false;
-        }
-        proposal[draft] = token;
-        prev_token = token;
-    }
-    if (proposal_len) *proposal_len = dw->block_size;
-    return true;
-}
-
 static bool dspark_confidence_probe_ready(
         const ds4_dspark_weights *dw) {
     if (!dspark_markov_probe_ready(dw)) return false;
@@ -33554,8 +33494,7 @@ static bool dspark_apply_markov_confidence_lazy_runtime(
         uint32_t               *confidence_len,
         uint32_t               *confidence_prefix_len,
         bool                    reuse_first_confidence,
-        float                  *confidence0,
-        bool                    stochastic_sampling) {
+        float                  *confidence0) {
     if (proposal_len) *proposal_len = 0;
     if (confidence_len) *confidence_len = 0;
     if (confidence_prefix_len) *confidence_prefix_len = 0;
@@ -33598,15 +33537,16 @@ static bool dspark_apply_markov_confidence_lazy_runtime(
             ok = false;
             break;
         }
-        ok = dspark_dense_row_to_f32(markov_state,
-                                     dspark_model,
-                                     final->markov_w1,
-                                     (uint32_t)prev_token);
-        if (!ok) break;
         float confidence_logit = 0.0f;
         if (draft == 0 && reuse_first_confidence) {
             confidence_logit = *confidence0;
         } else {
+            ok = dspark_dense_row_to_f32(markov_state,
+                                         dspark_model,
+                                         final->markov_w1,
+                                         (uint32_t)prev_token);
+            if (!ok) break;
+
             ok = ds4_gpu_tensor_read(metal_graph_batch_ffn_norm(g),
                                      (uint64_t)draft * hidden_bytes,
                                      features,
@@ -33625,24 +33565,10 @@ static bool dspark_apply_markov_confidence_lazy_runtime(
         }
 
         int32_t token = -1;
-        if (stochastic_sampling) {
-            ok = ds4_gpu_tensor_read(g->spec_logits,
-                                     (uint64_t)draft * logits_bytes,
-                                     logits,
-                                     logits_bytes) != 0;
-            if (ok) {
-                ok = dspark_sample_corrected_row(logits,
-                                                  dspark_model,
-                                                  final,
-                                                  markov_state,
-                                                  markov_bias,
-                                                  &token);
-            }
-        }
 #ifndef __APPLE__
         /* CUDA can apply the Markov bias and argmax without reading back the
          * full logits row. Metal currently falls through to the CPU path. */
-        if (!stochastic_sampling && ok && !dspark_markov_bias_disabled() &&
+        if (ok && !dspark_markov_bias_disabled() &&
             getenv("DS4_DSPARK_NO_GPU_MARKOV") == NULL &&
             g->dspark_draft_tokens &&
             dw->markov_rank != 0 && (dw->markov_rank & 31u) == 0 &&
@@ -33680,7 +33606,7 @@ static bool dspark_apply_markov_confidence_lazy_runtime(
             }
         }
 #endif
-        if (!stochastic_sampling && ok) {
+        if (ok) {
             ok = ds4_gpu_tensor_read(g->spec_logits,
                                      (uint64_t)draft * logits_bytes,
                                      logits,
@@ -36961,6 +36887,7 @@ struct ds4_engine {
     bool glm_mtp_timing;
     bool dspark;
     bool dspark_strict;
+    bool dspark_exact_sampling;
     bool cuda_tensor_parallel;
     bool glm_tp_token_prefill;
     bool ssd_streaming;
@@ -57488,6 +57415,7 @@ static int ds4_engine_open_internal(ds4_engine **out,
     e->glm_mtp_timing = opt->glm_mtp_timing;
     e->dspark = opt->dspark;
     e->dspark_strict = opt->dspark_strict;
+    e->dspark_exact_sampling = opt->dspark_exact_sampling;
     e->cuda_tensor_parallel = opt->cuda_tensor_parallel;
     e->glm_tp_token_prefill = opt->tp.glm_token_prefill;
     e->ssd_streaming = opt->ssd_streaming;
@@ -61524,8 +61452,7 @@ static bool ds4_session_prepare_dspark_draft_impl(ds4_session *s,
                         &confidence_len,
                         &confidence_prefix_len,
                         reuse_confidence0_markov,
-                        &confidence0,
-                        stochastic_requested);
+                        &confidence0);
             DS4_DSPARK_PROP_ADD(propose_markov_ms, markov_t0);
             confidence_ok = markov_ok;
         } else if (markov_ready) {
@@ -61545,25 +61472,15 @@ static bool ds4_session_prepare_dspark_draft_impl(ds4_session *s,
                                         0,
                                         logits,
                                         logits_bytes) != 0 &&
-                    (stochastic_requested ?
-                        dspark_apply_markov_stochastic(
-                            logits,
-                            &s->engine->mtp_model,
-                            dw,
-                            token,
-                            markov_state,
-                            markov_bias,
-                            markov_proposal,
-                            &markov_proposal_len) :
-                        dspark_apply_markov_greedy_probe(
-                            logits,
-                            &s->engine->mtp_model,
-                            dw,
-                            token,
-                            markov_state,
-                            markov_bias,
-                            markov_proposal,
-                            &markov_proposal_len));
+                    dspark_apply_markov_greedy_probe(
+                        logits,
+                        &s->engine->mtp_model,
+                        dw,
+                        token,
+                        markov_state,
+                        markov_bias,
+                        markov_proposal,
+                        &markov_proposal_len);
                 if (markov_ok && probe_log) {
                     /* Runtime only needs the greedy proposal. Keep the GPU
                      * writeback for probe mode, where spec_logits may be
@@ -67423,9 +67340,20 @@ int ds4_session_eval_speculative(ds4_session *s, int first_token,
     return 1;
 #else
     ds4_engine *e = s->engine;
+    const bool opportunistic_dspark =
+        e && e->support_kind == DS4_SUPPORT_DSPARK && e->dspark &&
+        !e->quality && !e->dspark_strict && !e->dspark_exact_sampling;
+    if (opportunistic_dspark) {
+        /* first_token was sampled with the requested temperature. Commit the
+         * following DFlash tokens while they match the target's greedy path;
+         * after a divergence the caller samples the next boundary token. */
+        return ds4_session_eval_speculative_argmax(
+            s, first_token, max_tokens, eos_token,
+            accepted, accepted_cap, err, errlen);
+    }
     const bool stochastic_dspark =
         e && e->support_kind == DS4_SUPPORT_DSPARK && e->dspark &&
-        !e->quality && !e->dspark_strict;
+        !e->quality && !e->dspark_strict && e->dspark_exact_sampling;
     bool can_prepare = stochastic_dspark && first_token != eos_token &&
         max_tokens > 1 && accepted_cap > 1;
     bool tail_skip = false;
