@@ -22,10 +22,22 @@
 #define MXFP4_TYPE 39u
 #define QK_MXFP4 32u
 #define QK_K 256u
+/* Default to the DS4 Flash routed-expert shape: model_dim 4096 means 16
+ * Q8_K activation chunks per token, which is what the resident tile and
+ * decode kernels see in production.  Smaller synthetic dims miss the
+ * no-staging and multi-chunk code paths entirely. */
+#ifndef N_TOTAL_EXPERT
 #define N_TOTAL_EXPERT 256u
+#endif
+#ifndef N_EXPERT
 #define N_EXPERT 6u
-#define MODEL_DIM 512u
-#define FFN_DIM 256u
+#endif
+#ifndef MODEL_DIM
+#define MODEL_DIM 4096u
+#endif
+#ifndef FFN_DIM
+#define FFN_DIM 2048u
+#endif
 #define N_PATTERN 4u
 #define CLAMP 7.0f
 
@@ -44,7 +56,6 @@ typedef struct {
     int32_t selected[N_EXPERT];
     float weights[N_EXPERT];
     float mid[N_EXPERT * FFN_DIM];
-    float out[MODEL_DIM];
 } reference_pattern;
 
 static const float mxfp4_values[16] = {
@@ -192,8 +203,7 @@ static void init_patterns(reference_pattern patterns[N_PATTERN]) {
 
 static void build_reference(reference_pattern *pattern,
                             const block_mxfp4 *gate_matrix,
-                            const block_mxfp4 *up_matrix,
-                            const block_mxfp4 *down_matrix) {
+                            const block_mxfp4 *up_matrix) {
     ref_block_q8_K xq[MODEL_DIM / QK_K];
     ref_block_q8_K midq[N_EXPERT][FFN_DIM / QK_K];
     quantize_q8_K(xq, pattern->x, MODEL_DIM);
@@ -216,17 +226,6 @@ static void build_reference(reference_pattern *pattern,
         }
         quantize_q8_K(midq[slot], mid, FFN_DIM);
     }
-
-    for (uint32_t row = 0; row < MODEL_DIM; row++) {
-        float sum = 0.0f;
-        for (uint32_t slot = 0; slot < N_EXPERT; slot++) {
-            const uint32_t expert = (uint32_t)pattern->selected[slot];
-            sum += dot_mxfp4_q8_K(
-                matrix_row(down_matrix, expert, row, MODEL_DIM, FFN_DIM),
-                midq[slot], FFN_DIM);
-        }
-        pattern->out[row] = sum;
-    }
 }
 
 static int compare_repeated(const char *name,
@@ -234,7 +233,6 @@ static int compare_repeated(const char *name,
                             uint32_t n_tokens,
                             uint32_t token_elems,
                             const reference_pattern patterns[N_PATTERN],
-                            bool compare_mid,
                             float abs_tolerance,
                             float rel_tolerance) {
     float max_abs = 0.0f;
@@ -245,9 +243,7 @@ static int compare_repeated(const char *name,
     const uint64_t count = (uint64_t)n_tokens * token_elems;
 
     for (uint32_t token = 0; token < n_tokens; token++) {
-        const float *expected = compare_mid ?
-            patterns[token % N_PATTERN].mid :
-            patterns[token % N_PATTERN].out;
+        const float *expected = patterns[token % N_PATTERN].mid;
         for (uint32_t i = 0; i < token_elems; i++) {
             const uint64_t index = (uint64_t)token * token_elems + i;
             const float got = actual[index];
@@ -278,6 +274,89 @@ static int compare_repeated(const char *name,
             "MXFP4 ROCm tokens=%-3u %-3s max_abs=%-10g at=%llu "
             "max_tol_ratio=%g at=%llu failures=%llu/%llu\n",
             n_tokens, name, max_abs, (unsigned long long)max_abs_index,
+            max_ratio, (unsigned long long)max_ratio_index,
+            (unsigned long long)failures, (unsigned long long)count);
+    return failures == 0u;
+}
+
+/* The GPU quantizes its own gate/up mid before the down projection, and a
+ * one-LSB rounding flip against the analytic reference mid is legitimate:
+ * both mids sit within float tolerance of each other, yet one flipped
+ * activation moves a down dot by up to d * 2^(e-127) * 6, which real-shape
+ * scales push past any fixed tolerance.  Judge the down stage on the GPU's
+ * own mid instead: quantize it with the identical CPU algorithm and require
+ * the down kernels to match that reference tightly.  Expected rows are
+ * cached per pattern; repeated tokens reuse them after a bitwise mid check. */
+static int check_out_from_gpu_mid(const float *out_actual,
+                                  const float *mid_actual,
+                                  uint32_t n_tokens,
+                                  const reference_pattern patterns[N_PATTERN],
+                                  const block_mxfp4 *down_matrix,
+                                  float abs_tolerance,
+                                  float rel_tolerance) {
+    static ref_block_q8_K midq[N_EXPERT][FFN_DIM / QK_K];
+    static float expected[N_PATTERN][MODEL_DIM];
+    int32_t cached_token[N_PATTERN] = { -1, -1, -1, -1 };
+    float max_abs = 0.0f;
+    float max_ratio = 0.0f;
+    uint64_t max_abs_index = 0u;
+    uint64_t max_ratio_index = 0u;
+    uint64_t failures = 0u;
+    const uint64_t count = (uint64_t)n_tokens * MODEL_DIM;
+
+    for (uint32_t token = 0; token < n_tokens; token++) {
+        const uint32_t p = token % N_PATTERN;
+        const reference_pattern *pattern = &patterns[p];
+        const float *mid = mid_actual + (uint64_t)token * N_EXPERT * FFN_DIM;
+        const uint64_t mid_bytes = (uint64_t)N_EXPERT * FFN_DIM * sizeof(float);
+        if (cached_token[p] < 0 ||
+            memcmp(mid_actual + (uint64_t)cached_token[p] * N_EXPERT * FFN_DIM,
+                   mid, mid_bytes) != 0) {
+            for (uint32_t slot = 0; slot < N_EXPERT; slot++) {
+                quantize_q8_K(midq[slot], mid + (uint64_t)slot * FFN_DIM, FFN_DIM);
+            }
+            for (uint32_t row = 0; row < MODEL_DIM; row++) {
+                float want = 0.0f;
+                for (uint32_t slot = 0; slot < N_EXPERT; slot++) {
+                    const uint32_t expert = (uint32_t)pattern->selected[slot];
+                    want += dot_mxfp4_q8_K(
+                        matrix_row(down_matrix, expert, row, MODEL_DIM, FFN_DIM),
+                        midq[slot], FFN_DIM);
+                }
+                expected[p][row] = want;
+            }
+            cached_token[p] = (int32_t)token;
+        }
+        for (uint32_t i = 0; i < MODEL_DIM; i++) {
+            const uint64_t index = (uint64_t)token * MODEL_DIM + i;
+            const float got = out_actual[index];
+            const float want = expected[p][i];
+            if (!isfinite(got) || !isfinite(want)) {
+                fprintf(stderr,
+                        "MXFP4 ROCm tokens=%u out non-finite at token=%u element=%u "
+                        "got=%g expected=%g\n",
+                        n_tokens, token, i, got, want);
+                return 0;
+            }
+            const float error = fabsf(got - want);
+            const float allowed = abs_tolerance + rel_tolerance * fabsf(want);
+            const float ratio = allowed > 0.0f ? error / allowed : error;
+            if (error > max_abs) {
+                max_abs = error;
+                max_abs_index = index;
+            }
+            if (ratio > max_ratio) {
+                max_ratio = ratio;
+                max_ratio_index = index;
+            }
+            if (error > allowed) failures++;
+        }
+    }
+
+    fprintf(stderr,
+            "MXFP4 ROCm tokens=%-3u out max_abs=%-10g at=%llu "
+            "max_tol_ratio=%g at=%llu failures=%llu/%llu\n",
+            n_tokens, max_abs, (unsigned long long)max_abs_index,
             max_ratio, (unsigned long long)max_ratio_index,
             (unsigned long long)failures, (unsigned long long)count);
     return failures == 0u;
@@ -381,10 +460,11 @@ static int run_case(uint32_t n_tokens,
         /* Gate/up are optional scratch outputs in the optimized ROCm paths;
          * mid is the public, stable result of that fused stage. */
         const int mid_ok = compare_repeated(
-            "mid", mid_actual, n_tokens, N_EXPERT * FFN_DIM, patterns, true,
+            "mid", mid_actual, n_tokens, N_EXPERT * FFN_DIM, patterns,
             1.0e-4f, 1.0e-4f);
-        const int out_ok = compare_repeated(
-            "out", out_actual, n_tokens, MODEL_DIM, patterns, false,
+        const int out_ok = check_out_from_gpu_mid(
+            out_actual, mid_actual, n_tokens, patterns,
+            (const block_mxfp4 *)((const char *)model + down_offset),
             2.0e-4f, 1.0e-4f);
         ok = mid_ok && out_ok;
     }
@@ -464,10 +544,8 @@ int main(void) {
         (const block_mxfp4 *)((const uint8_t *)model + gate_offset);
     const block_mxfp4 *up_matrix =
         (const block_mxfp4 *)((const uint8_t *)model + up_offset);
-    const block_mxfp4 *down_matrix =
-        (const block_mxfp4 *)((const uint8_t *)model + down_offset);
     for (uint32_t p = 0; p < N_PATTERN; p++) {
-        build_reference(&patterns[p], gate_matrix, up_matrix, down_matrix);
+        build_reference(&patterns[p], gate_matrix, up_matrix);
     }
 
     fprintf(stderr,
