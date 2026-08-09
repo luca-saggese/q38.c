@@ -21,7 +21,7 @@ it is clear what hardware was used for the benchmark.
 To generate an SVG graph from a CSV file:
 
 ```
-python3 speed-bench/plot_speed.py speed-bench/m3_max.csv --title "M3 Max t/s"
+uv run python speed-bench/plot_speed.py speed-bench/m3_max.csv --title "M3 Max t/s"
 ```
 
 The script uses only the Python standard library. By default it writes a file
@@ -80,6 +80,20 @@ ABBA and BAAB blocks, poisons host logit buffers before copying, and aborts
 unless every final full-vocabulary logit row is bit-identical. Defaults are an
 8192-token prefix, an automatically sized 8193-token context, and two repeats;
 use `--help` to override them.
+
+### Campaign reports
+
+Final campaign narratives (not operational handoffs):
+
+- `ds4_m5_fusion_port_results.md`: M5 Max ds4f-q2 decode-fusion promotion,
+  rejected attempts, mechanism/eligibility, and rollback contract.
+- `ds4_pre_m5_q2_decode_port_results.md`: pre-M5 port of those exact decode
+  paths on M3 Ultra (IQ2XXS/Q2), including aggregate rollback.
+- M3 Ultra resident-MXFP4 rounds 1–15: tables and manifest below (no separate
+  narrative file; the CSV/JSON set is the durable record).
+
+Session restart material and superseded agent handoffs stay under ignored
+`speed-bench/local-runs/` and are not part of the review surface.
 
 ### M3 Ultra MXFP4 improvement history
 
@@ -174,12 +188,14 @@ single-token-only specializations; official prefill medians remain flat
 between R13 and R15. Performance was measured only on M3 Ultra; M1, M2, and
 M4 were not performance-benchmarked.
 
-The final repository-wide `make test` at Round 15 retained 17
-golden/model-behavior assertion failures. Disabling all new Round 4-9 defaults
-reproduced the
-same 17 failures; the Metal-kernel suite and tensor-equivalence suite passed
-exactly, and the Round 15 normalized assertion fingerprint is byte-identical
-to the R13 campaign baseline. The manifest records the evidence hashes.
+Historical campaign note (Round 15 tip only): repository-wide `make test` at
+that checkpoint retained 17 golden/model-behavior assertion failures.
+Disabling all new Round 4-9 defaults reproduced the same 17 failures; the
+Metal-kernel suite and tensor-equivalence suite passed exactly, and the Round
+15 normalized assertion fingerprint is byte-identical to the R13 campaign
+baseline. The manifest records the evidence hashes. The current branch tip
+reports a green `make test`; treat the 17-failure count as historical
+provenance, not the present suite status.
 
 Use `sequence` as the chart x-axis, the normalized improvement columns for a
 shared percentage scale, and the controlled table for contribution labels.

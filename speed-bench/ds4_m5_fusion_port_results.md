@@ -1,6 +1,6 @@
 # DS4 M5 port results: decode fusion promotion (ds4f-q2, M5 Max 128 GiB)
 
-Results of applying `ds4_m5_fusion_port_handoff.md` on this machine.
+Final results for the M5 (Metal 4) decode-fusion campaign on this machine.
 Model: ds4f-q2 (IQ2XXS experts; the 156 GiB MXFP4 model does not fit
 128 GiB RAM). All fusion gates are quant-agnostic shape gates, so the
 port applies; the MXFP4-only pre-M5 extras (nsg=1 MoE decode,
@@ -10,6 +10,55 @@ with IQ2XXS experts and were not ported.
 Code: commit e42d6dc (adds `ds4_gpu_device_is_m5_apple_silicon()` and
 admits M5 at the seven gates below; `DS4_METAL_DISABLE_*` rollbacks
 unchanged). `make test` fully green on this config.
+
+## Mechanism, eligibility, and contract
+
+Metal System Trace showed pre-M5 decode already ~97.5% GPU-busy, so the
+lever is per-dispatch overhead inside a busy timeline (~3.9 us per
+dispatch+wrapper on M3 Ultra; ~25 dispatches/layer). Each fusion removes
+1–2 dispatches per layer while keeping bit-identical outputs. On M5 the
+same lever holds when GPU busy stays high (~98% here); none of the fused
+stages have NAX variants, so the fusion math matches the pre-M5 kernels.
+
+The original four pre-M5 fusions live in
+`metal_graph_encode_decode_layer_phase` (`ds4.c`). Each is default-ON for
+pre-M5 Apple silicon, admitted on M5 after promotion, bit-exact by
+construction, and rollback-gated:
+
+| fusion | enable (pre-promotion) | rollback |
+|---|---|---|
+| F1 HC norm+mix | `DS4_METAL_ENABLE_HC_NORM_MIX_FUSE` | `DS4_METAL_DISABLE_PRE_M5_HC_NORM_MIX_FUSE` |
+| F2 compressor quad store | `DS4_METAL_ENABLE_COMPRESSOR_QUAD_STORE` | `DS4_METAL_DISABLE_PRE_M5_COMPRESSOR_QUAD_STORE` |
+| F3 router + shared gate/up | `DS4_METAL_ENABLE_ROUTER_SHARED_FUSE` | `DS4_METAL_DISABLE_PRE_M5_ROUTER_SHARED_FUSE` |
+| F4 qkv norm + KV RoPE + FP8 store | `DS4_METAL_ENABLE_QKV_NORM_KV_STORE_FUSE` | `DS4_METAL_DISABLE_PRE_M5_QKV_NORM_KV_STORE_FUSE` |
+
+Later M5-only promotions add their own `DS4_METAL_DISABLE_M5_*` rollbacks
+(documented in the round sections below).
+
+Official benchmark contract used throughout:
+
+```text
+./ds4-bench -m MODEL --prompt-file speed-bench/promessi_sposi.txt \
+  --ctx-start 2048 --ctx-max 2048 --ctx-alloc 2081 --step-incr 2048 \
+  --gen-tokens 32 --prefill-chunk 4096 --power 100 --warm-weights \
+  --csv OUT/speed.csv --dump-frontier-logits-dir OUT/logits
+replicas: independent processes; report median and min-max
+```
+
+This campaign uses ds4f-q2 (frontier SHA below). The MXFP4 canonical
+frontier SHA `6f7edd6d7319d48270e3a5d34eb31f9f8f957ad7f54f4067afa9157c47708179`
+does not apply on 128 GiB. Controlled decode A/B must keep
+`exact_rows` / `exact_floats` / `exact_selected_ids` unanimous; a
+close-but-not-exact result is a rejection. Useful diagnostics already in
+tree: `DS4_METAL_GPU_BUSY_PROFILE=1` and
+`DS4_METAL_DECODE_STAGE_PROFILE=all` (diagnostic only — serializes the GPU).
+
+Do-not-repeat from the pre-M5 campaign (likely to transfer): wider n64
+matvec prefill regressions; direct/bitwise MXFP4 decode (exact but much
+slower); gate/up pair half-LUT constant-cache pressure; GPU-generated
+indirect routed-work grids; fixed schedules losing to adaptive; sum6
+row-widening regressions; flat indexer rope+QAT fusion. Full rejected
+detail: `m3_ultra_mxfp4_attempts.csv`.
 
 ## Baseline (branch tip caf64d1, fusions off, official command, 3 replicas)
 
