@@ -26763,7 +26763,7 @@ static int metal_graph_first_token_full_test(
  * flow and their CPU reads stay outside these generation entry points.
  */
 
-static bool metal_graph_pre_m5_q2_decode_schedule_eligible(
+static DS4_MAYBE_UNUSED bool metal_graph_pre_m5_q2_decode_schedule_eligible(
         const ds4_gpu_graph *g,
         const ds4_weights   *weights,
         uint32_t             pos,
@@ -26878,7 +26878,7 @@ static uint32_t metal_graph_token_adaptive_split_after_layers(
     return split_after_layers;
 }
 
-static bool metal_graph_decode_pipeline_fast_lookup_eligible(
+static DS4_MAYBE_UNUSED bool metal_graph_decode_pipeline_fast_lookup_eligible(
         const ds4_gpu_graph *g,
         const ds4_weights   *weights,
         uint32_t             pos,
