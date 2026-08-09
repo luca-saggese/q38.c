@@ -261,19 +261,17 @@ static int select_variant(const bench_config *cfg, int variant) {
     return 0;
 }
 
+/* Unset leftover output-geometry experiment knobs so A/B runs start clean.
+ * Keep only names that still have production getenv sites (or their M3
+ * rollback aliases). Dead allowlist-only names from abandoned NR8/NR4X2 /
+ * EXACT_VIEW / MAX_BYTES probes were removed after the mxfp4-m3 env audit. */
 static int normalize_output_experiment_env(void) {
     static const char *const conflicting[] = {
-        "DS4_METAL_ENABLE_OUTPUT_Q8_NR8",
-        "DS4_METAL_TEST_OUTPUT_Q8_NR8",
-        "DS4_METAL_ENABLE_OUTPUT_Q8_NR4X2",
-        "DS4_METAL_TEST_OUTPUT_Q8_NR4X2",
-        "DS4_METAL_ENABLE_OUTPUT_Q8_EXACT_VIEW",
         "DS4_METAL_ENABLE_OUTPUT_Q8_NR4",
         "DS4_METAL_DISABLE_M3_OUTPUT_Q8_NR4",
         "DS4_METAL_ENABLE_Q8_DECODE_EXACT_VIEWS",
         "DS4_METAL_DISABLE_Q8_DECODE_EXACT_VIEWS",
         "DS4_METAL_Q8_DECODE_EXACT_VIEW_MAX_MIB",
-        "DS4_METAL_Q8_DECODE_EXACT_VIEW_MAX_BYTES",
         "DS4_METAL_Q8_MV_ROWS",
         "DS4_METAL_ENABLE_OUTPUT_HC_SUM_NORM_FUSION",
         "DS4_METAL_DISABLE_M3_OUTPUT_HC_SUM_NORM_FUSION",
