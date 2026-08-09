@@ -22617,14 +22617,15 @@ static bool metal_graph_encode_decode_layer_phase(
             fprintf(stderr, "ds4: Metal graph compressed KV cache capacity exceeded at layer %u\n", il);
             ok = false;
         }
-        bool comp_state_already_stored = false;
+        bool comp_state_already_stored = qkv_pair_quad_fused;
         /* Quad projection: the attention and indexer compressor pairs share
          * the normalized input and the F16 matvec shape, so a single dispatch
          * covers all four matrices with unchanged per-row reduction trees.
-         * Removes one dispatch per decode layer. */
-        int quad_store = qkv_pair_quad_fused ? 1 : 0;
-        if (!qkv_pair_quad_fused &&
-            ok && ratio == 4u && !metal_graph_use_reference_compressor_pair_proj() &&
+         * Removes one dispatch per decode layer.  Either preceding fused
+         * QKV path may already have performed the same work. */
+        int quad_store = comp_state_already_stored ? 1 : 0;
+        if (ok && quad_store == 0 && ratio == 4u &&
+            !metal_graph_use_reference_compressor_pair_proj() &&
             getenv("DS4_METAL_DISABLE_PRE_M5_COMPRESSOR_QUAD_STORE") == NULL &&
             (ds4_gpu_device_is_pre_m5_apple_silicon() ||
              ds4_gpu_device_is_m5_apple_silicon() ||
