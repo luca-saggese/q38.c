@@ -47,8 +47,8 @@ for i in "${!BINS[@]}"; do
     assert_grep "$name --help mentions --cuda-tensor-parallel" "cuda-tensor-parallel" "$LOG"
     if [ "$name" != "ds4-bench" ]; then
         "$bin" --help runtime > "$LOG" 2>&1 || true
-        assert_grep "$name --help runtime mentions --dspark-exact-sampling" \
-            "dspark-exact-sampling" "$LOG"
+        assert_grep "$name --help runtime mentions --mtp-exact-sampling" \
+            "mtp-exact-sampling" "$LOG"
     fi
     if [ "$name" = "ds4" ]; then
         "$bin" --help distributed > "$LOG" 2>&1 || true
@@ -62,13 +62,26 @@ done
 for i in 0 1 3; do
     name=${NAMES[$i]}; bin=${BINS[$i]}
     [ -x "$bin" ] || continue
-    "$bin" --dspark-exact-sampling --mtp /dev/null -m /dev/null \
+    "$bin" --mtp-exact-sampling --mtp /dev/null -m /dev/null \
         > "$LOG" 2>&1
     rc=$?
     if [ $rc -ne 0 ] && ! grep -q "unknown option" "$LOG"; then
-        ok "$name parses --dspark-exact-sampling"
+        ok "$name parses --mtp-exact-sampling"
     else
-        fail "$name rejected --dspark-exact-sampling in option parsing"
+        fail "$name rejected --mtp-exact-sampling in option parsing"
+    fi
+done
+
+# The provisional DSpark-specific spelling was never released.
+for i in 0 1 3; do
+    name=${NAMES[$i]}; bin=${BINS[$i]}
+    [ -x "$bin" ] || continue
+    "$bin" --dspark-exact-sampling -m /dev/null > "$LOG" 2>&1
+    rc=$?
+    if [ $rc -ne 0 ] && grep -q "unknown option" "$LOG"; then
+        ok "$name rejects provisional --dspark-exact-sampling"
+    else
+        fail "$name retained provisional --dspark-exact-sampling"
     fi
 done
 

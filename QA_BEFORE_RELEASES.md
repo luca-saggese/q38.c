@@ -510,7 +510,7 @@ a substitute for CUDA or Metal release testing.
   measurement.
 - Repeat one opportunistic DSpark run with
   `--temp 1 --top-p 0.95 --min-p 0.05`, then repeat it with
-  `--dspark-exact-sampling`. The current 128-token code references are
+  `--mtp-exact-sampling`. The current 128-token code references are
   16.26 t/s ordinary, 12.28 t/s opportunistic, and 13.52 t/s exact, with no
   verifier errors. This is a correctness gate, not a ROCm speed claim; the
   ROCm batched verifier is still too expensive.
@@ -609,7 +609,7 @@ The agent is the most stateful component.  Test it manually, not only by build.
   turn that crosses sampled prose, greedy DSML structure, parameter text, and
   back to sampled prose. Require the tool to execute, the final answer to be
   valid, and DSpark stats to show zero verifier errors and replay fallbacks.
-  Run the opportunistic default and `--dspark-exact-sampling`. The M5 Max
+  Run the opportunistic default and `--mtp-exact-sampling`. The M5 Max
   opportunistic smoke created, compiled, and ran a C program printing
   `OPPORTUNISTIC_OK`, accepting 196 of 235 draft tokens.
 - Bash tools:

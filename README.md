@@ -248,17 +248,18 @@ diagnostics.
 
 At a non-zero temperature, ordinary `--dspark` uses opportunistic sampling.
 Tokens evaluated normally are sampled with the requested temperature, top-p,
-top-k, and min-p. DFlash then proposes a greedy suffix, and every token that
-matches the target's greedy continuation is committed directly. Sampling
-resumes at the first mismatch. This is deliberately more deterministic than
-ordinary temperature sampling. On an M5 Max it retained enough of the greedy
-DSpark gain to improve a predictable code continuation by about 8% at
-temperature 1. A single M3 Max run was slightly slower, the same test was
-nearly neutral on DGX Spark, and it was slower on Strix Halo, where
-verification is more expensive.
+top-k, and min-p. DFlash then proposes a temperature-zero suffix. Every draft
+token that matches the target's temperature-zero continuation is committed
+directly, even though the requested temperature is non-zero. Sampling resumes
+at the first mismatch. This is deliberately more deterministic than ordinary
+temperature sampling. On an M5 Max it retained enough of the greedy DSpark gain
+to improve a predictable code continuation by about 8% at temperature 1. A
+single M3 Max run was slightly slower, the same test was nearly neutral on DGX
+Spark, and it was slower on Strix Halo, where verification is more expensive.
 
-Use `--dspark-exact-sampling` when the output must follow the ordinary target
-distribution. Exact mode accepts each greedy DFlash proposal with its target
+Use `--mtp-exact-sampling` when the output must follow the ordinary target
+distribution. With the DFlash support model, exact mode disables direct
+temperature-zero matching: it accepts each greedy proposal with its target
 probability and, on rejection, samples from the remaining target distribution.
 It uses a stricter `0.8` confidence threshold by default. Add `--temp 0` for
 fully greedy decoding. `--quality` and `--dspark-strict` keep target-only

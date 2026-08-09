@@ -185,7 +185,7 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
             opt(fp, c, "--glm-mtp-timing", "Enable GLM MTP and print acceptance/timing counters.");
             opt(fp, c, "--dspark", "Enable DSpark using the support GGUF passed with --mtp.");
             opt(fp, c, "--dspark-confidence F", "Enable DSpark with confidence pruning threshold 0..1. Greedy/opportunistic default: Metal 0.6, CUDA/ROCm 0.7; exact sampling: 0.8");
-            opt(fp, c, "--dspark-exact-sampling", "Preserve the ordinary temperature distribution instead of using opportunistic DSpark sampling.");
+            opt(fp, c, "--mtp-exact-sampling", "DFlash: preserve the ordinary temperature distribution instead of accepting target-matching greedy drafts directly.");
             opt(fp, c, "--dspark-strict", "Load DSpark support but keep target-only decode.");
         }
         opt(fp, c, "--quality", "Prefer exact kernels where faster approximate paths exist.");

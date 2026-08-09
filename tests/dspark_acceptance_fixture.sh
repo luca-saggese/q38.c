@@ -18,7 +18,7 @@ SEED=${DS4_DSPARK_FIXTURE_SEED:-12345}
 EXACT_SAMPLING=${DS4_DSPARK_FIXTURE_EXACT_SAMPLING:-0}
 exact_sampling_arg=
 if [ "$EXACT_SAMPLING" != 0 ]; then
-    exact_sampling_arg=--dspark-exact-sampling
+    exact_sampling_arg=--mtp-exact-sampling
 fi
 partial_cases=0
 direct_partial_cases=0

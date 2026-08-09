@@ -13138,7 +13138,7 @@ static server_config parse_options(int argc, char **argv) {
         } else if (!strcmp(arg, "--dspark-strict")) {
             c.engine.dspark = true;
             c.engine.dspark_strict = true;
-        } else if (!strcmp(arg, "--dspark-exact-sampling")) {
+        } else if (!strcmp(arg, "--mtp-exact-sampling")) {
             c.engine.dspark = true;
             c.engine.dspark_exact_sampling = true;
         } else if (!strcmp(arg, "-c") || !strcmp(arg, "--ctx")) {
