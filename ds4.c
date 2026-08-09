@@ -22304,7 +22304,8 @@ static bool metal_graph_encode_decode_layer_phase(
                                                         DS4_ROPE_YARN_BETA_FAST,
                                                         DS4_ROPE_YARN_BETA_SLOW,
                                                         DS4_RMS_EPS,
-                                                        comp_state_already_stored) != 0;
+                                                        comp_state_already_stored,
+                                                        true) != 0;
         DS4_METAL_PROFILE_DECODE_STAGE("compressor_update");
         if (ok && emit) {
             ds4_gpu_tensor *comp_row_view = metal_graph_attn_comp_row_view(g, il, comp_row);
@@ -22411,7 +22412,8 @@ static bool metal_graph_encode_decode_layer_phase(
                                                             DS4_ROPE_YARN_BETA_FAST,
                                                             DS4_ROPE_YARN_BETA_SLOW,
                                                             DS4_RMS_EPS,
-                                                            index_state_already_stored) != 0;
+                                                            index_state_already_stored,
+                                                            true) != 0;
             DS4_METAL_PROFILE_DECODE_STAGE("indexer_compressor_update");
             if (ok && emit) {
 #if defined(__APPLE__)
@@ -26118,6 +26120,191 @@ static uint32_t metal_graph_token_split_after_layers(void) {
     return split_after_layers;
 }
 
+static uint32_t metal_graph_token_adaptive_split_after_layers(
+        const ds4_gpu_graph *g,
+        const ds4_weights   *weights,
+        uint32_t             pos,
+        uint32_t             second_split_after_layers,
+        bool                 allow_split_flush) {
+    const uint32_t split_after_layers =
+        metal_graph_token_split_after_layers();
+#if defined(__APPLE__)
+    /* Layer 4 is a routed layer in the fixed DS4 tape and remains available in
+     * the resident full-model path this schedule targets. */
+    const ds4_layer_weights *layer = weights ? &weights->layer[4] : NULL;
+    const bool mxfp4_routed =
+        layer && layer->ffn_gate_exps && layer->ffn_up_exps &&
+        layer->ffn_down_exps &&
+        layer->ffn_gate_exps->type == DS4_TENSOR_MXFP4 &&
+        layer->ffn_up_exps->type == DS4_TENSOR_MXFP4 &&
+        layer->ffn_down_exps->type == DS4_TENSOR_MXFP4;
+    const bool enabled =
+        ds4_gpu_device_is_pre_m5_apple_silicon() ||
+        getenv("DS4_METAL_ENABLE_DECODE_EARLY_SPLIT5") != NULL;
+    /* Once the raw SWA window is full, the short-context 4/12 schedule can
+     * submit its first useful work one routed layer earlier.  Five balanced
+     * exact-output blocks (three eval-length and two 1,024-token blocks)
+     * favored 3/12; keep the established 4/16 and adaptive 5-layer schedules
+     * unchanged outside this early second-split window. */
+    const bool early_split3_enabled =
+        ds4_gpu_device_is_pre_m5_apple_silicon() ||
+        getenv("DS4_METAL_ENABLE_DECODE_EARLY_SPLIT3") != NULL;
+    if (split_after_layers == 4u &&
+        second_split_after_layers == 12u &&
+        allow_split_flush && pos >= 128u && pos < 2048u &&
+        g && !g->quality && !g->ssd_streaming && !g->ssd_streaming_cold &&
+        g->tp_world != 2u && mxfp4_routed && early_split3_enabled &&
+        getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_EARLY_SPLIT3") == NULL) {
+        return 3u;
+    }
+    /* At the 2K frontier the fifth layer adds enough work to overlap command
+     * encoding.  Past 2816 the larger first command buffer starts losing to
+     * the established four-layer split, so retain that schedule there. */
+    if (split_after_layers == 4u &&
+        second_split_after_layers == 0u &&
+        allow_split_flush && pos >= 2048u && pos < 2816u &&
+        g && !g->quality && !g->ssd_streaming && !g->ssd_streaming_cold &&
+        g->tp_world != 2u && mxfp4_routed && enabled &&
+        getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_EARLY_SPLIT5") == NULL) {
+        return 5u;
+    }
+#else
+    (void)g;
+    (void)weights;
+    (void)pos;
+    (void)second_split_after_layers;
+    (void)allow_split_flush;
+#endif
+    return split_after_layers;
+}
+
+static bool metal_graph_decode_pipeline_fast_lookup_eligible(
+        const ds4_gpu_graph *g,
+        const ds4_weights   *weights,
+        uint32_t             pos,
+        bool                 allow_split_flush) {
+#if defined(__APPLE__)
+    if (!g || !weights || !allow_split_flush ||
+        g->quality || g->ssd_streaming || g->ssd_streaming_cold ||
+        g->placement != NULL || g->tp_world > 1u || g->mtp_enabled ||
+        DS4_N_LAYER <= 4u) {
+        return false;
+    }
+    /* Eval prompts commonly decode below the 2K benchmark frontier.  The
+     * mirror key is the complete pipeline specialization and is independent
+     * of position, so the same lookup is valid there; keep an early-only
+     * rollback for attribution without disabling the established 2K path. */
+    if (pos < 2048u &&
+        getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_EARLY_PIPELINE_FAST_LOOKUP") != NULL) {
+        return false;
+    }
+
+    const ds4_layer_weights *layer = &weights->layer[4];
+    const bool mxfp4_routed =
+        layer->ffn_gate_exps && layer->ffn_up_exps &&
+        layer->ffn_down_exps &&
+        layer->ffn_gate_exps->type == DS4_TENSOR_MXFP4 &&
+        layer->ffn_up_exps->type == DS4_TENSOR_MXFP4 &&
+        layer->ffn_down_exps->type == DS4_TENSOR_MXFP4;
+    /* Returning the same cached PSO through the C mirror is the pre-M5
+     * Apple-Silicon default for this measured decode shape. The explicit
+     * enable may bypass only device policy; neither policy path relaxes the
+     * graph-shape guards above, and the disable remains the dominant
+     * rollback for same-binary attribution. */
+    const bool enabled =
+        ds4_gpu_device_is_pre_m5_apple_silicon() ||
+        getenv("DS4_METAL_ENABLE_DECODE_PIPELINE_FAST_LOOKUP") != NULL;
+    return mxfp4_routed && enabled &&
+           getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_PIPELINE_FAST_LOOKUP") == NULL;
+#else
+    (void)g;
+    (void)weights;
+    (void)pos;
+    (void)allow_split_flush;
+    return false;
+#endif
+}
+
+static uint32_t metal_graph_token_second_split_after_layers(void) {
+    uint32_t split_after_layers = 0;
+#if defined(__APPLE__)
+    const char *split_env =
+        getenv("DS4_METAL_GRAPH_TOKEN_SECOND_SPLIT_LAYERS");
+    if (split_env && split_env[0]) {
+        char *end = NULL;
+        unsigned long v = strtoul(split_env, &end, 10);
+        if (end != split_env && v <= DS4_N_LAYER) {
+            split_after_layers = (uint32_t)v;
+        }
+    }
+#endif
+    return split_after_layers;
+}
+
+/* Automatic second command-buffer split for the same eligible resident MXFP4
+ * pre-M5 decode window as the adaptive first split.  At the 2K decode window
+ * the single 38-39 layer tail command buffer is fully encoded later than the
+ * first buffer's GPU work finishes, leaving a GPU idle bubble; flushing the
+ * middle command buffer after layer 16 lets it start while the tail is still
+ * being encoded.  Only command-buffer boundaries move, so kernel math,
+ * ordering, and outputs are unchanged.  An explicit
+ * DS4_METAL_GRAPH_TOKEN_SECOND_SPLIT_LAYERS always wins. */
+static uint32_t metal_graph_token_adaptive_second_split_after_layers(
+        const ds4_gpu_graph *g,
+        const ds4_weights   *weights,
+        uint32_t             pos,
+        uint32_t             env_second_split_after_layers,
+        bool                 allow_split_flush) {
+#if defined(__APPLE__)
+    if (env_second_split_after_layers != 0u) {
+        return env_second_split_after_layers;
+    }
+    /* Mirror the R4 adaptive-first-split guards: layer 4 is a routed layer in
+     * the fixed DS4 tape and stands in for the resident full-model path this
+     * schedule targets. */
+    const ds4_layer_weights *layer = weights ? &weights->layer[4] : NULL;
+    const bool mxfp4_routed =
+        layer && layer->ffn_gate_exps && layer->ffn_up_exps &&
+        layer->ffn_down_exps &&
+        layer->ffn_gate_exps->type == DS4_TENSOR_MXFP4 &&
+        layer->ffn_up_exps->type == DS4_TENSOR_MXFP4 &&
+        layer->ffn_down_exps->type == DS4_TENSOR_MXFP4;
+    const bool enabled =
+        ds4_gpu_device_is_pre_m5_apple_silicon() ||
+        getenv("DS4_METAL_ENABLE_DECODE_SECOND_SPLIT16") != NULL;
+    const bool eligible =
+        allow_split_flush && pos < 3328u &&
+        g && !g->quality && !g->ssd_streaming && !g->ssd_streaming_cold &&
+        g->tp_world != 2u && mxfp4_routed && enabled;
+    /* Once the raw SWA window is full, short eval prompts leave less GPU work
+     * in the four-layer prefix while the host still has the same remaining
+     * tape to encode.  Flushing again after layer 12 starts that middle work
+     * soon enough to cover the early decode bubble; 12 measured better than
+     * 8, 16, and 20 below position 2048.  Positions below 128 retain the
+     * single-tail schedule, which is slightly faster before the window fills.
+     * Keep a separate rollback so the established 2K schedule remains
+     * independently attributable. */
+    if (eligible && pos >= 128u && pos < 2048u && DS4_N_LAYER > 12u &&
+        getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_EARLY_SECOND_SPLIT12") == NULL) {
+        return 12u;
+    }
+    /* The encode/GPU overlap bubble the second split closes persists past
+     * 2815: attention cost grows only slowly through the compressed-KV
+     * window (raw SWA saturates at 128 rows) while encode cost per layer is
+     * constant, so the same 4/16 schedule stays profitable through 3327. */
+    if (eligible && pos >= 2048u && DS4_N_LAYER > 16u &&
+        getenv("DS4_METAL_DISABLE_PRE_M5_DECODE_SECOND_SPLIT16") == NULL) {
+        return 16u;
+    }
+#else
+    (void)g;
+    (void)weights;
+    (void)pos;
+    (void)allow_split_flush;
+#endif
+    return env_second_split_after_layers;
+}
+
 static int metal_graph_dspark_target_slot(
         const ds4_gpu_graph *g,
         uint32_t             il) {
@@ -26605,6 +26792,19 @@ static bool metal_graph_encode_token_raw_swa(
     if (g->placement) {
         if (!metal_graph_set_active_tier_decode(g, g->emb_tier)) return false;
     }
+#if defined(__APPLE__)
+    /* Metal command encoding is serialized by the backend. Preserve a caller
+     * hint across this nested scope, but keep it inactive unless this exact
+     * token satisfies the decode-only guards. */
+    const int previous_pipeline_fast_lookup =
+        ds4_gpu_set_decode_pipeline_fast_lookup(0);
+    const bool pipeline_fast_lookup_active =
+        metal_graph_decode_pipeline_fast_lookup_eligible(
+            g, weights, pos, allow_split_flush);
+    if (pipeline_fast_lookup_active) {
+        (void)ds4_gpu_set_decode_pipeline_fast_lookup(1);
+    }
+#endif
     bool ok = ds4_gpu_embed_token_hc_tensor(metal_graph_cur_hc(g),
                                               model->map,
                                               model->size,
@@ -26621,7 +26821,20 @@ static bool metal_graph_encode_token_raw_swa(
      * point where the prefix is large enough to hide useful work without
      * starving the second command buffer.
      */
-    const uint32_t split_after_layers = metal_graph_token_split_after_layers();
+    const uint32_t second_split_after_layers =
+        metal_graph_token_adaptive_second_split_after_layers(
+            g,
+            weights,
+            pos,
+            metal_graph_token_second_split_after_layers(),
+            allow_split_flush);
+    const uint32_t split_after_layers =
+        metal_graph_token_adaptive_split_after_layers(
+            g,
+            weights,
+            pos,
+            second_split_after_layers,
+            allow_split_flush);
 
     for (uint32_t il = 0; ok && il < DS4_N_LAYER; il++) {
         ok = metal_graph_encode_decode_layer(g,
@@ -26644,7 +26857,9 @@ static bool metal_graph_encode_token_raw_swa(
          * slot before its payload is ready. Keep each TP token in one command
          * buffer; non-TP decode retains the encode/execute overlap. */
         if (ok && allow_split_flush && g->tp_world != 2 &&
-            split_after_layers != 0 && il + 1u == split_after_layers) {
+            ((split_after_layers != 0 && il + 1u == split_after_layers) ||
+             (second_split_after_layers != 0 &&
+              il + 1u == second_split_after_layers))) {
             ok = ds4_gpu_flush_commands() != 0;
         }
     }
@@ -26652,6 +26867,10 @@ static bool metal_graph_encode_token_raw_swa(
     if (ok && need_logits) {
         ok = metal_graph_encode_output_head(g, model, weights, weights->output->dim[1]);
     }
+#if defined(__APPLE__)
+    (void)ds4_gpu_set_decode_pipeline_fast_lookup(
+        previous_pipeline_fast_lookup);
+#endif
     return ok;
 }
 
@@ -27979,6 +28198,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                             DS4_ROPE_YARN_BETA_FAST,
                                                             DS4_ROPE_YARN_BETA_SLOW,
                                                             DS4_RMS_EPS,
+                                                            false,
                                                             false) != 0;
                     if (ok && emit) {
                         ds4_gpu_tensor *comp_row_view = metal_graph_attn_comp_row_view(g, il, comp_row);
@@ -28278,6 +28498,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                                 DS4_ROPE_YARN_BETA_FAST,
                                                                 DS4_ROPE_YARN_BETA_SLOW,
                                                                 DS4_RMS_EPS,
+                                                                false,
                                                                 false) != 0;
                         if (ok && emit) {
                             ds4_gpu_tensor *index_row_view = ds4_gpu_tensor_view(
@@ -37248,7 +37469,97 @@ int ds4_token_assistant(ds4_engine *e) {
     return e->vocab.assistant_id;
 }
 
+static inline void argmax_f32_unrolled8_range(
+        const float *logits,
+        uint32_t     begin,
+        uint32_t     end,
+        int         *best,
+        float       *best_v) {
+    uint32_t i = begin;
+    int b0 = *best, b1 = *best, b2 = *best, b3 = *best;
+    int b4 = *best, b5 = *best, b6 = *best, b7 = *best;
+    float v0 = *best_v, v1 = *best_v, v2 = *best_v, v3 = *best_v;
+    float v4 = *best_v, v5 = *best_v, v6 = *best_v, v7 = *best_v;
+
+    while (end - i >= 8u) {
+        const float x0 = logits[i + 0u];
+        const float x1 = logits[i + 1u];
+        const float x2 = logits[i + 2u];
+        const float x3 = logits[i + 3u];
+        const float x4 = logits[i + 4u];
+        const float x5 = logits[i + 5u];
+        const float x6 = logits[i + 6u];
+        const float x7 = logits[i + 7u];
+        if (x0 > v0) { v0 = x0; b0 = (int)(i + 0u); }
+        if (x1 > v1) { v1 = x1; b1 = (int)(i + 1u); }
+        if (x2 > v2) { v2 = x2; b2 = (int)(i + 2u); }
+        if (x3 > v3) { v3 = x3; b3 = (int)(i + 3u); }
+        if (x4 > v4) { v4 = x4; b4 = (int)(i + 4u); }
+        if (x5 > v5) { v5 = x5; b5 = (int)(i + 5u); }
+        if (x6 > v6) { v6 = x6; b6 = (int)(i + 6u); }
+        if (x7 > v7) { v7 = x7; b7 = (int)(i + 7u); }
+        i += 8u;
+    }
+
+#define DS4_ARGMAX_MERGE_LANE(b, v) \
+    do { \
+        if ((v) > *best_v || ((v) == *best_v && (b) < *best)) { \
+            *best_v = (v); \
+            *best = (b); \
+        } \
+    } while (0)
+    DS4_ARGMAX_MERGE_LANE(b0, v0);
+    DS4_ARGMAX_MERGE_LANE(b1, v1);
+    DS4_ARGMAX_MERGE_LANE(b2, v2);
+    DS4_ARGMAX_MERGE_LANE(b3, v3);
+    DS4_ARGMAX_MERGE_LANE(b4, v4);
+    DS4_ARGMAX_MERGE_LANE(b5, v5);
+    DS4_ARGMAX_MERGE_LANE(b6, v6);
+    DS4_ARGMAX_MERGE_LANE(b7, v7);
+#undef DS4_ARGMAX_MERGE_LANE
+
+    for (; i < end; i++) {
+        const float v = logits[i];
+        if (v > *best_v) {
+            *best_v = v;
+            *best = (int)i;
+        }
+    }
+}
+
+static int sample_argmax_unrolled8(const float *logits, uint32_t n_vocab) {
+    int best = 0;
+    float best_v = DS4_NEG_INF;
+    argmax_f32_unrolled8_range(logits, 0, n_vocab, &best, &best_v);
+    return best;
+}
+
+static int argmax_f32_excluding_unrolled8(
+        const float *logits,
+        uint32_t     n,
+        int          excluded_id) {
+    const uint32_t first = excluded_id == 0 ? 1u : 0u;
+    if (first >= n) return -1;
+
+    int best = (int)first;
+    float best_v = logits[first];
+    const uint32_t begin = first + 1u;
+    if (excluded_id >= 0 &&
+        (uint32_t)excluded_id >= begin &&
+        (uint32_t)excluded_id < n) {
+        const uint32_t excluded = (uint32_t)excluded_id;
+        argmax_f32_unrolled8_range(logits, begin, excluded, &best, &best_v);
+        argmax_f32_unrolled8_range(logits, excluded + 1u, n, &best, &best_v);
+    } else {
+        argmax_f32_unrolled8_range(logits, begin, n, &best, &best_v);
+    }
+    return best;
+}
+
 static int sample_argmax(const float *logits, uint32_t n_vocab) {
+    if (getenv("DS4_CPU_DISABLE_UNROLLED_ARGMAX") == NULL) {
+        return sample_argmax_unrolled8(logits, n_vocab);
+    }
     int best = 0;
     float best_v = DS4_NEG_INF;
     for (uint32_t i = 0; i < n_vocab; i++) {
@@ -37677,6 +37988,25 @@ int ds4_test_sample_logits(const float *logits, uint32_t n_vocab,
     if (!logits || !rng || n_vocab == 0) return -1;
     return sample_top_p_min_p(logits, n_vocab, temperature, top_k,
                               top_p, min_p, rng, prob_scratch);
+}
+
+int ds4_test_argmax_excluding_logits(const float *logits, uint32_t n_vocab,
+                                     int excluded_id) {
+    if (!logits) return -1;
+    if (getenv("DS4_CPU_DISABLE_UNROLLED_ARGMAX") == NULL) {
+        return argmax_f32_excluding_unrolled8(logits, n_vocab, excluded_id);
+    }
+    int best = -1;
+    float best_v = DS4_NEG_INF;
+    for (uint32_t i = 0; i < n_vocab; i++) {
+        if ((int)i == excluded_id) continue;
+        const float v = logits[i];
+        if (best < 0 || v > best_v) {
+            best = (int)i;
+            best_v = v;
+        }
+    }
+    return best;
 }
 #endif
 
@@ -59662,6 +59992,10 @@ int ds4_session_argmax(ds4_session *s) {
 
 int ds4_session_argmax_excluding(ds4_session *s, int excluded_id) {
     if (!s || !s->logits) return -1;
+    if (getenv("DS4_CPU_DISABLE_UNROLLED_ARGMAX") == NULL) {
+        return argmax_f32_excluding_unrolled8(
+                s->logits, DS4_N_VOCAB, excluded_id);
+    }
     int best = -1;
     float best_logit = DS4_NEG_INF;
     for (uint32_t i = 0; i < DS4_N_VOCAB; i++) {

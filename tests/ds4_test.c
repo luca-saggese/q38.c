@@ -931,12 +931,16 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
         uint32_t ratio,
         uint32_t pos,
         uint32_t ape_type,
-        uint32_t seed) {
+        uint32_t seed,
+        bool test_decode_pack) {
     const uint32_t in_dim = 4096u;
     const uint32_t coff = ratio == 4u ? 2u : 1u;
     const uint32_t head_dim = width / coff;
     const uint32_t state_rows = coff * ratio;
     const bool emit = ((pos + 1u) % ratio) == 0u;
+    TEST_ASSERT(!test_decode_pack ||
+                (ratio == 4u && emit &&
+                 (head_dim == 128u || head_dim == 512u)));
     const uint64_t page = (uint64_t)getpagesize();
     const uint64_t weight_bytes =
         (uint64_t)width * in_dim * sizeof(uint16_t);
@@ -1022,10 +1026,28 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
         "DS4_METAL_DISABLE_COMPRESSOR_PAIR_PROJ";
     const char *store_disable_env =
         "DS4_METAL_DISABLE_COMPRESSOR_STORE_ONE";
+    const char *decode_pack_env =
+        "DS4_METAL_ENABLE_COMPRESSOR_RATIO4_DECODE_PACK_FUSION";
+    const char *decode_pack_disable_env =
+        "DS4_METAL_DISABLE_M3_COMPRESSOR_RATIO4_DECODE_PACK_FUSION";
+    const char *exact_reduction_env =
+        "DS4_METAL_ENABLE_COMPRESSOR_EXACT_REDUCTION_FUSION";
+    const char *exact_reduction_disable_env =
+        "DS4_METAL_DISABLE_M3_COMPRESSOR_EXACT_REDUCTION_FUSION";
+    const char *exact_reduction_poison_env =
+        "DS4_METAL_TEST_POISON_COMPRESSOR_EXACT_REDUCTION_SCRATCH";
     char *saved_force = test_save_env(force_env);
     char *saved_disable = test_save_env(disable_env);
     char *saved_pair_disable = test_save_env(pair_disable_env);
     char *saved_store_disable = test_save_env(store_disable_env);
+    char *saved_decode_pack = test_save_env(decode_pack_env);
+    char *saved_decode_pack_disable =
+        test_save_env(decode_pack_disable_env);
+    char *saved_exact_reduction = test_save_env(exact_reduction_env);
+    char *saved_exact_reduction_disable =
+        test_save_env(exact_reduction_disable_env);
+    char *saved_exact_reduction_poison =
+        test_save_env(exact_reduction_poison_env);
 
     test_float_compare_stats kv_stats = {0};
     test_float_compare_stats score_stats = {0};
@@ -1101,6 +1123,32 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
             ref_state_score_host[i] = (float)score_value / 72.0f;
             fused_state_score_host[i] = ref_state_score_host[i];
         }
+        if (test_decode_pack) {
+            static const uint32_t edge_bits[8] = {
+                0x00000000u, 0x80000000u, 0x00000001u, 0x80000001u,
+                0x3f800000u, 0xbf800000u, 0x42a00000u, 0xc2a00000u,
+            };
+            for (uint32_t col = 0; col < 4u; col++) {
+                for (uint32_t row = 0; row < 8u; row++) {
+                    const uint64_t state_col =
+                        (row >= 4u ? head_dim : 0u) + col;
+                    const uint64_t state_index =
+                        (uint64_t)row * width + state_col;
+                    const uint32_t score_bits =
+                        edge_bits[(row + col) & 7u];
+                    const uint32_t kv_bits =
+                        edge_bits[(7u - row + col) & 7u];
+                    memcpy(ref_state_score_host + state_index,
+                           &score_bits, sizeof(score_bits));
+                    memcpy(fused_state_score_host + state_index,
+                           &score_bits, sizeof(score_bits));
+                    memcpy(ref_state_kv_host + state_index,
+                           &kv_bits, sizeof(kv_bits));
+                    memcpy(fused_state_kv_host + state_index,
+                           &kv_bits, sizeof(kv_bits));
+                }
+            }
+        }
         for (uint32_t i = 0; i < head_dim; i++) {
             const uint32_t poison = 0x7fc01001u + (i & 0x3ffu);
             memcpy(ref_comp_host + i, &poison, sizeof(poison));
@@ -1138,6 +1186,13 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
         TEST_ASSERT(unsetenv(disable_env) == 0);
         TEST_ASSERT(unsetenv(pair_disable_env) == 0);
         TEST_ASSERT(unsetenv(store_disable_env) == 0);
+        TEST_ASSERT(unsetenv(decode_pack_env) == 0);
+        TEST_ASSERT(unsetenv(exact_reduction_env) == 0);
+        TEST_ASSERT(setenv(exact_reduction_disable_env, "1", 1) == 0);
+        TEST_ASSERT(unsetenv(exact_reduction_poison_env) == 0);
+        if (test_decode_pack) {
+            TEST_ASSERT(setenv(decode_pack_disable_env, "1", 1) == 0);
+        }
 
         TEST_ASSERT(ds4_gpu_matmul_f16_pair_tensor(
                         ref_kv, ref_score, model_raw, model_bytes,
@@ -1147,7 +1202,7 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
                         ref_comp, model_raw, model_bytes, ape_offset, ape_type,
                         norm_offset, 0, head_dim, ratio, pos, 0, 0, 0,
                         10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f,
-                        1.0e-6f, false) != 0);
+                        1.0e-6f, false, test_decode_pack) != 0);
 
         TEST_ASSERT(ds4_gpu_matmul_f16_pair_compressor_store_tensor(
                         fused_kv, fused_score,
@@ -1155,6 +1210,13 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
                         model_raw, model_bytes, 0, score_weight_offset,
                         ape_offset, ape_type, in_dim, width, x,
                         ratio, pos) == 1);
+        if (test_decode_pack) {
+            TEST_ASSERT(setenv(decode_pack_env, "1", 1) == 0);
+            TEST_ASSERT(unsetenv(decode_pack_disable_env) == 0);
+            TEST_ASSERT(setenv(exact_reduction_env, "1", 1) == 0);
+            TEST_ASSERT(unsetenv(exact_reduction_disable_env) == 0);
+            TEST_ASSERT(setenv(exact_reduction_poison_env, "1", 1) == 0);
+        }
         TEST_ASSERT(ds4_gpu_compressor_update_tensor(
                         fused_kv, fused_score,
                         fused_state_kv, fused_state_score,
@@ -1162,7 +1224,7 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
                         ape_offset, ape_type, norm_offset, 0,
                         head_dim, ratio, pos, 0, 0, 0,
                         10000.0f, 1.0f, 0.0f, 1.0f, 32.0f, 1.0f,
-                        1.0e-6f, true) != 0);
+                        1.0e-6f, true, test_decode_pack) != 0);
 
         TEST_ASSERT(ds4_gpu_tensor_read(
                         ref_kv, 0, ref_kv_host, out_bytes) != 0);
@@ -1205,13 +1267,23 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
     test_restore_env(disable_env, saved_disable);
     test_restore_env(pair_disable_env, saved_pair_disable);
     test_restore_env(store_disable_env, saved_store_disable);
+    test_restore_env(decode_pack_env, saved_decode_pack);
+    test_restore_env(decode_pack_disable_env, saved_decode_pack_disable);
+    test_restore_env(exact_reduction_env, saved_exact_reduction);
+    test_restore_env(exact_reduction_disable_env,
+                     saved_exact_reduction_disable);
+    test_restore_env(
+        exact_reduction_poison_env, saved_exact_reduction_poison);
 
     fprintf(stderr,
             "ds4-test: compressor pair state-store exact width=%u ratio=%u "
-            "pos=%u emit=%u ape=%s proj=%zu/%zu state=%zu/%zu "
+            "pos=%u emit=%u ape=%s decode_pack=%u exact_reduce=%u "
+            "proj=%zu/%zu state=%zu/%zu "
             "comp=%zu max_ulp=%u/%u/%u/%u/%u\n",
             width, ratio, pos, emit ? 1u : 0u,
             ape_type == 1u ? "f16" : "f32",
+            test_decode_pack ? 1u : 0u,
+            test_decode_pack ? 1u : 0u,
             kv_stats.mismatch_count, score_stats.mismatch_count,
             state_kv_stats.mismatch_count,
             state_score_stats.mismatch_count,
@@ -1252,11 +1324,13 @@ static void test_metal_f16_compressor_pair_state_store_exact_case(
 
 static void test_metal_f16_compressor_pair_state_store_exact(void) {
     test_metal_f16_compressor_pair_state_store_exact_case(
-        256, 4, 8, 0, 17);
+        256, 4, 8, 0, 17, false);
     test_metal_f16_compressor_pair_state_store_exact_case(
-        1024, 4, 11, 1, 29);
+        256, 4, 11, 1, 23, true);
     test_metal_f16_compressor_pair_state_store_exact_case(
-        512, 128, 255, 1, 43);
+        1024, 4, 11, 1, 29, true);
+    test_metal_f16_compressor_pair_state_store_exact_case(
+        512, 128, 255, 1, 43, false);
 }
 
 static void test_metal_compressor_ape_add_exact_case(
@@ -4369,7 +4443,7 @@ static void test_metal_router_simd_finalize_exact(void) {
     };
     const uint32_t n_expert = 256;
     const uint32_t n_used = 6;
-    const uint32_t repeats = 2;
+    const uint32_t modes = 4;
     const uint64_t probs_bytes = (uint64_t)n_expert * sizeof(float);
     const uint64_t selected_bytes = (uint64_t)n_used * sizeof(int32_t);
     const uint64_t weights_bytes = (uint64_t)n_used * sizeof(float);
@@ -4381,6 +4455,10 @@ static void test_metal_router_simd_finalize_exact(void) {
         "DS4_METAL_ENABLE_ROUTER_SIMD_WEIGHTS_FUSION";
     const char *weights_disable_env =
         "DS4_METAL_DISABLE_M3_ROUTER_SIMD_WEIGHTS_FUSION";
+    const char *transform_finalize_env =
+        "DS4_METAL_ENABLE_ROUTER_TRANSFORM_FINALIZE_FUSION";
+    const char *transform_finalize_disable_env =
+        "DS4_METAL_DISABLE_M3_ROUTER_TRANSFORM_FINALIZE_FUSION";
     const char *select_disable_env =
         "DS4_METAL_DISABLE_ROUTER_SELECT_FUSION";
 
@@ -4417,6 +4495,9 @@ static void test_metal_router_simd_finalize_exact(void) {
     char *saved_disable = test_save_env(disable_env);
     char *saved_weights_force = test_save_env(weights_force_env);
     char *saved_weights_disable = test_save_env(weights_disable_env);
+    char *saved_transform_finalize = test_save_env(transform_finalize_env);
+    char *saved_transform_finalize_disable =
+        test_save_env(transform_finalize_disable_env);
     char *saved_select_disable = test_save_env(select_disable_env);
     size_t total_selected_mismatch = 0;
     size_t total_weights_mismatch = 0;
@@ -4434,6 +4515,8 @@ static void test_metal_router_simd_finalize_exact(void) {
         ds4_gpu_set_quality(false);
         TEST_ASSERT(setenv(force_env, "1", 1) == 0);
         TEST_ASSERT(setenv(weights_force_env, "1", 1) == 0);
+        TEST_ASSERT(unsetenv(transform_finalize_env) == 0);
+        TEST_ASSERT(setenv(transform_finalize_disable_env, "1", 1) == 0);
         TEST_ASSERT(unsetenv(select_disable_env) == 0);
 
         for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ci++) {
@@ -4487,6 +4570,7 @@ static void test_metal_router_simd_finalize_exact(void) {
             TEST_ASSERT(ds4_gpu_tensor_write(
                 logits, 0, logits_host, probs_bytes) != 0);
 
+            TEST_ASSERT(unsetenv(transform_finalize_env) == 0);
             TEST_ASSERT(setenv(disable_env, "1", 1) == 0);
             TEST_ASSERT(ds4_gpu_router_select_tensor(
                 ref_selected, ref_weights, ref_probs,
@@ -4511,13 +4595,30 @@ static void test_metal_router_simd_finalize_exact(void) {
             }
 
             TEST_ASSERT(unsetenv(disable_env) == 0);
-            for (uint32_t rep = 0; rep <= repeats; rep++) {
-                const bool fused_weights = rep != 0;
+            for (uint32_t mode = 0; mode < modes; mode++) {
+                const bool fused_weights = mode != 0;
+                const bool fused_transform = mode >= 2;
                 if (fused_weights) {
                     TEST_ASSERT(unsetenv(weights_disable_env) == 0);
                 } else {
                     TEST_ASSERT(setenv(weights_disable_env, "1", 1) == 0);
                 }
+                if (fused_transform) {
+                    TEST_ASSERT(setenv(transform_finalize_env, "1", 1) == 0);
+                    TEST_ASSERT(unsetenv(transform_finalize_disable_env) == 0);
+                } else {
+                    TEST_ASSERT(unsetenv(transform_finalize_env) == 0);
+                    TEST_ASSERT(setenv(
+                        transform_finalize_disable_env, "1", 1) == 0);
+                }
+                for (uint32_t i = 0; i < n_expert; i++) {
+                    const uint32_t poison_bits = 0x7fc00001u + i;
+                    memcpy(&simd_probs_host[i],
+                           &poison_bits,
+                           sizeof(poison_bits));
+                }
+                TEST_ASSERT(ds4_gpu_tensor_write(
+                    simd_probs, 0, simd_probs_host, probs_bytes) != 0);
                 TEST_ASSERT(ds4_gpu_router_select_tensor(
                     simd_selected, simd_weights, simd_probs,
                     model_raw, page, 0, 0, 1, 0,
@@ -4549,8 +4650,9 @@ static void test_metal_router_simd_finalize_exact(void) {
                         "case=%s mode=%s rep=%u selected=%zu/%u weights=%zu/%u "
                         "probs=%zu/%u max_weight_ulp=%u max_prob_ulp=%u\n",
                         c->name,
+                        fused_transform ? "fused-transform" :
                         fused_weights ? "fused-weights" : "split-weights",
-                        fused_weights ? rep - 1u : 0u,
+                        fused_transform ? mode - 2u : 0u,
                         selected_mismatch,
                         n_used,
                         weights_stats.mismatch_count,
@@ -4573,16 +4675,19 @@ static void test_metal_router_simd_finalize_exact(void) {
     test_restore_env(disable_env, saved_disable);
     test_restore_env(weights_force_env, saved_weights_force);
     test_restore_env(weights_disable_env, saved_weights_disable);
+    test_restore_env(transform_finalize_env, saved_transform_finalize);
+    test_restore_env(transform_finalize_disable_env,
+                     saved_transform_finalize_disable);
     test_restore_env(select_disable_env, saved_select_disable);
     fprintf(stderr,
             "ds4-test: router SIMD finalize total selected=%zu/%zu "
             "weights=%zu/%zu probs=%zu/%zu\n",
             total_selected_mismatch,
-            (sizeof(cases) / sizeof(cases[0])) * (repeats + 1u) * (size_t)n_used,
+            (sizeof(cases) / sizeof(cases[0])) * modes * (size_t)n_used,
             total_weights_mismatch,
-            (sizeof(cases) / sizeof(cases[0])) * (repeats + 1u) * (size_t)n_used,
+            (sizeof(cases) / sizeof(cases[0])) * modes * (size_t)n_used,
             total_probs_mismatch,
-            (sizeof(cases) / sizeof(cases[0])) * (repeats + 1u) * (size_t)n_expert);
+            (sizeof(cases) / sizeof(cases[0])) * modes * (size_t)n_expert);
     TEST_ASSERT(total_selected_mismatch == 0);
     TEST_ASSERT(total_weights_mismatch == 0);
     TEST_ASSERT(total_probs_mismatch == 0);

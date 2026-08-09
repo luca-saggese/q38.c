@@ -145,6 +145,15 @@ void ds4_gpu_set_glm_model(bool enabled);
 void ds4_gpu_set_ssd_streaming(bool enabled);
 void ds4_gpu_set_glm_streaming_prefill_full_layer(bool enabled);
 #ifdef __APPLE__
+int ds4_gpu_device_is_pre_m5_apple_silicon(void);
+int ds4_gpu_set_decode_pipeline_fast_lookup(int enabled);
+/* Strict test oracle for the fixed decode mul_mv pipeline lookup cache. */
+int ds4_gpu_test_decode_pipeline_fast_lookup(void);
+/* Strict test oracle for the extended decode mul_mv_ext (nsg + nxpsg) cache. */
+int ds4_gpu_test_decode_pipeline_fast_lookup_ext(void);
+/* Strict test oracle for the generated resident-prefill MXFP4 half LUT. */
+int ds4_gpu_test_mxfp4_down_half_lut(uint16_t *legacy_bits,
+                                     uint16_t *lut_bits);
 void ds4_gpu_release_zero_prefix_prefill_mask_cache(void);
 #endif
 void ds4_gpu_set_streaming_expert_cache_budget(uint32_t experts);
@@ -1620,7 +1629,8 @@ int ds4_gpu_compressor_update_tensor(
         float                   beta_fast,
         float                   beta_slow,
         float                   rms_eps,
-        bool                    state_already_stored);
+        bool                    state_already_stored,
+        bool                    decode_one_token);
 
 int ds4_gpu_compressor_store_batch_tensor(
         const ds4_gpu_tensor *kv,
