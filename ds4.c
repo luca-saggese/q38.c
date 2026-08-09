@@ -35454,6 +35454,16 @@ static bool metal_graph_verify_suffix_tops_impl(
                          "DSpark verifier selected profile") &&
                  ds4_gpu_begin_commands() != 0;
         }
+#if defined(__APPLE__)
+        /* Tiny DFlash batches are expensive enough to keep Metal busy while
+         * the host encodes the next layers. Submit short prefixes to overlap
+         * that work without changing the verifier's kernels or arithmetic. */
+        if (ok && capture_dspark_hidden && !verify_profile &&
+            !selected_profile && g->tp_world != 2 &&
+            ((il + 1u) % 4u) == 0u) {
+            ok = ds4_gpu_flush_commands() != 0;
+        }
+#endif
     }
     g->tp_batch_rows = 0;
     if (ok && fuse_head) {
@@ -57161,7 +57171,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
     if (opt->dspark_confidence_threshold_set) {
         e->dspark_confidence_threshold = opt->dspark_confidence_threshold;
     } else {
-        e->dspark_confidence_threshold = 0.7f;
+        e->dspark_confidence_threshold =
+            e->backend == DS4_BACKEND_METAL ? 0.6f : 0.7f;
     }
     if (opt->cuda_tensor_parallel &&
         (opt->backend != DS4_BACKEND_CUDA || !gpu_cfg ||
