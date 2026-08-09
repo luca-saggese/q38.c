@@ -1015,3 +1015,110 @@ kernel void kernel_dsv4_output_hc_weights4(
             args.post_scale * x + args.eps;
     }
 }
+
+
+struct ds4_metal_args_hc_norm_mix {
+    int32_t n;
+    int32_t out_dim;
+    float   eps;
+};
+
+// Fused unweighted RMSNorm + F16 HC-mix projection for DS4 decode HC-pre.
+// The standalone decode path runs kernel_rms_norm_f32_4 over the flattened
+// 4*embd HC row (1024 threads, one threadgroup) and then
+// kernel_mul_mv_f16_f32_4 (nsg=8, nr0=2) over the normalized row.  Both
+// stages are reproduced bit-exactly in one dispatch: every threadgroup
+// redundantly recomputes the norm partials with the original 1024-thread
+// mapping (each real lane covers one virtual thread of each 256-thread
+// slice, preserving every simd_sum tree), and the matvec keeps the original
+// per-row accumulation order with y = x*scale computed on the fly, which
+// rounds identically to the materialized normalized row.  The host wrapper
+// gates this to n == 16384 && out_dim == 24, where the virtual-thread count
+// is exactly 1024 and the mv tail loop is empty.
+kernel void kernel_dsv4_hc_rms_norm_mix_f16(
+        constant ds4_metal_args_hc_norm_mix & args,
+        device const char  * x,
+        device const char  * weight,
+        device       char  * dst,
+        threadgroup  char  * shmem [[threadgroup(0)]],
+        uint3  tgpig [[threadgroup_position_in_grid]],
+        ushort tiisg [[thread_index_in_simdgroup]],
+        ushort sgitg [[simdgroup_index_in_threadgroup]]) {
+    constexpr short NSG = 8;   // ds4_gpu_make_plain_mv_dispatch(16384)
+    constexpr short NW  = N_SIMDWIDTH;
+    constexpr short NR0 = 2;   // plain mv nr0
+    constexpr short NB  = 32;
+    constexpr short NF  = 16;
+    constexpr short NF4 = NF/4;
+    constexpr uint  VTHREADS = 1024u;                 // rms norm threads at n == 16384
+    constexpr short VSLICES  = VTHREADS/(NSG*NW);     // virtual 256-thread slices
+
+    const uint n  = (uint)args.n;
+    const uint n4 = n >> 2;
+
+    device const float4 *x4 = (device const float4 *)x;
+
+    threadgroup float *norm_shmem = (threadgroup float *)shmem;        // NW slots
+    threadgroup float *mv_shmem   = (threadgroup float *)shmem + NW;   // NW*NR0 slots
+
+    // Phase A: exact replica of kernel_rms_norm_f32_4's reduction tree with
+    // the 1024 virtual threads folded onto this threadgroup's 8 simdgroups.
+    for (short v = 0; v < VSLICES; ++v) {
+        const uint vt = (uint)(sgitg + NSG*v)*NW + tiisg;
+        float sumf = 0.0f;
+        for (uint i00 = vt; i00 < n4; i00 += VTHREADS) {
+            sumf += dot(x4[i00], x4[i00]);
+        }
+        sumf = simd_sum(sumf);
+        if (tiisg == 0) {
+            norm_shmem[sgitg + NSG*v] = sumf;
+        }
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float total = norm_shmem[tiisg];
+    total = simd_sum(total);
+    const float mean  = total/(float)args.n;
+    const float scale = 1.0f/sqrt(mean + args.eps);
+
+    // Phase B: exact replica of kernel_mul_mv_f16_f32_4 (nsg=8, nr0=2) with
+    // the normalized operand recomputed as x*scale instead of reloaded.
+    const int nb = args.n/NB;
+    const int r0 = tgpig.x*NR0;
+
+    device const half4 * ax4[NR0];
+    FOR_UNROLL (short row = 0; row < NR0; ++row) {
+        ax4[row] = (device const half4 *)
+            (weight + (uint64_t)(r0 + row)*(uint64_t)n*sizeof(half));
+    }
+
+    float sumf_mv[NR0] = { 0.f };
+
+    const short ix = tiisg/(NW/NF);
+    const short il = tiisg%(NW/NF);
+    const int ib0 = sgitg*NF + ix;
+
+    for (int ib = ib0; ib < nb; ib += NSG*NF) {
+        float4 yl4[NF4];
+        FOR_UNROLL (short i = 0; i < NF4; ++i) {
+            yl4[i] = x4[(ib*NB + il*NF)/4 + i]*scale;
+        }
+
+        FOR_UNROLL (short row = 0; row < NR0; row++) {
+            device const half4 * xb4 = ax4[row] + (ib*NB + il*NF)/4;
+
+            float sumq = 0.f;
+            FOR_UNROLL (short i = 0; i < NF4; ++i) {
+                sumq += dot(float4(xb4[i]), yl4[i]);
+            }
+
+            sumf_mv[row] += sumq;
+        }
+    }
+
+    // n == 16384 makes the scalar tail loop of the original empty.
+    device float * dst_f32 = (device float *) dst;
+    helper_mv_reduce_and_write<NR0>(dst_f32, sumf_mv, r0, args.out_dim,
+                                    tiisg, sgitg, (threadgroup char *)mv_shmem);
+}

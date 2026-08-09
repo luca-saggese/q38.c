@@ -665,6 +665,22 @@ int ds4_gpu_shared_gate_up_swiglu_q8_0_tensor(
         uint64_t                out_dim,
         const ds4_gpu_tensor *x,
         float                   clamp);
+
+int ds4_gpu_router_shared_gate_up_q8_0_tensor(
+        ds4_gpu_tensor       *router_logits,
+        ds4_gpu_tensor       *gate,
+        ds4_gpu_tensor       *up,
+        ds4_gpu_tensor       *mid,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              router_weight_offset,
+        uint64_t              gate_offset,
+        uint64_t              up_offset,
+        uint64_t              in_dim,
+        uint64_t              router_out_dim,
+        uint64_t              out_dim,
+        const ds4_gpu_tensor *x,
+        float                 clamp);
 int ds4_gpu_shared_mid_swiglu_q8_0_decode_exact_tensor(
         ds4_gpu_tensor       *mid,
         const void             *model_map,
@@ -797,6 +813,32 @@ int ds4_gpu_matmul_f16_pair_compressor_store_tensor(
         uint32_t                ratio,
         uint32_t                pos);
 
+int ds4_gpu_matmul_f16_quad_compressor_store_tensor(
+        ds4_gpu_tensor       *out0_kv,
+        ds4_gpu_tensor       *out0_score,
+        ds4_gpu_tensor       *out1_kv,
+        ds4_gpu_tensor       *out1_score,
+        ds4_gpu_tensor       *state0_kv,
+        ds4_gpu_tensor       *state0_score,
+        ds4_gpu_tensor       *state1_kv,
+        ds4_gpu_tensor       *state1_score,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              weight0_kv_offset,
+        uint64_t              weight0_score_offset,
+        uint64_t              weight1_kv_offset,
+        uint64_t              weight1_score_offset,
+        uint64_t              ape0_offset,
+        uint32_t              ape0_type,
+        uint64_t              ape1_offset,
+        uint32_t              ape1_type,
+        uint64_t              in_dim,
+        uint32_t              width0,
+        uint32_t              width1,
+        const ds4_gpu_tensor *x,
+        uint32_t              ratio,
+        uint32_t              pos);
+
 int ds4_gpu_matmul_f32_tensor(
         ds4_gpu_tensor       *out,
         const void             *model_map,
@@ -876,6 +918,31 @@ int ds4_gpu_dsv4_qkv_rms_norm_rows_tensor(
         uint32_t                kv_n,
         uint32_t                rows,
         float                   eps);
+
+int ds4_gpu_dsv4_qkv_rms_norm_kv_rope_fp8_store_tensor(
+        ds4_gpu_tensor       *q_out,
+        const ds4_gpu_tensor *q,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              q_weight_offset,
+        uint32_t              q_n,
+        ds4_gpu_tensor       *kv_out,
+        const ds4_gpu_tensor *kv,
+        uint64_t              kv_weight_offset,
+        uint32_t              kv_n,
+        ds4_gpu_tensor       *raw_cache,
+        uint64_t              raw_cap,
+        uint32_t              raw_row,
+        uint32_t              n_rot,
+        uint32_t              pos0,
+        uint32_t              n_ctx_orig,
+        float                 freq_base,
+        float                 freq_scale,
+        float                 ext_factor,
+        float                 attn_factor,
+        float                 beta_fast,
+        float                 beta_slow,
+        float                 eps);
 
 int ds4_gpu_dsv4_qkv_rms_norm_rows_kv_rope_tensor(
         ds4_gpu_tensor       *q_out,
@@ -961,6 +1028,8 @@ int ds4_gpu_dsv4_indexer_qat_tensor(
         ds4_gpu_tensor *x,
         uint32_t          n_rows,
         uint32_t          head_dim);
+
+
 
 int ds4_gpu_rope_tail_tensor(
         ds4_gpu_tensor *x,
@@ -2481,6 +2550,17 @@ int ds4_gpu_hc_split_weighted_sum_norm_tensor(
         uint32_t                sinkhorn_iters,
         float                   eps,
         float                   norm_eps);
+
+int ds4_gpu_hc_rms_norm_mix_f16_available(void);
+int ds4_gpu_hc_rms_norm_mix_f16_tensor(
+        ds4_gpu_tensor       *out,
+        const ds4_gpu_tensor *x,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              weight_offset,
+        uint32_t              n,
+        uint32_t              out_dim,
+        float                 eps);
 
 /* Batched HC RMSNorm followed by its narrow F16 mixer projection. On the
  * tuned Metal path, scale_scratch stores one float per row instead of the
