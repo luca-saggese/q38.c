@@ -231,6 +231,15 @@ than a failure. `--dspark-strict` remains the byte-identical target-only mode.
   `DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
 - 64-token guardrail:
   `DS4_DSPARK_FIXTURE_TOKENS=64 DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
+- Sampled acceptance fixture:
+  `DS4_DSPARK_FIXTURE_TEMPERATURE=1 DS4_DSPARK_FIXTURE_TOP_P=0.95 DS4_DSPARK_FIXTURE_MIN_P=0.05 DS4_DSPARK_FIXTURE_SEED=12345 DS4_DSPARK_FIXTURE_TOKENS=32 DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
+  Require proposals, a direct commit, and zero errors. Output identity with the
+  baseline is not expected because speculative accept/reject decisions consume
+  additional random numbers.
+- `make test` includes a 100,000-draw distribution check for general `p/q`
+  correction and for the point-mass DFlash proposal used at runtime. Both
+  histograms must remain within the stated tolerance of the target
+  distribution.
 - Fixed-block direct partial commit:
   `DS4_DSPARK_FIXTURE_CONFIDENCE=0 DS4_DSPARK_FIXTURE_TOKENS=8 DS4_DSPARK_FIXTURE_REQUIRE_PARTIAL=1 DS4_DSPARK_MODEL=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf DS4_DSPARK_SUPPORT=/Users/antirez/ds4/gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf make dspark-acceptance`.
 - DSpark verifier invariant smoke:
@@ -246,6 +255,12 @@ than a failure. `--dspark-strict` remains the byte-identical target-only mode.
 - If verifier MoE kernels changed, run one diagnostic `c_add` profile with
   `DS4_DSPARK_VERIFY_SELECTED_PROFILE=1` or the Metal MoE stage profiler and
   record the selected-expert footprint or stage timing in the DSpark log.
+- On Metal, benchmark at least one predictable code continuation and one
+  deliberately unpredictable prose continuation at temperature 1. The M5 Max
+  0731 q2 reference for three 256-token code runs is 44.82-44.98 t/s without
+  DSpark and 48.27-49.70 t/s with DSpark (median gain about 7.7%). The creative
+  control was about 3.4% slower with DSpark because almost no useful blocks
+  were proposed; DSpark remains opt-in for this reason.
 
 ### Session Microbatching And Metal TP
 
@@ -487,6 +502,10 @@ a substitute for CUDA or Metal release testing.
   direct build must be faster. DSpark is not currently expected to beat
   ordinary ROCm decode, so do not describe it as a ROCm speedup without a new
   measurement.
+- Repeat one DSpark run with `--temp 1 --top-p 0.95 --min-p 0.05`. The current
+  128-token code reference is 16.55 t/s ordinary and 12.68 t/s DSpark, with
+  90.4% accepted drafts and no verifier errors. This is a correctness gate,
+  not a ROCm speed claim; the ROCm batched verifier is still too expensive.
 - Run one longer prompt if ROCm kernels, backend hooks, tensor loading, model
   cache, KV cache, or graph prefill code changed.
 - Run the GLM Q2 release model through ROCm SSD streaming with at least four
@@ -578,6 +597,12 @@ The agent is the most stateful component.  Test it manually, not only by build.
   ASCII character ramp or output dimensions.  Verify the agent edits the
   existing file instead of rewriting the whole project, and that the final
   program still builds and runs.
+- With a matched DSpark support file and temperature 1, repeat a coding-tool
+  turn that crosses sampled prose, greedy DSML structure, parameter text, and
+  back to sampled prose. Require the tool to execute, the final answer to be
+  valid, and DSpark stats to show zero verifier errors and replay fallbacks.
+  The M5 Max smoke created, compiled, and ran a C program printing
+  `STOCHASTIC_OK`, accepting 129 of 149 draft tokens.
 - Bash tools:
   test short output, large output truncation, non-zero exit output, long-running
   jobs, `bash_status`, and `bash_stop`.
@@ -642,9 +667,11 @@ claims across different models or contexts.
 | Two M5 Max 128 GB Macs, Metal TP over TB5 RDMA | GLM 5.2 IQ2_XXS, 4,096-token context | about 94 t/s | 15.4 t/s |
 | DGX Spark GB10, CUDA | Flash q2, 7,047-token prompt | 343.81 t/s | 13.75 t/s |
 | DGX Spark GB10, CUDA | Flash q2 DSpark, 64-token C fixture | - | 24.48 t/s direct; 13.93 t/s replay predecessor |
+| DGX Spark GB10, CUDA | pre-0731 Flash q2, sampled 128-token code prompt | - | 18.17 t/s ordinary; 18.30 t/s DSpark |
 | Strix Halo gfx1151, ROCm | Flash IQ2 resident, short section 9 smoke | - | 17.27 t/s; FP32 rollback 9.70 t/s |
 | Strix Halo gfx1151, ROCm | Flash IQ2 resident, 4,096-token context | - | 14.82 t/s; FP32 rollback 8.76 t/s |
 | Strix Halo gfx1151, ROCm | Flash IQ2 DSpark, 64-token C fixture | - | 11.40 t/s direct; 9.77 t/s replay predecessor; 16.70 t/s ordinary |
+| Strix Halo gfx1151, ROCm | Flash 0731 IQ2, sampled 128-token code prompt | - | 16.55 t/s ordinary; 12.68 t/s DSpark |
 | 8x L40S, CUDA TP | Flash q4, 2,048-token prefill benchmark | 1,524.84 t/s | 46.93 t/s |
 | 8x L40S, CUDA TP | Flash q4, 16-row decode oracle | - | 126.0 aggregate t/s |
 

@@ -232,21 +232,28 @@ is not supported. On Metal, the main model may be resident or use
 state to the memory requirement. DSpark replaces the legacy one-stage MTP
 support model for that run rather than stacking with it.
 
-Run it with greedy decoding:
+Run it with the normal sampling defaults:
 
 ```sh
 ./ds4 -m ds4flash.gguf \
   --mtp gguf/DeepSeek-V4-Flash-DSpark-support-0731.gguf \
-  --dspark --temp 0
+  --dspark
 ```
 
 `--mtp` supplies the support GGUF, while `--dspark` selects the DSpark runtime.
 The default confidence threshold is `0.6` on Metal and `0.7` on CUDA and ROCm;
 it prunes suffixes that are unlikely to repay their verification cost.
 `--dspark-confidence 0` forces fixed five-token blocks and is intended for
-diagnostics. Sampled decoding does not use DSpark proposals. `--quality` and
-`--dspark-strict` also keep target-only decoding, which is useful for
-reproducibility checks.
+diagnostics. Sampled decoding uses a stricter `0.8` default. DFlash proposes
+its most likely token; the target accepts it with the probability assigned by
+the requested temperature, top-p, top-k, and min-p filters. On rejection, the
+replacement is sampled from the remaining target distribution. This preserves
+ordinary target sampling rather than treating a draft as ground truth.
+Add `--temp 0` for greedy decoding. `--quality` and `--dspark-strict` keep
+target-only decoding, which is useful for reproducibility checks.
+The same DSpark flags work with `ds4-agent` and with non-batched
+`ds4-server` requests. Session-batched serving currently uses ordinary target
+decoding.
 
 ## Speed
 
