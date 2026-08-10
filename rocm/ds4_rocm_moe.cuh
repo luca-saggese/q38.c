@@ -383,6 +383,144 @@ __device__ __forceinline__ static float dev_dot_mxfp4_q8_K_half_block(
     return 0.5f * y->d * dev_e8m0_to_f32(x->e) * (float)bsum;
 }
 
+/* Aligned-activation variant of the 8-pair chunk dot.  The staged copies
+ * hold each pair's 256 quant bytes 16-byte aligned with the Q8_K scale in
+ * a separate array, so one b128 load replaces four dword loads per half
+ * sub-block: this kernel family is issue-bound, not bandwidth-bound, and
+ * the load count per dp4a is what gates it.  The low/high nibble sums use
+ * separate integer accumulators; integer reassociation is exact, so the
+ * result is bit-identical to the struct-layout helper. */
+__device__ static void dev_dot_mxfp4_q8a_block8(
+        const cuda_block_mxfp4 *x8,
+        const int8_t *q0, const int8_t *q1, const int8_t *q2, const int8_t *q3,
+        const int8_t *q4, const int8_t *q5, const int8_t *q6, const int8_t *q7,
+        float d0, float d1, float d2, float d3,
+        float d4, float d5, float d6, float d7,
+        uint32_t n,
+        float acc[8]) {
+    const int8_t *qs[8] = { q0, q1, q2, q3, q4, q5, q6, q7 };
+    const float ds[8] = { d0, d1, d2, d3, d4, d5, d6, d7 };
+    float chunk[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    #pragma unroll
+    for (uint32_t sb = 0; sb < 8u; sb++) {
+        const cuda_block_mxfp4 *x = x8 + sb;
+        /* One misaligned b128 covers the block's 16 packed bytes; gfx11
+         * global loads support arbitrary alignment. */
+        const uint4 w4 = *(const uint4 *)(x->qs);
+        int32_t wlo[4], whi[4];
+        wlo[0] = (int32_t)dev_mxfp4_unpack4(w4.x);
+        whi[0] = (int32_t)dev_mxfp4_unpack4(w4.x >> 4u);
+        wlo[1] = (int32_t)dev_mxfp4_unpack4(w4.y);
+        whi[1] = (int32_t)dev_mxfp4_unpack4(w4.y >> 4u);
+        wlo[2] = (int32_t)dev_mxfp4_unpack4(w4.z);
+        whi[2] = (int32_t)dev_mxfp4_unpack4(w4.z >> 4u);
+        wlo[3] = (int32_t)dev_mxfp4_unpack4(w4.w);
+        whi[3] = (int32_t)dev_mxfp4_unpack4(w4.w >> 4u);
+        const float d = dev_e8m0_to_f32(x->e);
+        #pragma unroll
+        for (uint32_t p = 0; p < 8u; p++) {
+            if (p < n) {
+                const int4 lo = *(const int4 *)(qs[p] + sb * 32u);
+                const int4 hi = *(const int4 *)(qs[p] + sb * 32u + 16u);
+                int32_t s = 0;
+                int32_t t = 0;
+                s = __dp4a(wlo[0], lo.x, s);
+                t = __dp4a(whi[0], hi.x, t);
+                s = __dp4a(wlo[1], lo.y, s);
+                t = __dp4a(whi[1], hi.y, t);
+                s = __dp4a(wlo[2], lo.z, s);
+                t = __dp4a(whi[2], hi.z, t);
+                s = __dp4a(wlo[3], lo.w, s);
+                t = __dp4a(whi[3], hi.w, t);
+                chunk[p] += d * (float)(s + t);
+            }
+        }
+    }
+    #pragma unroll
+    for (uint32_t p = 0; p < 8u; p++) {
+        if (p < n) acc[p] += 0.5f * ds[p] * chunk[p];
+    }
+}
+
+/* Fused gate+up flavor: one activation load pair feeds both weight
+ * matrices, halving the dominant b128 traffic of the gate/up tile
+ * kernel.  Per-matrix accumulation is unchanged. */
+__device__ static void dev_dot_mxfp4_q8a_pair_block8(
+        const cuda_block_mxfp4 *g8,
+        const cuda_block_mxfp4 *u8,
+        const int8_t *q0, const int8_t *q1, const int8_t *q2, const int8_t *q3,
+        const int8_t *q4, const int8_t *q5, const int8_t *q6, const int8_t *q7,
+        float d0, float d1, float d2, float d3,
+        float d4, float d5, float d6, float d7,
+        uint32_t n,
+        float gate[8],
+        float up[8]) {
+    const int8_t *qs[8] = { q0, q1, q2, q3, q4, q5, q6, q7 };
+    const float ds[8] = { d0, d1, d2, d3, d4, d5, d6, d7 };
+    float gchunk[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float uchunk[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    #pragma unroll
+    for (uint32_t sb = 0; sb < 8u; sb++) {
+        const uint4 gw = *(const uint4 *)(g8[sb].qs);
+        const uint4 uw = *(const uint4 *)(u8[sb].qs);
+        int32_t glo[4], ghi[4], ulo[4], uhi[4];
+        glo[0] = (int32_t)dev_mxfp4_unpack4(gw.x);
+        ghi[0] = (int32_t)dev_mxfp4_unpack4(gw.x >> 4u);
+        glo[1] = (int32_t)dev_mxfp4_unpack4(gw.y);
+        ghi[1] = (int32_t)dev_mxfp4_unpack4(gw.y >> 4u);
+        glo[2] = (int32_t)dev_mxfp4_unpack4(gw.z);
+        ghi[2] = (int32_t)dev_mxfp4_unpack4(gw.z >> 4u);
+        glo[3] = (int32_t)dev_mxfp4_unpack4(gw.w);
+        ghi[3] = (int32_t)dev_mxfp4_unpack4(gw.w >> 4u);
+        ulo[0] = (int32_t)dev_mxfp4_unpack4(uw.x);
+        uhi[0] = (int32_t)dev_mxfp4_unpack4(uw.x >> 4u);
+        ulo[1] = (int32_t)dev_mxfp4_unpack4(uw.y);
+        uhi[1] = (int32_t)dev_mxfp4_unpack4(uw.y >> 4u);
+        ulo[2] = (int32_t)dev_mxfp4_unpack4(uw.z);
+        uhi[2] = (int32_t)dev_mxfp4_unpack4(uw.z >> 4u);
+        ulo[3] = (int32_t)dev_mxfp4_unpack4(uw.w);
+        uhi[3] = (int32_t)dev_mxfp4_unpack4(uw.w >> 4u);
+        const float gd = dev_e8m0_to_f32(g8[sb].e);
+        const float ud = dev_e8m0_to_f32(u8[sb].e);
+        #pragma unroll
+        for (uint32_t p = 0; p < 8u; p++) {
+            if (p < n) {
+                const int4 lo = *(const int4 *)(qs[p] + sb * 32u);
+                const int4 hi = *(const int4 *)(qs[p] + sb * 32u + 16u);
+                int32_t gs = 0;
+                int32_t gt = 0;
+                int32_t us = 0;
+                int32_t ut = 0;
+                gs = __dp4a(glo[0], lo.x, gs);
+                gt = __dp4a(ghi[0], hi.x, gt);
+                us = __dp4a(ulo[0], lo.x, us);
+                ut = __dp4a(uhi[0], hi.x, ut);
+                gs = __dp4a(glo[1], lo.y, gs);
+                gt = __dp4a(ghi[1], hi.y, gt);
+                us = __dp4a(ulo[1], lo.y, us);
+                ut = __dp4a(uhi[1], hi.y, ut);
+                gs = __dp4a(glo[2], lo.z, gs);
+                gt = __dp4a(ghi[2], hi.z, gt);
+                us = __dp4a(ulo[2], lo.z, us);
+                ut = __dp4a(uhi[2], hi.z, ut);
+                gs = __dp4a(glo[3], lo.w, gs);
+                gt = __dp4a(ghi[3], hi.w, gt);
+                us = __dp4a(ulo[3], lo.w, us);
+                ut = __dp4a(uhi[3], hi.w, ut);
+                gchunk[p] += gd * (float)(gs + gt);
+                uchunk[p] += ud * (float)(us + ut);
+            }
+        }
+    }
+    #pragma unroll
+    for (uint32_t p = 0; p < 8u; p++) {
+        if (p < n) {
+            gate[p] += 0.5f * ds[p] * gchunk[p];
+            up[p] += 0.5f * ds[p] * uchunk[p];
+        }
+    }
+}
+
 __device__ static void dev_dot_mxfp4_q8_K_block8(
         const cuda_block_mxfp4 *x8,
         const cuda_block_q8_K *y0,
@@ -1997,15 +2135,18 @@ __global__ static void moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel(
     uint32_t count = counts[expert];
     if (max_count != 0u && count >= max_count) return;
     uint32_t local_start = tile_starts[tile];
-    /* Dynamically sized by the launch to 8 * xq_blocks staged Q8_K chunks:
-     * the DS4 shapes only need half of a static [8][16] tile, and the
-     * smaller LDS footprint admits more resident workgroups. */
-    extern __shared__ cuda_block_q8_K sxq[];
+    /* Staged activations live as 16-byte-aligned quant slices with the
+     * Q8_K scales in a separate array: the dot helper is issue-bound, and
+     * the aligned layout lets it load b128 instead of four dwords.  The
+     * layout also drops the unused 32-byte bsums from every staged chunk.
+     * Sized by the launch to 8 * xq_blocks * (256 + 4) bytes. */
+    extern __shared__ int4 sxq4[];
+    int8_t *sqs = (int8_t *)sxq4;
+    float *sds = (float *)(sqs + (uint64_t)8u * xq_blocks * 256u);
     uint32_t pair[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     /* Fixed-count predicated setup keeps pair/xqb in registers instead of
-     * dynamically indexed scratch; tok/slot are recomputed from pair at
-     * finalize so only two arrays stay live across the dp4a loop.  The tail
-     * xqb entries stay at valid dummy rows and are never read past np. */
+     * dynamically indexed scratch.  The tail xqb entries stay at valid
+     * dummy rows and are never read past np. */
     const cuda_block_q8_K *xqb[8] = { xq, xq, xq, xq, xq, xq, xq, xq };
     uint32_t np = count - local_start;
     if (np > 8u) np = 8u;
@@ -2016,18 +2157,26 @@ __global__ static void moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel(
             xqb[p] = xq + (uint64_t)(pair[p] / n_expert) * xq_blocks;
         }
     }
-    if (xq_blocks <= 16u) {
+    const int staged = xq_blocks <= 16u;
+    if (staged) {
+        for (uint32_t i = threadIdx.x; i < np * xq_blocks * 16u; i += blockDim.x) {
+            const uint32_t u = i / (xq_blocks * 16u);
+            const uint32_t rem = i - u * (xq_blocks * 16u);
+            const uint32_t b = rem >> 4u;
+            const uint32_t k = rem & 15u;
+            const uint32_t sp = sorted_pairs[offsets[expert] + local_start + u];
+            const int32_t *src = (const int32_t *)
+                xq[(uint64_t)(sp / n_expert) * xq_blocks + b].qs + k * 4u;
+            ((int4 *)sqs)[(u * xq_blocks + b) * 16u + k] =
+                make_int4(src[0], src[1], src[2], src[3]);
+        }
         for (uint32_t i = threadIdx.x; i < np * xq_blocks; i += blockDim.x) {
-            uint32_t p = i / xq_blocks;
-            uint32_t b = i - p * xq_blocks;
-            const uint32_t sp = sorted_pairs[offsets[expert] + local_start + p];
-            sxq[i] = xq[(uint64_t)(sp / n_expert) * xq_blocks + b];
+            const uint32_t u = i / xq_blocks;
+            const uint32_t b = i - u * xq_blocks;
+            const uint32_t sp = sorted_pairs[offsets[expert] + local_start + u];
+            sds[i] = xq[(uint64_t)(sp / n_expert) * xq_blocks + b].d;
         }
         __syncthreads();
-        #pragma unroll
-        for (uint32_t p = 0; p < 8u; p++) {
-            if (p < np) xqb[p] = sxq + p * xq_blocks;
-        }
     }
     if (row >= expert_mid_dim) return;
     const char *gate_row = gate_base + (uint64_t)expert * gate_expert_bytes + (uint64_t)row * gate_row_bytes;
@@ -2035,13 +2184,24 @@ __global__ static void moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel(
     const uint64_t gate_chunk_bytes = gate_row_bytes / xq_blocks;
     float gate[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     float up[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const uint64_t sq = (uint64_t)xq_blocks << 8u;
     for (uint32_t b = lane; b < xq_blocks; b += 8u) {
         const cuda_block_mxfp4 *gb = (const cuda_block_mxfp4 *)(gate_row + (uint64_t)b * gate_chunk_bytes);
         const cuda_block_mxfp4 *ub = (const cuda_block_mxfp4 *)(up_row + (uint64_t)b * gate_chunk_bytes);
-        dev_dot_mxfp4_q8_K_block8(gb, xqb[0] + b, xqb[1] + b, xqb[2] + b, xqb[3] + b,
-                                  xqb[4] + b, xqb[5] + b, xqb[6] + b, xqb[7] + b, np, gate);
-        dev_dot_mxfp4_q8_K_block8(ub, xqb[0] + b, xqb[1] + b, xqb[2] + b, xqb[3] + b,
-                                  xqb[4] + b, xqb[5] + b, xqb[6] + b, xqb[7] + b, np, up);
+        if (staged) {
+            const int8_t *qb = sqs + ((uint64_t)b << 8u);
+            dev_dot_mxfp4_q8a_pair_block8(gb, ub,
+                qb, qb + sq, qb + 2u * sq, qb + 3u * sq,
+                qb + 4u * sq, qb + 5u * sq, qb + 6u * sq, qb + 7u * sq,
+                sds[b], sds[xq_blocks + b], sds[2u * xq_blocks + b], sds[3u * xq_blocks + b],
+                sds[4u * xq_blocks + b], sds[5u * xq_blocks + b], sds[6u * xq_blocks + b], sds[7u * xq_blocks + b],
+                np, gate, up);
+        } else {
+            dev_dot_mxfp4_q8_K_block8(gb, xqb[0] + b, xqb[1] + b, xqb[2] + b, xqb[3] + b,
+                                      xqb[4] + b, xqb[5] + b, xqb[6] + b, xqb[7] + b, np, gate);
+            dev_dot_mxfp4_q8_K_block8(ub, xqb[0] + b, xqb[1] + b, xqb[2] + b, xqb[3] + b,
+                                      xqb[4] + b, xqb[5] + b, xqb[6] + b, xqb[7] + b, np, up);
+        }
     }
     /* pair == tok * n_expert + slot, so it indexes weights directly. */
     #pragma unroll
@@ -2821,7 +2981,11 @@ __global__ static void moe_down_mxfp4_expert_tile8_row32_kernel(
     uint32_t row = blockIdx.x * 32u + (threadIdx.x >> 3u);
     uint32_t expert = tile_experts[tile];
     uint32_t local_start = tile_starts[tile];
-    __shared__ cuda_block_q8_K sxq[8][8];
+    /* Aligned quant slices plus separate scales, as in the gate/up tile
+     * kernel, so the dot helper loads b128 from LDS. */
+    __shared__ int4 sxq4[8u * 8u * 16u];
+    __shared__ float sds[8u * 8u];
+    int8_t *sqs = (int8_t *)sxq4;
     uint32_t pair[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     /* Fixed-count predicated setup keeps pair/xqb in registers; the tail
      * xqb entries stay at valid dummy rows and are never read past np. */
@@ -2836,27 +3000,46 @@ __global__ static void moe_down_mxfp4_expert_tile8_row32_kernel(
             xqb[p] = midq + (uint64_t)pair[p] * midq_blocks;
         }
     }
-    if (midq_blocks <= 8u) {
+    const int staged = midq_blocks <= 8u;
+    if (staged) {
+        for (uint32_t i = threadIdx.x; i < np * midq_blocks * 16u; i += blockDim.x) {
+            const uint32_t u = i / (midq_blocks * 16u);
+            const uint32_t rem = i - u * (midq_blocks * 16u);
+            const uint32_t b = rem >> 4u;
+            const uint32_t k = rem & 15u;
+            const uint32_t sp = sorted_pairs[offsets[expert] + local_start + u];
+            const int32_t *src = (const int32_t *)
+                midq[(uint64_t)sp * midq_blocks + b].qs + k * 4u;
+            ((int4 *)sqs)[(u * midq_blocks + b) * 16u + k] =
+                make_int4(src[0], src[1], src[2], src[3]);
+        }
         for (uint32_t i = threadIdx.x; i < np * midq_blocks; i += blockDim.x) {
-            uint32_t p = i / midq_blocks;
-            uint32_t b = i - p * midq_blocks;
-            const uint32_t sp = sorted_pairs[offsets[expert] + local_start + p];
-            sxq[p][b] = midq[(uint64_t)sp * midq_blocks + b];
+            const uint32_t u = i / midq_blocks;
+            const uint32_t b = i - u * midq_blocks;
+            const uint32_t sp = sorted_pairs[offsets[expert] + local_start + u];
+            sds[i] = midq[(uint64_t)sp * midq_blocks + b].d;
         }
         __syncthreads();
-        #pragma unroll
-        for (uint32_t p = 0; p < 8u; p++) {
-            if (p < np) xqb[p] = sxq[p];
-        }
     }
     if (row >= out_dim) return;
     const char *down_row = down_base + (uint64_t)expert * down_expert_bytes + (uint64_t)row * down_row_bytes;
     const uint64_t down_chunk_bytes = down_row_bytes / midq_blocks;
     float acc[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const uint64_t sq = (uint64_t)midq_blocks << 8u;
     for (uint32_t b = lane; b < midq_blocks; b += 8u) {
         const cuda_block_mxfp4 *wb = (const cuda_block_mxfp4 *)(down_row + (uint64_t)b * down_chunk_bytes);
-        dev_dot_mxfp4_q8_K_block8(wb, xqb[0] + b, xqb[1] + b, xqb[2] + b, xqb[3] + b,
-                                  xqb[4] + b, xqb[5] + b, xqb[6] + b, xqb[7] + b, np, acc);
+        if (staged) {
+            const int8_t *qb = sqs + ((uint64_t)b << 8u);
+            dev_dot_mxfp4_q8a_block8(wb,
+                qb, qb + sq, qb + 2u * sq, qb + 3u * sq,
+                qb + 4u * sq, qb + 5u * sq, qb + 6u * sq, qb + 7u * sq,
+                sds[b], sds[midq_blocks + b], sds[2u * midq_blocks + b], sds[3u * midq_blocks + b],
+                sds[4u * midq_blocks + b], sds[5u * midq_blocks + b], sds[6u * midq_blocks + b], sds[7u * midq_blocks + b],
+                np, acc);
+        } else {
+            dev_dot_mxfp4_q8_K_block8(wb, xqb[0] + b, xqb[1] + b, xqb[2] + b, xqb[3] + b,
+                                      xqb[4] + b, xqb[5] + b, xqb[6] + b, xqb[7] + b, np, acc);
+        }
     }
     #pragma unroll
     for (uint32_t p = 0; p < 8u; p++) {

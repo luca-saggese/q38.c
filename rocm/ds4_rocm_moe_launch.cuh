@@ -1149,10 +1149,10 @@ static int routed_moe_launch(
                     }
                 } else if (mxfp4_path) {
                     dim3 tgrid((expert_mid_dim + 31u) / 32u, tile_capacity, 1);
-                    /* LDS staging of 8 activation rows, sized to the actual
-                     * xq_blocks instead of a worst-case static tile. */
+                    /* LDS staging of 8 activation rows as aligned quant
+                     * slices plus scales, sized to the actual xq_blocks. */
                     const uint32_t tile8_shmem = xq_blocks <= 16u ?
-                        8u * xq_blocks * (uint32_t)sizeof(cuda_block_q8_K) : 0u;
+                        8u * xq_blocks * (256u + (uint32_t)sizeof(float)) : 0u;
                     moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel<<<tgrid, 256, tile8_shmem>>>(
                         (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                         gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
