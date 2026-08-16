@@ -1063,29 +1063,29 @@ static int routed_moe_launch(
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile offsets launch");
                 }
                 if (ok && use_mxfp4_ldsB) {
-                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, ds4_rocm_stream()>>>(tile128_offsets, tile128_total, counts, 128u, bucket_count);
+                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, 0 /* default stream */>>>(tile128_offsets, tile128_total, counts, 128u, bucket_count);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile128 offsets launch");
                 }
                 if (ok && use_mxfp4_ldsB) {
-                    moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256, 0, ds4_rocm_stream()>>>(
+                    moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256, 0, 0 /* default stream */>>>(
                         tile128_experts, tile128_starts, tile128_offsets, counts, 128u, bucket_count);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile128 build launch");
                 }
                 if (ok && use_mxfp4_tile32) {
-                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, ds4_rocm_stream()>>>(tile32_offsets, tile32_total, counts, 32u, bucket_count);
+                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, 0 /* default stream */>>>(tile32_offsets, tile32_total, counts, 32u, bucket_count);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile32 offsets launch");
                 }
                 if (ok && use_mxfp4_tile32) {
-                    moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256, 0, ds4_rocm_stream()>>>(
+                    moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256, 0, 0 /* default stream */>>>(
                         tile32_experts, tile32_starts, tile32_offsets, counts, 32u, bucket_count);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile32 build launch");
                 }
                 if (ok && use_mxfp4_tile4) {
-                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, ds4_rocm_stream()>>>(tile4_offsets, tile4_total, counts, 4u, bucket_count);
+                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, 0 /* default stream */>>>(tile4_offsets, tile4_total, counts, 4u, bucket_count);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile4 offsets launch");
                 }
                 if (ok && use_mxfp4_tile4) {
-                    moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256, 0, ds4_rocm_stream()>>>(
+                    moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256, 0, 0 /* default stream */>>>(
                         tile4_experts, tile4_starts, tile4_offsets, counts, 4u, bucket_count);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile4 build launch");
                 }
@@ -1273,7 +1273,7 @@ static int routed_moe_launch(
                 } else if (mxfp4_path) {
                     if (use_mxfp4_tile32 && tile32_total && tile32_experts && tile32_starts) {
                         dim3 t32grid((expert_mid_dim + 31u) / 32u, tile32_capacity, 1);
-                        moe_gate_up_mid_mxfp4_expert_tile32_row32_kernel<<<t32grid, 256, 0, ds4_rocm_stream()>>>(
+                        moe_gate_up_mid_mxfp4_expert_tile32_row32_kernel<<<t32grid, 256, 0, 0 /* default stream */>>>(
                             (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                             gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                             tile32_total, tile32_experts, tile32_starts, (const float *)weights->ptr,
@@ -1298,7 +1298,7 @@ static int routed_moe_launch(
                             }
                         }
                         dim3 bgrid(expert_mid_dim / 8u, tile128_capacity, 1);
-                        moe_gate_up_mid_mxfp4_expert_row8_ldsB_kernel<<<bgrid, 256, ldsB_shmem, ds4_rocm_stream()>>>(
+                        moe_gate_up_mid_mxfp4_expert_row8_ldsB_kernel<<<bgrid, 256, ldsB_shmem, 0 /* default stream */>>>(
                             (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                             gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                             tile128_total, tile128_experts, tile128_starts, (const float *)weights->ptr,
@@ -1308,7 +1308,7 @@ static int routed_moe_launch(
                         const uint32_t tile4_shmem = xq_blocks <= 28u ?
                             4u * xq_blocks * (256u + (uint32_t)sizeof(float)) : 0u;
                         dim3 tgrid(tile4_capacity, (expert_mid_dim + 31u) / 32u, 1);
-                        moe_gate_up_mid_mxfp4_expert_tileN_kernel<4u, 32u><<<tgrid, 256, tile4_shmem, ds4_rocm_stream()>>>(
+                        moe_gate_up_mid_mxfp4_expert_tileN_kernel<4u, 32u><<<tgrid, 256, tile4_shmem, 0 /* default stream */>>>(
                             (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                             gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                             tile4_total, tile4_experts, tile4_starts, (const float *)weights->ptr,
@@ -1336,7 +1336,7 @@ static int routed_moe_launch(
                             }
                         }
                         dim3 tgrid(tile_capacity, (expert_mid_dim + 63u) / 64u, 1);
-                        moe_gate_up_mid_mxfp4_expert_tileN_kernel<8u, 64u><<<tgrid, 512, row64_shmem, ds4_rocm_stream()>>>(
+                        moe_gate_up_mid_mxfp4_expert_tileN_kernel<8u, 64u><<<tgrid, 512, row64_shmem, 0 /* default stream */>>>(
                             (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                             gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                             tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -1369,7 +1369,7 @@ static int routed_moe_launch(
                             tile8_shmem_attr_set = 1;
                         }
                     }
-                    moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel<<<tgrid, 256, tile8_shmem, ds4_rocm_stream()>>>(
+                    moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel<<<tgrid, 256, tile8_shmem, 0 /* default stream */>>>(
                         (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                         gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                         tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
@@ -1776,7 +1776,7 @@ static int routed_moe_launch(
                 } else if (mxfp4_path) {
                     const uint32_t row_blocks = (out_dim + 31u) / 32u;
                     dim3 tgrid((row_blocks + down_row_groups - 1u) / down_row_groups, down_tile_capacity, 1);
-                    moe_down_mxfp4_expert_tile8_row32_kernel<<<tgrid, 256, 0, ds4_rocm_stream()>>>(
+                    moe_down_mxfp4_expert_tile8_row32_kernel<<<tgrid, 256, 0, 0 /* default stream */>>>(
                         (float *)down->ptr,
                         down_w, midq, sorted_pairs, sorted_offsets, sorted_counts,
                         down_tile_total, down_tile_experts, down_tile_starts,
