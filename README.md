@@ -115,7 +115,7 @@ Download one main model. **Prefer the imatrix versions.**
 ./download_model.sh ds4f-q2-q4   # q2 with the last 6 expert layers at q4
 ./download_model.sh ds4f-q4      # >= 256 GB RAM machines
 ./download_model.sh ds4f-mxfp4   # native MXFP4 experts, about 156 GB
-./download_model.sh pro-q2-imatrix  # 512 GB RAM machines, PRO q2 imatrix quant
+./download_model.sh pro-q2-imatrix  # 512 GB RAM machines, PRO 0813 q2 imatrix
 ```
 
 The MXFP4 GGUF preserves DeepSeek's released MXFP4 routed-expert weights rather
@@ -140,10 +140,10 @@ Authentication is optional for public downloads, but `--token TOKEN`,
 
 If you want to regenerate GGUF files or collect a new imatrix, see
 [gguf-tools/README.md](gguf-tools/README.md). Those tools are meant for offline
-model-building work and can take a long time on the full DeepSeek V4 Flash
-weights. Flash GGUF generation is supported by the local tools. PRO GGUF
-production currently still depends on the external `llama.cpp`-based workflow;
-native tooling can be added later.
+model-building work and can take a long time on the full DeepSeek weights.
+Flash and PRO GGUF generation are supported by the local tools. PRO conversion
+uses a compatible published PRO GGUF as its metadata, tensor-layout, and output
+type template.
 
 GLM 5.2 support is limited to the GGUF files tested by this branch:
 
@@ -369,7 +369,7 @@ and occasional work when you accept slow generation. Start with `--nothink`:
 ./download_model.sh pro-q2-imatrix
 
 ./ds4 \
-  -m gguf/DeepSeek-V4-Pro-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-Instruct-imatrix.gguf \
+  -m gguf/DeepSeek-V4-Pro-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-Instruct-imatrix-0813.gguf \
   --ssd-streaming \
   --ctx 32768 \
   --nothink
@@ -385,7 +385,7 @@ re-enable thinking with a conservative generation limit:
 
 ```sh
 ./ds4 \
-  -m gguf/DeepSeek-V4-Pro-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-Instruct-imatrix.gguf \
+  -m gguf/DeepSeek-V4-Pro-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-Instruct-imatrix-0813.gguf \
   --ssd-streaming \
   --ctx 32768 \
   --think \
