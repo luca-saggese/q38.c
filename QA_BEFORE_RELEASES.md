@@ -176,8 +176,12 @@ top-logprob slices, so do not replace them with one sampled chat answer.
   routed reference is lower quality but should stay near first-token match
   `92/100`, API top-1 agreement about `0.890`, and API pair-order agreement
   about `0.800` unless the quantization changed deliberately.
-- Run the 100-case DeepSeek V4 PRO fixture for every released PRO GGUF:
-  `gguf-tools/quality-testing/score_official /path/to/deepseek-v4-pro.gguf gguf-tools/quality-testing/data/pro/manifest.tsv /tmp/pro.tsv 4096`.
+- Match every PRO GGUF to its checkpoint. The June preview uses
+  `gguf-tools/quality-testing/data/pro/manifest.tsv`; the August 0813 release
+  uses `gguf-tools/quality-testing/data/pro-0813/manifest.tsv`. Never interpret
+  a cross-checkpoint score as a quantization result.
+- Run the 100-case DeepSeek V4 PRO 0813 fixture for the new release GGUF:
+  `gguf-tools/quality-testing/score_official /path/to/deepseek-v4-pro-0813.gguf gguf-tools/quality-testing/data/pro-0813/manifest.tsv /tmp/pro-0813.tsv 4096 --ssd-streaming`.
 - For SSD streaming, run the same official-continuation scorer once with full
   residency and once with `--ssd-streaming` for the release model.  The summary
   and API agreement should stay in the same quality band.
