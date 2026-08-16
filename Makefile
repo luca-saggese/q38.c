@@ -339,6 +339,12 @@ tests/test_mxfp4_rocm.o: tests/test_mxfp4_rocm.c ds4_gpu.h
 tests/test_mxfp4_rocm: tests/test_mxfp4_rocm.o ds4_rocm.o
 	$(HIPCC) $(ROCM_CFLAGS) -o $@ $^ $(ROCM_LDLIBS)
 
+tests/bench_mxfp4_rocm.o: tests/bench_mxfp4_rocm.c ds4_gpu.h
+	$(CC) $(filter-out -ffast-math,$(CFLAGS)) $(ROCM_HOST_CFLAGS) -DDS4_ROCM_BUILD -I. -c -o $@ $<
+
+tests/bench_mxfp4_rocm: tests/bench_mxfp4_rocm.o ds4_rocm.o
+	$(HIPCC) $(ROCM_CFLAGS) -o $@ $^ $(ROCM_LDLIBS)
+
 test-mxfp4-rocm: tests/test_mxfp4_rocm
 	./tests/test_mxfp4_rocm
 

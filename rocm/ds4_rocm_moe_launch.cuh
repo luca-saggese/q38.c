@@ -775,6 +775,15 @@ static int routed_moe_launch(
         const uint32_t use_direct_down_sum6 =
             (n_tokens == 1u || use_mxfp4_tiny_batch) &&
             n_expert <= DS4_ROCM_N_EXPERT_USED;
+        const uint32_t use_mxfp4_ldsB =
+            mxfp4_path && use_expert_tiles && n_tokens >= 128u &&
+            16u * gate_row_bytes <= 60u * 1024u &&
+            (expert_mid_dim % 8u) == 0u &&
+            getenv("DS4_ROCM_ENABLE_MXFP4_LDSB") != NULL;
+        const uint32_t use_mxfp4_tile32 =
+            mxfp4_path && use_expert_tiles && n_tokens >= 32u &&
+            (expert_mid_dim % 32u) == 0u &&
+            getenv("DS4_ROCM_ENABLE_MXFP4_TILE32") != NULL;
         uint32_t *sorted_pairs = NULL;
         uint32_t *sorted_offsets = NULL;
         uint32_t *sorted_counts = NULL;
@@ -784,9 +793,25 @@ static int routed_moe_launch(
         uint32_t *tile16_total = NULL;
         uint32_t *tile16_experts = NULL;
         uint32_t *tile16_starts = NULL;
+        uint32_t *tile128_total = NULL;
+        uint32_t *tile128_experts = NULL;
+        uint32_t *tile128_starts = NULL;
+        uint32_t *tile32_total = NULL;
+        uint32_t *tile32_experts = NULL;
+        uint32_t *tile32_starts = NULL;
         uint32_t *iq2_gate_hot_dev = NULL;
         uint32_t tile_capacity = 0;
         uint32_t tile16_capacity = 0;
+        uint32_t tile128_capacity = 0;
+        uint32_t tile32_capacity = 0;
+        if (getenv("DS4_ROCM_MOE_PATH_DEBUG") != NULL) {
+            fprintf(stderr,
+                    "ds4: moe path n=%u mxfp4=%d stream_full=%d full_cached=%d "
+                    "batch_stream=%d split=%d compact=%d sorted=%u tiles=%u\n",
+                    n_tokens, mxfp4_path, stream_full_layer, full_table_cached,
+                    batch_stream_selected, batch_stream_split_selected,
+                    compact_selected, use_sorted_pairs, use_expert_tiles);
+        }
         dim3 xq_grid(xq_blocks, n_tokens, 1);
         q8_K_quantize_kernel<<<xq_grid, 256>>>(xq, (const float *)x->ptr, expert_in_dim, n_tokens);
         ok = cuda_ok(cudaGetLastError(), "routed_moe x quantize launch");
@@ -909,6 +934,8 @@ static int routed_moe_launch(
             const uint64_t sorted_bytes = (uint64_t)pair_count * sizeof(uint32_t);
             tile_capacity = (pair_count + expert_tile_m - 1u) / expert_tile_m + bucket_count;
             tile16_capacity = use_down_tile16 ? ((pair_count + 15u) / 16u + bucket_count) : 0u;
+            tile128_capacity = use_mxfp4_ldsB ? ((pair_count + 127u) / 128u + bucket_count) : 0u;
+            tile32_capacity = use_mxfp4_tile32 ? ((pair_count + 31u) / 32u + bucket_count) : 0u;
             const uint64_t tile_offsets_bytes = (uint64_t)(bucket_count + 1u) * sizeof(uint32_t);
             const uint64_t tile_total_bytes = sizeof(uint32_t);
             const uint64_t tile_experts_bytes = (uint64_t)tile_capacity * sizeof(uint32_t);
@@ -927,7 +954,23 @@ static int routed_moe_launch(
             const uint64_t tile16_starts_off = tile16_experts_off + tile16_experts_bytes;
             const uint64_t iq2_gate_hot_off = tile16_starts_off + tile16_starts_bytes;
             const uint64_t iq2_gate_hot_bytes = (uint64_t)bucket_count * sizeof(uint32_t);
-            const uint64_t scratch_bytes = iq2_gate_hot_off + iq2_gate_hot_bytes;
+            const uint64_t tile128_offsets_off = iq2_gate_hot_off + iq2_gate_hot_bytes;
+            const uint64_t tile128_offsets_bytes = use_mxfp4_ldsB ? (uint64_t)(bucket_count + 1u) * sizeof(uint32_t) : 0u;
+            const uint64_t tile128_total_off = tile128_offsets_off + tile128_offsets_bytes;
+            const uint64_t tile128_total_bytes = use_mxfp4_ldsB ? sizeof(uint32_t) : 0u;
+            const uint64_t tile128_experts_off = tile128_total_off + tile128_total_bytes;
+            const uint64_t tile128_experts_bytes = (uint64_t)tile128_capacity * sizeof(uint32_t);
+            const uint64_t tile128_starts_off = tile128_experts_off + tile128_experts_bytes;
+            const uint64_t tile128_starts_bytes = (uint64_t)tile128_capacity * sizeof(uint32_t);
+            const uint64_t tile32_offsets_off = tile128_starts_off + tile128_starts_bytes;
+            const uint64_t tile32_offsets_bytes = use_mxfp4_tile32 ? (uint64_t)(bucket_count + 1u) * sizeof(uint32_t) : 0u;
+            const uint64_t tile32_total_off = tile32_offsets_off + tile32_offsets_bytes;
+            const uint64_t tile32_total_bytes = use_mxfp4_tile32 ? sizeof(uint32_t) : 0u;
+            const uint64_t tile32_experts_off = tile32_total_off + tile32_total_bytes;
+            const uint64_t tile32_experts_bytes = (uint64_t)tile32_capacity * sizeof(uint32_t);
+            const uint64_t tile32_starts_off = tile32_experts_off + tile32_experts_bytes;
+            const uint64_t tile32_starts_bytes = (uint64_t)tile32_capacity * sizeof(uint32_t);
+            const uint64_t scratch_bytes = tile32_starts_off + tile32_starts_bytes;
             uint8_t *scratch = (uint8_t *)cuda_tmp_alloc(scratch_bytes,
                                                          "routed_moe sorted pairs");
             if (!scratch) {
@@ -948,6 +991,14 @@ static int routed_moe_launch(
                 tile16_experts = use_down_tile16 ? (uint32_t *)(scratch + tile16_experts_off) : NULL;
                 tile16_starts = use_down_tile16 ? (uint32_t *)(scratch + tile16_starts_off) : NULL;
                 iq2_gate_hot_dev = (uint32_t *)(scratch + iq2_gate_hot_off);
+                uint32_t *tile128_offsets = use_mxfp4_ldsB ? (uint32_t *)(scratch + tile128_offsets_off) : NULL;
+                tile128_total = use_mxfp4_ldsB ? (uint32_t *)(scratch + tile128_total_off) : NULL;
+                tile128_experts = use_mxfp4_ldsB ? (uint32_t *)(scratch + tile128_experts_off) : NULL;
+                tile128_starts = use_mxfp4_ldsB ? (uint32_t *)(scratch + tile128_starts_off) : NULL;
+                uint32_t *tile32_offsets = use_mxfp4_tile32 ? (uint32_t *)(scratch + tile32_offsets_off) : NULL;
+                tile32_total = use_mxfp4_tile32 ? (uint32_t *)(scratch + tile32_total_off) : NULL;
+                tile32_experts = use_mxfp4_tile32 ? (uint32_t *)(scratch + tile32_experts_off) : NULL;
+                tile32_starts = use_mxfp4_tile32 ? (uint32_t *)(scratch + tile32_starts_off) : NULL;
                 ok = cuda_ok(cudaMemset(counts, 0, counts_bytes), "routed_moe sorted counts clear");
                 if (ok) {
                     moe_count_sorted_pairs_kernel<<<(pair_count + 255u) / 256u, 256>>>(
@@ -973,6 +1024,24 @@ static int routed_moe_launch(
                 if (ok && use_expert_tiles) {
                     moe_build_expert_tile_offsets_kernel<<<1, 1>>>(tile_offsets, tile_total, counts, expert_tile_m, bucket_count);
                     ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile offsets launch");
+                }
+                if (ok && use_mxfp4_ldsB) {
+                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, ds4_rocm_stream()>>>(tile128_offsets, tile128_total, counts, 128u, bucket_count);
+                    ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile128 offsets launch");
+                }
+                if (ok && use_mxfp4_ldsB) {
+                    moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256, 0, ds4_rocm_stream()>>>(
+                        tile128_experts, tile128_starts, tile128_offsets, counts, 128u, bucket_count);
+                    ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile128 build launch");
+                }
+                if (ok && use_mxfp4_tile32) {
+                    moe_build_expert_tile_offsets_kernel<<<1, 1, 0, ds4_rocm_stream()>>>(tile32_offsets, tile32_total, counts, 32u, bucket_count);
+                    ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile32 offsets launch");
+                }
+                if (ok && use_mxfp4_tile32) {
+                    moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256, 0, ds4_rocm_stream()>>>(
+                        tile32_experts, tile32_starts, tile32_offsets, counts, 32u, bucket_count);
+                    ok = cuda_ok(cudaGetLastError(), "routed_moe expert tile32 build launch");
                 }
                 if (ok && use_expert_tiles) {
                     moe_build_expert_tiles_kernel<<<(bucket_count + 255u) / 256u, 256>>>(
@@ -1128,6 +1197,14 @@ static int routed_moe_launch(
             }
         }
         if (ok && !split_gateup_done) {
+            if (getenv("DS4_ROCM_MOE_PATH_DEBUG") != NULL) {
+                fprintf(stderr,
+                        "ds4: moe gate/up launch check: sorted_pairs=%p offsets=%p counts=%p "
+                        "tile_total=%p tile_experts=%p tile_starts=%p\n",
+                        (void *)sorted_pairs, (void *)sorted_offsets,
+                        (void *)sorted_counts, (void *)tile_total,
+                        (void *)tile_experts, (void *)tile_starts);
+            }
             dim3 mgrid((expert_mid_dim + 31u) / 32u, pair_count, 1);
             if (ok && sorted_pairs && use_expert_tiles && sorted_offsets && sorted_counts && tile_total && tile_experts && tile_starts) {
                 if (q4k_path) {
@@ -1148,17 +1225,73 @@ static int routed_moe_launch(
                             0u, write_gate_up, clamp);
                     }
                 } else if (mxfp4_path) {
-                    dim3 tgrid((expert_mid_dim + 31u) / 32u, tile_capacity, 1);
+                    if (use_mxfp4_tile32 && tile32_total && tile32_experts && tile32_starts) {
+                        dim3 t32grid((expert_mid_dim + 31u) / 32u, tile32_capacity, 1);
+                        moe_gate_up_mid_mxfp4_expert_tile32_row32_kernel<<<t32grid, 256, 0, ds4_rocm_stream()>>>(
+                            (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
+                            gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
+                            tile32_total, tile32_experts, tile32_starts, (const float *)weights->ptr,
+                            gate_expert_bytes, gate_row_bytes, xq_blocks, expert_mid_dim, n_expert,
+                            0u, write_gate_up, clamp);
+                    } else if (use_mxfp4_ldsB && tile128_total && tile128_experts && tile128_starts) {
+                        /* B-staged prefill path: 8 output rows x up to 128
+                         * tokens per block; expert weights read ~once. */
+                        const uint32_t ldsB_shmem = 16u * (uint32_t)gate_row_bytes;
+                        if (ldsB_shmem > 48u * 1024u) {
+                            static int ldsB_shmem_attr_set = 0;
+                            if (!ldsB_shmem_attr_set) {
+                                const cudaError_t attr_err = cudaFuncSetAttribute(
+                                    (const void *)moe_gate_up_mid_mxfp4_expert_row8_ldsB_kernel,
+                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                    16u * 3808u);
+                                if (attr_err != cudaSuccess) {
+                                    (void)cudaGetLastError();
+                                    return 0;
+                                }
+                                ldsB_shmem_attr_set = 1;
+                            }
+                        }
+                        dim3 bgrid(expert_mid_dim / 8u, tile128_capacity, 1);
+                        moe_gate_up_mid_mxfp4_expert_row8_ldsB_kernel<<<bgrid, 256, ldsB_shmem, ds4_rocm_stream()>>>(
+                            (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
+                            gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
+                            tile128_total, tile128_experts, tile128_starts, (const float *)weights->ptr,
+                            gate_expert_bytes, gate_row_bytes, xq_blocks, expert_mid_dim, n_expert,
+                            0u, write_gate_up, clamp);
+                    } else {
+                    dim3 tgrid(tile_capacity, (expert_mid_dim + 31u) / 32u, 1);
+                    if (getenv("DS4_ROCM_MOE_PATH_DEBUG") != NULL) {
+                        fprintf(stderr,
+                                "ds4: moe mxfp4 gate/up tile8 launch grid=(%u,%u) mid_dim=%u tile_capacity=%u xq_blocks=%u\n",
+                                tgrid.x, tgrid.y, expert_mid_dim, tile_capacity, xq_blocks);
+                    }
                     /* LDS staging of 8 activation rows as aligned quant
-                     * slices plus scales, sized to the actual xq_blocks. */
-                    const uint32_t tile8_shmem = xq_blocks <= 16u ?
+                     * slices plus scales, sized to the actual xq_blocks.
+                     * Raised to 28 blocks (7168-dim x at Q8_K=256): 56.9 KiB
+                     * needs the >48 KiB dynamic-smem opt-in, set once. */
+                    const uint32_t tile8_shmem = xq_blocks <= 28u ?
                         8u * xq_blocks * (256u + (uint32_t)sizeof(float)) : 0u;
-                    moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel<<<tgrid, 256, tile8_shmem>>>(
+                    if (tile8_shmem > 48u * 1024u) {
+                        static int tile8_shmem_attr_set = 0;
+                        if (!tile8_shmem_attr_set) {
+                            const cudaError_t attr_err = cudaFuncSetAttribute(
+                                (const void *)moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel,
+                                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                8u * 28u * 260u);
+                            if (attr_err != cudaSuccess) {
+                                (void)cudaGetLastError();
+                                return 0;
+                            }
+                            tile8_shmem_attr_set = 1;
+                        }
+                    }
+                    moe_gate_up_mid_mxfp4_expert_tile8_row32_kernel<<<tgrid, 256, tile8_shmem, ds4_rocm_stream()>>>(
                         (float *)gate->ptr, (float *)up->ptr, (float *)mid->ptr,
                         gate_w, up_w, xq, sorted_pairs, sorted_offsets, sorted_counts,
                         tile_total, tile_experts, tile_starts, (const float *)weights->ptr,
                         gate_expert_bytes, gate_row_bytes, xq_blocks, expert_mid_dim, n_expert,
                         0u, write_gate_up, clamp);
+                    }
                 } else if (use_gate_row2048) {
                     if (gate_row_span == 512u) {
                         dim3 tgrid((expert_mid_dim + 511u) / 512u, tile_capacity, 1);
