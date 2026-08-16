@@ -372,7 +372,9 @@ static int run_case(uint32_t n_tokens,
                     uint64_t gate_row_bytes,
                     uint64_t down_expert_bytes,
                     uint64_t down_row_bytes,
-                    const reference_pattern patterns[N_PATTERN]) {
+                    const reference_pattern patterns[N_PATTERN],
+                    float *snapshot_out,
+                    const float *expect_out) {
     const uint64_t token_x_count = (uint64_t)n_tokens * MODEL_DIM;
     const uint64_t route_count = (uint64_t)n_tokens * N_EXPERT;
     const uint64_t mid_count = route_count * FFN_DIM;
@@ -467,6 +469,16 @@ static int run_case(uint32_t n_tokens,
             (const block_mxfp4 *)((const char *)model + down_offset),
             2.0e-4f, 1.0e-4f);
         ok = mid_ok && out_ok;
+    }
+    if (ok && snapshot_out) {
+        memcpy(snapshot_out, out_actual, out_count * sizeof(float));
+    }
+    if (ok && expect_out &&
+        memcmp(expect_out, out_actual, out_count * sizeof(float)) != 0) {
+        fprintf(stderr,
+                "MXFP4 ROCm tokens=%u bitwise mismatch vs default tile path\n",
+                n_tokens);
+        ok = 0;
     }
 
     ds4_gpu_tensor_free(out_tensor);
@@ -581,14 +593,54 @@ int main(void) {
         goto cleanup;
     }
 
-    for (uint32_t i = 0; i < sizeof(token_cases) / sizeof(token_cases[0]); i++) {
+    float *snap128 = (float *)malloc(128u * MODEL_DIM * sizeof(float));
+    float *snap512 = (float *)malloc(512u * MODEL_DIM * sizeof(float));
+    ok = ok && snap128 && snap512;
+    for (uint32_t i = 0; ok && i < sizeof(token_cases) / sizeof(token_cases[0]); i++) {
+        float *snap = token_cases[i] == 128u ? snap128 :
+                      token_cases[i] == 512u ? snap512 : NULL;
         if (!run_case(token_cases[i], model, model_size,
                       gate_offset, up_offset, down_offset,
                       gate_expert_bytes, gate_row_bytes,
-                      down_expert_bytes, down_row_bytes, patterns)) {
+                      down_expert_bytes, down_row_bytes, patterns,
+                      snap, NULL)) {
             ok = 0;
         }
     }
+    /* Occupancy/path variants must reproduce the default tile path bit
+     * for bit: same accumulation order by construction, so the out
+     * tensors compare with memcmp, not a tolerance. */
+    if (ok) {
+        const struct {
+            const char *name;
+            const char *value;
+        } variant_envs[] = {
+            { "DS4_ROCM_ENABLE_MXFP4_TILE4", "1" },
+            { "DS4_ROCM_ENABLE_MXFP4_ROW64", "1" },
+            { "DS4_ROCM_MXFP4_DOWN_RGROUP", "4" },
+        };
+        for (uint32_t v = 0; v < sizeof(variant_envs) / sizeof(variant_envs[0]); v++) {
+            setenv(variant_envs[v].name, variant_envs[v].value, 1);
+            const int vok =
+                run_case(128u, model, model_size,
+                         gate_offset, up_offset, down_offset,
+                         gate_expert_bytes, gate_row_bytes,
+                         down_expert_bytes, down_row_bytes, patterns,
+                         NULL, snap128) &&
+                run_case(512u, model, model_size,
+                         gate_offset, up_offset, down_offset,
+                         gate_expert_bytes, gate_row_bytes,
+                         down_expert_bytes, down_row_bytes, patterns,
+                         NULL, snap512);
+            unsetenv(variant_envs[v].name);
+            fprintf(stderr, "MXFP4 ROCm variant %s=%s: %s\n",
+                    variant_envs[v].name, variant_envs[v].value,
+                    vok ? "bitwise OK" : "MISMATCH");
+            if (!vok) ok = 0;
+        }
+    }
+    free(snap128);
+    free(snap512);
 
 cleanup:
     if (initialized) {
