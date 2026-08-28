@@ -352,3 +352,98 @@ Qwen3.8-Flash-Next / DGX Spark prototype
 
 Target: GB10 / 128 GB unified coherent memory / CUDA only 
 
+Qwen3.8-Flash-Next / DGX Spark prototype 
+
+## **19. REVISIONE R1 — Expert hotness, reuse e shortlist di sensitivity** 
+
+M7 trasforma la telemetria M6 in una shortlist utile per M8. Non assegna ancora quant type finali: costruisce ranking e bucket candidati usando usage, router importance, locality e quant reconstruction error. 
+
+### **19.1 Feature table per expert** 
+
+|**Feature**|**Interpretazione**|
+|---|---|
+|activation_frequency|quanto spesso l'expert viene selezionato|
+|mean_router_weight|pesomedio quando selezionato|
+|router_mass_fraction|quota della massa totale di routing|
+|output_energy|magnitudinemedia dell'output expert|
+|reuse_distance|locality/cache utility|
+|q2_reconstruction_error|<br>sensibilitàlocale alla quantizzazione|
+|weighted_q2_error|errore locale pesato dal router|
+
+
+
+### **19.2 Ranking provvisorio** 
+
+```
+importance_score (candidate heuristic only) =
+    normalize(router_mass_fraction)
+```
+
+- `normalize(output_energy)` 
+
+- `normalize(q2_reconstruction_error)` 
+
+```
+hotness tracked separately:
+```
+
+```
+    activation_frequency + reuse_distance
+```
+
+**NO GUESSING:** La formula è solo una euristica candidata. Non diventa policy finché non viene correlata con direct loss <u>ablations in M8E.</u> 
+
+### **19.3 Bucket candidati** 
+
+|**Bucket**|**Descrizione**|**Uso M8E**|
+|---|---|---|
+|A|hot+ highsensitivity|prima priorità Q4/Q5|
+|B|cold+high sensitivity|Q4 candidate se direct loss lo giustifica|
+|C|<br>hot+ lowsensitivity|<br>puòrestare Q2/Q3;importante perbandwidth|
+|D|cold+low sensitivity|prima priorità per Q2|
+
+
+
+### **19.4 Nuovi commit / modifiche M7** 
+
+|**Commit**|**Modifica aggiuntiva**|**Gate**|
+|---|---|---|
+|M7-C05|<br>MoE locality study produce 48×512 feature<br>table.|No missing experts.|
+|M7-C06|Expert cache usa hotness senza confonderla<br>con sensitivity.|Separate reports.|
+|M7-C13|<br>SSD ADRconsidera expert banke qtypefuturi.|Not tied to uniformqtype.|
+|M7-C16|Final artifacts includono shortlist<br>sensitivity/hotness.|Ready for M8E.|
+
+
+
+### **19.5 Direct shortlist calibration** 
+
+- Selezionare top-N expert per sensitivity per layer e un campione random di controllo. 
+
+- Registrare expert sensibili soprattutto nel down projection rispetto a gate/up. 
+
+- Non usare solo frequency: un expert raro può essere molto sensibile. 
+
+### **19.6 Nuovi test M7** 
+
+|**ID**|**Test**|**PASS**|
+|---|---|---|
+|M7-T17|Feature completeness|48×512expert con feature base|
+|M7-T18|Bucket determinism|same corpus/seed->same classification|
+|M7-T19|Hotnessvs sensitivity separation|report distinti|
+|M7-T20|Projection sensitivity sample|gate/up/down metrics disponibili|
+
+
+
+### **19.7 Acceptance artifact aggiuntivi** 
+
+```
+artifacts/m7/
+  expert_feature_table.parquet_or_json
+  expert_hotness_rank.json
+  expert_sensitivity_rank.json
+  expert_projection_sensitivity_sample.json
+  expert_bucket_candidates.json
+```
+
+Target: GB10 / 128 GB unified coherent memory / CUDA only 
+

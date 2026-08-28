@@ -8,7 +8,7 @@ _Selective Q4: sensitivity-driven quantization, memory solver, quality gates e r
 
 ## **1. Definition of Done** 
 
-- Esiste una ricetta Q4 selettiva formalmente definita per classe tensor, non una semplice quantizzazione uniforme. 
+- Esiste una ricetta Q4 selettiva formalmente definita per classe tensor e, per i routed experts, eventualmente per bucket/singolo expert/projection; non una semplice quantizzazione uniforme. 
 
 - I routed experts sono il dominio principale che passa da Q2 a Q4; router, shared expert, GDN/QSA/GR, norms e output cambiano precisione solo tramite ablation. 
 
@@ -43,6 +43,9 @@ subject to:
     no swap thrash
     no full dequant mirror
     all correctness gates pass
+```
+
+```
 secondary objectives:
     maximize decode t/s
     maximize prefill t/s
@@ -56,10 +59,9 @@ Il solver non deve essere sofisticato: può iniziare come enumerazione guidata d
 |**Classe**|**Baseline M7**|**Prima prova M8**|**Priorità qualità**|
 |---|---|---|---|
 |Routed expert gate/up|Q2-class|Q4_K/IQ4-class|MEDIA-ALTA|
-|Routed expert down|Q2-class|Q4_K/IQ4-class separata|ALTA|
+|<br>Routed expert down|Q2-class|Q4_K/IQ4-class separata|ALTA|
 |Router|Q8/BF16|immutato|MOLTO ALTA|
 |Shared expert|Q8/BF16|immutato; poiQ6/Q8 ablation|ALTA|
-|GDN projections/state-related<br>weights|Q8/BF16|immutato|MOLTO ALTA|
 
 
 
@@ -68,6 +70,7 @@ Target: GB10 / 128 GB unified coherent memory / CUDA only
 |||Q|wen3.8-Flash-Next /DGXSparkprototype|
 |---|---|---|---|
 |**Classe**|**Baseline M7**|**Prima prova M8**|**Priorità qualità**|
+|GDN projections/state-related<br>weights|Q8/BF16|immutato|MOLTO ALTA|
 |QSA projections/indexer|Q8/BF16|immutato|MOLTO ALTA|
 |GatedResidual|Q8/BF16|immutato|MOLTOALTA|
 |Norm/scales|BF16/F32|immutato|MOLTO ALTA|
@@ -83,7 +86,7 @@ Target: GB10 / 128 GB unified coherent memory / CUDA only
 |R0|Q2|Q2|M7precision|baselineM7|
 |R1|Q4|Q2|M7 precision|misura valore puro del Q4<br>experts|
 |R2|Q4|Q4|M7 precision|misura valore PLE Q4|
-|R3|Q4 down + Q4 gate/up<br>variant B|Q2|<br>M7 precision|quant-type sensitivity<br>experts|
+|R3|Q4 down + Q4 gate/up<br>variant B|Q2|M7 precision|quant-type sensitivity<br>experts|
 |R4|Q4 experts|Q2|shared expert Q6/Q8|recupero memoria se<br>necessario|
 |R5|Q4 experts|Q2|embedding/output Q6<br>candidate|trade-off memoria/logits|
 
@@ -101,7 +104,7 @@ La ricetta finale può non coincidere con nessuna R0-R5. Queste sono prove contr
 |M8-C03|Q4 expert kernels<br>finalization|q38_moe_cuda.cu;<br>q38_quant.cu|Completa Q4 candidate<br>gate/up/down e ubatch<br>fuzz.|M6 goldens + Q4|
 |M8-C04|R1 artifact|quant_manifest_R1.json;<br>GGUF|Q4 routed experts, resto<br>invariato.|load + audit|
 |M8-C05|R1 quality/perf|artifacts/m8/R1_*|Logit/perplexity/task/<br>memory/t/s vs R0.|report|
-|M8-C06|PLE Q4 ablation|q38_ple*; R2 manifest|Q4 row decoder/storage<br>policy se necessario.|M4 goldens pass|
+|M8-C06|PLE Q4 ablation|q38_ple*; R2 manifest|<br>Q4 row decoder/storage<br>policy se necessario.|M4 goldens pass|
 |M8-C07|Core sensitivity probes|R4/R5 manifests|Shared/embed/output<br>reductions una classe per<br>volta.|no mixed attribution|
 |M8-C08|Recipe search|tools/<br>q38_recipe_search.py|Enumera candidate entro<br>memory gate usando<br>measured deltas.|candidate shortlist|
 |M8-C09|Final recipe build|quant_manifest_q4_selecti<br>ve.json|Produce artifact finale<br>reproducibile.|audit 100%|
@@ -119,8 +122,6 @@ recipe component:
   class
   tensor_count
   source_bytes
-  quant_type
-  quantized_bytes
 ```
 
 Target: GB10 / 128 GB unified coherent memory / CUDA only 
@@ -128,6 +129,8 @@ Target: GB10 / 128 GB unified coherent memory / CUDA only
 Qwen3.8-Flash-Next / DGX Spark prototype 
 
 ```
+  quant_type
+  quantized_bytes
   alignment_overhead
   required_workspace_bytes
   expected_residency_policy
@@ -156,7 +159,7 @@ solver output:
 |---|---|
 |Layer/logit error|localizza distorsione tecnica|
 |KL/log-prob delta|confronto distribuzionale|
-|<br>Perplexity su corpusfisso|sensibilità globale|
+|Perplexity su corpusfisso|sensibilità globale|
 |Greedy deterministic suite|regressioni evidenti e reproducibility|
 |Coding/reasoningmultilingual mini-suite|quality sanity|
 |Tool/structured-format suite|stabilità formato se target server la richiede|
@@ -200,26 +203,25 @@ Il Q4 non è accettato se passa solo un benchmark end-to-end. Deve mantenere tut
 |M8-T02|Q4blockdecode|scalar/CUDApass|
 |M8-T03|Q4 expert boundaries|all 512 indexing safe|
 |M8-T04|Q4ubatch fuzz|M6matrixpass|
-|M8-T05|R1 quant audit|only intended classes changed|
-|M8-T06|R1 memory|withinSparkgates|
-|M8-T07|R1 correctness regression|M0-M7 pass|
 
 
 
 Target: GB10 / 128 GB unified coherent memory / CUDA only 
 
-<u>Qwen3.8-Flash-Next / DGX Spark prototype</u> 
-
-|**ID**|**Test**|**PASS**|
+|||Qwen3.8-Flash-Next /DGXSparkprototype|
 |---|---|---|
-|M8-T08|PLE Q2 vs Q4 ablation|measured and attributable|
-|M8-T09|Final recipe quant audit|100% tensoraccounted|
-|M8-T10|Final startup peak|≤112 GiB|
-|M8-T11|Finalprefillpeak|≤116 GiB|
+|**ID**|**Test**|**PASS**|
+|M8-T05|R1 quant audit|only intended classes changed|
+|M8-T06|R1 memory|withinSparkgates|
+|M8-T07|R1 correctness regression|M0-M7 pass|
+|M8-T08|PLEQ2 vs Q4ablation|measured and attributable|
+|M8-T09|Final recipe quant audit|100% tensor accounted|
+|M8-T10|Finalstartup peak|≤112GiB|
+|M8-T11|Final prefill peak|≤116 GiB|
 |M8-T12|No swap/full mirror|pass|
-|M8-T13|Finalquality|meets thresholds establishedfromdata|
-|M8-T14|Final throughput|documented vs R0; no unexplained regression|
-|M8-T15|Chunk/ubatch/stateregression|allprior invariance tests pass|
+|M8-T13|Final quality|meets thresholds established from data|
+|M8-T14|Finalthroughput|documentedvsR0;no unexplainedregression|
+|M8-T15|Chunk/ubatch/state regression|all prior invariance tests pass|
 
 
 
@@ -275,15 +277,175 @@ artifacts/m8/
 
 **Qwen3.8-Flash-Next technical overview:** https://qwen.ai/blog?id=qwen3.8-flash-next 
 
-**Public Q4_K_M GGUF example (~120 GB):** https://huggingface.co/vumpt/Qwen3.8-Flash-Next-GGUF **llama.cpp qwen4exp SM121 sustained-load issue #27780:** https://github.com/ggml-org/llama.cpp/issues/27780 **llama.cpp qwen4exp SM110 corruption issue #27763:** https://github.com/ggml-org/llama.cpp/issues/27763 
+**Public Q4_K_M GGUF example (~120 GB):** https://huggingface.co/vumpt/Qwen3.8-Flash-Next-GGUF 
+
+**llama.cpp qwen4exp SM121 sustained-load issue #27780:** https://github.com/ggml-org/llama.cpp/issues/27780 
 
 Target: GB10 / 128 GB unified coherent memory / CUDA only 
 
-Qwen3.8-Flash-Next / DGX Spark prototype **llama.cpp qwen4exp multi-segment issue #27797:** https://github.com/ggml-org/llama.cpp/issues/27797 
+Qwen3.8-Flash-Next / DGX Spark prototype **llama.cpp qwen4exp SM110 corruption issue #27763:** https://github.com/ggml-org/llama.cpp/issues/27763 
+
+**llama.cpp qwen4exp multi-segment issue #27797:** https://github.com/ggml-org/llama.cpp/issues/27797 
 
 **llama.cpp speculative Q4 divergence issue #25618:** https://github.com/ggml-org/llama.cpp/issues/25618 
 
 **NVIDIA DGX Spark:** https://www.nvidia.com/products/workstations/dgx-spark/ 
+
+Target: GB10 / 128 GB unified coherent memory / CUDA only 
+
+Qwen3.8-Flash-Next / DGX Spark prototype 
+
+## **16. REVISIONE R1 — M8E: Expert-wise selective quantization** 
+
+M8E decide realmente se expert diversi devono avere precisioni diverse. Il target predefinito è una policy a bucket; la granularità per singolo expert o per (layer, expert, projection) viene adottata solo se produce un vantaggio misurabile sufficiente a giustificare dispatch/layout più complessi. 
+
+### **16.1 Gerarchia di granularità** 
+
+|**Livello**|**Granularità**|**Default?**|**Costo runtime**|
+|---|---|---|---|
+|E0|tutti routed experts uguali|baseline R1|basso|
+|E1|per layer|candidate coarse|basso|
+|E2|per sensitivity bucket|TARGET DEFAULT|medio-basso|
+|E3|persingolo expert|solo se utile|medio|
+|E4|per expert+projection|solo casi ad alto ROI|più alto|
+
+
+
+### **16.2 Direct loss ablation** 
+
+Il ranking M7 è solo una shortlist. La decisione finale usa ablation sul calibration corpus. 
+
+```
+for candidate expert e (or bucket B):
+  baseline = final_recipe_without_change
+  variant  = baseline with e/B quantized at candidate qtype
+```
+
+```
+  measure:
+    delta_NLL
+    delta_KL
+    greedy token changes
+    memory delta
+    decode/prefill delta
+repeat qtypes:
+  Q2
+  Q3 candidate if supported
+  Q4
+  Q5/Q6 only for exceptional sensitive experts
+```
+
+- Non è necessario testare 24,576 expert-instance con full corpus. 
+
+- Stage 1 usa feature ranking; Stage 2 local reconstruction; Stage 3 direct loss solo su shortlist e controlli random. 
+
+- Il direct loss viene normalizzato anche per byte aggiuntivi per stimare quality-gain/GB. 
+
+### **16.3 Objective per expert** 
+
+```
+utility(e, qtype) =
+    quality_gain_vs_Q2(e, qtype)
+    / additional_bytes_vs_Q2(e, qtype)
+```
+
+```
+constraints:
+    Spark memory gates
+    runtime supports bank dispatch
+    no regression in correctness/ubatch fuzz
+```
+
+È un criterio ingegneristico; `quality_gain` deve essere definito dai risultati del corpus. 
+
+### **16.4 Expert bank builder** 
+
+```
+per layer:
+  bucket experts by (gate_qtype, up_qtype, down_qtype)
+  pack each bucket contiguously
+  emit:
+    bank tensors
+    expert_location[512]
+    bank metadata
+    checksums
+```
+
+- 
+
+- Il numero di bank deve rimanere piccolo. 
+
+Target: GB10 / 128 GB unified coherent memory / CUDA only 
+
+Qwen3.8-Flash-Next / DGX Spark prototype 
+
+- Se la policy individuale crea troppe combinazioni, applicare clustering verso bucket vicini. 
+
+- Il converter stampa bank count/layer e fallisce oltre una soglia configurata. 
+
+### **16.5 Nuovi commit M8E** 
+
+|**Commit**|**Scopo**|**Gate**|
+|---|---|---|
+|M8E-C00|Import feature/ranking M6-M7 e freeze<br>calibrationcorpus.|Checksums complete.|
+|M8E-C01|Direct ablation harness per expert/bucket.|Per-expert override works.|
+|M8E-C02|Projection-specific ablationgate/up/down.|Attributionclean.|
+|M8E-C03|Quality-gain-per-GB scorer.|Reproducible ranking.|
+|M8E-C04|Bucket optimizerunderSpark memory solver.|Candidatefits.|
+|M8E-C05|Expert-bank packer mixed Q2/Q4(+Q3/Q5).|Exact mapping.|
+|M8E-C06|Mixed-bankCUDAdispatch.|M6fuzz +goldenpass.|
+|M8E-C07|Compare E0/E1/E2/E3<br>complexity/performance.|Simplest adequate recipe chosen.|
+|M8E-C08|Freeze final expert map.|Manifest+checksums.|
+
+
+
+### **16.6 Nuovi test M8E** 
+
+|**ID**|**Test**|**PASS**|
+|---|---|---|
+|M8E-T01|Expertmap bijection|512expert/layerexactly once|
+|M8E-T02|Mixed-bank dispatch|correct qtype kernel per expert|
+|M8E-T03|Projectionoverride|gate/up/downbankcorrect|
+|M8E-T04|Bank-count cap|within configured limit|
+|M8E-T05|Q2/Q4same-layerubatch fuzz|no OOB/illegalaccess|
+|M8E-T06|Direct loss reproducibility|same corpus/seed same ranking within<br>tolerance|
+|M8E-T07|Random-control ablation|ranking beats random allocation enough to<br>justify use|
+|M8E-T08|Final mixed recipe memory|Spark gates pass|
+|M8E-T09|Final mixedrecipe quality|betterquality/GBthanuniform E0|
+|M8E-T10|Full M0-M7 regression|all pass|
+
+
+
+### **16.7 Acceptance artifacts M8E** 
+
+```
+artifacts/m8/
+```
+
+```
+  expert_direct_ablation.json
+  expert_projection_ablation.json
+  expert_quality_per_gb.json
+  expert_bucket_optimizer.json
+  expert_bank_layout.json
+  expert_location_maps/
+  mixed_bank_ubatch_fuzz.json
+  final_expert_quant_map.json
+```
+
+### **16.8 Decision rule** 
+
+- Se E2 bucketed raggiunge quasi tutta la qualità di E3 individuale con meno complessità, scegliere E2. 
+
+- E3/E4 sono accettati solo con vantaggio misurabile e stabile. 
+
+- Un expert raro ma sensibile può ricevere più bit; hotness e sensitivity non sono la stessa cosa. 
+
+- Un expert frequente ma poco sensibile può restare Q2 se il risparmio bandwidth/memoria è più utile. 
+
+### **16.9 Stop condition** 
+
+Se il mixed-quant expert layout non è supportabile senza riscrivere M1/M6 internals, il progetto deve tornare a M1: expert-wise selective quantization non può essere aggiunta come hack in M8. 
 
 Target: GB10 / 128 GB unified coherent memory / CUDA only 
 

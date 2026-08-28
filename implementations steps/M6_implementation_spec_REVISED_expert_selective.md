@@ -333,3 +333,89 @@ Qwen3.8-Flash-Next / DGX Spark prototype
 
 Target: GB10 / 128 GB unified coherent memory / CUDA only 
 
+Qwen3.8-Flash-Next / DGX Spark prototype 
+
+## **16. REVISIONE R1 — Telemetria per expert-wise quantization** 
+
+M6 non sceglie ancora quali expert meritano Q4, ma deve produrre i dati necessari per farlo. Le statistiche sono raccolte per (layer, expert) e, in calibration mode, per projection gate/up/down. 
+
+### **16.1 Statistiche obbligatorie** 
+
+```
+per layer, expert:
+  activation_count
+  selected_fraction
+  sum_router_weight
+  mean_router_weight
+  max_router_weight
+  output_l2_sum
+  output_l2_mean
+```
+
+```
+calibration mode:
+  gate_up_reconstruction_error_q2
+  down_reconstruction_error_q2
+  cosine_error_q2
+```
+
+- La telemetria non deve cambiare routing o ordine delle somme. 
+
+- I contatori devono evitare overflow su soak lunghi. 
+
+- Il profiling detailed può essere disabilitato; i contatori base restano disponibili. 
+
+### **16.2 Expert sensitivity probe** 
+
+```
+for selected calibration tokens:
+```
+
+```
+  y_ref = expert_forward(reference_or_high_precision)
+  y_q2  = expert_forward(q2)
+```
+
+```
+  record:
+    relative_l2(y_ref, y_q2)
+    cosine(y_ref, y_q2)
+    weighted_error = router_weight * relative_l2
+```
+
+È un proxy locale, non la misura finale di quality loss. Serve a creare una shortlist per M8E. 
+
+### **16.3 Aggiornamenti commit M6** 
+
+|**Commit**|**Modifica aggiuntiva**|**Gate**|
+|---|---|---|
+|M6-C03|Router CUDA espone IDs/weights a telemetry<br>hook.|No output change.|
+|M6-C05|Q2 expert primitive supporta calibration<br>compare mode.|Oracle match.|
+|M6-C07|<br>Dispatch registra usage e router-weight stats<br>per expert.|Counts reconcile.|
+|M6-C15|<br>Baselineinclude expert_usage_by_layer.json.|48×512table complete.|
+|M6-C16|Acceptance verifica telemetry accounting.|activations=routed_pairs.|
+
+
+
+### **16.4 Nuovi test M6** 
+
+|**ID**|**Test**|**PASS**|
+|---|---|---|
+|M6-T18|Expert usage accounting|somma activation_count= routed_pairs|
+|M6-T19|Router-weight accounting|aggregate stats match debug recomputation|
+|M6-T20|Telemetry disabled equivalence|logitsidenticaltelemetry on/off|
+|M6-T21|Sensitivity sample determinism|same seed->same sample/error metrics|
+
+
+
+### **16.5 Acceptance artifact aggiuntivi** 
+
+```
+artifacts/m6/
+  expert_usage_by_layer.json
+  expert_router_weight_stats.json
+  expert_q2_local_error_sample.json
+```
+
+Target: GB10 / 128 GB unified coherent memory / CUDA only 
+
