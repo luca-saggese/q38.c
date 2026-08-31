@@ -1,0 +1,7428 @@
+{
+  "summary": {
+    "bytes_source": 6112163808,
+    "elements": 3056081904,
+    "tensors": 364
+  },
+  "tensors": [
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        142254528,
+        142256832
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        142256832,
+        144911040
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        144911040,
+        144917952
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        144917952,
+        152880576
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        152880576,
+        152889184
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        152889184,
+        162805600
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        162805600,
+        162807904
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        162807904,
+        172724320
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        172724320,
+        172726624
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        172726624,
+        172728928
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        172728928,
+        172731232
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        172731232,
+        172733536
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.0.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        172733536,
+        172735840
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        172735840,
+        175390048
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        175390048,
+        175396960
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        175396960,
+        183359584
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        183359584,
+        183368192
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        183368192,
+        193284608
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        193284608,
+        193286912
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        193286912,
+        203203328
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        203203328,
+        203205632
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        203205632,
+        203207936
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        203207936,
+        203210240
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        203210240,
+        203212544
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.1.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        203212544,
+        203214848
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        203214848,
+        205869056
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        205869056,
+        205875968
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        205875968,
+        213838592
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        213838592,
+        213847200
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        213847200,
+        223763616
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        223763616,
+        223765920
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        223765920,
+        233682336
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        233682336,
+        233684640
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        233684640,
+        233686944
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        233686944,
+        233689248
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        233689248,
+        233691552
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.10.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        233691552,
+        233693856
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        233693856,
+        236348064
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        236348064,
+        236354976
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        236354976,
+        244317600
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        244317600,
+        244326208
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        244326208,
+        254242624
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        254242624,
+        254244928
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        254244928,
+        264161344
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        264161344,
+        264163648
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        264163648,
+        264165952
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        264165952,
+        264168256
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        264168256,
+        264170560
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.11.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        264170560,
+        264172864
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        264172864,
+        266827072
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        266827072,
+        266833984
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        266833984,
+        274796608
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        274796608,
+        274805216
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        274805216,
+        284721632
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        284721632,
+        284723936
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        284723936,
+        294640352
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        294640352,
+        294642656
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        294642656,
+        294644960
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        294644960,
+        294647264
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        294647264,
+        294649568
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.12.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        294649568,
+        294651872
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        294651872,
+        297306080
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        297306080,
+        297312992
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        297312992,
+        305275616
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        305275616,
+        305284224
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        305284224,
+        315200640
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        315200640,
+        315202944
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        315202944,
+        325119360
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        325119360,
+        325121664
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        325121664,
+        325123968
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        325123968,
+        325126272
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        325126272,
+        325128576
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.13.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        325128576,
+        325130880
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        325130880,
+        327785088
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        327785088,
+        327792000
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        327792000,
+        335754624
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        335754624,
+        335763232
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        335763232,
+        345679648
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        345679648,
+        345681952
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        345681952,
+        355598368
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        355598368,
+        355600672
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        355600672,
+        355602976
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        355602976,
+        355605280
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        355605280,
+        355607584
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.14.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        355607584,
+        355609888
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        355609888,
+        358264096
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        358264096,
+        358271008
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        358271008,
+        366233632
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        366233632,
+        366242240
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        366242240,
+        376158656
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        376158656,
+        376160960
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        376160960,
+        386077376
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        386077376,
+        386079680
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        386079680,
+        386081984
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        386081984,
+        386084288
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        386084288,
+        386086592
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.15.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        386086592,
+        386088896
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        386088896,
+        388743104
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        388743104,
+        388750016
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        388750016,
+        396712640
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        396712640,
+        396721248
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        396721248,
+        406637664
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        406637664,
+        406639968
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        406639968,
+        416556384
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        416556384,
+        416558688
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        416558688,
+        416560992
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        416560992,
+        416563296
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        416563296,
+        416565600
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.16.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        416565600,
+        416567904
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        416567904,
+        419222112
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        419222112,
+        419229024
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        419229024,
+        427191648
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        427191648,
+        427200256
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        427200256,
+        437116672
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        437116672,
+        437118976
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        437118976,
+        447035392
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        447035392,
+        447037696
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        447037696,
+        447040000
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        447040000,
+        447042304
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        447042304,
+        447044608
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.17.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        447044608,
+        447046912
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        447046912,
+        449701120
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        449701120,
+        449708032
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        449708032,
+        457670656
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        457670656,
+        457679264
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        457679264,
+        467595680
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        467595680,
+        467597984
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        467597984,
+        477514400
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        477514400,
+        477516704
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        477516704,
+        477519008
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        477519008,
+        477521312
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        477521312,
+        477523616
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.18.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        477523616,
+        477525920
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        477525920,
+        480180128
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        480180128,
+        480187040
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        480187040,
+        488149664
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        488149664,
+        488158272
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        488158272,
+        498074688
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        498074688,
+        498076992
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        498076992,
+        507993408
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        507993408,
+        507995712
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        507995712,
+        507998016
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        507998016,
+        508000320
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        508000320,
+        508002624
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.19.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        508002624,
+        508004928
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        508004928,
+        510659136
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        510659136,
+        510666048
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        510666048,
+        518628672
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        518628672,
+        518637280
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        518637280,
+        528553696
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        528553696,
+        528556000
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        528556000,
+        538472416
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        538472416,
+        538474720
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        538474720,
+        538477024
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        538477024,
+        538479328
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        538479328,
+        538481632
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.2.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        538481632,
+        538483936
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        538483936,
+        541138144
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        541138144,
+        541145056
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        541145056,
+        549107680
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        549107680,
+        549116288
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        549116288,
+        559032704
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        559032704,
+        559035008
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        559035008,
+        568951424
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        568951424,
+        568953728
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        568953728,
+        568956032
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        568956032,
+        568958336
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        568958336,
+        568960640
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.20.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        568960640,
+        568962944
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        568962944,
+        571617152
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        571617152,
+        571624064
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        571624064,
+        579586688
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        579586688,
+        579595296
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        579595296,
+        589511712
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        589511712,
+        589514016
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        589514016,
+        599430432
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        599430432,
+        599432736
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        599432736,
+        599435040
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        599435040,
+        599437344
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        599437344,
+        599439648
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.21.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        599439648,
+        599441952
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        599441952,
+        602096160
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        602096160,
+        602103072
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        602103072,
+        610065696
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        610065696,
+        610074304
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        610074304,
+        619990720
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        619990720,
+        619993024
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        619993024,
+        629909440
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        629909440,
+        629911744
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        629911744,
+        629914048
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        629914048,
+        629916352
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        629916352,
+        629918656
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.22.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        629918656,
+        629920960
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        629920960,
+        632575168
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        632575168,
+        632582080
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        632582080,
+        640544704
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        640544704,
+        640553312
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        640553312,
+        650469728
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        650469728,
+        650472032
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        650472032,
+        660388448
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        660388448,
+        660390752
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        660390752,
+        660393056
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        660393056,
+        660395360
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        660395360,
+        660397664
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.23.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        660397664,
+        660399968
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        660399968,
+        663054176
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        663054176,
+        663061088
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        663061088,
+        671023712
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        671023712,
+        671032320
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        671032320,
+        680948736
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        680948736,
+        680951040
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        680951040,
+        690867456
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        690867456,
+        690869760
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        690869760,
+        690872064
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        690872064,
+        690874368
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        690874368,
+        690876672
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.24.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        690876672,
+        690878976
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        690878976,
+        693533184
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        693533184,
+        693540096
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        693540096,
+        701502720
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        701502720,
+        701511328
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        701511328,
+        711427744
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        711427744,
+        711430048
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        711430048,
+        721346464
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        721346464,
+        721348768
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        721348768,
+        721351072
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        721351072,
+        721353376
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        721353376,
+        721355680
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.25.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        721355680,
+        721357984
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        721357984,
+        724012192
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        724012192,
+        724019104
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        724019104,
+        731981728
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        731981728,
+        731990336
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        731990336,
+        741906752
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        741906752,
+        741909056
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        741909056,
+        751825472
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        751825472,
+        751827776
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        751827776,
+        751830080
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        751830080,
+        751832384
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        751832384,
+        751834688
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.26.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        751834688,
+        751836992
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        751836992,
+        754491200
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        754491200,
+        754498112
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        754498112,
+        762460736
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        762460736,
+        762469344
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        762469344,
+        772385760
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        772385760,
+        772388064
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        772388064,
+        782304480
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        782304480,
+        782306784
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        782306784,
+        782309088
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        782309088,
+        782311392
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        782311392,
+        782313696
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.3.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        782313696,
+        782316000
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        782316000,
+        784970208
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        784970208,
+        784977120
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        784977120,
+        792939744
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        792939744,
+        792948352
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        792948352,
+        802864768
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        802864768,
+        802867072
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        802867072,
+        812783488
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        812783488,
+        812785792
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        812785792,
+        812788096
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        812788096,
+        812790400
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        812790400,
+        812792704
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.4.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        812792704,
+        812795008
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        812795008,
+        815449216
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        815449216,
+        815456128
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        815456128,
+        823418752
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        823418752,
+        823427360
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        823427360,
+        833343776
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        833343776,
+        833346080
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        833346080,
+        843262496
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        843262496,
+        843264800
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        843264800,
+        843267104
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        843267104,
+        843269408
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        843269408,
+        843271712
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.5.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        843271712,
+        843274016
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        843274016,
+        845928224
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        845928224,
+        845935136
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        845935136,
+        853897760
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        853897760,
+        853906368
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        853906368,
+        863822784
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        863822784,
+        863825088
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        863825088,
+        873741504
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        873741504,
+        873743808
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        873743808,
+        873746112
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        873746112,
+        873748416
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        873748416,
+        873750720
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.6.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        873750720,
+        873753024
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        873753024,
+        876407232
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        876407232,
+        876414144
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        876414144,
+        884376768
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        884376768,
+        884385376
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        884385376,
+        894301792
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        894301792,
+        894304096
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        894304096,
+        904220512
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        904220512,
+        904222816
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        904222816,
+        904225120
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        904225120,
+        904227424
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        904227424,
+        904229728
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.7.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        904229728,
+        904232032
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        904232032,
+        906886240
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        906886240,
+        906893152
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        906893152,
+        914855776
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        914855776,
+        914864384
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        914864384,
+        924780800
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        924780800,
+        924783104
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        924783104,
+        934699520
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        934699520,
+        934701824
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        934701824,
+        934704128
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        934704128,
+        934706432
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        934706432,
+        934708736
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.8.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        934708736,
+        934711040
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.attn.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2654208,
+      "class": "vision",
+      "data_offsets": [
+        934711040,
+        937365248
+      ],
+      "elements": 1327104,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.attn.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6912,
+      "class": "vision",
+      "data_offsets": [
+        937365248,
+        937372160
+      ],
+      "elements": 3456,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.attn.qkv.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        3456
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 7962624,
+      "class": "vision",
+      "data_offsets": [
+        937372160,
+        945334784
+      ],
+      "elements": 3981312,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.attn.qkv.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        3456,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 8608,
+      "class": "vision",
+      "data_offsets": [
+        945334784,
+        945343392
+      ],
+      "elements": 4304,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.mlp.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        945343392,
+        955259808
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.mlp.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        955259808,
+        955262112
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.mlp.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9916416,
+      "class": "vision",
+      "data_offsets": [
+        955262112,
+        965178528
+      ],
+      "elements": 4958208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.mlp.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        4304
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        965178528,
+        965180832
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.norm1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        965180832,
+        965183136
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.norm1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        965183136,
+        965185440
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.norm2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        965185440,
+        965187744
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.blocks.9.norm2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 9216,
+      "class": "vision",
+      "data_offsets": [
+        965187744,
+        965196960
+      ],
+      "elements": 4608,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.merger.linear_fc1.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        4608
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 42467328,
+      "class": "vision",
+      "data_offsets": [
+        965196960,
+        1007664288
+      ],
+      "elements": 21233664,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.merger.linear_fc1.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4608,
+        4608
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 5120,
+      "class": "vision",
+      "data_offsets": [
+        1007664288,
+        1007669408
+      ],
+      "elements": 2560,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.merger.linear_fc2.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 23592960,
+      "class": "vision",
+      "data_offsets": [
+        1007669408,
+        1031262368
+      ],
+      "elements": 11796480,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.merger.linear_fc2.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        2560,
+        4608
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        1031262368,
+        1031264672
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.merger.norm.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        1031264672,
+        1031266976
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.merger.norm.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2304,
+      "class": "vision",
+      "data_offsets": [
+        1031266976,
+        1031269280
+      ],
+      "elements": 1152,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.patch_embed.proj.bias",
+      "quant_rule": null,
+      "role": "bias",
+      "shape": [
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 3538944,
+      "class": "vision",
+      "data_offsets": [
+        1031269280,
+        1034808224
+      ],
+      "elements": 1769472,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.patch_embed.proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1152,
+        3,
+        2,
+        16,
+        16
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 5308416,
+      "class": "vision",
+      "data_offsets": [
+        1034808224,
+        1040116640
+      ],
+      "elements": 2654208,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "model.visual.pos_embed.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        2304,
+        1152
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00001-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 13107200,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1948515264
+      ],
+      "elements": 6553600,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "mtp.fc_embedding.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        2560,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00120-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 13107200,
+      "class": "mtp",
+      "data_offsets": [
+        1716597760,
+        1729704960
+      ],
+      "elements": 6553600,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "mtp.fc_hidden.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        2560,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00124-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 20480,
+      "class": "mtp",
+      "data_offsets": [
+        1742323904,
+        1742344384
+      ],
+      "elements": 10240,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "mtp.hyper_connection_mixer.hc_norm.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00037-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6553600,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1941961664
+      ],
+      "elements": 3276800,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "mtp.hyper_connection_mixer.input_mix_weight_down.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        320,
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00041-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6553600,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1839068608
+      ],
+      "elements": 3276800,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "mtp.hyper_connection_mixer.input_mix_weight_up.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        10240,
+        320
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00043-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 81920,
+      "class": "mtp",
+      "data_offsets": [
+        1716597760,
+        1716679680
+      ],
+      "elements": 40960,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.attn_hyper_connection.block_inject_weight.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4,
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00047-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 20480,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1935428544
+      ],
+      "elements": 10240,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.attn_hyper_connection.hc_norm.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00049-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6553600,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1839068608
+      ],
+      "elements": 3276800,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.attn_hyper_connection.input_mix_weight_down.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        320,
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00053-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6553600,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1941961664
+      ],
+      "elements": 3276800,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.attn_hyper_connection.input_mix_weight_up.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        10240,
+        320
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00057-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 1677721600,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        3510236608
+      ],
+      "elements": 838860800,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp.experts.down_proj",
+      "quant_rule": null,
+      "role": "down_proj",
+      "shape": [
+        512,
+        2560,
+        640
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00062-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 3355443200,
+      "class": "mtp",
+      "data_offsets": [
+        115917152,
+        3471360352
+      ],
+      "elements": 1677721600,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp.experts.gate_up_proj",
+      "quant_rule": null,
+      "role": "gate_up_proj",
+      "shape": [
+        512,
+        1280,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00060-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2621440,
+      "class": "mtp",
+      "data_offsets": [
+        1716597760,
+        1719219200
+      ],
+      "elements": 1310720,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp.gate.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00066-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 3276800,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1938684864
+      ],
+      "elements": 1638400,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp.shared_expert.down_proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        2560,
+        640
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00076-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 3276800,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1835791808
+      ],
+      "elements": 1638400,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp.shared_expert.gate_proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        640,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00072-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 3276800,
+      "class": "mtp",
+      "data_offsets": [
+        1835791808,
+        1839068608
+      ],
+      "elements": 1638400,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp.shared_expert.up_proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        640,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00072-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 5120,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1832520128
+      ],
+      "elements": 2560,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp.shared_expert_gate.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        1,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00070-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 81920,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1832596928
+      ],
+      "elements": 40960,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp_hyper_connection.block_inject_weight.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        4,
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00078-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 20480,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1935428544
+      ],
+      "elements": 10240,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp_hyper_connection.hc_norm.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00082-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6553600,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1941961664
+      ],
+      "elements": 3276800,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp_hyper_connection.input_mix_weight_down.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        320,
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00086-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 6553600,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1839068608
+      ],
+      "elements": 3276800,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.mlp_hyper_connection.input_mix_weight_up.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        10240,
+        320
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00088-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 3276800,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1835791808
+      ],
+      "elements": 1638400,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.indexer.index_qk_proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        640,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00090-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 256,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1935408320
+      ],
+      "elements": 128,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.indexer.k_layernorm.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        128
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00094-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 256,
+      "class": "mtp",
+      "data_offsets": [
+        1716597760,
+        1716598016
+      ],
+      "elements": 128,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.indexer.q_layernorm.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        128
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00100-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 512,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1935408576
+      ],
+      "elements": 256,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.k_norm.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        256
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00102-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2621440,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1835136448
+      ],
+      "elements": 1310720,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.k_proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00108-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 31457280,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1863972288
+      ],
+      "elements": 15728640,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.o_proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        2560,
+        6144
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00106-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 512,
+      "class": "mtp",
+      "data_offsets": [
+        1935408064,
+        1935408576
+      ],
+      "elements": 256,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.q_norm.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        256
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00112-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 62914560,
+      "class": "mtp",
+      "data_offsets": [
+        1835136448,
+        1898051008
+      ],
+      "elements": 31457280,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.q_proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        12288,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00108-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 2621440,
+      "class": "mtp",
+      "data_offsets": [
+        1898051008,
+        1900672448
+      ],
+      "elements": 1310720,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": 0,
+      "name": "mtp.layers.0.self_attn.v_proj.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00108-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 5120,
+      "class": "mtp",
+      "data_offsets": [
+        1832515008,
+        1832520128
+      ],
+      "elements": 2560,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "mtp.pre_fc_norm_embedding.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        2560
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00114-of-00131.safetensors"
+    },
+    {
+      "bytes_source": 20480,
+      "class": "mtp",
+      "data_offsets": [
+        1716597760,
+        1716618240
+      ],
+      "elements": 10240,
+      "gguf_type": null,
+      "included_runtime": false,
+      "layer": null,
+      "name": "mtp.pre_fc_norm_hidden.weight",
+      "quant_rule": null,
+      "role": "weight",
+      "shape": [
+        10240
+      ],
+      "source_dtype": "BF16",
+      "source_shard": "model-00118-of-00131.safetensors"
+    }
+  ]
+}

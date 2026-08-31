@@ -1,0 +1,16 @@
+{
+  "blockers": [
+    "full 48-layer runtime artifact is not present"
+  ],
+  "excluded_summary": {
+    "bytes_source": 6112163808,
+    "elements": 3056081904,
+    "tensors": 364
+  },
+  "format": "q38_m1_acceptance_v1",
+  "persistent_dequant_mirror": false,
+  "runtime_tensor_count": 1294,
+  "source_tensor_count": 1658,
+  "status": "blocked",
+  "whole_file_cuda_host_register": false
+}
