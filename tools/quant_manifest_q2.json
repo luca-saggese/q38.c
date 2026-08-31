@@ -60,7 +60,8 @@
       "expected_min_matches": 48,
       "expected_max_matches": 48,
       "rationale": "Use Q2-class storage while keeping projection policy explicit.",
-      "include": true
+      "include": true,
+      "layout_transform": "transpose_last_two_axes"
     },
     {
       "id": "router_bf16",
@@ -123,13 +124,13 @@
       "include": true
     },
     {
-      "id": "ple_q2_k",
+      "id": "ple_bf16",
       "class": "ple",
       "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.ple\\.",
-      "quant_type": "Q2_K",
+      "quant_type": "BF16",
       "expected_min_matches": 137,
       "expected_max_matches": 137,
-      "rationale": "PLE is a separate lookup class and may use Q2-class storage.",
+      "rationale": "Keep PLE high precision until a Q2 row decoder supports its 160/4-wide tensors.",
       "include": true
     }
   ]

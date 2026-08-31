@@ -27,6 +27,7 @@
           "expected_max_matches": {"type": "integer", "minimum": 0},
           "rationale": {"type": "string", "minLength": 1},
           "include": {"type": "boolean"},
+          "layout_transform": {"type": "string"},
           "exclude": {
             "type": "array",
             "items": {"type": "string", "minLength": 1}
