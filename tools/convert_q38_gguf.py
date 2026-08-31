@@ -13,6 +13,7 @@ import os
 import re
 import struct
 import subprocess
+import shutil
 
 
 GGUF_MAGIC = 0x46554747
@@ -208,6 +209,8 @@ def write_subset(model_dir, inventory_path, output_path, max_layer, revision,
     estimate = sum(estimate_bytes(tensor, target, shape)
                    for tensor, _, target, shape in entries)
     if plan_output:
+        disk_free = shutil.disk_usage(os.path.dirname(plan_output) or ".").free
+        gate = min(108 * 1024 ** 3, disk_free)
         plan = {
             "format": "q38_runtime_conversion_plan_v1",
             "max_layer": max_layer,
@@ -216,9 +219,13 @@ def write_subset(model_dir, inventory_path, output_path, max_layer, revision,
             "estimated_tensor_bytes": estimate,
             "source_bytes": sum(t["bytes_source"] for t, _, _, _ in entries),
             "headroom_target_bytes": 108 * 1024 ** 3,
-            "status": "pass" if estimate <= 108 * 1024 ** 3 else "blocked",
-            "reason": ("estimated payload exceeds the M1 108 GiB pressure target"
-                       if estimate > 108 * 1024 ** 3 else ""),
+            "disk_free_bytes": disk_free,
+            "status": "pass" if estimate <= gate else "blocked",
+            "reason": (
+                "estimated payload exceeds the M1 108 GiB pressure target"
+                if estimate > 108 * 1024 ** 3 else
+                "local filesystem is too small for the runtime artifact"
+                if estimate > disk_free else ""),
         }
         with open(plan_output, "w", encoding="utf-8") as stream:
             json.dump(plan, stream, indent=2, sort_keys=True)

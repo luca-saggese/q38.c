@@ -170,6 +170,14 @@ m1-full: m1-validate tools/q38_quantize
 		--inventory $(M1_ARTIFACT_DIR)/source_inventory.json \
 		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
 		--manifest tools/quant_manifest_q2.json \
+		--output $(M1_ARTIFACT_DIR)/unused.gguf \
+		--max-layer 47 --revision de4b8e4d43b917e7706784d8bb445c9af86a3540 \
+		--quantize --plan-output $(M1_ARTIFACT_DIR)/full_conversion_plan.json
+	@test "$$(python3 -c 'import json; print(json.load(open("$(M1_ARTIFACT_DIR)/full_conversion_plan.json"))["status"])')" = pass
+	python3 tools/convert_q38_gguf.py --model-dir $(MODEL_DIR) \
+		--inventory $(M1_ARTIFACT_DIR)/source_inventory.json \
+		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
+		--manifest tools/quant_manifest_q2.json \
 		--output $(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
 		--max-layer 47 --revision de4b8e4d43b917e7706784d8bb445c9af86a3540 \
 		--quantizer ./tools/q38_quantize
