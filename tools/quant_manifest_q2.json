@@ -128,13 +128,14 @@
       "include": true
     },
     {
-      "id": "ple_bf16",
+      "id": "ple_q8_0",
       "class": "ple",
       "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.ple\\.",
-      "quant_type": "BF16",
+      "quant_type": "Q8_0",
+      "fallback_quant_type": "BF16",
       "expected_min_matches": 137,
       "expected_max_matches": 137,
-      "rationale": "Keep PLE high precision until a Q2 row decoder supports its 160/4-wide tensors.",
+      "rationale": "Use the donor Q8_0 row format because PLE rows are 160-wide and are not Q2_K block aligned.",
       "include": true
     }
   ]

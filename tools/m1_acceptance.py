@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 
 
 def digest(path):
@@ -61,6 +62,14 @@ def main():
     blockers = []
     if not os.path.exists(artifact):
         blockers.append("full 48-layer runtime artifact is not present")
+        plan_path = os.path.join(args.artifact_dir, "full_conversion_plan.json")
+        if os.path.exists(plan_path):
+            plan = json.load(open(plan_path, encoding="utf-8"))
+            free = shutil.disk_usage(args.artifact_dir).free
+            if free < plan["estimated_tensor_bytes"]:
+                blockers.append(
+                    f"local filesystem has {free} bytes free; "
+                    f"full artifact estimate is {plan['estimated_tensor_bytes']} bytes")
     for path in memory_files:
         if not os.path.exists(path):
             blockers.append(f"missing memory artifact: {path}")

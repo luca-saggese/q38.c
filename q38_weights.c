@@ -215,7 +215,7 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             return false;
         }
         if (tensor->type != 30 && tensor->type != 27 &&
-            tensor->type != 10 && tensor->type != 16) {
+            tensor->type != 8 && tensor->type != 10 && tensor->type != 16) {
             set_error(error, error_len, "unsupported tensor type in runtime artifact");
             return false;
         }

@@ -38,6 +38,7 @@ static int check_type(ds4q_type type, int with_weights) {
 
 int main(void) {
     if (check_type(DS4Q_TYPE_Q2_K, 0) ||
+        check_type(DS4Q_TYPE_Q8_0, 0) ||
         check_type(DS4Q_TYPE_Q4_K, 0) ||
         check_type(DS4Q_TYPE_IQ2_XXS, 1)) {
         fprintf(stderr, "quant block or expert boundary test failed\n");

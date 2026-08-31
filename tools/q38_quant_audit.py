@@ -97,6 +97,13 @@ def main():
         expected = rule["quant_type"]
         if source["source_dtype"] != "BF16":
             expected = source["source_dtype"]
+        elif expected in {"Q2_K", "IQ2_XXS", "Q4_K", "Q8_0"}:
+            shape = list(source["shape"])
+            if rule.get("layout_transform") == "transpose_last_two_axes":
+                shape[-1], shape[-2] = shape[-2], shape[-1]
+            if len(shape) < 2 or shape[-1] % TYPE_INFO[
+                    {"Q2_K": 10, "IQ2_XXS": 16, "Q4_K": 12, "Q8_0": 8}[expected]][0]:
+                expected = rule.get("fallback_quant_type", expected)
         if expected == "I64":
             expected = "I64"
         if expected != tensor["type"] and rule["include"]:

@@ -30,6 +30,8 @@ def main():
             if rule.get("layout_transform") == "transpose_last_two_axes":
                 shape = shape[:-2] + [shape[-1], shape[-2]]
             if not shape or shape[-1] % block:
+                if rule.get("fallback_quant_type"):
+                    continue
                 raise ValueError(
                     f"{tensor['name']}: final dimension {shape[-1]} "
                     f"is not divisible by {block}"
