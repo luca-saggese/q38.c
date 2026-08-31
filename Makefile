@@ -188,7 +188,7 @@ m1-full: m1-validate tools/q38_quantize
 		--manifest tools/quant_manifest_q2.json \
 		--output $(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
 		--max-layer 47 --revision de4b8e4d43b917e7706784d8bb445c9af86a3540 \
-		--quantizer ./tools/q38_quantize
+		--quantize --quantizer ./tools/q38_quantize
 
 m1-memory-matrix: m1-subset
 	sh tools/run_memory_matrix.sh \
