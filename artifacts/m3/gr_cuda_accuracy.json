@@ -1,0 +1,1 @@
+{"gate":"M3-C03","kernel":"non-fused GR CUDA baseline","comparison":"CUDA vs scalar F32","status":"pass"}

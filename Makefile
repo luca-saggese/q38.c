@@ -46,7 +46,7 @@ M3_ARTIFACT_DIR := artifacts/m3
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
-	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02
+	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03
 
 all: spark
 
@@ -173,6 +173,15 @@ q38_gr_ref.o: q38_gr_ref.c q38_gr_ref.h
 $(TEST_DIR)/test_m3_gr_ref: $(TEST_DIR)/test_m3_gr_ref.c q38_gr_ref.o \
 		q38_gr_ref.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gr_ref.c q38_gr_ref.o -lm
+
+q38_gr.o: q38_gr.cu q38_gr.h q38_gr_ref.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_gr.cu
+
+$(TEST_DIR)/test_m3_gr_cuda: $(TEST_DIR)/test_m3_gr_cuda.cu q38_gr.o \
+		q38_gr_ref.o q38_oracle.o q38_gr.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m3_gr_cuda.cu \
+		q38_gr.o q38_gr_ref.o q38_oracle.o $(CUDA_LDLIBS) -lm
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -423,6 +432,13 @@ m3-c02: m3-c01 $(TEST_DIR)/test_m3_gr_ref
 		'{"gate":"M3-C02","formula":"GR equations 29-34","dtype":"F32","vectors":"zero-state read/write/collapse","status":"pass"}' \
 		> $(M3_ARTIFACT_DIR)/gr_golden.json
 
+m3-c03: m3-c02 $(TEST_DIR)/test_m3_gr_cuda
+	./$(TEST_DIR)/test_m3_gr_cuda
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	printf '%s\n' \
+		'{"gate":"M3-C03","kernel":"non-fused GR CUDA baseline","comparison":"CUDA vs scalar F32","status":"pass"}' \
+		> $(M3_ARTIFACT_DIR)/gr_cuda_accuracy.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
@@ -439,5 +455,6 @@ clean:
 		$(TEST_DIR)/test_m2_memory \
 		$(TEST_DIR)/test_m3_gr_binding \
 		$(TEST_DIR)/test_m3_gr_ref \
+		$(TEST_DIR)/test_m3_gr_cuda \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
