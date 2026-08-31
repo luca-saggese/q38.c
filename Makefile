@@ -36,12 +36,13 @@ Q38_OBJS := $(C_OBJS) $(CUDA_OBJS)
 
 TEST_DIR := tests
 TEST_BINS := $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
-	$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config
+	$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
+	$(TEST_DIR)/test_quant_blocks
 ARTIFACT_DIR := artifacts/m0
 M1_ARTIFACT_DIR := artifacts/m1
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
-	m1-bind m1-quant-block
+	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance
 
 all: spark
 
@@ -86,10 +87,17 @@ $(TEST_DIR)/test_memory: $(TEST_DIR)/test_memory.c q38_memory.o q38.h q38_memory
 $(TEST_DIR)/test_model_config: $(TEST_DIR)/test_model_config.c q38_model_config.o q38_model_config.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_model_config.c q38_model_config.o
 
+$(TEST_DIR)/test_quant_blocks: $(TEST_DIR)/test_quant_blocks.c \
+		to_be_deleted/gguf-tools/quants.c to_be_deleted/gguf-tools/quants.h
+	$(CC) $(CFLAGS) -Ito_be_deleted/gguf-tools -o $@ \
+		$(TEST_DIR)/test_quant_blocks.c to_be_deleted/gguf-tools/quants.c \
+		-lm -lpthread
+
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
 	./$(TEST_DIR)/test_memory
 	./$(TEST_DIR)/test_model_config
+	./$(TEST_DIR)/test_quant_blocks
 
 m0-acceptance: spark
 	@set -eu; \
@@ -137,16 +145,45 @@ m1-validate: m1-inventory
 	python3 tools/q38_validate_manifest.py \
 		$(M1_ARTIFACT_DIR)/tensor_classes.json tools/quant_manifest_q2.json
 
-m1-quant-block: m1-validate
+m1-quant-block: m1-validate $(TEST_DIR)/test_quant_blocks
 	python3 tools/q38_quant_block_test.py \
 		$(M1_ARTIFACT_DIR)/tensor_classes.json tools/quant_manifest_q2.json
+	./$(TEST_DIR)/test_quant_blocks
 
-m1-subset: m1-validate
+m1-subset: m1-validate tools/q38_quantize
 	python3 tools/convert_q38_gguf.py --model-dir $(MODEL_DIR) \
 		--inventory $(M1_ARTIFACT_DIR)/source_inventory.json \
-		--output $(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-BF16.gguf \
+		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
+		--manifest tools/quant_manifest_q2.json \
+		--output $(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf \
 		--max-layer 3 \
-		--revision de4b8e4d43b917e7706784d8bb445c9af86a3540
+		--revision de4b8e4d43b917e7706784d8bb445c9af86a3540 \
+		--quantize --quantizer ./tools/q38_quantize
+
+tools/q38_quantize: tools/q38_quantize.c to_be_deleted/gguf-tools/quants.c \
+		to_be_deleted/gguf-tools/quants.h
+	$(CC) $(CFLAGS) -Ito_be_deleted/gguf-tools -o $@ \
+		tools/q38_quantize.c to_be_deleted/gguf-tools/quants.c -lm -lpthread
+
+m1-full: m1-validate tools/q38_quantize
+	python3 tools/convert_q38_gguf.py --model-dir $(MODEL_DIR) \
+		--inventory $(M1_ARTIFACT_DIR)/source_inventory.json \
+		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
+		--manifest tools/quant_manifest_q2.json \
+		--output $(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		--max-layer 47 --revision de4b8e4d43b917e7706784d8bb445c9af86a3540 \
+		--quantizer ./tools/q38_quantize
+
+m1-memory-matrix: m1-subset
+	sh tools/run_memory_matrix.sh \
+		$(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf \
+		$(M1_ARTIFACT_DIR)
+
+m1-acceptance: m1-validate m1-quant-block m1-bind
+	python3 tools/m1_acceptance.py --artifact-dir $(M1_ARTIFACT_DIR) \
+		--inventory $(M1_ARTIFACT_DIR)/source_inventory.json \
+		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
+		--manifest tools/quant_manifest_q2.json
 
 q38_weights.o: q38_weights.c q38_weights.h q38_gguf.h q38_model_config.h
 	$(CC) $(CFLAGS) -c -o $@ q38_weights.c
@@ -158,10 +195,11 @@ $(TEST_DIR)/test_weights: $(TEST_DIR)/test_weights.c q38_weights.o q38_gguf.o \
 
 m1-bind: m1-subset $(TEST_DIR)/test_weights
 	./$(TEST_DIR)/test_weights \
-		$(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-BF16.gguf
+		$(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf
 
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
-		$(TEST_DIR)/test_weights
+		$(TEST_DIR)/test_weights $(TEST_DIR)/test_quant_blocks \
+		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR)
