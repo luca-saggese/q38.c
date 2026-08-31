@@ -2,6 +2,7 @@
 #include "q38_weights.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 int main(int argc, char **argv) {
     uint32_t qtypes[Q38_MODEL_EXPERTS];
@@ -26,10 +27,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "uniform expert bank mapping failed\n");
         return 1;
     }
-    if (argc != 2) {
-        fprintf(stderr, "usage: test_weights subset.gguf\n");
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "usage: test_weights runtime-subset.gguf [max-layer]\n");
         return 2;
     }
+    uint32_t max_layer = argc == 3 ? (uint32_t)strtoul(argv[2], NULL, 10) : 3;
     char error[256];
     q38_gguf *model = q38_gguf_open(argv[1], error, sizeof(error));
     if (!model) {
@@ -37,14 +39,19 @@ int main(int argc, char **argv) {
         return 1;
     }
     q38_weights weights;
-    if (!q38_weights_bind_subset(model, 3, &weights, error, sizeof(error))) {
+    if (!q38_weights_bind_subset(model, max_layer, &weights, error, sizeof(error))) {
         fprintf(stderr, "bind failed: %s\n", error);
         q38_gguf_close(model);
         return 1;
     }
-    if (weights.bound_layers != 4 || weights.bound_tensor_count != 30 ||
-        weights.layer[3].kind != Q38_LAYER_FULL_ATTENTION ||
-        weights.layer[0].experts.loc[511].local_index != 511) {
+    uint32_t expected = 5 + (max_layer + 1) * 24 +
+        (max_layer >= 1 ? 137 : 0);
+    if (weights.bound_layers != max_layer + 1 ||
+        weights.bound_tensor_count != expected ||
+        (max_layer >= 3 && weights.layer[3].kind != Q38_LAYER_FULL_ATTENTION) ||
+        weights.layer[0].experts.loc[511].local_index != 511 ||
+        (max_layer >= 1 && weights.layer[1].ple_tensor_count != 137) ||
+        weights.layer[0].tensor_count != 24) {
         fprintf(stderr, "unexpected bound subset layout\n");
         q38_gguf_close(model);
         return 1;

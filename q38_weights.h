@@ -13,6 +13,8 @@ extern "C" {
 #endif
 
 #define Q38_MAX_BANKS_PER_LAYER 512
+#define Q38_MAX_LAYER_TENSORS 192
+#define Q38_MAX_PLE_TENSORS 160
 
 typedef struct {
     uint8_t bank_id;
@@ -41,6 +43,10 @@ typedef struct {
     q38_tensor *shared_down_proj;
     q38_tensor *gdn_or_qsa[32];
     uint32_t gdn_or_qsa_count;
+    q38_tensor *tensor[Q38_MAX_LAYER_TENSORS];
+    uint32_t tensor_count;
+    q38_tensor *ple_tensor[Q38_MAX_PLE_TENSORS];
+    uint32_t ple_tensor_count;
     q38_layer_expert_store experts;
 } q38_layer_weights;
 
@@ -48,8 +54,11 @@ typedef struct {
     q38_tensor *token_embd;
     q38_layer_weights layer[Q38_MODEL_LAYERS];
     q38_tensor *output;
+    q38_tensor *global_tensor[8];
+    uint32_t global_tensor_count;
     uint32_t bound_layers;
     uint32_t bound_tensor_count;
+    bool quantized;
 } q38_weights;
 
 /* Bind a runtime-only subset containing layers 0..max_layer, without forward
