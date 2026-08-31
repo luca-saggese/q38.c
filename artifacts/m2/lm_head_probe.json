@@ -1,0 +1,1 @@
+{"gate":"M2-C08","dtype":"BF16","top_order":[0,248046,109266,9419,248045,248319],"rows":[{"token_id":0,"fnv1a64":"cd740218567ab91f"},{"token_id":9419,"fnv1a64":"1076a097d48f1b9a"},{"token_id":109266,"fnv1a64":"140d9e3e721a8751"},{"token_id":248045,"fnv1a64":"a9e1dfd300b4dfc2"},{"token_id":248046,"fnv1a64":"45ec20cfd9533283"},{"token_id":248319,"fnv1a64":"5adbf11c92f6a10f"}]}

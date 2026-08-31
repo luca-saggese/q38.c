@@ -44,7 +44,7 @@ M2_ARTIFACT_DIR := artifacts/m2
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
-	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07
+	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08
 
 all: spark
 
@@ -147,6 +147,13 @@ $(TEST_DIR)/test_m2_embedding: $(TEST_DIR)/test_m2_embedding.c \
 		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_embedding.c q38_weights.o \
 		q38_gguf.o q38_model_config.o
+
+$(TEST_DIR)/test_m2_lm_head: $(TEST_DIR)/test_m2_lm_head.cu \
+		q38_cuda_primitives.o q38_oracle.o q38_weights.o q38_gguf.o \
+		q38_model_config.o q38_cuda_primitives.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m2_lm_head.cu \
+		q38_cuda_primitives.o q38_oracle.o q38_weights.o q38_gguf.o \
+		q38_model_config.o $(CUDA_LDLIBS) -lm
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -336,6 +343,17 @@ m2-c07: m2-c06 $(TEST_DIR)/test_m2_embedding
 		--model-dir $(MODEL_DIR) \
 		--probe $(M2_ARTIFACT_DIR)/embedding_probe.json
 
+m2-c08: m2-c07 $(TEST_DIR)/test_m2_lm_head
+	@test -f $(M1_ARTIFACT_DIR)/runtime-layers0-q2-test.gguf || \
+		{ echo "M2-C08: required M1 subset artifact is unavailable" >&2; exit 1; }
+	@mkdir -p $(M2_ARTIFACT_DIR)
+	./$(TEST_DIR)/test_m2_lm_head \
+		$(M1_ARTIFACT_DIR)/runtime-layers0-q2-test.gguf \
+		> $(M2_ARTIFACT_DIR)/lm_head_probe.json
+	python3 tools/validate_m2_lm_head.py \
+		--model-dir $(MODEL_DIR) \
+		--probe $(M2_ARTIFACT_DIR)/lm_head_probe.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
@@ -348,5 +366,6 @@ clean:
 		$(TEST_DIR)/test_m2_norm \
 		$(TEST_DIR)/test_m2_matvec \
 		$(TEST_DIR)/test_m2_embedding \
+		$(TEST_DIR)/test_m2_lm_head \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR)
