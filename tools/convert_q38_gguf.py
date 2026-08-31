@@ -96,6 +96,15 @@ def transformed_shape(tensor, rule, quantize):
     return shape
 
 
+def output_type(tensor, rule, quantize, shape):
+    if not quantize or tensor["source_dtype"] != "BF16":
+        return tensor["source_dtype"]
+    target = rule["quant_type"]
+    if target in BLOCK_INFO and (len(shape) < 2 or shape[-1] % BLOCK_INFO[target][0]):
+        target = rule.get("fallback_quant_type", tensor["source_dtype"])
+    return target
+
+
 def source_range(model_dir, tensor):
     shard_path = os.path.join(model_dir, tensor["source_shard"])
     with open(shard_path, "rb") as shard:
@@ -187,12 +196,10 @@ def write_subset(model_dir, inventory_path, output_path, max_layer, revision,
             "quant_type": tensor["source_dtype"], "include": True}
         if not rule.get("include", True):
             raise ValueError(f"{tensor['name']}: selected tensor is excluded")
-        target = (rule["quant_type"] if quantize and
-                  tensor["source_dtype"] == "BF16"
-                  else tensor["source_dtype"])
+        shape = transformed_shape(tensor, rule, quantize)
+        target = output_type(tensor, rule, quantize, shape)
         if target not in GGUF_TYPES:
             raise ValueError(f"{tensor['name']}: unsupported output type {target}")
-        shape = transformed_shape(tensor, rule, quantize)
         if (target in ("Q2_K", "IQ2_XXS", "Q4_K", "Q8_0")
                 and tensor["source_dtype"] != "BF16"):
             raise ValueError(f"{tensor['name']}: quantizer requires BF16 source")
