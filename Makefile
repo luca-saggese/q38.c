@@ -44,7 +44,7 @@ M2_ARTIFACT_DIR := artifacts/m2
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
-	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09
+	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10
 
 all: spark
 
@@ -154,6 +154,11 @@ $(TEST_DIR)/test_m2_lm_head: $(TEST_DIR)/test_m2_lm_head.cu \
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m2_lm_head.cu \
 		q38_cuda_primitives.o q38_oracle.o q38_weights.o q38_gguf.o \
 		q38_model_config.o $(CUDA_LDLIBS) -lm
+
+$(TEST_DIR)/test_m2_memory: $(TEST_DIR)/test_m2_memory.c \
+		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_memory.c q38_weights.o \
+		q38_gguf.o q38_model_config.o
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -364,6 +369,14 @@ m2-c09: m2-c08 $(TEST_DIR)/test_weights
 		'{"gate":"M2-C09","binding":"strict","layers":48,"runtime_tensor_count":1294,"ple":"handle-backed views","status":"pass"}' \
 		> $(M2_ARTIFACT_DIR)/full_binding_report.json
 
+m2-c10: m2-c09 $(TEST_DIR)/test_m2_memory
+	@test -f $(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf || \
+		{ echo "M2-C10: required M1 full artifact is unavailable" >&2; exit 1; }
+	@mkdir -p $(M2_ARTIFACT_DIR)
+	./$(TEST_DIR)/test_m2_memory \
+		$(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		> $(M2_ARTIFACT_DIR)/memory.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
@@ -377,5 +390,6 @@ clean:
 		$(TEST_DIR)/test_m2_matvec \
 		$(TEST_DIR)/test_m2_embedding \
 		$(TEST_DIR)/test_m2_lm_head \
+		$(TEST_DIR)/test_m2_memory \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR)
