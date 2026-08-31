@@ -17,6 +17,26 @@ def main():
     with open(args.manifest, encoding="utf-8") as stream:
         manifest = json.load(stream)
 
+    policy = manifest.get("expert_policy")
+    if not isinstance(policy, dict) or not isinstance(policy.get("default"), dict):
+        raise ValueError("expert_policy.default is required")
+    required_projection = {"gate", "up", "down"}
+    if set(policy["default"]) != required_projection:
+        raise ValueError("expert_policy.default must define gate/up/down")
+    seen_experts = set()
+    for override in policy.get("overrides", []):
+        experts = override.get("experts", [])
+        if not experts or len(set(experts)) != len(experts):
+            raise ValueError("expert override experts must be non-empty and unique")
+        if any(not isinstance(expert, int) or not 0 <= expert < 512
+               for expert in experts):
+            raise ValueError("expert override id outside 0..511")
+        if seen_experts.intersection(experts):
+            raise ValueError("expert override entries overlap")
+        seen_experts.update(experts)
+        if set(override) != {"experts", "gate", "up", "down"}:
+            raise ValueError("expert override must define gate/up/down")
+
     matches = {}
     for rule in manifest["rules"]:
         selected = [

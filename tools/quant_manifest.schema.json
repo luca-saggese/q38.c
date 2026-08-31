@@ -2,11 +2,45 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "q38 selective quantization manifest",
   "type": "object",
-  "required": ["format", "model_revision", "rules"],
+  "required": ["format", "model_revision", "rules", "expert_policy"],
   "additionalProperties": false,
   "properties": {
     "format": {"const": "q38_quant_manifest_v2"},
     "model_revision": {"type": "string", "minLength": 1},
+    "expert_policy": {
+      "type": "object",
+      "required": ["default", "overrides"],
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "object",
+          "required": ["gate", "up", "down"],
+          "additionalProperties": false,
+          "properties": {
+            "gate": {"type": "string", "minLength": 1},
+            "up": {"type": "string", "minLength": 1},
+            "down": {"type": "string", "minLength": 1}
+          }
+        },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["experts", "gate", "up", "down"],
+            "additionalProperties": false,
+            "properties": {
+              "experts": {
+                "type": "array", "minItems": 1,
+                "items": {"type": "integer", "minimum": 0, "maximum": 511}
+              },
+              "gate": {"type": "string", "minLength": 1},
+              "up": {"type": "string", "minLength": 1},
+              "down": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
     "rules": {
       "type": "array",
       "minItems": 1,

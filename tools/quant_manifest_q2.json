@@ -1,6 +1,10 @@
 {
   "format": "q38_quant_manifest_v2",
   "model_revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540",
+  "expert_policy": {
+    "default": {"gate": "Q2_K", "up": "Q2_K", "down": "Q2_K"},
+    "overrides": []
+  },
   "rules": [
     {
       "id": "exclude_vision",
@@ -43,13 +47,13 @@
       "include": true
     },
     {
-      "id": "routed_gate_up_iq2_xxs",
+      "id": "routed_gate_up_q2_k",
       "class": "routed_expert",
       "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.mlp\\.experts\\.gate_up_proj$",
-      "quant_type": "IQ2_XXS",
+      "quant_type": "Q2_K",
       "expected_min_matches": 48,
       "expected_max_matches": 48,
-      "rationale": "Reduce the dominant routed-expert footprint.",
+      "rationale": "Use the donor Q2_K path for deterministic bring-up and broad kernel compatibility.",
       "include": true
     },
     {
