@@ -264,10 +264,25 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
         } else if (name_has(tensor, ".ple.")) {
             if (dst->ple_tensor_count >= Q38_MAX_PLE_TENSORS)
                 set_error(error, error_len, "PLE tensor table capacity exceeded");
-            else dst->ple_tensor[dst->ple_tensor_count++] = tensor;
-        } else if (!(name_has(tensor, ".linear_attn.") ||
-                     name_has(tensor, ".self_attn.") ||
-                     name_has(tensor, "hyper_connection."))) {
+            else {
+                bool source_integer = name_has(tensor, "layer_multipliers") ||
+                    name_has(tensor, "ngram_heads_offsets") ||
+                    name_has(tensor, "ngram_heads_vocab_sizes");
+                bool row_quantized = out->quantized && tensor->ndim >= 2 &&
+                    tensor->dim[tensor->ndim - 1] % 32 == 0;
+                uint32_t expected_type = source_integer ? 27 :
+                    (row_quantized ? 8 : 30);
+                if (tensor->type != expected_type)
+                    set_error(error, error_len, "PLE shape/type mismatch");
+                else
+                    dst->ple_tensor[dst->ple_tensor_count++] = tensor;
+            }
+        } else if (name_has(tensor, ".linear_attn.") ||
+                   name_has(tensor, ".self_attn.") ||
+                   name_has(tensor, "hyper_connection.")) {
+            if (tensor->type != 30)
+                set_error(error, error_len, "core projection type mismatch");
+        } else {
             set_error(error, error_len, "unknown layer tensor role");
         }
         if (error && error[0]) return false;
