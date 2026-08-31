@@ -43,7 +43,7 @@ M1_ARTIFACT_DIR := artifacts/m1
 M2_ARTIFACT_DIR := artifacts/m2
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
-	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00
+	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01
 
 all: spark
 
@@ -99,6 +99,11 @@ $(TEST_DIR)/test_quant_blocks: $(TEST_DIR)/test_quant_blocks.c \
 
 $(TEST_DIR)/test_m2_golden: $(TEST_DIR)/test_m2_golden.c q38_golden.o q38_golden.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_golden.c q38_golden.o
+
+$(TEST_DIR)/test_m2_weights: $(TEST_DIR)/test_m2_weights.c q38_weights.o \
+		q38_gguf.o q38_model_config.o q38_weights.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_weights.c q38_weights.o \
+		q38_gguf.o q38_model_config.o
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -227,10 +232,22 @@ m2-c00: $(TEST_DIR)/test_m2_golden
 		'{"format":"q38-golden-binary","version":1,"endianness":"little","checksum":"FNV-1a-64","metadata":"fixed q38_golden_meta"}' \
 		> $(M2_ARTIFACT_DIR)/golden_format_version.json
 
+m2-c01: m2-c00 $(TEST_DIR)/test_weights $(TEST_DIR)/test_m2_weights
+	./$(TEST_DIR)/test_m2_weights
+	@test -f $(M1_ARTIFACT_DIR)/runtime-layers0-q2-test.gguf || \
+		{ echo "M2-C01: required M1 subset artifact is unavailable" >&2; exit 1; }
+	./$(TEST_DIR)/test_weights \
+		$(M1_ARTIFACT_DIR)/runtime-layers0-q2-test.gguf 0
+	@mkdir -p $(M2_ARTIFACT_DIR)
+	printf '%s\n' \
+		'{"gate":"M2-C01","binding":"strict","subset_max_layer":0,"required_layers":1,"tensor_count":29,"payload":"mmap views only","status":"pass"}' \
+		> $(M2_ARTIFACT_DIR)/binding_report.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
 		$(TEST_DIR)/test_weights $(TEST_DIR)/test_quant_blocks \
 		$(TEST_DIR)/test_m2_golden \
+		$(TEST_DIR)/test_m2_weights \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR)

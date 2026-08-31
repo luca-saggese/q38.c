@@ -77,6 +77,99 @@ static bool bind_exact(const q38_gguf *model, const char *name,
     return true;
 }
 
+static bool validate_core_tensor(const q38_tensor *tensor, char *error,
+                                 size_t error_len) {
+    static const uint64_t a_log[] = {48};
+    static const uint64_t conv[] = {10240, 1, 4};
+    static const uint64_t proj_48[] = {48, 2560};
+    static const uint64_t qkv[] = {10240, 2560};
+    static const uint64_t z[] = {6144, 2560};
+    static const uint64_t norm[] = {128};
+    static const uint64_t out[] = {2560, 6144};
+    static const uint64_t index_qk[] = {640, 2560};
+    static const uint64_t norm_256[] = {256};
+    static const uint64_t proj_512[] = {512, 2560};
+    static const uint64_t q_proj[] = {12288, 2560};
+    const uint64_t *shape = NULL;
+    uint32_t ndim = 0;
+    if (name_has(tensor, ".linear_attn.A_log") ||
+        name_has(tensor, ".linear_attn.dt_bias")) {
+        shape = a_log; ndim = 1;
+    } else if (name_has(tensor, ".linear_attn.conv1d.weight")) {
+        shape = conv; ndim = 3;
+    } else if (name_has(tensor, ".linear_attn.in_proj_a.weight") ||
+               name_has(tensor, ".linear_attn.in_proj_b.weight")) {
+        shape = proj_48; ndim = 2;
+    } else if (name_has(tensor, ".linear_attn.in_proj_qkv.weight")) {
+        shape = qkv; ndim = 2;
+    } else if (name_has(tensor, ".linear_attn.in_proj_z.weight")) {
+        shape = z; ndim = 2;
+    } else if (name_has(tensor, ".linear_attn.norm.weight")) {
+        shape = norm; ndim = 1;
+    } else if (name_has(tensor, ".linear_attn.out_proj.weight")) {
+        shape = out; ndim = 2;
+    } else if (name_has(tensor, ".self_attn.indexer.index_qk_proj.weight")) {
+        shape = index_qk; ndim = 2;
+    } else if (name_has(tensor, ".self_attn.indexer.k_layernorm.weight") ||
+               name_has(tensor, ".self_attn.indexer.q_layernorm.weight")) {
+        shape = norm; ndim = 1;
+    } else if (name_has(tensor, ".self_attn.k_norm.weight") ||
+               name_has(tensor, ".self_attn.q_norm.weight")) {
+        shape = norm_256; ndim = 1;
+    } else if (name_has(tensor, ".self_attn.k_proj.weight") ||
+               name_has(tensor, ".self_attn.v_proj.weight")) {
+        shape = proj_512; ndim = 2;
+    } else if (name_has(tensor, ".self_attn.o_proj.weight")) {
+        shape = out; ndim = 2;
+    } else if (name_has(tensor, ".self_attn.q_proj.weight")) {
+        shape = q_proj; ndim = 2;
+    } else {
+        if (error && error_len)
+            snprintf(error, error_len, "unknown core tensor role: %.*s",
+                     (int)tensor->name.len, tensor->name.ptr);
+        return false;
+    }
+    if (tensor->type != 30 || !shape_is(tensor, shape, ndim)) {
+        if (error && error_len)
+            snprintf(error, error_len, "core shape/type mismatch: %.*s",
+                     (int)tensor->name.len, tensor->name.ptr);
+        return false;
+    }
+    return true;
+}
+
+static bool validate_layer_complete(const q38_layer_weights *layer,
+                                    uint32_t layer_number, char *error,
+                                    size_t error_len) {
+    uint32_t core = 0, hyper = 0, mlp = 0;
+    for (uint32_t i = 0; i < layer->tensor_count; i++) {
+        const q38_tensor *tensor = layer->tensor[i];
+        if (name_has(tensor, ".linear_attn.") ||
+            name_has(tensor, ".self_attn.")) core++;
+        else if (name_has(tensor, ".attn_hyper_connection.") ||
+                 name_has(tensor, ".mlp_hyper_connection.")) hyper++;
+        else if (name_has(tensor, ".mlp.")) mlp++;
+    }
+    if (core != 9 || hyper != 8 || mlp != 7 ||
+        !layer->router || !layer->shared_expert_gate ||
+        !layer->shared_gate_proj || !layer->shared_up_proj ||
+        !layer->shared_down_proj || layer->experts.bank_count != 1 ||
+        !layer->experts.bank[0].gate_up || !layer->experts.bank[0].down) {
+        if (error && error_len)
+            snprintf(error, error_len,
+            "layer %u required tensor set incomplete (core=%u hyper=%u mlp=%u router=%d gate=%d up=%d down=%d expert=%d)",
+            layer_number, core, hyper, mlp, layer->router != NULL,
+            layer->shared_expert_gate != NULL,
+            layer->shared_gate_proj != NULL,
+            layer->shared_up_proj != NULL,
+            layer->experts.bank_count == 1 &&
+                layer->experts.bank[0].gate_up &&
+                layer->experts.bank[0].down);
+        return false;
+    }
+    return true;
+}
+
 bool q38_expert_store_init_uniform(q38_layer_expert_store *store,
                                    uint32_t qtype) {
     if (!store) return false;
@@ -226,9 +319,12 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             else {
                 if (!dst->experts.bank_count)
                     q38_expert_store_init_uniform(&dst->experts, tensor->type);
-                else if (dst->experts.bank[0].qtype != tensor->type)
+                if (dst->experts.bank[0].qtype != tensor->type)
                     set_error(error, error_len, "routed expert quant type mismatch");
-                dst->experts.bank[0].gate_up = tensor;
+                else if (dst->experts.bank[0].gate_up)
+                    set_error(error, error_len, "duplicate routed gate/up tensor");
+                else
+                    dst->experts.bank[0].gate_up = tensor;
             }
         } else if (name_has(tensor, ".mlp.experts.down_proj")) {
             const uint64_t *shape = out->quantized
@@ -236,30 +332,46 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             if (!shape_is(tensor, shape, 3) ||
                 (out->quantized ? tensor->type != 10 : tensor->type != 30))
                 set_error(error, error_len, "routed down shape/type mismatch");
-                else {
-                    if (!dst->experts.bank_count)
-                        q38_expert_store_init_uniform(&dst->experts, tensor->type);
+            else {
+                if (!dst->experts.bank_count)
+                    q38_expert_store_init_uniform(&dst->experts, tensor->type);
+                if (dst->experts.bank[0].qtype != tensor->type)
+                    set_error(error, error_len, "routed expert quant type mismatch");
+                else if (dst->experts.bank[0].down)
+                    set_error(error, error_len, "duplicate routed down tensor");
+                else
                     dst->experts.bank[0].down = tensor;
-                }
+            }
         } else if (name_has(tensor, ".mlp.gate.weight")) {
             if (!shape_is(tensor, router_shape, 2) || tensor->type != 30)
                 set_error(error, error_len, "router shape/type mismatch");
+            else if (dst->router)
+                set_error(error, error_len, "duplicate router tensor");
             else dst->router = tensor;
         } else if (name_has(tensor, ".shared_expert.gate_proj.weight") ||
                    name_has(tensor, ".shared_expert.up_proj.weight")) {
             if (!shape_is(tensor, shared_shape, 2) || tensor->type != 30)
                 set_error(error, error_len, "shared projection shape/type mismatch");
-            else if (name_has(tensor, ".gate_proj."))
-                dst->shared_gate_proj = tensor;
-            else
-                dst->shared_up_proj = tensor;
+            else if (name_has(tensor, ".gate_proj.")) {
+                if (dst->shared_gate_proj)
+                    set_error(error, error_len, "duplicate shared gate tensor");
+                else dst->shared_gate_proj = tensor;
+            } else {
+                if (dst->shared_up_proj)
+                    set_error(error, error_len, "duplicate shared up tensor");
+                else dst->shared_up_proj = tensor;
+            }
         } else if (name_has(tensor, ".shared_expert.down_proj.weight")) {
             if (!shape_is(tensor, shared_down_shape, 2) || tensor->type != 30)
                 set_error(error, error_len, "shared down shape/type mismatch");
+            else if (dst->shared_down_proj)
+                set_error(error, error_len, "duplicate shared down tensor");
             else dst->shared_down_proj = tensor;
         } else if (name_has(tensor, ".shared_expert_gate.weight")) {
             if (!shape_is(tensor, shared_gate_shape, 2) || tensor->type != 30)
                 set_error(error, error_len, "shared gate shape/type mismatch");
+            else if (dst->shared_expert_gate)
+                set_error(error, error_len, "duplicate shared expert gate tensor");
             else dst->shared_expert_gate = tensor;
         } else if (name_has(tensor, ".ple.")) {
             if (dst->ple_tensor_count >= Q38_MAX_PLE_TENSORS)
@@ -280,8 +392,20 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
         } else if (name_has(tensor, ".linear_attn.") ||
                    name_has(tensor, ".self_attn.") ||
                    name_has(tensor, "hyper_connection.")) {
-            if (tensor->type != 30)
-                set_error(error, error_len, "core projection type mismatch");
+            if (name_has(tensor, "hyper_connection.")) {
+                static const uint64_t inject[] = {4, 10240};
+                static const uint64_t hcnorm[] = {10240};
+                static const uint64_t down[] = {320, 10240};
+                static const uint64_t up[] = {10240, 320};
+                const uint64_t *shape = name_has(tensor, "block_inject_weight")
+                    ? inject : name_has(tensor, "hc_norm") ? hcnorm
+                    : name_has(tensor, "input_mix_weight_down") ? down : up;
+                uint32_t ndim = name_has(tensor, "hc_norm") ? 1 : 2;
+                if (tensor->type != 30 || !shape_is(tensor, shape, ndim))
+                    set_error(error, error_len, "hyper-connection shape/type mismatch");
+            } else {
+                validate_core_tensor(tensor, error, error_len);
+            }
         } else {
             set_error(error, error_len, "unknown layer tensor role");
         }
@@ -289,6 +413,16 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
         dst->tensor[dst->tensor_count++] = tensor;
         bound++;
     }
+
+    if (out->global_tensor_count != 3) {
+        if (error && error_len > 0)
+            snprintf(error, error_len, "global tensor set mismatch: expected 3, got %u",
+                     out->global_tensor_count);
+        return false;
+    }
+    for (uint32_t layer = 0; layer <= max_layer; layer++)
+        if (!validate_layer_complete(&out->layer[layer], layer, error, error_len))
+            return false;
 
     uint32_t expected = expected_tensor_count(max_layer);
     /* The inventory is authoritative for role cardinality; this check catches
