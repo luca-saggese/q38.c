@@ -40,7 +40,7 @@ TEST_BINS := $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 ARTIFACT_DIR := artifacts/m0
 M1_ARTIFACT_DIR := artifacts/m1
 
-.PHONY: all spark test clean m0-acceptance m1-inventory
+.PHONY: all spark test clean m0-acceptance m1-inventory m1-validate
 
 all: spark
 
@@ -129,6 +129,12 @@ m1-inventory:
 	@mkdir -p $(M1_ARTIFACT_DIR)
 	python3 tools/q38_inventory.py --model-dir $(MODEL_DIR) \
 		--output $(M1_ARTIFACT_DIR)/source_inventory.json
+
+m1-validate: m1-inventory
+	python3 tools/q38_classify.py $(M1_ARTIFACT_DIR)/source_inventory.json \
+		--output $(M1_ARTIFACT_DIR)/tensor_classes.json
+	python3 tools/q38_validate_manifest.py \
+		$(M1_ARTIFACT_DIR)/tensor_classes.json tools/quant_manifest_q2.json
 
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
