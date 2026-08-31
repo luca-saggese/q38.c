@@ -46,7 +46,7 @@ M3_ARTIFACT_DIR := artifacts/m3
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
-	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03
+	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04
 
 all: spark
 
@@ -182,6 +182,11 @@ $(TEST_DIR)/test_m3_gr_cuda: $(TEST_DIR)/test_m3_gr_cuda.cu q38_gr.o \
 		q38_gr_ref.o q38_oracle.o q38_gr.h
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m3_gr_cuda.cu \
 		q38_gr.o q38_gr_ref.o q38_oracle.o $(CUDA_LDLIBS) -lm
+
+$(TEST_DIR)/test_m3_gdn_binding: $(TEST_DIR)/test_m3_gdn_binding.c \
+		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gdn_binding.c q38_weights.o \
+		q38_gguf.o q38_model_config.o
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -439,6 +444,16 @@ m3-c03: m3-c02 $(TEST_DIR)/test_m3_gr_cuda
 		'{"gate":"M3-C03","kernel":"non-fused GR CUDA baseline","comparison":"CUDA vs scalar F32","status":"pass"}' \
 		> $(M3_ARTIFACT_DIR)/gr_cuda_accuracy.json
 
+m3-c04: m3-c03 $(TEST_DIR)/test_m3_gdn_binding
+	@test -f $(M1_ARTIFACT_DIR)/runtime-layers0-q2-test.gguf || \
+		{ echo "M3-C04: required M1 subset artifact is unavailable" >&2; exit 1; }
+	./$(TEST_DIR)/test_m3_gdn_binding \
+		$(M1_ARTIFACT_DIR)/runtime-layers0-q2-test.gguf
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	printf '%s\n' \
+		'{"gate":"M3-C04","family":"GDN","key_heads":16,"value_heads":48,"head_dim":128,"conv_kernel":4,"status":"pass"}' \
+		> $(M3_ARTIFACT_DIR)/gdn_binding.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
@@ -456,5 +471,6 @@ clean:
 		$(TEST_DIR)/test_m3_gr_binding \
 		$(TEST_DIR)/test_m3_gr_ref \
 		$(TEST_DIR)/test_m3_gr_cuda \
+		$(TEST_DIR)/test_m3_gdn_binding \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)

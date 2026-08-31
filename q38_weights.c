@@ -437,6 +437,34 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
                     *slot = tensor;
             } else {
                 validate_core_tensor(tensor, error, error_len);
+                if ((!error || !error[0]) &&
+                    name_has(tensor, ".linear_attn.")) {
+                    q38_tensor **slot = NULL;
+                    if (name_has(tensor, ".in_proj_qkv.weight"))
+                        slot = &dst->gdn.in_proj_qkv;
+                    else if (name_has(tensor, ".in_proj_z.weight"))
+                        slot = &dst->gdn.in_proj_z;
+                    else if (name_has(tensor, ".in_proj_a.weight"))
+                        slot = &dst->gdn.in_proj_a;
+                    else if (name_has(tensor, ".in_proj_b.weight"))
+                        slot = &dst->gdn.in_proj_b;
+                    else if (name_has(tensor, ".conv1d.weight"))
+                        slot = &dst->gdn.conv1d;
+                    else if (name_has(tensor, ".A_log"))
+                        slot = &dst->gdn.A_log;
+                    else if (name_has(tensor, ".dt_bias"))
+                        slot = &dst->gdn.dt_bias;
+                    else if (name_has(tensor, ".norm.weight"))
+                        slot = &dst->gdn.norm;
+                    else if (name_has(tensor, ".out_proj.weight"))
+                        slot = &dst->gdn.out_proj;
+                    if (!slot)
+                        set_error(error, error_len, "unknown GDN tensor role");
+                    else if (*slot)
+                        set_error(error, error_len, "duplicate GDN tensor");
+                    else
+                        *slot = tensor;
+                }
             }
         } else {
             set_error(error, error_len, "unknown layer tensor role");
@@ -452,9 +480,21 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
                      out->global_tensor_count);
         return false;
     }
-    for (uint32_t layer = 0; layer <= max_layer; layer++)
+    for (uint32_t layer = 0; layer <= max_layer; layer++) {
         if (!validate_layer_complete(&out->layer[layer], layer, error, error_len))
             return false;
+        if (out->layer[layer].kind == Q38_LAYER_LINEAR_ATTENTION) {
+            const q38_gdn_weights *gdn = &out->layer[layer].gdn;
+            if (!gdn->in_proj_qkv || !gdn->in_proj_z || !gdn->in_proj_a ||
+                !gdn->in_proj_b || !gdn->conv1d || !gdn->A_log ||
+                !gdn->dt_bias || !gdn->norm || !gdn->out_proj) {
+                if (error && error_len)
+                    snprintf(error, error_len,
+                             "layer %u GDN tensor set incomplete", layer);
+                return false;
+            }
+        }
+    }
 
     uint32_t expected = expected_tensor_count(max_layer);
     /* The inventory is authoritative for role cardinality; this check catches

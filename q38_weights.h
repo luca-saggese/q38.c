@@ -42,6 +42,18 @@ typedef struct {
 } q38_gr_weights;
 
 typedef struct {
+    q38_tensor *in_proj_qkv;
+    q38_tensor *in_proj_z;
+    q38_tensor *in_proj_a;
+    q38_tensor *in_proj_b;
+    q38_tensor *conv1d;
+    q38_tensor *A_log;
+    q38_tensor *dt_bias;
+    q38_tensor *norm;
+    q38_tensor *out_proj;
+} q38_gdn_weights;
+
+typedef struct {
     q38_layer_kind kind;
     q38_tensor *router;
     q38_tensor *shared_expert_gate;
@@ -57,6 +69,7 @@ typedef struct {
     q38_layer_expert_store experts;
     q38_gr_weights attn_gr;
     q38_gr_weights mlp_gr;
+    q38_gdn_weights gdn;
 } q38_layer_weights;
 
 typedef struct {
