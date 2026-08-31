@@ -2,6 +2,7 @@
 """Classify source tensor names; unknown names are a hard error."""
 
 import argparse
+from collections import defaultdict
 import json
 import re
 
@@ -45,6 +46,8 @@ def main():
         source = json.load(stream)
 
     classified = []
+    summary = defaultdict(lambda: {"tensors": 0, "elements": 0, "bytes_source": 0})
+    excluded = {"tensors": 0, "elements": 0, "bytes_source": 0}
     for tensor in source["tensors"]:
         label, layer, role = classify(tensor["name"])
         item = dict(tensor)
@@ -58,11 +61,17 @@ def main():
             }
         )
         classified.append(item)
+        target = excluded if label in ("vision", "mtp") else summary[label]
+        target["tensors"] += 1
+        target["elements"] += tensor["elements"]
+        target["bytes_source"] += tensor["bytes_source"]
 
     report = {
         "format": "q38_tensor_classes_v1",
         "tensor_count": len(classified),
         "unclassified_count": 0,
+        "class_summary": dict(sorted(summary.items())),
+        "excluded_summary": excluded,
         "tensors": classified,
     }
     with open(args.output, "w", encoding="utf-8") as stream:

@@ -35,7 +35,8 @@ CUDA_OBJS := q38_cuda.o
 Q38_OBJS := $(C_OBJS) $(CUDA_OBJS)
 
 TEST_DIR := tests
-TEST_BINS := $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf $(TEST_DIR)/test_memory
+TEST_BINS := $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
+	$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config
 ARTIFACT_DIR := artifacts/m0
 M1_ARTIFACT_DIR := artifacts/m1
 
@@ -61,6 +62,9 @@ q38_memory.o: q38_memory.c q38_memory.h q38.h
 q38_platform.o: q38_platform.c q38_platform.h q38_cuda.h q38.h
 	$(CC) $(CFLAGS) -c -o $@ q38_platform.c
 
+q38_model_config.o: q38_model_config.c q38_model_config.h
+	$(CC) $(CFLAGS) -c -o $@ q38_model_config.c
+
 # --- Executable -----------------------------------------------------------
 q38: $(Q38_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ $(Q38_OBJS) $(CUDA_LDLIBS)
@@ -78,9 +82,13 @@ $(TEST_DIR)/test_gguf: $(TEST_DIR)/test_gguf.c q38_gguf.o q38.h q38_gguf.h
 $(TEST_DIR)/test_memory: $(TEST_DIR)/test_memory.c q38_memory.o q38.h q38_memory.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_memory.c q38_memory.o
 
+$(TEST_DIR)/test_model_config: $(TEST_DIR)/test_model_config.c q38_model_config.o q38_model_config.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_model_config.c q38_model_config.o
+
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
 	./$(TEST_DIR)/test_memory
+	./$(TEST_DIR)/test_model_config
 
 m0-acceptance: spark
 	@set -eu; \
@@ -123,5 +131,6 @@ m1-inventory:
 		--output $(M1_ARTIFACT_DIR)/source_inventory.json
 
 clean:
-	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf $(TEST_DIR)/test_memory
+	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
+		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config
 	rm -rf $(ARTIFACT_DIR)
