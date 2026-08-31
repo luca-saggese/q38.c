@@ -44,6 +44,6 @@ int main(void) {
         fprintf(stderr, "quant block or expert boundary test failed\n");
         return 1;
     }
-    puts("test_quant_blocks: Q2/IQ2/Q4 donor block tests passed");
+    puts("test_quant_blocks: Q2/Q8/IQ2/Q4 donor block tests passed");
     return 0;
 }
