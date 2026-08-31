@@ -1,0 +1,5 @@
+M2 acceptance passed
+gates: M2-C00 M2-C01 M2-C02 M2-C03 M2-C04 M2-C05 M2-C06 M2-C07 M2-C08 M2-C09 M2-C10 M2-C11
+tokenizer: 10 frozen raw/chat cases, exact IDs
+binding: 48 layers, 1294 runtime tensors
+memory: repeated full bind 20x, no FD/RSS growth

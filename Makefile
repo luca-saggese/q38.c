@@ -44,7 +44,8 @@ M2_ARTIFACT_DIR := artifacts/m2
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
-	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10
+	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
+	m2-c11 m2-acceptance
 
 all: spark
 
@@ -376,6 +377,13 @@ m2-c10: m2-c09 $(TEST_DIR)/test_m2_memory
 	./$(TEST_DIR)/test_m2_memory \
 		$(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
 		> $(M2_ARTIFACT_DIR)/memory.json
+
+m2-c11: m2-c10 test
+	python3 tools/m2_acceptance.py \
+		--artifact-dir $(M2_ARTIFACT_DIR) \
+		--model-dir $(MODEL_DIR)
+
+m2-acceptance: m2-c11
 
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
