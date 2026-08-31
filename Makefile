@@ -5,7 +5,7 @@
 # ./q38 plus the M0 test binaries.
 
 CC ?= cc
-CFLAGS ?= -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only
+CFLAGS ?= -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I.
 
 # --- CUDA toolchain -----------------------------------------------------
 CUDA_HOME ?= $(shell if [ -x /usr/local/cuda/bin/nvcc ]; then \
@@ -68,7 +68,7 @@ spark: q38 $(TEST_BINS)
 
 # --- Tests ------------------------------------------------------------------
 $(TEST_DIR)/test_platform: $(TEST_DIR)/test_platform.c q38_platform.o q38_cuda.o q38.h q38_platform.h q38_cuda.h
-	$(NVCC) $(NVCCFLAGS) -o $@ $(TEST_DIR)/test_platform.c q38_platform.o q38_cuda.o $(CUDA_LDLIBS)
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_platform.c q38_platform.o q38_cuda.o $(CUDA_LDLIBS)
 
 $(TEST_DIR)/test_gguf: $(TEST_DIR)/test_gguf.c q38_gguf.o q38.h q38_gguf.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_gguf.c q38_gguf.o
@@ -81,15 +81,39 @@ test: $(TEST_BINS)
 	./$(TEST_DIR)/test_memory
 
 m0-acceptance: spark
-	@mkdir -p $(ARTIFACT_DIR)
-	@echo "q38: running M0 acceptance"
-	./q38 --platform --json > $(ARTIFACT_DIR)/platform.json
-	./q38 --inspect test.gguf --json > $(ARTIFACT_DIR)/inspect.json 2>/dev/null || \
-		(echo "q38: no test.gguf present; skipping inspect artifact" >&2)
-	./q38 --memory-plan test.gguf --json > $(ARTIFACT_DIR)/memory.json 2>/dev/null || \
-		(echo "q38: no test.gguf present; skipping memory-plan artifact" >&2)
-	./$(TEST_DIR)/test_gguf
-	./$(TEST_DIR)/test_memory
+	@set -eu; \
+	mkdir -p $(ARTIFACT_DIR); \
+	echo "q38: running M0 acceptance"; \
+	./$(TEST_DIR)/test_platform; \
+	./$(TEST_DIR)/test_gguf; \
+	./$(TEST_DIR)/test_memory; \
+	printf '\107\107\125\106\003\000\000\000\000\000\000\000\000\000\000\000' > $(ARTIFACT_DIR)/test.gguf; \
+	truncate -s 1G $(ARTIFACT_DIR)/test.gguf; \
+	./q38 --inspect $(ARTIFACT_DIR)/test.gguf --json > $(ARTIFACT_DIR)/inspect.json; \
+	./q38 --list-tensors $(ARTIFACT_DIR)/test.gguf --json > $(ARTIFACT_DIR)/tensors.json; \
+	./q38 --memory-plan $(ARTIFACT_DIR)/test.gguf --json > $(ARTIFACT_DIR)/memory.json; \
+	./q38 --platform-json > $(ARTIFACT_DIR)/platform.json; \
+	grep -q '"version":3' $(ARTIFACT_DIR)/inspect.json; \
+	grep -q '"tensors":0' $(ARTIFACT_DIR)/inspect.json; \
+	grep -q '"tensors":\[\]' $(ARTIFACT_DIR)/tensors.json; \
+	for key in phase rss_bytes mem_available_bytes cuda_free_bytes cuda_total_bytes \
+		model_file_bytes model_mapped_bytes cuda_allocated_bytes peak_internal_bytes; do \
+		grep -q "\"$$key\"" $(ARTIFACT_DIR)/memory.json; \
+	done; \
+	test "$$(stat -c '%s' $(ARTIFACT_DIR)/test.gguf)" -eq 1073741824; \
+	/usr/bin/time -f '%M' -o $(ARTIFACT_DIR)/rss-kb.txt \
+		./q38 --inspect $(ARTIFACT_DIR)/test.gguf >/dev/null; \
+	rss_kb="$$(cat $(ARTIFACT_DIR)/rss-kb.txt)"; \
+	test "$${rss_kb:-0}" -lt 262144; \
+	for i in $$(seq 1 100); do ./$(TEST_DIR)/test_gguf >/dev/null 2>&1; done; \
+	if grep -RInE 'cudaHostRegister[[:space:]]*\(' --exclude-dir=.git \
+		--exclude-dir=to_be_deleted --exclude='*.md' .; then \
+		echo "q38: forbidden whole-file host registration found" >&2; exit 1; \
+	fi; \
+	if nm -u q38 tests/test_platform | grep -E 'ds4_|DeepSeek|GLM|DSpark|MTP|Metal|ROCm'; then \
+		echo "q38: out-of-scope symbols linked" >&2; exit 1; \
+	fi; \
+	echo "q38: M0 acceptance passed"
 
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf $(TEST_DIR)/test_memory

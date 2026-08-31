@@ -22,6 +22,7 @@ static void usage(FILE *fp) {
         "\n"
         "modes:\n"
         "  --platform                 Probe the platform (CUDA + host memory)\n"
+        "  --platform-json            Platform probe in JSON format\n"
         "  --inspect <model.gguf>     Print GGUF metadata and tensor summary\n"
         "  --list-tensors <model.gguf> List individual tensors\n"
         "  --memory-plan <model.gguf> Dry-run memory plan (no allocation)\n"
@@ -239,9 +240,10 @@ int main(int argc, char **argv) {
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
-        if (strcmp(a, "--platform") == 0) {
+        if (strcmp(a, "--platform") == 0 || strcmp(a, "--platform-json") == 0) {
             mode = Q38_MODE_PLATFORM;
             opt.platform = true;
+            if (strcmp(a, "--platform-json") == 0) opt.json = true;
         } else if (strcmp(a, "--inspect") == 0) {
             mode = Q38_MODE_INSPECT;
             opt.inspect = true;

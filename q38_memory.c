@@ -12,7 +12,8 @@ static int proc_rss_bytes(uint64_t *out) {
     FILE *fp = fopen("/proc/self/statm", "r");
     if (!fp) return -1;
     unsigned long pages = 0;
-    int rc = fscanf(fp, "%*lu %lu", &pages);
+    unsigned long ignored_size = 0;
+    int rc = fscanf(fp, "%lu %lu", &ignored_size, &pages);
     fclose(fp);
     if (rc != 1) return -1;
     long page_size = sysconf(_SC_PAGESIZE);
