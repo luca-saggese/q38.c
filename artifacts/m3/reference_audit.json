@@ -1,0 +1,12 @@
+{
+  "gate": "M3-C00",
+  "status": "pass",
+  "reference_audit": "complete",
+  "unknown_blockers": [
+    "fused projection slice order",
+    "16-to-48 head mapping",
+    "serialized recurrent-state layout",
+    "exact GR tensor assignment",
+    "runnable Qwen3.8 forward reference"
+  ]
+}

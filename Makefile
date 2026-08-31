@@ -41,11 +41,12 @@ TEST_BINS := $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 ARTIFACT_DIR := artifacts/m0
 M1_ARTIFACT_DIR := artifacts/m1
 M2_ARTIFACT_DIR := artifacts/m2
+M3_ARTIFACT_DIR := artifacts/m3
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
-	m2-c11 m2-acceptance
+		m2-c11 m2-acceptance m3-c00
 
 all: spark
 
@@ -385,6 +386,14 @@ m2-c11: m2-c10 test
 
 m2-acceptance: m2-c11
 
+m3-c00: m2-acceptance
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	cp docs/qwen_gdn_semantics.md $(M3_ARTIFACT_DIR)/qwen_gdn_semantics.md
+	python3 tools/m3_c00_audit.py \
+		--doc docs/qwen_gdn_semantics.md \
+		--model-dir $(MODEL_DIR) \
+		--output $(M3_ARTIFACT_DIR)/reference_audit.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
@@ -400,4 +409,4 @@ clean:
 		$(TEST_DIR)/test_m2_lm_head \
 		$(TEST_DIR)/test_m2_memory \
 		tools/q38_quantize
-	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR)
+	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
