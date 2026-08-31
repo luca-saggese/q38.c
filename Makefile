@@ -40,9 +40,10 @@ TEST_BINS := $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 	$(TEST_DIR)/test_quant_blocks
 ARTIFACT_DIR := artifacts/m0
 M1_ARTIFACT_DIR := artifacts/m1
+M2_ARTIFACT_DIR := artifacts/m2
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
-	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance
+	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00
 
 all: spark
 
@@ -66,6 +67,9 @@ q38_platform.o: q38_platform.c q38_platform.h q38_cuda.h q38.h
 
 q38_model_config.o: q38_model_config.c q38_model_config.h
 	$(CC) $(CFLAGS) -c -o $@ q38_model_config.c
+
+q38_golden.o: q38_golden.c q38_golden.h
+	$(CC) $(CFLAGS) -c -o $@ q38_golden.c
 
 # --- Executable -----------------------------------------------------------
 q38: $(Q38_OBJS)
@@ -92,6 +96,9 @@ $(TEST_DIR)/test_quant_blocks: $(TEST_DIR)/test_quant_blocks.c \
 	$(CC) $(CFLAGS) -Ito_be_deleted/gguf-tools -o $@ \
 		$(TEST_DIR)/test_quant_blocks.c to_be_deleted/gguf-tools/quants.c \
 		-lm -lpthread
+
+$(TEST_DIR)/test_m2_golden: $(TEST_DIR)/test_m2_golden.c q38_golden.o q38_golden.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_golden.c q38_golden.o
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -213,9 +220,17 @@ m1-bind: m1-subset $(TEST_DIR)/test_weights
 	./$(TEST_DIR)/test_weights \
 		$(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf
 
+m2-c00: $(TEST_DIR)/test_m2_golden
+	@mkdir -p $(M2_ARTIFACT_DIR)
+	./$(TEST_DIR)/test_m2_golden
+	printf '%s\n' \
+		'{"format":"q38-golden-binary","version":1,"endianness":"little","checksum":"FNV-1a-64","metadata":"fixed q38_golden_meta"}' \
+		> $(M2_ARTIFACT_DIR)/golden_format_version.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
 		$(TEST_DIR)/test_weights $(TEST_DIR)/test_quant_blocks \
+		$(TEST_DIR)/test_m2_golden \
 		tools/q38_quantize
-	rm -rf $(ARTIFACT_DIR)
+	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR)
