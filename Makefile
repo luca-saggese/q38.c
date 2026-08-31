@@ -6,6 +6,7 @@
 
 CC ?= cc
 CFLAGS ?= -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I.
+MODEL_DIR ?= /home/lvx/q38model
 
 # --- CUDA toolchain -----------------------------------------------------
 CUDA_HOME ?= $(shell if [ -x /usr/local/cuda/bin/nvcc ]; then \
@@ -36,8 +37,9 @@ Q38_OBJS := $(C_OBJS) $(CUDA_OBJS)
 TEST_DIR := tests
 TEST_BINS := $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf $(TEST_DIR)/test_memory
 ARTIFACT_DIR := artifacts/m0
+M1_ARTIFACT_DIR := artifacts/m1
 
-.PHONY: all spark test clean m0-acceptance
+.PHONY: all spark test clean m0-acceptance m1-inventory
 
 all: spark
 
@@ -114,6 +116,11 @@ m0-acceptance: spark
 		echo "q38: out-of-scope symbols linked" >&2; exit 1; \
 	fi; \
 	echo "q38: M0 acceptance passed"
+
+m1-inventory:
+	@mkdir -p $(M1_ARTIFACT_DIR)
+	python3 tools/q38_inventory.py --model-dir $(MODEL_DIR) \
+		--output $(M1_ARTIFACT_DIR)/source_inventory.json
 
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf $(TEST_DIR)/test_memory
