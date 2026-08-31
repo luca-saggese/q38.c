@@ -63,6 +63,7 @@ def inventory(model_dir):
                 "source_dtype": entry.get("dtype"),
                 "elements": elements,
                 "bytes_source": offsets[1] - offsets[0],
+                "data_offsets": offsets,
                 "source_shard": shard,
             }
         )

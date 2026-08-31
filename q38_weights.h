@@ -1,0 +1,72 @@
+#ifndef Q38_WEIGHTS_H
+#define Q38_WEIGHTS_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "q38_gguf.h"
+#include "q38_model_config.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define Q38_MAX_BANKS_PER_LAYER 512
+
+typedef struct {
+    uint8_t bank_id;
+    uint16_t local_index;
+} q38_expert_location;
+
+typedef struct {
+    uint32_t qtype;
+    q38_tensor *gate_up;
+    q38_tensor *down;
+    uint32_t expert_count;
+} q38_expert_bank;
+
+typedef struct {
+    q38_expert_bank bank[Q38_MAX_BANKS_PER_LAYER];
+    q38_expert_location loc[Q38_MODEL_EXPERTS];
+    uint32_t bank_count;
+} q38_layer_expert_store;
+
+typedef struct {
+    q38_layer_kind kind;
+    q38_tensor *router;
+    q38_tensor *shared_expert_gate;
+    q38_tensor *shared_gate_proj;
+    q38_tensor *shared_up_proj;
+    q38_tensor *shared_down_proj;
+    q38_tensor *gdn_or_qsa[32];
+    uint32_t gdn_or_qsa_count;
+    q38_layer_expert_store experts;
+} q38_layer_weights;
+
+typedef struct {
+    q38_tensor *token_embd;
+    q38_layer_weights layer[Q38_MODEL_LAYERS];
+    q38_tensor *output;
+    uint32_t bound_layers;
+    uint32_t bound_tensor_count;
+} q38_weights;
+
+/* Bind a runtime-only subset containing layers 0..max_layer, without forward
+ * execution or persistent dequantized storage. */
+bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
+                             q38_weights *out, char *error, size_t error_len);
+
+/* Construct an O(1) uniform bank mapping for 512 experts. */
+bool q38_expert_store_init_uniform(q38_layer_expert_store *store,
+                                   uint32_t qtype);
+
+/* Group experts by quant type while preserving an O(1) expert lookup. */
+bool q38_expert_store_init_mixed(q38_layer_expert_store *store,
+                                 const uint32_t qtypes[Q38_MODEL_EXPERTS]);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
