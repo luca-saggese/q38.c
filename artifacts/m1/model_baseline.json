@@ -1,0 +1,24 @@
+{
+  "donor_revision": "c1d4597",
+  "files": {
+    "config.json": {
+      "bytes": 4745,
+      "sha256": "889658f2508e8c61d409b02e70e0d78d8d4452ec65aaafbe129805d213d2e74b"
+    },
+    "generation_config.json": {
+      "bytes": 202,
+      "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e"
+    },
+    "model.safetensors.index.json": {
+      "bytes": 170726,
+      "sha256": "99e815241ef03325536b0aaa4441deea45174c17fae31e10f0bb456410c590de"
+    }
+  },
+  "format": "q38_m1_model_baseline_v1",
+  "local_quantizer": {
+    "sha256": "a1ff4cd5e57728660c34c6bf5f311fc2413d67bae5a2d87d020c1c66137aa8cf",
+    "source": "to_be_deleted/gguf-tools/quants.c"
+  },
+  "model_revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540",
+  "source_model_dir": "/home/lvx/q38model"
+}

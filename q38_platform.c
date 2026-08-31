@@ -38,12 +38,31 @@ int q38_platform_rss_bytes(uint64_t *rss_bytes) {
     FILE *fp = fopen("/proc/self/statm", "r");
     if (!fp) return -1;
     unsigned long pages = 0;
-    int rc = fscanf(fp, "%*lu %lu", &pages);
+    unsigned long ignored_size = 0;
+    int rc = fscanf(fp, "%lu %lu", &ignored_size, &pages);
     fclose(fp);
     if (rc != 1) return -1;
     long page_size = sysconf(_SC_PAGESIZE);
     if (page_size <= 0) page_size = 4096;
     *rss_bytes = (uint64_t)pages * (uint64_t)page_size;
+    return 0;
+}
+
+int q38_platform_validate(const q38_platform_info *info,
+                          char *reason, size_t reason_len) {
+    if (reason && reason_len > 0) reason[0] = '\0';
+    if (info->cuda_device_count != 1) {
+        snprintf(reason, reason_len,
+                 "expected exactly 1 CUDA device, found %d",
+                 info->cuda_device_count);
+        return -1;
+    }
+    if (info->cc_major != 12 || info->cc_minor != 1) {
+        snprintf(reason, reason_len,
+                 "unsupported compute capability sm_%d%d (require sm_121)",
+                 info->cc_major, info->cc_minor);
+        return -1;
+    }
     return 0;
 }
 
@@ -66,18 +85,5 @@ int q38_platform_probe(q38_platform_info *out, char *reason, size_t reason_len) 
     }
 
     /* GB10 / SM 12.1 guard. No silent degradation. */
-    if (out->cuda_device_count != 1) {
-        snprintf(reason, reason_len,
-                 "expected exactly 1 CUDA device, found %d",
-                 out->cuda_device_count);
-        return -1;
-    }
-    if (out->cc_major != 12 || out->cc_minor != 1) {
-        snprintf(reason, reason_len,
-                 "unsupported compute capability sm_%d%d (require sm_121)",
-                 out->cc_major, out->cc_minor);
-        return -1;
-    }
-
-    return 0;
+    return q38_platform_validate(out, reason, reason_len);
 }

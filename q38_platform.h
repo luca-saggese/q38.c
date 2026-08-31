@@ -23,6 +23,11 @@ int q38_platform_host_memory(uint64_t *total_bytes, uint64_t *available_bytes);
 /* Current process RSS in bytes. Returns 0 on success. */
 int q38_platform_rss_bytes(uint64_t *rss_bytes);
 
+/* Validate the single-device GB10 / SM 12.1 requirement. Returns 0 when the
+ * supplied probe result is supported and writes a refusal reason otherwise. */
+int q38_platform_validate(const q38_platform_info *info,
+                          char *reason, size_t reason_len);
+
 /* Combine CUDA + host into a full platform probe. Returns 0 on success and
  * fills `out`. On unsupported platform returns non-zero and a reason. */
 int q38_platform_probe(q38_platform_info *out, char *reason, size_t reason_len);

@@ -1,0 +1,12 @@
+{
+  "disk_free_bytes": 40204185600,
+  "estimated_tensor_bytes": 60900309080,
+  "format": "q38_runtime_conversion_plan_v1",
+  "headroom_target_bytes": 115964116992,
+  "max_layer": 3,
+  "quantized": true,
+  "reason": "local filesystem is too small for the runtime artifact",
+  "source_bytes": 125760904280,
+  "status": "blocked",
+  "tensor_count": 238
+}

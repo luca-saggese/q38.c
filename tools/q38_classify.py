@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Classify source tensor names; unknown names are a hard error."""
+
+import argparse
+from collections import defaultdict
+import json
+import re
+
+
+RULES = (
+    ("vision", re.compile(r"(^|\.)(visual|vision)(\.|$)")),
+    ("mtp", re.compile(r"(^|\.)(mtp|mtp_layers?)(\.|$)")),
+    ("shared_expert", re.compile(r"(^|\.)(shared_expert)(\.|_|$)")),
+    ("routed_expert", re.compile(r"(^|\.)(experts?)(\.|$)")),
+    ("router", re.compile(r"(^|\.)(router|gate)(\.|_|$)")),
+    ("ple", re.compile(r"(^|\.)(ple|ngram)(\.|$)")),
+    ("gdn", re.compile(r"(^|\.)(gdn|linear_attn|mamba)(\.|$)")),
+    ("qsa", re.compile(r"(^|\.)(qsa|self_attn|attention)(\.|$)")),
+    ("gr", re.compile(
+        r"(^|\.)(gated_residual|residual|hyper_connection|"
+        r"input_mix|block_inject|hc_norm)(\.|_|$)"
+    )),
+    ("embedding", re.compile(r"(^|\.)(embed_tokens|token_embedding|wte)(\.|$)")),
+    ("output", re.compile(r"(^|\.)(lm_head|output)(\.|$)")),
+    ("norm", re.compile(r"(^|\.)(norm|input_layernorm|post_attention_layernorm)(\.|$)")),
+)
+
+
+def classify(name):
+    matches = [label for label, pattern in RULES if pattern.search(name)]
+    if not matches:
+        raise ValueError(f"{name}: no semantic class rule matched")
+    label = matches[0]
+    layer_match = re.search(r"(?:layers?|blk)\.(\d+)", name)
+    layer = int(layer_match.group(1)) if layer_match else None
+    role = name.rsplit(".", 1)[-1]
+    return label, layer, role
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("inventory")
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    with open(args.inventory, encoding="utf-8") as stream:
+        source = json.load(stream)
+
+    classified = []
+    summary = defaultdict(lambda: {"tensors": 0, "elements": 0, "bytes_source": 0})
+    excluded = {"tensors": 0, "elements": 0, "bytes_source": 0}
+    for tensor in source["tensors"]:
+        label, layer, role = classify(tensor["name"])
+        item = dict(tensor)
+        item.update(
+            {
+                "class": label,
+                "layer": layer,
+                "role": role,
+                "included_runtime": label not in ("vision", "mtp"),
+                "quant_rule": None,
+            }
+        )
+        classified.append(item)
+        target = excluded if label in ("vision", "mtp") else summary[label]
+        target["tensors"] += 1
+        target["elements"] += tensor["elements"]
+        target["bytes_source"] += tensor["bytes_source"]
+
+    report = {
+        "format": "q38_tensor_classes_v1",
+        "tensor_count": len(classified),
+        "unclassified_count": 0,
+        "class_summary": dict(sorted(summary.items())),
+        "excluded_summary": excluded,
+        "tensors": classified,
+    }
+    with open(args.output, "w", encoding="utf-8") as stream:
+        json.dump(report, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+
+
+if __name__ == "__main__":
+    main()

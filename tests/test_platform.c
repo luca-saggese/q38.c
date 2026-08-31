@@ -22,29 +22,33 @@ static int failures = 0;
     else { fprintf(stderr, "ok:   %s\n", msg); } \
 } while (0)
 
-/* Directly test the guard logic without a device by checking the refusal
- * conditions on a synthetic platform_info. */
+/* Directly test the guard logic without a device using synthetic probe data. */
 static void test_guard_logic(void) {
     q38_platform_info p;
+    char reason[256];
     memset(&p, 0, sizeof(p));
 
     /* Wrong CC. */
     p.cuda_device_count = 1;
     p.cc_major = 11;
     p.cc_minor = 0;
-    CHECK(!(p.cc_major == 12 && p.cc_minor == 1), "refuses non-sm121 CC");
+    CHECK(q38_platform_validate(&p, reason, sizeof(reason)) != 0 &&
+          strstr(reason, "unsupported compute capability") != NULL,
+          "refuses non-sm121 CC");
 
     /* Wrong device count. */
     p.cuda_device_count = 2;
     p.cc_major = 12;
     p.cc_minor = 1;
-    CHECK(p.cuda_device_count != 1, "refuses multi-device");
+    CHECK(q38_platform_validate(&p, reason, sizeof(reason)) != 0 &&
+          strstr(reason, "exactly 1 CUDA device") != NULL,
+          "refuses multi-device");
 
     /* Correct target. */
     p.cuda_device_count = 1;
     p.cc_major = 12;
     p.cc_minor = 1;
-    CHECK(p.cuda_device_count == 1 && p.cc_major == 12 && p.cc_minor == 1,
+    CHECK(q38_platform_validate(&p, reason, sizeof(reason)) == 0,
           "accepts GB10/SM121");
 }
 
