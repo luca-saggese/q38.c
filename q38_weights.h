@@ -35,6 +35,13 @@ typedef struct {
 } q38_layer_expert_store;
 
 typedef struct {
+    q38_tensor *block_inject_weight;
+    q38_tensor *hc_norm;
+    q38_tensor *input_mix_weight_down;
+    q38_tensor *input_mix_weight_up;
+} q38_gr_weights;
+
+typedef struct {
     q38_layer_kind kind;
     q38_tensor *router;
     q38_tensor *shared_expert_gate;
@@ -48,6 +55,8 @@ typedef struct {
     q38_tensor *ple_tensor[Q38_MAX_PLE_TENSORS];
     uint32_t ple_tensor_count;
     q38_layer_expert_store experts;
+    q38_gr_weights attn_gr;
+    q38_gr_weights mlp_gr;
 } q38_layer_weights;
 
 typedef struct {

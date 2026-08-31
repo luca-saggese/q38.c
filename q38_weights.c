@@ -150,7 +150,13 @@ static bool validate_layer_complete(const q38_layer_weights *layer,
                  name_has(tensor, ".mlp_hyper_connection.")) hyper++;
         else if (name_has(tensor, ".mlp.")) mlp++;
     }
-    if (core != 9 || hyper != 8 || mlp != 7 ||
+    bool attn_gr = layer->attn_gr.block_inject_weight &&
+        layer->attn_gr.hc_norm && layer->attn_gr.input_mix_weight_down &&
+        layer->attn_gr.input_mix_weight_up;
+    bool mlp_gr = layer->mlp_gr.block_inject_weight &&
+        layer->mlp_gr.hc_norm && layer->mlp_gr.input_mix_weight_down &&
+        layer->mlp_gr.input_mix_weight_up;
+    if (core != 9 || hyper != 8 || mlp != 7 || !attn_gr || !mlp_gr ||
         !layer->router || !layer->shared_expert_gate ||
         !layer->shared_gate_proj || !layer->shared_up_proj ||
         !layer->shared_down_proj || layer->experts.bank_count != 1 ||
@@ -397,12 +403,38 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
                 static const uint64_t hcnorm[] = {10240};
                 static const uint64_t down[] = {320, 10240};
                 static const uint64_t up[] = {10240, 320};
-                const uint64_t *shape = name_has(tensor, "block_inject_weight")
-                    ? inject : name_has(tensor, "hc_norm") ? hcnorm
-                    : name_has(tensor, "input_mix_weight_down") ? down : up;
-                uint32_t ndim = name_has(tensor, "hc_norm") ? 1 : 2;
-                if (tensor->type != 30 || !shape_is(tensor, shape, ndim))
+                q38_gr_weights *gr = name_has(tensor, ".attn_hyper_connection.")
+                    ? &dst->attn_gr : name_has(tensor, ".mlp_hyper_connection.")
+                    ? &dst->mlp_gr : NULL;
+                const uint64_t *shape = NULL;
+                q38_tensor **slot = NULL;
+                uint32_t ndim = 2;
+                if (!gr) {
+                    set_error(error, error_len, "unknown GR tensor family");
+                } else if (name_has(tensor, "block_inject_weight")) {
+                    shape = inject;
+                    slot = &gr->block_inject_weight;
+                } else if (name_has(tensor, "hc_norm")) {
+                    shape = hcnorm;
+                    ndim = 1;
+                    slot = &gr->hc_norm;
+                } else if (name_has(tensor, "input_mix_weight_down")) {
+                    shape = down;
+                    slot = &gr->input_mix_weight_down;
+                } else if (name_has(tensor, "input_mix_weight_up")) {
+                    shape = up;
+                    slot = &gr->input_mix_weight_up;
+                } else {
+                    set_error(error, error_len, "unknown GR tensor role");
+                }
+                if (!gr || !shape || !slot)
+                    set_error(error, error_len, "unknown GR tensor family");
+                else if (*slot)
+                    set_error(error, error_len, "duplicate GR tensor");
+                else if (tensor->type != 30 || !shape_is(tensor, shape, ndim))
                     set_error(error, error_len, "hyper-connection shape/type mismatch");
+                else
+                    *slot = tensor;
             } else {
                 validate_core_tensor(tensor, error, error_len);
             }

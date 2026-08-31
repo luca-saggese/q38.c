@@ -46,7 +46,7 @@ M3_ARTIFACT_DIR := artifacts/m3
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
-		m2-c11 m2-acceptance m3-c00
+	m2-c11 m2-acceptance m3-c00 m3-c01
 
 all: spark
 
@@ -160,6 +160,11 @@ $(TEST_DIR)/test_m2_lm_head: $(TEST_DIR)/test_m2_lm_head.cu \
 $(TEST_DIR)/test_m2_memory: $(TEST_DIR)/test_m2_memory.c \
 		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_memory.c q38_weights.o \
+		q38_gguf.o q38_model_config.o
+
+$(TEST_DIR)/test_m3_gr_binding: $(TEST_DIR)/test_m3_gr_binding.c \
+		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gr_binding.c q38_weights.o \
 		q38_gguf.o q38_model_config.o
 
 test: $(TEST_BINS)
@@ -394,6 +399,16 @@ m3-c00: m2-acceptance
 		--model-dir $(MODEL_DIR) \
 		--output $(M3_ARTIFACT_DIR)/reference_audit.json
 
+m3-c01: m3-c00 $(TEST_DIR)/test_m3_gr_binding
+	@test -f $(M1_ARTIFACT_DIR)/runtime-layers0-q2-test.gguf || \
+		{ echo "M3-C01: required M1 subset artifact is unavailable" >&2; exit 1; }
+	./$(TEST_DIR)/test_m3_gr_binding \
+		$(M1_ARTIFACT_DIR)/runtime-layers0-q2-test.gguf
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	printf '%s\n' \
+		'{"gate":"M3-C01","families":["attn_hyper_connection","mlp_hyper_connection"],"rank":320,"branches":4,"status":"pass"}' \
+		> $(M3_ARTIFACT_DIR)/gr_binding.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
@@ -408,5 +423,6 @@ clean:
 		$(TEST_DIR)/test_m2_embedding \
 		$(TEST_DIR)/test_m2_lm_head \
 		$(TEST_DIR)/test_m2_memory \
+		$(TEST_DIR)/test_m3_gr_binding \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
