@@ -10,8 +10,8 @@ work. Model artifacts stay outside this repository.
 | Revision timestamp | `2026-08-27T05:03:36Z` |
 | Local model directory | `/home/lvx/q38model` |
 | Config SHA-256 | `889658f2508e8c61d409b02e70e0d78d8d4452ec65aaafbe129805d213d2e74b` |
-| Safetensors index SHA-256 | `UNKNOWN (download pending)` |
-| Tokenizer SHA-256 | `UNKNOWN (download pending)` |
+| Safetensors index SHA-256 | `99e815241ef03325536b0aaa4441deea45174c17fae31e10f0bb456410c590de` |
+| Tokenizer SHA-256 | `0997f410c57a1f4e53b09e4be8f4a172d90edd956436fb0847030937229b9f3` |
 | Converter revision | `UNKNOWN (converter not selected)` |
 | llama.cpp revision | `UNKNOWN (compatibility audit pending)` |
 

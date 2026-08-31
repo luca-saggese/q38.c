@@ -9,23 +9,26 @@ import re
 RULES = (
     ("vision", re.compile(r"(^|\.)(visual|vision)(\.|$)")),
     ("mtp", re.compile(r"(^|\.)(mtp|mtp_layers?)(\.|$)")),
-    ("embedding", re.compile(r"(^|\.)(embed_tokens|token_embedding|wte)(\.|$)")),
-    ("output", re.compile(r"(^|\.)(lm_head|output)(\.|$)")),
-    ("norm", re.compile(r"(^|\.)(norm|input_layernorm|post_attention_layernorm)(\.|$)")),
-    ("router", re.compile(r"(^|\.)(router|gate)(\.|$)")),
-    ("shared_expert", re.compile(r"(^|\.)(shared_expert)(\.|$)")),
+    ("shared_expert", re.compile(r"(^|\.)(shared_expert)(\.|_|$)")),
     ("routed_expert", re.compile(r"(^|\.)(experts?)(\.|$)")),
+    ("router", re.compile(r"(^|\.)(router|gate)(\.|_|$)")),
     ("ple", re.compile(r"(^|\.)(ple|ngram)(\.|$)")),
     ("gdn", re.compile(r"(^|\.)(gdn|linear_attn|mamba)(\.|$)")),
     ("qsa", re.compile(r"(^|\.)(qsa|self_attn|attention)(\.|$)")),
-    ("gr", re.compile(r"(^|\.)(gated_residual|residual)(\.|$)")),
+    ("gr", re.compile(
+        r"(^|\.)(gated_residual|residual|hyper_connection|"
+        r"input_mix|block_inject|hc_norm)(\.|_|$)"
+    )),
+    ("embedding", re.compile(r"(^|\.)(embed_tokens|token_embedding|wte)(\.|$)")),
+    ("output", re.compile(r"(^|\.)(lm_head|output)(\.|$)")),
+    ("norm", re.compile(r"(^|\.)(norm|input_layernorm|post_attention_layernorm)(\.|$)")),
 )
 
 
 def classify(name):
     matches = [label for label, pattern in RULES if pattern.search(name)]
-    if len(matches) != 1:
-        raise ValueError(f"{name}: expected exactly one class, got {matches}")
+    if not matches:
+        raise ValueError(f"{name}: no semantic class rule matched")
     label = matches[0]
     layer_match = re.search(r"(?:layers?|blk)\.(\d+)", name)
     layer = int(layer_match.group(1)) if layer_match else None
