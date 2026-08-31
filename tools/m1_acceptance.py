@@ -70,6 +70,13 @@ def main():
                 blockers.append(
                     f"local filesystem has {free} bytes free; "
                     f"full artifact estimate is {plan['estimated_tensor_bytes']} bytes")
+    subset_plan_path = os.path.join(args.artifact_dir, "subset_conversion_plan.json")
+    if os.path.exists(subset_plan_path):
+        subset_plan = json.load(open(subset_plan_path, encoding="utf-8"))
+        if subset_plan.get("status") == "blocked":
+            blockers.append(
+                f"layers 0..3 subset estimate is {subset_plan['estimated_tensor_bytes']} "
+                f"bytes, above local free storage")
     for path in memory_files:
         if not os.path.exists(path):
             blockers.append(f"missing memory artifact: {path}")
