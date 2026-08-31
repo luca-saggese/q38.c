@@ -77,6 +77,23 @@ __global__ static void dequant_kernel(uint32_t type, const void *blocks,
         out[index] = q4_value((const q38_q4_k_block *)blocks + block, element);
 }
 
+__global__ static void rms_norm_kernel(const float *input, const float *weight,
+                                       float *output, size_t elements,
+                                       float epsilon) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= elements) return;
+    float sum = 0.0f;
+    for (size_t i = 0; i < elements; i++) sum += input[i] * input[i];
+    output[index] = input[index] * rsqrtf(sum / (float)elements + epsilon) *
+                    weight[index];
+}
+
+__global__ static void silu_kernel(const float *input, float *output,
+                                   size_t elements) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < elements) output[index] = input[index] / (1.0f + expf(-input[index]));
+}
+
 static void set_error(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
 }
@@ -98,6 +115,44 @@ extern "C" bool q38_cuda_dequantize_row(uint32_t type, const void *blocks,
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess) {
         if (error && error_len) snprintf(error, error_len, "CUDA launch failed: %s",
+                                         cudaGetErrorString(status));
+        return false;
+    }
+    return true;
+}
+
+extern "C" bool q38_cuda_rms_norm(const float *input, const float *weight,
+                                   float *output, size_t elements,
+                                   float epsilon, cudaStream_t stream,
+                                   char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!input || !weight || !output || !elements) {
+        set_error(error, error_len, "invalid CUDA RMSNorm arguments");
+        return false;
+    }
+    rms_norm_kernel<<<(unsigned)((elements + 255) / 256), 256, 0, stream>>>(
+        input, weight, output, elements, epsilon);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) {
+        if (error && error_len) snprintf(error, error_len, "CUDA RMSNorm launch failed: %s",
+                                         cudaGetErrorString(status));
+        return false;
+    }
+    return true;
+}
+
+extern "C" bool q38_cuda_silu(const float *input, float *output, size_t elements,
+                              cudaStream_t stream, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!input || !output || !elements) {
+        set_error(error, error_len, "invalid CUDA SiLU arguments");
+        return false;
+    }
+    silu_kernel<<<(unsigned)((elements + 255) / 256), 256, 0, stream>>>(
+        input, output, elements);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) {
+        if (error && error_len) snprintf(error, error_len, "CUDA SiLU launch failed: %s",
                                          cudaGetErrorString(status));
         return false;
     }

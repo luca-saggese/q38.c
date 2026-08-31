@@ -44,7 +44,7 @@ M2_ARTIFACT_DIR := artifacts/m2
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
-	m2-c02 m2-c03 m2-c04
+	m2-c02 m2-c03 m2-c04 m2-c05
 
 all: spark
 
@@ -132,6 +132,11 @@ $(TEST_DIR)/test_m2_cuda: $(TEST_DIR)/test_m2_cuda.cu q38_cuda_primitives.o \
 		q38_quant.o q38_oracle.o q38_cuda_primitives.h
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m2_cuda.cu \
 		q38_cuda_primitives.o q38_quant.o q38_oracle.o $(CUDA_LDLIBS) -lm
+
+$(TEST_DIR)/test_m2_norm: $(TEST_DIR)/test_m2_norm.cu q38_cuda_primitives.o \
+		q38_oracle.o q38_cuda_primitives.h q38_oracle.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m2_norm.cu \
+		q38_cuda_primitives.o q38_oracle.o $(CUDA_LDLIBS) -lm
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -296,6 +301,13 @@ m2-c04: m2-c03 $(TEST_DIR)/test_m2_cuda
 		'{"gate":"M2-C04","paths":["Q2_K","Q4_K"],"comparison":"CUDA vs scalar F32","status":"pass"}' \
 		> $(M2_ARTIFACT_DIR)/primitive_accuracy.json
 
+m2-c05: m2-c04 $(TEST_DIR)/test_m2_norm
+	./$(TEST_DIR)/test_m2_norm
+	@mkdir -p $(M2_ARTIFACT_DIR)
+	printf '%s\n' \
+		'{"gate":"M2-C05","paths":["RMSNorm","SiLU"],"accumulation":"F32","comparison":"CUDA vs scalar oracle","status":"pass"}' \
+		> $(M2_ARTIFACT_DIR)/norm_activation.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
@@ -305,5 +317,6 @@ clean:
 		$(TEST_DIR)/test_m2_tokenizer \
 		$(TEST_DIR)/test_m2_quant \
 		$(TEST_DIR)/test_m2_cuda \
+		$(TEST_DIR)/test_m2_norm \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR)
