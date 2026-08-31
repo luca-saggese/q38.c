@@ -43,7 +43,8 @@ M1_ARTIFACT_DIR := artifacts/m1
 M2_ARTIFACT_DIR := artifacts/m2
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
-	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01
+	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
+	m2-c02
 
 all: spark
 
@@ -70,6 +71,9 @@ q38_model_config.o: q38_model_config.c q38_model_config.h
 
 q38_golden.o: q38_golden.c q38_golden.h
 	$(CC) $(CFLAGS) -c -o $@ q38_golden.c
+
+q38_tokenizer.o: q38_tokenizer.c q38_tokenizer.h
+	$(CC) $(CFLAGS) -c -o $@ q38_tokenizer.c
 
 # --- Executable -----------------------------------------------------------
 q38: $(Q38_OBJS)
@@ -104,6 +108,10 @@ $(TEST_DIR)/test_m2_weights: $(TEST_DIR)/test_m2_weights.c q38_weights.o \
 		q38_gguf.o q38_model_config.o q38_weights.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_weights.c q38_weights.o \
 		q38_gguf.o q38_model_config.o
+
+$(TEST_DIR)/test_m2_tokenizer: $(TEST_DIR)/test_m2_tokenizer.c \
+		q38_tokenizer.o q38_tokenizer.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_tokenizer.c q38_tokenizer.o
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -243,11 +251,20 @@ m2-c01: m2-c00 $(TEST_DIR)/test_weights $(TEST_DIR)/test_m2_weights
 		'{"gate":"M2-C01","binding":"strict","subset_max_layer":0,"required_layers":1,"tensor_count":29,"payload":"mmap views only","status":"pass"}' \
 		> $(M2_ARTIFACT_DIR)/binding_report.json
 
+m2-c02: m2-c01 $(TEST_DIR)/test_m2_tokenizer
+	@mkdir -p $(M2_ARTIFACT_DIR)
+	python3 tools/generate_m2_tokenizer_vectors.py \
+		--model-dir $(MODEL_DIR) \
+		--output $(M2_ARTIFACT_DIR)/tokenizer_vectors.json
+	./$(TEST_DIR)/test_m2_tokenizer
+	@test "$$(python3 -c 'import json; print(len(json.load(open("$(M2_ARTIFACT_DIR)/tokenizer_vectors.json"))["cases"]))')" -eq 10
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
 		$(TEST_DIR)/test_weights $(TEST_DIR)/test_quant_blocks \
 		$(TEST_DIR)/test_m2_golden \
 		$(TEST_DIR)/test_m2_weights \
+		$(TEST_DIR)/test_m2_tokenizer \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR)

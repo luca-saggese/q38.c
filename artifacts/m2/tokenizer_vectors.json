@@ -1,0 +1,439 @@
+{
+  "format": "q38-tokenizer-vectors",
+  "version": 1,
+  "model_revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540",
+  "tokenizer_class": "Qwen2Tokenizer",
+  "add_special_tokens": false,
+  "reference_files": {
+    "tokenizer.json": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+    "tokenizer_config.json": "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27",
+    "chat_template.jinja": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+    "merges.txt": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"
+  },
+  "cases": [
+    {
+      "name": "ascii_plain",
+      "kind": "text",
+      "text": "Hello, world!\nSecond line.",
+      "ids": [
+        9419,
+        11,
+        1814,
+        0,
+        198,
+        15207,
+        1500,
+        13
+      ]
+    },
+    {
+      "name": "whitespace_newline_punctuation",
+      "kind": "text",
+      "text": "  leading\tspaces\nline  ",
+      "ids": [
+        220,
+        6187,
+        1838,
+        26453,
+        198,
+        1021,
+        256
+      ]
+    },
+    {
+      "name": "unicode_combining_cjk_emoji",
+      "kind": "text",
+      "text": "Caffè déjà vu — 你好世界 🙂 é",
+      "ids": [
+        34,
+        2562,
+        4311,
+        44311,
+        31441,
+        1892,
+        220,
+        109266,
+        96748,
+        26594,
+        3825
+      ]
+    },
+    {
+      "name": "long_repetitive_boundary",
+      "kind": "text",
+      "text": "abcabcabcabcabcabcabcabcabcabc abcabcabcabcabcabcabcabcabcabc abcabcabcabcabcabcabcabcabcabc abcabcabcabcabcabcabcabcabcabc abcabcabcabcabcabcabcabcabcabc abcabcabcabcabcabcabcabcabcabc abcabcabcabcabcabcabcabcabcabc abcabcabcabcabcabcabcabcabcabc ",
+      "ids": [
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        37730,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        37730,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        37730,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        37730,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        37730,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        37730,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        37730,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        13290,
+        220
+      ]
+    },
+    {
+      "name": "special_markers",
+      "kind": "text",
+      "text": "<|im_start|>assistant\n<think>\n",
+      "ids": [
+        248045,
+        74455,
+        198,
+        248068,
+        198
+      ]
+    },
+    {
+      "name": "tool_like_markup",
+      "kind": "text",
+      "text": "{\"name\":\"lookup\",\"arguments\":{\"q\":\"<x>&\"}}\n<tool_call>\n</tool_call>",
+      "ids": [
+        4754,
+        591,
+        3147,
+        20377,
+        2129,
+        15889,
+        21624,
+        80,
+        3147,
+        27,
+        87,
+        5608,
+        29958,
+        198,
+        248058,
+        198,
+        248059
+      ]
+    },
+    {
+      "name": "chat_system_user_no_thinking",
+      "kind": "chat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are concise."
+        },
+        {
+          "role": "user",
+          "content": "Hello?"
+        }
+      ],
+      "options": {
+        "add_generation_prompt": true,
+        "enable_thinking": false
+      },
+      "ids": [
+        248045,
+        8678,
+        198,
+        2523,
+        513,
+        61446,
+        13,
+        248046,
+        198,
+        248045,
+        846,
+        198,
+        9419,
+        30,
+        248046,
+        198,
+        248045,
+        74455,
+        198,
+        248068,
+        271,
+        248069,
+        271
+      ],
+      "rendered": "<|im_start|>system\nYou are concise.<|im_end|>\n<|im_start|>user\nHello?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    },
+    {
+      "name": "chat_empty_system_no_thinking",
+      "kind": "chat",
+      "messages": [
+        {
+          "role": "system",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "Ciao"
+        }
+      ],
+      "options": {
+        "add_generation_prompt": true,
+        "enable_thinking": false
+      },
+      "ids": [
+        248045,
+        846,
+        198,
+        34,
+        21817,
+        248046,
+        198,
+        248045,
+        74455,
+        198,
+        248068,
+        271,
+        248069,
+        271
+      ],
+      "rendered": "<|im_start|>user\nCiao<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    },
+    {
+      "name": "chat_assistant_default_reasoning",
+      "kind": "chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Compute 2+2."
+        },
+        {
+          "role": "assistant",
+          "content": "4"
+        }
+      ],
+      "options": {
+        "add_generation_prompt": false,
+        "enable_thinking": true
+      },
+      "ids": [
+        248045,
+        8678,
+        198,
+        24342,
+        286,
+        4879,
+        369,
+        716,
+        310,
+        830,
+        11553,
+        13,
+        5044,
+        1683,
+        15060,
+        1472,
+        279,
+        3274,
+        11,
+        9307,
+        1328,
+        30800,
+        11,
+        2814,
+        47675,
+        25605,
+        11,
+        321,
+        60445,
+        55404,
+        11,
+        27224,
+        11,
+        321,
+        30246,
+        303,
+        279,
+        1534,
+        4087,
+        13,
+        248046,
+        198,
+        248045,
+        846,
+        198,
+        44712,
+        220,
+        17,
+        10,
+        17,
+        13,
+        248046,
+        198,
+        248045,
+        74455,
+        198,
+        248068,
+        271,
+        248069,
+        271,
+        19,
+        248046,
+        198
+      ],
+      "rendered": "<|im_start|>system\nReasoning effort is set to xhigh. Please think carefully through the task, validate key assumptions, consider plausible alternatives, and prioritize correctness, consistency, and clarity in the final answer.<|im_end|>\n<|im_start|>user\nCompute 2+2.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n4<|im_end|>\n"
+    },
+    {
+      "name": "chat_tool_response",
+      "kind": "chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Call lookup."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "function": {
+                "name": "lookup",
+                "arguments": {
+                  "q": "abc"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"ok\":true}"
+        }
+      ],
+      "options": {
+        "add_generation_prompt": false,
+        "enable_thinking": false
+      },
+      "ids": [
+        248045,
+        846,
+        198,
+        6994,
+        18054,
+        13,
+        248046,
+        198,
+        248045,
+        74455,
+        198,
+        248068,
+        271,
+        248069,
+        271,
+        248058,
+        198,
+        27,
+        1628,
+        28,
+        20377,
+        29,
+        198,
+        27,
+        15704,
+        60922,
+        29,
+        198,
+        13290,
+        198,
+        510,
+        15704,
+        29,
+        198,
+        510,
+        1628,
+        29,
+        198,
+        248059,
+        248046,
+        198,
+        248045,
+        846,
+        198,
+        248066,
+        198,
+        4754,
+        547,
+        763,
+        1802,
+        92,
+        198,
+        248067,
+        248046,
+        198
+      ],
+      "rendered": "<|im_start|>user\nCall lookup.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n<tool_call>\n<function=lookup>\n<parameter=q>\nabc\n</parameter>\n</function>\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\n{\"ok\":true}\n</tool_response><|im_end|>\n"
+    }
+  ]
+}
