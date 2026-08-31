@@ -24,6 +24,13 @@ bool q38_cuda_rms_norm(const float *input, const float *weight, float *output,
 bool q38_cuda_silu(const float *input, float *output, size_t elements,
                    cudaStream_t stream, char *error, size_t error_len);
 
+bool q38_cuda_q2_matvec(const void *weights, size_t rows, size_t cols,
+                        const float *input, float *output,
+                        cudaStream_t stream, char *error, size_t error_len);
+bool q38_cuda_bf16_matvec(const uint16_t *weights, size_t rows, size_t cols,
+                          const float *input, float *output,
+                          cudaStream_t stream, char *error, size_t error_len);
+
 #ifdef __cplusplus
 }
 #endif

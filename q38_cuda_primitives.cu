@@ -94,6 +94,36 @@ __global__ static void silu_kernel(const float *input, float *output,
     if (index < elements) output[index] = input[index] / (1.0f + expf(-input[index]));
 }
 
+__global__ static void q2_matvec_kernel(const q38_q2_k_block *weights,
+                                        size_t rows, size_t cols,
+                                        const float *input, float *output) {
+    const size_t row = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+    const size_t blocks_per_row = cols / Q38_QUANT_QK_K;
+    float sum = 0.0f;
+    for (size_t col = 0; col < cols; col++) {
+        const q38_q2_k_block *block =
+            weights + row * blocks_per_row + col / Q38_QUANT_QK_K;
+        sum += q2_value(block, (unsigned)(col % Q38_QUANT_QK_K)) * input[col];
+    }
+    output[row] = sum;
+}
+
+__device__ static float bf16_to_float_device(uint16_t bits) {
+    return __uint_as_float((uint32_t)bits << 16);
+}
+
+__global__ static void bf16_matvec_kernel(const uint16_t *weights, size_t rows,
+                                          size_t cols, const float *input,
+                                          float *output) {
+    const size_t row = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+    float sum = 0.0f;
+    for (size_t col = 0; col < cols; col++)
+        sum += bf16_to_float_device(weights[row * cols + col]) * input[col];
+    output[row] = sum;
+}
+
 static void set_error(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
 }
@@ -153,6 +183,47 @@ extern "C" bool q38_cuda_silu(const float *input, float *output, size_t elements
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess) {
         if (error && error_len) snprintf(error, error_len, "CUDA SiLU launch failed: %s",
+                                         cudaGetErrorString(status));
+        return false;
+    }
+    return true;
+}
+
+extern "C" bool q38_cuda_q2_matvec(const void *weights, size_t rows,
+                                    size_t cols, const float *input,
+                                    float *output, cudaStream_t stream,
+                                    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!weights || !rows || !cols || cols % Q38_QUANT_QK_K ||
+        !input || !output) {
+        set_error(error, error_len, "invalid CUDA Q2 matvec arguments");
+        return false;
+    }
+    q2_matvec_kernel<<<(unsigned)((rows + 255) / 256), 256, 0, stream>>>(
+        (const q38_q2_k_block *)weights, rows, cols, input, output);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) {
+        if (error && error_len) snprintf(error, error_len, "CUDA Q2 matvec launch failed: %s",
+                                         cudaGetErrorString(status));
+        return false;
+    }
+    return true;
+}
+
+extern "C" bool q38_cuda_bf16_matvec(const uint16_t *weights, size_t rows,
+                                      size_t cols, const float *input,
+                                      float *output, cudaStream_t stream,
+                                      char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!weights || !rows || !cols || !input || !output) {
+        set_error(error, error_len, "invalid CUDA BF16 matvec arguments");
+        return false;
+    }
+    bf16_matvec_kernel<<<(unsigned)((rows + 255) / 256), 256, 0, stream>>>(
+        weights, rows, cols, input, output);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) {
+        if (error && error_len) snprintf(error, error_len, "CUDA BF16 matvec launch failed: %s",
                                          cudaGetErrorString(status));
         return false;
     }
