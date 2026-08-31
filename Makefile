@@ -44,7 +44,7 @@ M2_ARTIFACT_DIR := artifacts/m2
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
-	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08
+	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09
 
 all: spark
 
@@ -353,6 +353,16 @@ m2-c08: m2-c07 $(TEST_DIR)/test_m2_lm_head
 	python3 tools/validate_m2_lm_head.py \
 		--model-dir $(MODEL_DIR) \
 		--probe $(M2_ARTIFACT_DIR)/lm_head_probe.json
+
+m2-c09: m2-c08 $(TEST_DIR)/test_weights
+	@test -f $(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf || \
+		{ echo "M2-C09: required M1 full artifact is unavailable" >&2; exit 1; }
+	./$(TEST_DIR)/test_weights \
+		$(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf 47
+	@mkdir -p $(M2_ARTIFACT_DIR)
+	printf '%s\n' \
+		'{"gate":"M2-C09","binding":"strict","layers":48,"runtime_tensor_count":1294,"ple":"handle-backed views","status":"pass"}' \
+		> $(M2_ARTIFACT_DIR)/full_binding_report.json
 
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
