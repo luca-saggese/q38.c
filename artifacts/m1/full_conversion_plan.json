@@ -1,0 +1,11 @@
+{
+  "estimated_tensor_bytes": 151932061720,
+  "format": "q38_runtime_conversion_plan_v1",
+  "headroom_target_bytes": 115964116992,
+  "max_layer": 47,
+  "quantized": true,
+  "reason": "estimated payload exceeds the M1 108 GiB pressure target",
+  "source_bytes": 353887799320,
+  "status": "blocked",
+  "tensor_count": 1294
+}
