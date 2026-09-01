@@ -162,11 +162,11 @@ static bool write_artifact(const char *path, const cudaDeviceProp &properties,
                  "\"kernel\": [%u, %u], \"history\": [\"token\", %u, %u]}, "
                  "\"recurrence\": {\"q\": [\"token\", %u, %u], \"k\": "
                  "[\"token\", %u, %u], \"v\": [\"token\", %u, %u], \"state\": "
-                 "[1, %u, %u, %u]}, \"output\": {\"input\": [\"token\", %u], "
+                 "[\"gdn_slot\", 1, %u, %u, %u]}, \"output\": {\"input\": [\"token\", %u], "
                  "\"output\": [\"token\", %u]}},\n"
                  "  \"layouts\": {\"logical\": \"projection matrices are "
                  "output-by-input; activations are token-major; state is "
-                 "[sequence,value_head,row,column]\", \"physical\": "
+                 "[gdn_slot,sequence,value_head,row,column]\", \"physical\": "
                  "\"contiguous F32 row-major regions; no transposition, "
                  "packing, fusion, or tiling\"},\n",
                  kTokens, static_cast<unsigned>(kInputDim),
@@ -191,27 +191,38 @@ static bool write_artifact(const char *path, const cudaDeviceProp &properties,
         file,
         "  \"state_bytes\": {\"source\": \"q38_state\", "
         "\"recurrent_descriptor\": {\"sequence_count\": %u, "
-        "\"value_heads\": %u, \"head_dim\": %u, \"elements\": %llu, "
-        "\"bytes\": %llu}, \"conv_history_descriptor\": "
+        "\"value_heads\": %u, \"head_dim\": %u, \"slot_count\": %u, "
+        "\"elements_per_slot\": %llu, \"bytes_per_slot\": %llu, "
+        "\"elements\": %llu, \"bytes\": %llu}, \"conv_history_descriptor\": "
         "{\"sequence_count\": %u, \"channels\": %u, \"kernel\": %u, "
-        "\"history_tokens\": %u, \"elements\": %llu, \"bytes\": %llu}, "
-        "\"gr_state_bytes\": %llu, \"persistent_recurrent_state_bytes\": "
+        "\"history_tokens\": %u, \"slot_count\": %u, "
+        "\"elements_per_slot\": %llu, \"bytes_per_slot\": %llu, "
+        "\"elements\": %llu, \"bytes\": %llu}, "
+        "\"gr_workspace_bytes\": %llu, \"persistent_recurrent_state_bytes\": "
         "%llu, \"conv_history_bytes\": %llu, \"workspace_bytes\": %llu, "
-        "\"persistent_bytes\": %llu, \"allocation_bytes\": %llu},\n"
+        "\"persistent_bytes\": %llu, \"activation_bytes\": %llu, "
+        "\"allocation_bytes\": %llu},\n"
         "  \"stages\": [\n",
         layout.recurrent.sequence_count, layout.recurrent.value_heads,
         layout.recurrent.head_dim,
+        layout.recurrent.slot_count,
+        static_cast<unsigned long long>(layout.recurrent.elements_per_slot),
+        static_cast<unsigned long long>(layout.recurrent.bytes_per_slot),
         static_cast<unsigned long long>(layout.recurrent.elements),
         static_cast<unsigned long long>(layout.recurrent.bytes),
         layout.conv_history.sequence_count, layout.conv_history.channels,
         layout.conv_history.kernel, layout.conv_history.history_tokens,
+        layout.conv_history.slot_count,
+        static_cast<unsigned long long>(layout.conv_history.elements_per_slot),
+        static_cast<unsigned long long>(layout.conv_history.bytes_per_slot),
         static_cast<unsigned long long>(layout.conv_history.elements),
         static_cast<unsigned long long>(layout.conv_history.bytes),
-        static_cast<unsigned long long>(memory.gr_state_bytes),
+        static_cast<unsigned long long>(memory.gr_workspace_bytes),
         static_cast<unsigned long long>(memory.persistent_recurrent_state_bytes),
         static_cast<unsigned long long>(memory.conv_history_bytes),
         static_cast<unsigned long long>(memory.workspace_bytes),
         static_cast<unsigned long long>(memory.persistent_bytes),
+        static_cast<unsigned long long>(memory.activation_bytes),
         static_cast<unsigned long long>(memory.allocation_bytes));
 
     for (size_t i = 0; i < 4; i++) {
@@ -323,7 +334,8 @@ int main(int argc, char **argv) {
     float *d_state = allocate(layout.recurrent.elements, "cudaMalloc state");
     float *d_conv_history =
         allocate(layout.conv_history.elements, "cudaMalloc conv history");
-    float *d_gr_state = allocate(layout.gr.elements, "cudaMalloc GR state");
+    float *d_gr_workspace =
+        allocate(layout.gr_workspace.elements, "cudaMalloc GR workspace");
     float *d_recurrent =
         allocate(kTokens * kValueChannels, "cudaMalloc recurrence output");
     float *d_output = allocate(kTokens * kInputDim, "cudaMalloc output");
@@ -340,14 +352,16 @@ int main(int argc, char **argv) {
     StageTiming timings[4] = {};
     if (ok) {
         for (size_t sample = 0; sample < kSamples && ok; sample++) {
-            ok = q38_cuda_gdn_recurrence_reset(d_state, stream, error,
-                                               sizeof(error)) &&
+            ok = cuda_ok(cudaMemsetAsync(d_state, 0, layout.recurrent.bytes,
+                                         stream),
+                         "reset all GDN state slots") &&
                  cuda_ok(cudaMemsetAsync(
                              d_conv_history, 0, layout.conv_history.bytes,
                              stream),
                          "reset conv history") &&
-                 cuda_ok(cudaMemsetAsync(d_gr_state, 0, layout.gr.bytes, stream),
-                         "reset GR state") &&
+                 cuda_ok(cudaMemsetAsync(d_gr_workspace, 0,
+                                         layout.gr_workspace.bytes, stream),
+                         "reset GR workspace") &&
                  cuda_ok(cudaStreamSynchronize(stream), "reset synchronize");
             if (!ok) break;
 

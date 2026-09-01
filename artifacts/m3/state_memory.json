@@ -1,1 +1,1 @@
-{"gate":"M3-C05","persistent_recurrent_state_bytes":3145728,"conv_history_bytes":122880,"gr_state_bytes":40960,"workspace_bytes":0,"persistent_bytes":3309568,"allocation_bytes":3309568,"status":"pass"}
+{"gate":"M3-C05","persistent_recurrent_state_bytes":113246208,"conv_history_bytes":4423680,"gr_workspace_bytes":40960,"workspace_bytes":0,"persistent_bytes":117669888,"activation_bytes":40960,"allocation_bytes":117710848,"status":"pass"}

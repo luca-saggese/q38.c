@@ -74,7 +74,9 @@ q38_gdn_ref.c
 
 ## **5. Stato persistente: regole** 
 
-- Separare `persistent recurrent state`, `conv history`, `GR branch state` e `workspace`. Quattro contatori memoria separati. 
+- Separare `persistent recurrent state`, `conv history`, GR forward activation
+  workspace, e generic workspace. Il GR non è stato semantico persistente;
+  l'accounting deve escluderlo da `persistent_bytes`.
 
 - Lo state non deve vivere dentro scratch buffers riciclabili tra layer. 
 
@@ -327,4 +329,3 @@ Qwen3.8-Flash-Next / DGX Spark prototype
 **NVIDIA DGX Spark:** https://www.nvidia.com/products/workstations/dgx-spark/ 
 
 GB10 / 128 GB unified coherent memory / CUDA only / Q2 bring-up -> selective Q4 
-

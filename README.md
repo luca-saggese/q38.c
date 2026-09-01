@@ -61,11 +61,22 @@ done, the commit plan, and the M0 test matrix.
 - `q38_platform.{c,h}`, `q38_cuda.cu` — platform guard (GB10 / SM 12.1).
 - `q38_gguf.{c,h}` — GGUF v3 parser core (isolated from model families).
 - `q38_memory.{c,h}` — memory telemetry.
+- `q38_tokenizer.{c,h}` — validated Python/Hugging Face reference tokenizer
+  bridge; native tokenizer implementation is intentionally pending.
 - `q38.c` — inspection CLI.
 - `tests/` — M0 test suite (`test_platform`, `test_gguf`, `test_memory`).
 - `ds4_ssd.{c,h}`, `cuda/mmq/` — parked, out of the M0 link.
 - `to_be_deleted/` — donor sources parked for deletion review.
 - `BASELINE.md`, `THIRD_PARTY_NOTES.md` — donor freeze and provenance.
+
+## M3 reference boundaries
+
+The tokenizer bridge remains an oracle for frozen token IDs and chat-template
+behavior; it is not the final native runtime tokenizer. The q38 GGUF ABI is
+the original Qwen3.8 tensor layout as emitted by the q38 converter. Existing
+metadata records `q38.quant_manifest`, `q38.source_revision`,
+`q38.down_proj_layout`, and the runtime-only/exclusion flags; llama.cpp is a
+semantic reference, not a binary-layout requirement.
 
 ## License
 

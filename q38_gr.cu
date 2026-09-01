@@ -28,7 +28,8 @@ __global__ static void gr_down_kernel(const float *normalized, const float *down
     float value = 0.0f;
     for (unsigned i = 0; i < Q38_GR_BRANCHES * Q38_GR_HIDDEN; i++)
         value += down[rank * Q38_GR_BRANCHES * Q38_GR_HIDDEN + i] * normalized[i];
-    bottleneck[rank] = value > 0.0f ? value : value * expf(value);
+    value /= (float)Q38_GR_HC_COUNT;
+    bottleneck[rank] = value / (1.0f + expf(-value));
 }
 
 __global__ static void gr_up_kernel(const float *normalized, const float *up,
@@ -64,7 +65,8 @@ __global__ static void gr_write_kernel(const float *residual,
     for (unsigned i = 0; i < Q38_GR_BRANCHES * Q38_GR_HIDDEN; i++)
         value += inject[branch * Q38_GR_BRANCHES * Q38_GR_HIDDEN + i] *
                  normalized[i];
-    const float scale = 2.0f / (1.0f + expf(-value));
+    const float scale =
+        2.0f / (1.0f + expf(-value / (float)Q38_GR_HC_COUNT));
     updated[index] = residual[index] + scale * block_output[index % Q38_GR_HIDDEN];
 }
 

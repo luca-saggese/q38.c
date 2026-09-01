@@ -50,6 +50,7 @@ int main(int argc, char **argv) {
         weights.bound_tensor_count != expected ||
         (max_layer >= 3 && weights.layer[3].kind != Q38_LAYER_FULL_ATTENTION) ||
         weights.layer[0].experts.loc[511].local_index != 511 ||
+        (max_layer == 0 && weights.layer[1].ple_tensor_count != 0) ||
         (max_layer >= 1 && weights.layer[1].ple_tensor_count != 137) ||
         weights.layer[0].tensor_count != 24) {
         fprintf(stderr, "unexpected bound subset layout\n");

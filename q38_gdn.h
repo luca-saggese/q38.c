@@ -76,6 +76,17 @@ bool q38_cuda_gdn_conv_silu(uint32_t kernel_type, const void *kernel,
                             size_t error_len);
 
 /*
+ * Fused reference-equivalent path: causal convolution, SiLU, and the
+ * persistent history tail update execute in one kernel.  Each channel owns a
+ * block; the block-wide barrier completes all output reads before thread zero
+ * updates that channel's history tail.
+ */
+bool q38_cuda_gdn_conv_silu_fused(
+    uint32_t kernel_type, const void *kernel, const float *input,
+    size_t tokens, size_t channels, size_t kernel_size, float *history,
+    float *output, cudaStream_t stream, char *error, size_t error_len);
+
+/*
  * Split the frozen Qwen4Exp qkv stream, whose logical order is
  * [Q(16*128), K(16*128), V(48*128)].  Each output is token-major and remains
  * in the 16-head logical form; 16-to-48 repeat-interleave is a separate step.

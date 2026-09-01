@@ -6,6 +6,10 @@ static float sigmoid(float value) {
     return 1.0f / (1.0f + expf(-value));
 }
 
+static float silu(float value) {
+    return value * sigmoid(value);
+}
+
 static void normalized_branches(const float *residual,
                                 const q38_gr_ref_params *params,
                                 float *normalized) {
@@ -34,7 +38,7 @@ void q38_gr_read(const float *residual, const q38_gr_ref_params *params,
         for (size_t i = 0; i < Q38_GR_BRANCHES * Q38_GR_HIDDEN; i++)
             value += params->input_mix_down[rank * Q38_GR_BRANCHES *
                                             Q38_GR_HIDDEN + i] * normalized[i];
-        bottleneck[rank] = value > 0.0f ? value : value * expf(value);
+        bottleneck[rank] = silu(value / (float)Q38_GR_HC_COUNT);
     }
     for (size_t i = 0; i < Q38_GR_BRANCHES * Q38_GR_HIDDEN; i++) {
         float value = 0.0f;
@@ -61,7 +65,7 @@ void q38_gr_write(const float *residual, const float *block_output,
         for (size_t i = 0; i < Q38_GR_BRANCHES * Q38_GR_HIDDEN; i++)
             value += params->block_inject[branch * Q38_GR_BRANCHES *
                                            Q38_GR_HIDDEN + i] * normalized[i];
-        const float scale = 2.0f * sigmoid(value);
+        const float scale = 2.0f * sigmoid(value / (float)Q38_GR_HC_COUNT);
         for (size_t channel = 0; channel < Q38_GR_HIDDEN; channel++)
             updated[branch * Q38_GR_HIDDEN + channel] =
                 residual[branch * Q38_GR_HIDDEN + channel] +

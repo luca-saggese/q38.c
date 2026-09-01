@@ -1,1 +1,1 @@
-{"gate":"M3-C02","formula":"GR equations 29-34","dtype":"F32","vectors":"zero-state read/write/collapse","status":"pass"}
+{"gate":"M3-C02","formula":"SiLU(low_rank/hc_count), 2*sigmoid(inject/hc_count)","dtype":"F32","vectors":"zero smoke plus independent non-zero negative-SiLU/scaling goldens","status":"pass"}

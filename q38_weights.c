@@ -228,7 +228,7 @@ static bool validate_metadata(const q38_gguf *model, uint32_t max_layer,
         !q38_gguf_get_bool(model, "q38.excluded_mtp", &excluded_mtp) ||
         !excluded_mtp ||
         !q38_gguf_get_u32(model, "q38.max_layer", &metadata_layer) ||
-        metadata_layer != max_layer) {
+        metadata_layer < max_layer) {
         set_error(error, error_len, "runtime-only architecture metadata mismatch");
         return false;
     }
@@ -243,9 +243,11 @@ static uint32_t expected_tensor_count(uint32_t max_layer) {
     for (uint32_t i = 0; i < layers; i++) {
         full += (i % 4 == 3) ? 9 : 9; /* one core family per layer */
     }
+    /* The frozen fixture names PLE tensors under layers.1; max_layer is
+     * zero-based, so layer 1 is included when max_layer >= 1. */
     uint32_t ple = max_layer >= 1 ? Q38_MAX_PLE_TENSORS - 23 : 0;
     /* 8 hyper-connection, 7 MoE/router, and one core family are represented
-     * by the inventory; layer 2 additionally owns the 137 PLE tensors. */
+     * by the inventory; zero-based layer 1 additionally owns 137 PLE tensors. */
     return 5 + full + layers * 15 + ple;
 }
 
@@ -303,11 +305,11 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             return false;
         }
         unsigned layer = 0;
-        if (!layer_number(tensor, &layer) ||
-            layer > max_layer || layer >= Q38_MODEL_LAYERS) {
+        if (!layer_number(tensor, &layer) || layer >= Q38_MODEL_LAYERS) {
             set_error(error, error_len, "tensor layer is outside bound subset");
             return false;
         }
+        if (layer > max_layer) continue;
         q38_layer_weights *dst = &out->layer[layer];
         if (dst->tensor_count >= Q38_MAX_LAYER_TENSORS) {
             set_error(error, error_len, "layer tensor table capacity exceeded");

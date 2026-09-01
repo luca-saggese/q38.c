@@ -47,7 +47,7 @@ M3_ARTIFACT_DIR := artifacts/m3
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
-	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12
+	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit
 
 all: spark
 
@@ -274,6 +274,34 @@ m3-c12: m3-c11 $(TEST_DIR)/test_m3_cuda_profile_baseline
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	./$(TEST_DIR)/test_m3_cuda_profile_baseline \
 		$(M3_ARTIFACT_DIR)/cuda_profile_baseline.json
+
+$(TEST_DIR)/test_m3_gdn_fused: \
+		$(TEST_DIR)/test_m3_gdn_fused.cu q38_gdn.o q38_gdn_ref.o \
+		q38_cuda_primitives.o q38_gdn.h q38_gdn_ref.h q38_state.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ \
+		$(TEST_DIR)/test_m3_gdn_fused.cu q38_gdn.o q38_gdn_ref.o \
+		q38_cuda_primitives.o $(CUDA_LDLIBS) -lm
+
+m3-c13: m3-c12 $(TEST_DIR)/test_m3_gdn_fused
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	./$(TEST_DIR)/test_m3_gdn_fused \
+		$(M3_ARTIFACT_DIR)/cuda_profile_fused.json
+
+m3-audit: $(TEST_DIR)/test_m3_gr_ref $(TEST_DIR)/test_m3_gr_cuda \
+		$(TEST_DIR)/test_m3_state $(TEST_DIR)/test_weights
+	@test -f $(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf
+	./$(TEST_DIR)/test_m3_gr_ref
+	./$(TEST_DIR)/test_m3_gr_cuda
+	./$(TEST_DIR)/test_m3_state
+	@for layer in 0 1 2 3; do \
+		./$(TEST_DIR)/test_weights \
+			$(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf \
+			$$layer; \
+	done
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	printf '%s\n' \
+		'{"gate":"M3-AUDIT","gr":"external non-zero scalar/CUDA goldens with negative SiLU and hc_count scaling","state":"36 independent GDN slots with explicit 48-layer mapping; GR activation excluded from persistent bytes","ple":{"zero_based_layer":1,"counts":{"max_layer_0":29,"max_layer_1":190,"max_layer_2":214,"max_layer_3":238},"finding":"no off-by-one; frozen fixture places PLE at layers.1"},"tokenizer":"reference bridge; native tokenizer pending","status":"pass"}' \
+		> $(M3_ARTIFACT_DIR)/audit.json
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -521,14 +549,14 @@ m3-c02: m3-c01 $(TEST_DIR)/test_m3_gr_ref
 	./$(TEST_DIR)/test_m3_gr_ref
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	printf '%s\n' \
-		'{"gate":"M3-C02","formula":"GR equations 29-34","dtype":"F32","vectors":"zero-state read/write/collapse","status":"pass"}' \
+		'{"gate":"M3-C02","formula":"SiLU(low_rank/hc_count), 2*sigmoid(inject/hc_count)","dtype":"F32","vectors":"zero smoke plus independent non-zero negative-SiLU/scaling goldens","status":"pass"}' \
 		> $(M3_ARTIFACT_DIR)/gr_golden.json
 
 m3-c03: m3-c02 $(TEST_DIR)/test_m3_gr_cuda
 	./$(TEST_DIR)/test_m3_gr_cuda
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	printf '%s\n' \
-		'{"gate":"M3-C03","kernel":"non-fused GR CUDA baseline","comparison":"CUDA vs scalar F32","status":"pass"}' \
+		'{"gate":"M3-C03","kernel":"non-fused GR CUDA baseline","comparison":"CUDA vs independent external F32 goldens","status":"pass"}' \
 		> $(M3_ARTIFACT_DIR)/gr_cuda_accuracy.json
 
 m3-c04: m3-c03 $(TEST_DIR)/test_m3_gdn_binding
@@ -545,10 +573,10 @@ m3-c05: m3-c04 $(TEST_DIR)/test_m3_state
 	./$(TEST_DIR)/test_m3_state
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	printf '%s\n' \
-		'{"gate":"M3-C05","scope":"single-sequence","recurrent_state":{"logical_shape":[1,48,128,128],"dtype":"F32","bytes":3145728},"conv_history":{"logical_shape":[1,3,10240],"kernel":4,"dtype":"F32","bytes":122880},"gr_state":{"logical_shape":[1,4,2560],"dtype":"F32","bytes":40960},"workspace_bytes":0,"physical_layout":"reference contiguous regions; no GB10 tiling","status":"pass"}' \
+		'{"gate":"M3-C05","scope":"48-layer model","gdn_layers":36,"full_attention_layers":[3,7,11,15,19,23,27,31,35,39,43,47],"layer_to_gdn_slot":"explicit pointer-free table","recurrent_state":{"logical_shape":["gdn_slot",1,48,128,128],"dtype":"F32","bytes_per_slot":3145728,"bytes":113246208},"conv_history":{"logical_shape":["gdn_slot",1,3,10240],"kernel":4,"bytes_per_slot":122880,"bytes":4423680},"gr_workspace":{"logical_shape":[1,4,2560],"dtype":"F32","bytes":40960},"persistent_excludes_gr":true,"physical_layout":"contiguous per-slot regions; no GB10 tiling","status":"pass"}' \
 		> $(M3_ARTIFACT_DIR)/state_layout.json
 	printf '%s\n' \
-		'{"gate":"M3-C05","persistent_recurrent_state_bytes":3145728,"conv_history_bytes":122880,"gr_state_bytes":40960,"workspace_bytes":0,"persistent_bytes":3309568,"allocation_bytes":3309568,"status":"pass"}' \
+		'{"gate":"M3-C05","persistent_recurrent_state_bytes":113246208,"conv_history_bytes":4423680,"gr_workspace_bytes":40960,"workspace_bytes":0,"persistent_bytes":117669888,"activation_bytes":40960,"allocation_bytes":117710848,"status":"pass"}' \
 		> $(M3_ARTIFACT_DIR)/state_memory.json
 
 m3-c06: m3-c05 $(TEST_DIR)/test_m3_gdn_ref
@@ -591,5 +619,6 @@ clean:
 		$(TEST_DIR)/test_m3_multigdn \
 		$(TEST_DIR)/test_m3_chunk_invariance \
 		$(TEST_DIR)/test_m3_cuda_profile_baseline \
+		$(TEST_DIR)/test_m3_gdn_fused \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)

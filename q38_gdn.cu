@@ -116,6 +116,49 @@ __global__ static void gdn_conv_history_tail_kernel(
     }
 }
 
+/*
+ * One block owns one channel.  Threads cover the token dimension, then a
+ * block barrier makes the history update occur only after every convolution
+ * read has completed.  Thread zero advances the tail in the same order as
+ * gdn_conv_history_tail_kernel, so short chunks retain the exact reference
+ * semantics without a temporary buffer or a write/read race.
+ */
+__global__ static void gdn_conv_silu_fused_kernel(
+    uint32_t kernel_type, const void *kernel, const float *input,
+    size_t tokens, size_t channels, size_t kernel_size, float *history,
+    float *output) {
+    const size_t channel = (size_t)blockIdx.x;
+    if (channel >= channels) return;
+    const size_t history_tokens = kernel_size - 1u;
+    for (size_t token = threadIdx.x; token < tokens;
+         token += (size_t)blockDim.x) {
+        const size_t current = history_tokens + token;
+        float sum = 0.0f;
+        for (size_t tap = 0; tap < kernel_size; tap++) {
+            const size_t distance = kernel_size - 1u - tap;
+            const size_t source = current - distance;
+            const float sample =
+                source < history_tokens
+                    ? history[source * channels + channel]
+                    : input[(source - history_tokens) * channels + channel];
+            sum += gdn_conv_weight(kernel_type, kernel,
+                                   tap * channels + channel) * sample;
+        }
+        output[token * channels + channel] =
+            sum / (1.0f + expf(-sum));
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        for (size_t tail = 0; tail < history_tokens; tail++) {
+            const size_t source = tokens + tail;
+            history[tail * channels + channel] =
+                source < history_tokens
+                    ? history[source * channels + channel]
+                    : input[(source - history_tokens) * channels + channel];
+        }
+    }
+}
+
 __global__ static void gdn_split_qkv_kernel(const float *qkv, size_t tokens,
                                             float *q, float *k, float *v) {
     const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -315,6 +358,39 @@ extern "C" bool q38_cuda_gdn_conv_silu(
         return false;
     return q38_cuda_silu(output, output, tokens * channels, stream, error,
                          error_len);
+}
+
+extern "C" bool q38_cuda_gdn_conv_silu_fused(
+    uint32_t kernel_type, const void *kernel, const float *input,
+    size_t tokens, size_t channels, size_t kernel_size, float *history,
+    float *output, cudaStream_t stream, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!kernel || !input || !tokens || !channels || !history || !output ||
+        kernel_size < 2u || kernel_type > Q38_GDN_WEIGHT_BF16 ||
+        (kernel_type != Q38_GDN_WEIGHT_F32 &&
+         kernel_type != Q38_GDN_WEIGHT_BF16) ||
+        tokens > SIZE_MAX / channels ||
+        tokens > SIZE_MAX - (kernel_size - 1u) ||
+        (kernel_size - 1u) > SIZE_MAX / channels ||
+        !valid_grid(channels) ||
+        !valid_grid((kernel_size - 1u) * channels)) {
+        set_error(error, error_len, "invalid fused GDN convolution arguments");
+        return false;
+    }
+    const unsigned threads =
+        (unsigned)(tokens < 256u ? tokens : 256u);
+    gdn_conv_silu_fused_kernel<<<(unsigned)channels, threads, 0, stream>>>(
+        kernel_type, kernel, input, tokens, channels, kernel_size, history,
+        output);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) {
+        if (error && error_len)
+            snprintf(error, error_len,
+                     "fused GDN convolution launch failed: %s",
+                     cudaGetErrorString(status));
+        return false;
+    }
+    return true;
 }
 
 extern "C" bool q38_cuda_gdn_split_qkv(

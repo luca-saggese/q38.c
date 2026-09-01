@@ -8,7 +8,8 @@
 extern "C" {
 #endif
 
-#define Q38_GR_BRANCHES 4u
+#define Q38_GR_HC_COUNT 4u
+#define Q38_GR_BRANCHES Q38_GR_HC_COUNT
 #define Q38_GR_HIDDEN 2560u
 #define Q38_GR_RANK 320u
 

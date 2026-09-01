@@ -412,3 +412,20 @@ while the final GB10 implementation choices remain open:
 
 None of these may be used to change the equations, head mapping, state shape,
 or convolution-history semantics above.
+
+## q38 runtime state and artifact boundary
+
+The q38 session descriptor represents all 48 model layers with the fixed
+zero-based mapping `layer % 4 == 3 -> full attention`, and the other 36 layers
+mapped in order to independent GDN state slots `0..35`. Each slot owns its
+own recurrent matrix and three-token convolution history. The GR
+hyper-connection buffer is a forward activation workspace, not persistent
+semantic session state, and is excluded from `persistent_bytes`.
+
+The q38 GGUF ABI remains the original Qwen3.8 checkpoint tensor layout emitted
+by the q38 converter. The currently supported artifact metadata is
+`q38.quant_manifest`, `q38.source_revision`, `q38.down_proj_layout`,
+`q38.runtime_only`, `q38.max_layer`, `q38.excluded_vision`,
+`q38.excluded_mtp`, and `q38.quantized`; no transformed llama.cpp tensor ABI is
+assumed. The tokenizer used during M2/M3 is the validated Python/Hugging Face
+reference bridge; a native tokenizer remains future work.
