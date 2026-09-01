@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05
 
 all: spark
 
@@ -350,6 +350,22 @@ $(TEST_DIR)/test_m5_qsa_ref: $(TEST_DIR)/test_m5_qsa_ref.c \
 m5-c04: m5-c03 $(TEST_DIR)/test_m5_qsa_ref
 	@./$(TEST_DIR)/test_m5_qsa_ref
 	@printf '%s\n' '{"gate":"M5-C04","implementation":"scalar QSA block pooling and index scoring","compression_ratio":4,"scoring":"ReLU per indexer head then sum","tail":"incomplete final block retained","status":"pass"}' > artifacts/m5/indexer_goldens.json
+
+q38_topk_ref.o: q38_topk_ref.c q38_topk_ref.h
+	$(CC) $(CFLAGS) -c -o $@ q38_topk_ref.c
+
+q38_topk_cuda.o: q38_topk_cuda.cu q38_topk_cuda.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_topk_cuda.cu
+
+$(TEST_DIR)/test_m5_topk: $(TEST_DIR)/test_m5_topk.cu \
+		q38_topk_ref.o q38_topk_cuda.o q38_topk_ref.h q38_topk_cuda.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_topk.cu \
+		q38_topk_ref.o q38_topk_cuda.o $(CUDA_LDLIBS) -lm
+
+m5-c05: m5-c04 $(TEST_DIR)/test_m5_topk
+	@./$(TEST_DIR)/test_m5_topk
+	@printf '%s\n' '{"gate":"M5-C05","implementation":"deterministic scalar/CUDA top-k","tie_break":"higher score, then lower token-cell ID","selection_order":"stable; only selected IDs are semantic","status":"pass"}' > artifacts/m5/topk_goldens.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -875,5 +891,6 @@ clean:
 		$(TEST_DIR)/test_m5_rope_ref \
 		$(TEST_DIR)/test_m5_qsa_cuda \
 		$(TEST_DIR)/test_m5_qsa_ref \
+		$(TEST_DIR)/test_m5_topk \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
