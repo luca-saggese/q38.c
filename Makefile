@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07
 
 all: spark
 
@@ -375,6 +375,14 @@ $(TEST_DIR)/test_m5_qsa_index_cuda: $(TEST_DIR)/test_m5_qsa_index_cuda.cu \
 m5-c06: m5-c05 $(TEST_DIR)/test_m5_qsa_index_cuda
 	@./$(TEST_DIR)/test_m5_qsa_index_cuda
 	@printf '%s\n' '{"gate":"M5-C06","implementation":"naive CUDA block pooling/index scoring","pooling":"arithmetic mean including incomplete tail","scoring":"ReLU per head then sum","status":"pass"}' > artifacts/m5/indexer_cuda.json
+
+$(TEST_DIR)/test_m5_qsa_tail: $(TEST_DIR)/test_m5_qsa_tail.c \
+		q38_qsa_ref.o q38_qsa_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_tail.c q38_qsa_ref.o -lm
+
+m5-c07: m5-c06 $(TEST_DIR)/test_m5_qsa_tail
+	@./$(TEST_DIR)/test_m5_qsa_tail
+	@printf '%s\n' '{"gate":"M5-C07","implementation":"scalar causal tail handling","selected_width":"min(n_kv, indexer_top_k + compress_ratio - 1)","ratio":4,"top_k":2048,"boundary_lengths":[1,2,3,4,5,6,7,8,2047,2048,2049],"status":"pass"}' > artifacts/m5/causal_boundary_matrix.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -902,5 +910,6 @@ clean:
 		$(TEST_DIR)/test_m5_qsa_ref \
 		$(TEST_DIR)/test_m5_topk \
 		$(TEST_DIR)/test_m5_qsa_index_cuda \
+		$(TEST_DIR)/test_m5_qsa_tail \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)

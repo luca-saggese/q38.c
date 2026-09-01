@@ -76,3 +76,15 @@ bool q38_qsa_expand_block_scores_ref(const float *block_scores,
         token_scores[token] = block_scores[token / ratio];
     return true;
 }
+
+bool q38_qsa_selected_width_ref(size_t kv_count, size_t top_k, size_t ratio,
+                                size_t *width, char *error, size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (!kv_count || !top_k || !ratio || !width)
+        return fail(error, error_len, "invalid QSA selected-width arguments");
+    if (top_k > SIZE_MAX - ratio + 1)
+        return fail(error, error_len, "QSA selected width overflows");
+    const size_t requested = top_k + ratio - 1;
+    *width = requested < kv_count ? requested : kv_count;
+    return true;
+}
