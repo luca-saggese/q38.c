@@ -1,0 +1,1 @@
+{"gate":"M5-C02","implementation":"scalar Qwen4Exp partial interleaved mRoPE","n_dims":64,"sections":[11,11,10,0],"theta":10000000,"text_positions":"all four mRoPE coordinates use committed text position","status":"pass"}
