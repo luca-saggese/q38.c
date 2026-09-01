@@ -1,0 +1,1 @@
+{"gate":"M4-C02","oracle":"scalar uint64 XOR/multiply modulo indexing","heads":16,"orders":["bigram","trigram"],"status":"pass"}
