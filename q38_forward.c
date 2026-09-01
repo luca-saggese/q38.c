@@ -372,6 +372,13 @@ static bool full_tensor_data(const q38_gguf *model, const q38_tensor *tensor,
     return *data != NULL && *row_bytes != 0;
 }
 
+static float full_bf16_to_float(uint16_t bits) {
+    uint32_t raw = (uint32_t)bits << 16;
+    float value;
+    memcpy(&value, &raw, sizeof(value));
+    return value;
+}
+
 static float full_tensor_scalar(const q38_gguf *model, const q38_tensor *tensor,
                                 size_t row, size_t column, float *scratch,
                                 size_t scratch_count) {
@@ -384,7 +391,7 @@ static float full_tensor_scalar(const q38_gguf *model, const q38_tensor *tensor,
         uint16_t bits;
         memcpy(&bits, (const unsigned char *)data + row * row_bytes +
                    column * sizeof(bits), sizeof(bits));
-        return q38_half_to_float(bits);
+        return full_bf16_to_float(bits);
     }
     if (tensor->type == 0) {
         float value;
@@ -454,7 +461,7 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
         if (tensor->type == 30) {
             const uint16_t *values = (const uint16_t *)row_data;
             for (size_t c = 0; c < cols; ++c)
-                sum += q38_half_to_float(values[c]) * input[c];
+                sum += full_bf16_to_float(values[c]) * input[c];
         } else {
             const float *values = (const float *)row_data;
             for (size_t c = 0; c < cols; ++c) sum += values[c] * input[c];
@@ -981,7 +988,7 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                     uint16_t bits;
                     memcpy(&bits, (const unsigned char *)row + d * 2, 2);
                     embedding[t * emb_width + h * 160 + d] =
-                        q38_half_to_float(bits);
+                        full_bf16_to_float(bits);
                 }
             } else if (layer->ple_store.qtype == 8) {
                 if (layer->ple_store.row_bytes != 170) {
