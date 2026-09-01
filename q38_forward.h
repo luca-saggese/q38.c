@@ -88,6 +88,11 @@ typedef struct {
     bool has_reference;
     bool (*trace)(uint32_t layer, const float *hidden, size_t token_count,
                   size_t width, void *user, char *error, size_t error_len);
+    bool (*route_trace)(uint32_t layer, const uint16_t *experts,
+                        const float *weights, size_t count, void *user,
+                        char *error, size_t error_len);
+    bool (*qsa_trace)(uint32_t layer, const uint32_t *selected, size_t count,
+                      void *user, char *error, size_t error_len);
     void *trace_user;
 } q38_forward_diagnostics;
 

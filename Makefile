@@ -46,6 +46,10 @@ M4_ARTIFACT_DIR := artifacts/m4
 M6_GOLDEN := artifacts/m6/checkpoint_minimal_goldens.json
 M6_PREFLIGHT := artifacts/m6/preflight.json
 M6_PREFLIGHT_SUMMARY := artifacts/m6/full_model_preflight.txt
+M6_TRACE := artifacts/m6/real_forward_trace.json
+M6_REFERENCE := artifacts/m6/transformers_reference.json
+M6_COMPARISON := artifacts/m6/semantic_comparison.json
+M6_PYTHON ?= .venv-m6/bin/python
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -680,6 +684,15 @@ $(TEST_DIR)/test_m6_forward_api: $(TEST_DIR)/test_m6_forward_api.c \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
+$(TEST_DIR)/m6_real_forward: $(TEST_DIR)/m6_real_forward.c \
+		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m6_real_forward.c \
+		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
+
 m6-c07: m6-c06 $(TEST_DIR)/test_m6_dispatch
 	@./$(TEST_DIR)/test_m6_dispatch
 	@printf '%s\n' '{"gate":"M6-C07","path":"stable token-major routed pair dispatch and weighted combine","status":"pass"}' > artifacts/m6/dispatch_combine_goldens.json
@@ -714,12 +727,25 @@ m6-preflight: m6-c11
 	@cat $(M6_PREFLIGHT_SUMMARY)
 
 m6-c12: m6-preflight
-	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api
+	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api \
+		$(TEST_DIR)/m6_real_forward
 	@./$(TEST_DIR)/test_m6_forward_api
+	@./$(TEST_DIR)/m6_real_forward \
+		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		$(M6_TRACE)
 	@python3 tools/m6_checkpoint_goldens.py --model-dir $(MODEL_DIR) \
 		--output $(M6_GOLDEN)
 	@python3 tools/m6_forward_readiness.py --model-dir $(MODEL_DIR) \
 		--output artifacts/m6/forward_48_layer.json --preflight $(M6_PREFLIGHT)
+	@test -x $(M6_PYTHON)
+	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
+		$(M6_PYTHON) tools/m6_transformers_reference.py \
+		--model-dir $(MODEL_DIR) --trace $(M6_TRACE) \
+		--output $(M6_REFERENCE)
+	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
+		$(M6_PYTHON) tools/m6_compare_traces.py \
+		--native $(M6_TRACE) --reference $(M6_REFERENCE) \
+		--output $(M6_COMPARISON)
 
 m6-c13: m6-c12
 	@test -f artifacts/m6/first_token_logits.json || \

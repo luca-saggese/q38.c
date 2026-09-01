@@ -59,11 +59,16 @@ static bool matrix_ok(const q38_forward_matrix *matrix, size_t rows,
             matrix->dtype == Q38_FORWARD_BF16);
 }
 
-static void rms(float *x, const float *weight, size_t n) {
+static void rms(float *x, const float *weight, size_t n, bool one_plus) {
     double sum = 0.0;
     for (size_t i = 0; i < n; ++i) sum += (double)x[i] * x[i];
     const float scale = 1.0f / sqrtf((float)(sum / n) + 1e-6f);
-    for (size_t i = 0; i < n; ++i) x[i] *= scale * (weight ? weight[i] : 1.0f);
+    for (size_t i = 0; i < n; ++i) {
+        const float multiplier = weight ? (one_plus ? 1.0f + weight[i]
+                                                    : weight[i])
+                                        : 1.0f;
+        x[i] *= scale * multiplier;
+    }
 }
 
 static void rope(float *x, size_t n, size_t rotary, size_t position,
@@ -136,7 +141,7 @@ static size_t select_prefix(const q38_forward_qsa_weights *w,
                     key[d] += index_keys[(begin + j) * w->index_dim + d];
                 key[d] /= (float)w->ratio;
             }
-            rms(key, w->index_k_norm, w->index_dim);
+            rms(key, w->index_k_norm, w->index_dim, true);
             rope(key, w->index_dim, w->rotary_dims, begin, w->rope_theta);
             const float *q = query + h * w->index_dim;
             for (size_t d = 0; d < w->index_dim; ++d)
@@ -227,13 +232,13 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
             float *q = queries + (t * w->query_heads + h) * w->head_dim;
             memcpy(q, qfull + t * q_rows + h * w->head_dim * 2,
                    w->head_dim * sizeof(float));
-            rms(q, w->q_norm, w->head_dim);
+            rms(q, w->q_norm, w->head_dim, true);
             rope(q, w->head_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
         for (size_t h = 0; h < w->kv_heads; ++h) {
             float *k = keys + (t * w->kv_heads + h) * w->head_dim;
-            rms(k, w->k_norm, w->head_dim);
+            rms(k, w->k_norm, w->head_dim, true);
             rope(k, w->head_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
@@ -241,7 +246,7 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
             float *q = indexq + (t * w->index_heads + h) * w->index_dim;
             memcpy(q, index + t * index_rows + h * w->index_dim,
                    w->index_dim * sizeof(float));
-            rms(q, w->index_q_norm, w->index_dim);
+            rms(q, w->index_q_norm, w->index_dim, true);
             rope(q, w->index_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
@@ -507,11 +512,16 @@ static bool full_matvec(const q38_gguf *model, const q38_tensor *tensor,
     return true;
 }
 
-static void full_rms(float *x, const float *weight, size_t n) {
+static void full_rms(float *x, const float *weight, size_t n, bool one_plus) {
     double sum = 0.0;
     for (size_t i = 0; i < n; ++i) sum += (double)x[i] * x[i];
     const float scale = 1.0f / sqrtf((float)(sum / (double)n) + 1e-6f);
-    for (size_t i = 0; i < n; ++i) x[i] *= scale * (weight ? weight[i] : 1.0f);
+    for (size_t i = 0; i < n; ++i) {
+        const float multiplier = weight ? (one_plus ? 1.0f + weight[i]
+                                                    : weight[i])
+                                        : 1.0f;
+        x[i] *= scale * multiplier;
+    }
 }
 
 static bool full_decode_vector(const q38_gguf *model, const q38_tensor *tensor,
@@ -565,7 +575,7 @@ static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
                                               s * Q38_GR_HIDDEN + d, scratch,
                                               Q38_GR_HIDDEN);
             full_rms(normed + t * width + s * Q38_GR_HIDDEN, gamma,
-                     Q38_GR_HIDDEN);
+                     Q38_GR_HIDDEN, true);
         }
         if (!full_matvec(model, weights->input_mix_weight_down,
                          normed + t * width, 320, width, down, scratch,
@@ -604,7 +614,7 @@ static bool full_gr_write(const q38_gguf *model, const q38_gr_weights *weights,
                                               s * Q38_GR_HIDDEN + d, scratch,
                                               Q38_GR_HIDDEN);
             full_rms(normed + t * width + s * Q38_GR_HIDDEN, gamma,
-                     Q38_GR_HIDDEN);
+                     Q38_GR_HIDDEN, true);
         }
         if (!full_matvec(model, weights->block_inject_weight,
                          normed + t * width, 4, width, inject, scratch,
@@ -742,7 +752,7 @@ static bool full_gdn(const q38_gguf *model, const q38_layer_weights *layer,
             float nw[128];
             if (!full_decode_vector(model, layer->gdn.norm, nw, 128,
                                     error, error_len)) goto fail;
-            full_rms(norm, nw, 128);
+            full_rms(norm, nw, 128, false);
             for (size_t d = 0; d < dim; ++d)
                 gdn_out[(t * heads + h) * dim + d] =
                     norm[d] * (1.0f / (1.0f + expf(-z[t * z_n + h * dim + d])));
@@ -786,7 +796,8 @@ static bool full_expert_down(const q38_gguf *model, const q38_tensor *tensor,
 
 static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                      bool quantized, const float *input, size_t tokens,
-                     float *output, float *scratch, char *error,
+                     uint32_t layer_number, float *output, float *scratch,
+                     q38_forward_diagnostics *diagnostics, char *error,
                      size_t error_len) {
     q38_moe_weights weights;
     if (!q38_moe_bind_layer(layer, quantized, &weights, error, error_len))
@@ -836,6 +847,12 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
             selected_sum += route.weight[k];
         for (size_t k = 0; k < Q38_MOE_TOP_K; ++k)
             route.weight[k] /= selected_sum;
+        if (diagnostics && diagnostics->route_trace &&
+            !diagnostics->route_trace(layer_number, route.expert, route.weight,
+                                      Q38_MOE_TOP_K,
+                                      diagnostics->trace_user, error,
+                                      error_len))
+            goto fail;
         memset(output + t * Q38_GR_HIDDEN, 0,
                Q38_GR_HIDDEN * sizeof(float));
         for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
@@ -1004,8 +1021,8 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
             !full_decode_vector(model, norm_conv, nc, width, error, error_len))
             goto fail;
         for (size_t t = 0; t < token_count; ++t) {
-            full_rms(key + t * width, nk, width);
-            full_rms(query + t * width, nq, width);
+            full_rms(key + t * width, nk, width, true);
+            full_rms(query + t * width, nq, width, true);
             for (size_t s = 0; s < 4; ++s) {
                 float score = 0.0f;
                 for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
@@ -1021,7 +1038,7 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
             }
             memcpy(normalized + t * width, gated + t * width,
                    width * sizeof(float));
-            full_rms(normalized + t * width, nc, width);
+            full_rms(normalized + t * width, nc, width, true);
         }
     }
     for (size_t t = 0; t < token_count; ++t)
@@ -1125,7 +1142,9 @@ static uint64_t full_fingerprint(const float *values, size_t count) {
 static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
                      q38_qsa_state *qsa_state, const float *input,
                      size_t tokens, float *output, uint32_t *selected,
-                     size_t *counts, char *error, size_t error_len) {
+                     size_t *counts, uint32_t layer_number,
+                     q38_forward_diagnostics *diagnostics, char *error,
+                     size_t error_len) {
     q38_forward_qsa_weights w;
     memset(&w, 0, sizeof(w));
     const q38_tensor *matrices[] = {
@@ -1169,6 +1188,12 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
     bool ok = q38_forward_qsa_ref(
         &w, qsa_state, input, tokens, output, selected,
         Q38_FULL_QSA_SELECTED_STRIDE, counts, error, error_len);
+    if (ok && diagnostics && diagnostics->qsa_trace)
+        for (size_t t = 0; t < tokens; ++t)
+            if (!diagnostics->qsa_trace(
+                    layer_number, selected + t * Q38_FULL_QSA_SELECTED_STRIDE,
+                    counts[t], diagnostics->trace_user, error, error_len))
+                ok = false;
     free((void *)w.q_norm); free((void *)w.k_norm);
     free((void *)w.index_q_norm); free((void *)w.index_k_norm);
     return ok;
@@ -1242,8 +1267,8 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                           layer_number, block, scratch, error, error_len))
                 goto fail;
         } else if (!full_qsa(model, layer, &state->qsa[layer_number], mixed,
-                             token_count, block, selected, counts, error,
-                             error_len))
+                             token_count, block, selected, counts,
+                             layer_number, diagnostics, error, error_len))
             goto fail;
         if (!full_gr_write(model, &layer->attn_gr, streams, block, token_count,
                            updated, normed, inject, scratch, error, error_len))
@@ -1252,7 +1277,8 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         if (!full_gr_read(model, &layer->mlp_gr, updated, token_count, mixed,
                           normed, down, up, scratch, error, error_len) ||
             !full_moe(model, layer, weights->quantized, mixed, token_count,
-                      block, scratch, error, error_len) ||
+                      layer_number, block, scratch, diagnostics, error,
+                      error_len) ||
             !full_gr_write(model, &layer->mlp_gr, updated, block, token_count,
                            streams, normed, inject, scratch, error, error_len))
             goto fail;

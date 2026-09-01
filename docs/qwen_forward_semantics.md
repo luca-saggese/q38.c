@@ -17,6 +17,11 @@ QSA cache details cross-checked against llama.cpp PR #27742.
 6. Collapse the final streams through the hyper-connection mixer. This mixer
    is the output norm; there is no separate final RMSNorm. Apply `lm_head`.
 
+The hyper-connection, QSA, and PLE RMSNorm weights use the Transformers
+parameterization `normalized * (1 + weight)`. The GDN recurrent output norm is
+the gated-norm variant and uses its direct multiplicative weight. These two
+parameterizations must not be conflated in the native reference path.
+
 Prefill and decode use the same equations. Decode is a one-token ubatch whose
 position is the number of committed tokens before the token; cache writes are
 committed before subsequent reads. The native reference graph keeps this
