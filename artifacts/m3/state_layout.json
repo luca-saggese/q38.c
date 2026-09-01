@@ -1,0 +1,1 @@
+{"gate":"M3-C05","scope":"single-sequence","recurrent_state":{"logical_shape":[1,48,128,128],"dtype":"F32","bytes":3145728},"conv_history":{"logical_shape":[1,3,10240],"kernel":4,"dtype":"F32","bytes":122880},"gr_state":{"logical_shape":[1,4,2560],"dtype":"F32","bytes":40960},"workspace_bytes":0,"physical_layout":"reference contiguous regions; no GB10 tiling","status":"pass"}
