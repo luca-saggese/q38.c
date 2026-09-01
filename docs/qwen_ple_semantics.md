@@ -231,3 +231,27 @@ introduced after the scalar reference path and golden vectors pass.
 | Gather flatten and head order | `src/models/qwen4exp.cpp::llama_model_qwen4exp::graph::build_ple` |
 | Gate equation | `src/models/qwen4exp.cpp::...::build_ple` |
 | Dilated causal convolution and injection | `src/models/qwen4exp.cpp::...::build_ple` |
+
+## M4-C06 evidence boundary
+
+The checked-in `tools/generate_m4_c06_goldens.py` is an offline oracle. It
+reads the three int64 hash-constant tensors directly from the local
+safetensors checkpoint and applies the frozen `llm_graph_input_ple::set_input`
+loop; it does not import, link, or execute q38. The resulting
+`artifacts/m4/ple_injection_golden.json` contains deterministic BOS, boundary,
+repetition, EOS-reset, and chunk-history cases with token IDs and all 16 row
+IDs, plus source/model revisions and SHA-256 checksums.
+
+Checkpoint inspection also records the physical PLE row width as 160 BF16
+values. Sixteen heads therefore form the logical 2560-wide gathered embedding.
+The 2560-wide synthetic rows used by the earlier decoder tests are not a
+claim about the production checkpoint layout.
+
+This repository does not yet contain a complete q38 model-forward graph, and
+the local Qwen checkpoint is approximately 336 GiB. No independent hidden
+vectors are available without running that missing/unsuitable full forward.
+Consequently the C probe validates the production hash/row-ID path and records
+the exact reference injection boundary (`hidden + gated + conv_out`), while
+`hidden_before_ple`, `hidden_after_ple`, and `ple_contribution_vector` remain
+explicitly `null`. The probe rejects fabricated vectors; a future full-forward
+oracle can populate these fields without changing the file format.
