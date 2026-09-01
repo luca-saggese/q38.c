@@ -49,7 +49,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
-	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04
+	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05
 
 all: spark
 
@@ -180,6 +180,22 @@ m4-c04: m4-c03 $(TEST_DIR)/test_m4_ple_row
 	@./$(TEST_DIR)/test_m4_ple_row
 	@mkdir -p $(M4_ARTIFACT_DIR)
 	printf '%s\n' '{"gate":"M4-C04","decoder":"scalar PLE row","qtypes":["Q2_K","Q4_K"],"row_width":2560,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_row_quant_tests.json
+
+q38_ple_cuda.o: q38_ple_cuda.cu q38_ple_cuda.h q38_quant.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_ple_cuda.cu
+
+$(TEST_DIR)/test_m4_ple_cuda: $(TEST_DIR)/test_m4_ple_cuda.cu \
+		q38_ple_cuda.o q38_ple_ref.o q38_session.o q38_quant.o \
+		q38_ple_cuda.h q38_ple_ref.h q38_quant.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m4_ple_cuda.cu \
+		q38_ple_cuda.o q38_ple_ref.o q38_session.o q38_quant.o \
+		$(CUDA_LDLIBS) -lm
+
+m4-c05: m4-c04 $(TEST_DIR)/test_m4_ple_cuda
+	@./$(TEST_DIR)/test_m4_ple_cuda
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	printf '%s\n' '{"gate":"M4-C05","lookup":"naive CUDA row decode","qtypes":["Q2_K","Q4_K"],"cache":"disabled","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_cuda_lookup.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -690,5 +706,10 @@ clean:
 		$(TEST_DIR)/test_m3_chunk_invariance \
 		$(TEST_DIR)/test_m3_cuda_profile_baseline \
 		$(TEST_DIR)/test_m3_gdn_fused \
+		$(TEST_DIR)/test_m4_session \
+		$(TEST_DIR)/test_m4_ple_ref \
+		$(TEST_DIR)/test_m4_ple_store \
+		$(TEST_DIR)/test_m4_ple_row \
+		$(TEST_DIR)/test_m4_ple_cuda \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
