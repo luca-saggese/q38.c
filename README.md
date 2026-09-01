@@ -62,7 +62,9 @@ done, the commit plan, and the M0 test matrix.
 - `q38_gguf.{c,h}` — GGUF v3 parser core (isolated from model families).
 - `q38_memory.{c,h}` — memory telemetry.
 - `q38_tokenizer.{c,h}` — native byte-level BPE tokenizer loaded directly from
-  the local tokenizer files. Python is used only by the golden-vector tools.
+  the local tokenizer files. It provides encode/decode, frozen chat-template
+  rendering, structured text/image/video content markers, and special-token
+  handling. Python is used only by the golden-vector tools.
 - `q38.c` — inspection CLI.
 - `tests/` — M0 test suite (`test_platform`, `test_gguf`, `test_memory`).
 - `ds4_ssd.{c,h}`, `cuda/mmq/` — parked, out of the M0 link.

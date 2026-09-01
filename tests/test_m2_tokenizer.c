@@ -105,6 +105,9 @@ int main(void) {
     static const uint32_t chat_vision[] = {
         248045, 846, 198, 10071, 220, 248053, 248056, 248054, 1381,
         248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271};
+    static const uint32_t chat_video[] = {
+        248045, 846, 198, 248053, 248057, 248054, 248046, 198,
+        248045, 74455, 198, 248068, 271, 248069, 271};
     q38_tokenizer tokenizer;
     char error[256];
     if (!q38_tokenizer_init(&tokenizer, "/home/lvx/q38model",
@@ -168,6 +171,10 @@ int main(void) {
         "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Look \"},"
         "{\"type\":\"image\",\"image\":\"x\"},{\"type\":\"text\",\"text\":\" now\"}]}]",
         chat_vision, sizeof(chat_vision) / sizeof(*chat_vision), true, false);
+    failed |= check_chat(
+        &tokenizer, "chat_video",
+        "[{\"role\":\"user\",\"content\":[{\"type\":\"video\",\"video\":\"x\"}]}]",
+        chat_video, sizeof(chat_video) / sizeof(*chat_video), true, false);
     failed |= check_roundtrip(&tokenizer, "decode_ascii",
                               "Hello, world!\nSecond line.");
     failed |= check_roundtrip(&tokenizer, "decode_unicode",
