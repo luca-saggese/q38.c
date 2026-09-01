@@ -12,10 +12,10 @@
   "layouts": {"logical": "projection matrices are output-by-input; activations are token-major; state is [gdn_slot,sequence,value_head,row,column]", "physical": "contiguous F32 row-major regions; no transposition, packing, fusion, or tiling"},
   "state_bytes": {"source": "q38_state", "recurrent_descriptor": {"sequence_count": 1, "value_heads": 48, "head_dim": 128, "slot_count": 36, "elements_per_slot": 786432, "bytes_per_slot": 3145728, "elements": 28311552, "bytes": 113246208}, "conv_history_descriptor": {"sequence_count": 1, "channels": 10240, "kernel": 4, "history_tokens": 3, "slot_count": 36, "elements_per_slot": 30720, "bytes_per_slot": 122880, "elements": 1105920, "bytes": 4423680}, "gr_workspace_bytes": 40960, "persistent_recurrent_state_bytes": 113246208, "conv_history_bytes": 4423680, "workspace_bytes": 0, "persistent_bytes": 117669888, "activation_bytes": 40960, "allocation_bytes": 117710848},
   "stages": [
-    {"name": "projection", "kernel_launches": 1, "cuda_event_ms": {"samples": [1.91078, 1.63574, 1.54739], "min": 1.54739, "mean": 1.69797, "max": 1.91078}, "scope": "single stage event around existing API calls"},
-    {"name": "conv", "kernel_launches": 3, "cuda_event_ms": {"samples": [0.107136, 0.010688, 0.008608], "min": 0.008608, "mean": 0.042144, "max": 0.107136}, "scope": "single stage event around existing API calls"},
-    {"name": "recurrence", "kernel_launches": 4, "cuda_event_ms": {"samples": [9.19574, 9.01542, 9.01357], "min": 9.01357, "mean": 9.07491, "max": 9.19574}, "scope": "single stage event around existing API calls"},
-    {"name": "output", "kernel_launches": 1, "cuda_event_ms": {"samples": [0.713056, 0.673088, 0.699872], "min": 0.673088, "mean": 0.695339, "max": 0.713056}, "scope": "single stage event around existing API calls"}
+    {"name": "projection", "kernel_launches": 1, "cuda_event_ms": {"samples": [1.6951, 1.4409, 1.43158], "min": 1.43158, "mean": 1.52253, "max": 1.6951}, "scope": "single stage event around existing API calls"},
+    {"name": "conv", "kernel_launches": 3, "cuda_event_ms": {"samples": [0.094656, 0.010432, 0.007616], "min": 0.007616, "mean": 0.037568, "max": 0.094656}, "scope": "single stage event around existing API calls"},
+    {"name": "recurrence", "kernel_launches": 4, "cuda_event_ms": {"samples": [9.2623, 9.05245, 9.06147], "min": 9.05245, "mean": 9.12541, "max": 9.2623}, "scope": "single stage event around existing API calls"},
+    {"name": "output", "kernel_launches": 1, "cuda_event_ms": {"samples": [0.66624, 0.64768, 0.64848], "min": 0.64768, "mean": 0.654133, "max": 0.66624}, "scope": "single stage event around existing API calls"}
   ],
   "kernel_launches": [
     {"stage": "projection", "name": "gdn_dense_project_kernel", "count": 1},

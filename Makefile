@@ -313,7 +313,7 @@ m3-audit: tokenizer-runtime-gate $(TEST_DIR)/test_m3_gr_ref $(TEST_DIR)/test_m3_
 		> $(M3_ARTIFACT_DIR)/audit.json
 
 m3-acceptance: m3-c13
-	@python3 -c 'import json, pathlib; p=pathlib.Path("$(M3_ARTIFACT_DIR)"); names=("audit.json","gr_golden.json","gr_cuda_accuracy.json","state_layout.json","state_memory.json","gdn_microtests.json","gdn_projection_conv.json","gdn_recurrence_cuda.json","layer0_intermediates.json","multigdn_intermediates.json","chunk_invariance.json","cuda_profile_baseline.json","cuda_profile_fused.json"); bad=[n for n in names if json.loads((p/n).read_text()).get("status") != "pass"]; raise SystemExit("M3 acceptance failed: "+", ".join(bad)) if bad else None'
+	@python3 -c 'import json, pathlib; p=pathlib.Path("$(M3_ARTIFACT_DIR)"); names=("audit.json","gr_golden.json","gr_cuda_accuracy.json","state_layout.json","state_memory.json","gdn_microtests.json","gdn_projection_conv.json","gdn_recurrence_cuda.json","layer0_intermediates.json","multigdn_intermediates.json","chunk_invariance.json","cuda_profile_baseline.json","cuda_profile_fused.json"); bad=[n for n in names if json.loads((p/n).read_text()).get("status") != "pass"]; assert not bad, "M3 acceptance failed: "+", ".join(bad)'
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	@printf '%s\n' \
 		'{"gate":"M3-C14","gates":["M3-AUDIT","M3-C00","M3-C01","M3-C02","M3-C03","M3-C04","M3-C05","M3-C06","M3-C07","M3-C08","M3-C09","M3-C10","M3-C11","M3-C12","M3-C13"],"status":"pass","physical_layout":"reference/simple logical-contiguous path; no GB10 layout optimization"}' \
