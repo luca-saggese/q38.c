@@ -1,0 +1,15 @@
+M6 FULL MODEL PREFLIGHT
+layers 48/48 PASS
+GDN 36/36 PASS
+QSA 12/12 PASS
+GR tensors PASS
+router tensors 48/48 PASS
+shared experts 48/48 PASS
+routed expert banks 48/48 PASS
+expert count/layer 512 PASS
+LM head PASS
+final norm PASS
+PLE PASS file-backed
+unsupported qtypes 0 PASS
+missing tensors 0 PASS
+shape mismatches 0 PASS

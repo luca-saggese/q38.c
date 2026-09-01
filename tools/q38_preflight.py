@@ -12,6 +12,7 @@ import json
 import os
 import re
 import struct
+from collections import defaultdict
 from pathlib import Path
 
 
@@ -291,6 +292,114 @@ def support_reason(item, expected_type, expected_shape, actual, tensor):
     return True, "supported by file-backed q38 binder/forward path"
 
 
+def write_summary(report, path):
+    tensors = report.get("tensors", [])
+    by_layer = defaultdict(list)
+    for tensor in tensors:
+        by_layer[tensor.get("layer")].append(tensor)
+
+    def supported(items):
+        return bool(items) and all(
+            item.get("execution_path_supported", False) for item in items)
+
+    layer_ok = {
+        layer: supported(by_layer[layer])
+        for layer in range(48)
+    }
+    gdn_layers = sum(
+        layer_ok[layer] and sum(item["class"] == "gdn"
+                                for item in by_layer[layer]) == 9
+        for layer in range(48))
+    qsa_layers = sum(
+        layer_ok[layer] and sum(item["class"] == "qsa"
+                                for item in by_layer[layer]) == 9
+        for layer in range(48))
+    gr_ok = (
+        sum(item["class"] == "gr" for item in tensors) == 387 and
+        all(layer_ok[layer] and
+            sum(item["class"] == "gr" for item in by_layer[layer]) == 8
+            for layer in range(48)) and
+        sum(item["class"] == "gr" for item in by_layer[None]) == 3)
+    router_layers = sum(
+        layer_ok[layer] and sum(item["class"] == "router"
+                                for item in by_layer[layer]) == 1
+        for layer in range(48))
+    shared_layers = sum(
+        layer_ok[layer] and
+        sum(item["class"] == "shared_expert"
+            for item in by_layer[layer]) == 4
+        for layer in range(48))
+    routed_layers = sum(
+        layer_ok[layer] and
+        sum(item["class"] == "routed_expert"
+            for item in by_layer[layer]) == 2
+        for layer in range(48))
+    expert_shapes_ok = all(
+        item["required_shape"][0] == 512 and
+        item.get("shape") == item["required_shape"] and
+        item.get("execution_path_supported", False)
+        for item in tensors if item["class"] in ("router", "routed_expert")
+    )
+    lm_head_ok = supported(
+        [item for item in tensors if item["name"] == "lm_head.weight"])
+    final_norm_ok = supported([
+        item for item in tensors
+        if item["name"].endswith("hyper_connection_mixer.hc_norm.weight")
+    ])
+    ple_items = [item for item in by_layer[1] if item["class"] == "ple"]
+    ple_shards = [
+        item for item in ple_items
+        if ".ngram_embedding.shard_" in item["name"]
+    ]
+    ple_ok = (
+        len(ple_items) == 137 and len(ple_shards) == 128 and
+        supported(ple_items) and all(
+            item["qtype"] == "Q8_0" and item["required_qtype"] == "Q8_0"
+            for item in ple_shards))
+    missing = sum(not item.get("present", False) for item in tensors)
+    unsupported_qtypes = sum(
+        item.get("present", False) and not item.get(
+            "execution_path_supported", False) and
+        ("qtype" in item.get("reason", "").lower() or
+         "execution path" in item.get("reason", "").lower())
+        for item in tensors)
+    shape_mismatches = sum(
+        item.get("present", False) and (
+            item.get("shape") != item.get("required_shape") or
+            "shape" in item.get("reason", "").lower() or
+            "byte count" in item.get("reason", "").lower())
+        for item in tensors)
+    checks = [
+        ("layers 48/48", len(tensors) == 1294 and all(layer_ok.values())),
+        ("GDN 36/36", gdn_layers == 36),
+        ("QSA 12/12", qsa_layers == 12),
+        ("GR tensors", gr_ok),
+        ("router tensors 48/48", router_layers == 48),
+        ("shared experts 48/48", shared_layers == 48),
+        ("routed expert banks 48/48", routed_layers == 48),
+        ("expert count/layer 512", expert_shapes_ok),
+        ("LM head", lm_head_ok),
+        ("final norm", final_norm_ok),
+        ("PLE", ple_ok),
+        ("unsupported qtypes 0", unsupported_qtypes == 0),
+        ("missing tensors 0", missing == 0),
+        ("shape mismatches 0", shape_mismatches == 0),
+    ]
+    lines = ["M6 FULL MODEL PREFLIGHT"]
+    for label, ok in checks:
+        suffix = "PASS" if ok else "FAIL"
+        if label in ("GR tensors", "LM head", "final norm"):
+            lines.append(f"{label} {suffix}")
+        elif label == "PLE":
+            lines.append(f"{label} {suffix} file-backed")
+        else:
+            lines.append(f"{label} {suffix}")
+    lines.append("")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return all(ok for _, ok in checks)
+
+
 def run(args):
     source, shard_count = load_checkpoint(args.model_dir)
     classes = json.loads(args.classes.read_text(encoding="utf-8"))
@@ -363,10 +472,12 @@ def run(args):
         "unexpected_tensors": unexpected,
         "failures": failures,
     }
+    report["summary"] = str(args.summary)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n",
                            encoding="utf-8")
-    if failures:
+    summary_pass = write_summary(report, args.summary)
+    if failures or not summary_pass:
         raise SystemExit(1)
 
 
@@ -379,6 +490,8 @@ def main():
     parser.add_argument("--manifest", type=Path,
                         default=Path("tools/quant_manifest_q2.json"))
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--summary", type=Path,
+                        default=Path("artifacts/m6/full_model_preflight.txt"))
     args = parser.parse_args()
     try:
         run(args)
@@ -397,9 +510,28 @@ def main():
             "failures": [{"execution_path_supported": False,
                           "reason": str(exc)}],
         }
+        report["summary"] = str(args.summary)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n",
                                encoding="utf-8")
+        args.summary.parent.mkdir(parents=True, exist_ok=True)
+        args.summary.write_text(
+            "M6 FULL MODEL PREFLIGHT\n"
+            "layers 48/48 FAIL\n"
+            "GDN 36/36 FAIL\n"
+            "QSA 12/12 FAIL\n"
+            "GR tensors FAIL\n"
+            "router tensors 48/48 FAIL\n"
+            "shared experts 48/48 FAIL\n"
+            "routed expert banks 48/48 FAIL\n"
+            "expert count/layer 512 FAIL\n"
+            "LM head FAIL\n"
+            "final norm FAIL\n"
+            "PLE FAIL file-backed\n"
+            "unsupported qtypes 0 FAIL\n"
+            "missing tensors 0 FAIL\n"
+            "shape mismatches 0 FAIL\n",
+            encoding="utf-8")
         print(f"q38 preflight failed: {exc}")
         raise SystemExit(1)
 

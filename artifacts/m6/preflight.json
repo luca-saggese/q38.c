@@ -16,6 +16,7 @@
   "missing_count": 0,
   "required_tensor_count": 1294,
   "status": "pass",
+  "summary": "artifacts/m6/full_model_preflight.txt",
   "tensors": [
     {
       "class": "output",

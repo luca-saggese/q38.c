@@ -45,6 +45,7 @@ M3_ARTIFACT_DIR := artifacts/m3
 M4_ARTIFACT_DIR := artifacts/m4
 M6_GOLDEN := artifacts/m6/checkpoint_minimal_goldens.json
 M6_PREFLIGHT := artifacts/m6/preflight.json
+M6_PREFLIGHT_SUMMARY := artifacts/m6/full_model_preflight.txt
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -708,7 +709,9 @@ m6-preflight: m6-c11
 	@python3 tools/q38_preflight.py --model-dir $(MODEL_DIR) \
 		--artifact $(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
 		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
-		--manifest tools/quant_manifest_q2.json --output $(M6_PREFLIGHT)
+		--manifest tools/quant_manifest_q2.json --output $(M6_PREFLIGHT) \
+		--summary $(M6_PREFLIGHT_SUMMARY)
+	@cat $(M6_PREFLIGHT_SUMMARY)
 
 m6-c12: m6-preflight
 	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api
