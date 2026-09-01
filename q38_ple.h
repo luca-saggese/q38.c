@@ -27,6 +27,26 @@ typedef struct {
     uint64_t file_offset;
 } q38_ple_store;
 
+typedef enum {
+    Q38_PLE_GATHER_DIRECT = 0,
+    Q38_PLE_GATHER_PARALLEL = 1,
+} q38_ple_gather_mode;
+
+typedef struct {
+    size_t direct_threshold;
+    size_t parallel_threshold;
+} q38_ple_tuning;
+
+typedef struct {
+    uint64_t requests;
+    uint64_t unique_rows;
+    uint64_t bytes_copied;
+    uint64_t deduplicated_rows;
+} q38_ple_gather_stats;
+
+q38_ple_gather_mode q38_ple_choose_gather_mode(
+    size_t unique_rows, const q38_ple_tuning *tuning);
+
 bool q38_ple_store_bind(const q38_tensor *tensor, uint32_t expected_row_width,
                         q38_ple_store *store, char *error, size_t error_len);
 
@@ -51,6 +71,10 @@ bool q38_ple_store_read_rows(const q38_ple_store *store, const uint64_t *rows,
                              size_t row_count, void *row_data,
                              size_t row_stride, char *error,
                              size_t error_len);
+bool q38_ple_store_read_rows_mode(
+    const q38_ple_store *store, const uint64_t *rows, size_t row_count,
+    void *row_data, size_t row_stride, q38_ple_gather_mode mode,
+    q38_ple_gather_stats *stats, char *error, size_t error_len);
 
 #ifdef __cplusplus
 }

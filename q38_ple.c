@@ -1,11 +1,20 @@
 #include "q38_ple.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len > 0) snprintf(error, error_len, "%s", message);
     return false;
+}
+
+q38_ple_gather_mode q38_ple_choose_gather_mode(
+    size_t unique_rows, const q38_ple_tuning *tuning) {
+    const size_t threshold = tuning && tuning->parallel_threshold
+        ? tuning->parallel_threshold : 512;
+    return unique_rows < threshold ? Q38_PLE_GATHER_DIRECT
+                                   : Q38_PLE_GATHER_PARALLEL;
 }
 
 static bool tensor_name_is_shard(const q38_tensor *tensor,
@@ -160,19 +169,64 @@ bool q38_ple_store_read_rows(const q38_ple_store *store, const uint64_t *rows,
                              size_t row_count, void *row_data,
                              size_t row_stride, char *error,
                              size_t error_len) {
+    return q38_ple_store_read_rows_mode(
+        store, rows, row_count, row_data, row_stride,
+        Q38_PLE_GATHER_DIRECT, NULL, error, error_len);
+}
+
+bool q38_ple_store_read_rows_mode(
+    const q38_ple_store *store, const uint64_t *rows, size_t row_count,
+    void *row_data, size_t row_stride, q38_ple_gather_mode mode,
+    q38_ple_gather_stats *stats, char *error, size_t error_len) {
     if (error && error_len > 0) error[0] = '\0';
     if (!store || !rows || row_count == 0 || !row_data ||
-        row_stride < store->row_bytes) {
+        row_stride < store->row_bytes ||
+        (mode != Q38_PLE_GATHER_DIRECT && mode != Q38_PLE_GATHER_PARALLEL) ||
+        row_count > SIZE_MAX / row_stride) {
         return fail(error, error_len, "invalid PLE row batch arguments");
     }
-    if (row_count > SIZE_MAX / row_stride) {
-        return fail(error, error_len, "PLE row batch size overflows");
+    q38_ple_gather_stats local = {0};
+    local.requests = row_count;
+    if (mode == Q38_PLE_GATHER_DIRECT) {
+        for (size_t i = 0; i < row_count; ++i)
+            if (!q38_ple_store_read_row(
+                    store, rows[i], (uint8_t *)row_data + i * row_stride,
+                    (size_t)store->row_bytes, error, error_len))
+                return false;
+        local.unique_rows = row_count;
+    } else {
+        uint64_t *unique = malloc(row_count * sizeof(*unique));
+        size_t *map = malloc(row_count * sizeof(*map));
+        if (!unique || !map) {
+            free(unique); free(map);
+            return fail(error, error_len, "PLE gather metadata allocation failed");
+        }
+        size_t unique_count = 0;
+        for (size_t i = 0; i < row_count; ++i) {
+            size_t at = 0;
+            while (at < unique_count && unique[at] != rows[i]) ++at;
+            if (at == unique_count) unique[unique_count++] = rows[i];
+            map[i] = at;
+        }
+        uint8_t *staging = malloc(unique_count * store->row_bytes);
+        if (!staging) {
+            free(unique); free(map);
+            return fail(error, error_len, "PLE gather staging allocation failed");
+        }
+        for (size_t i = 0; i < unique_count; ++i)
+            if (!q38_ple_store_read_row(
+                    store, unique[i], staging + i * store->row_bytes,
+                    (size_t)store->row_bytes, error, error_len)) {
+                free(staging); free(unique); free(map); return false;
+            }
+        for (size_t i = 0; i < row_count; ++i)
+            memcpy((uint8_t *)row_data + i * row_stride,
+                   staging + map[i] * store->row_bytes, store->row_bytes);
+        local.unique_rows = unique_count;
+        local.deduplicated_rows = row_count - unique_count;
+        free(staging); free(unique); free(map);
     }
-    for (size_t i = 0; i < row_count; ++i) {
-        if (!q38_ple_store_read_row(
-                store, rows[i], (uint8_t *)row_data + i * row_stride,
-                (size_t)store->row_bytes, error, error_len))
-            return false;
-    }
+    local.bytes_copied = row_count * store->row_bytes;
+    if (stats) *stats = local;
     return true;
 }

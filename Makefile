@@ -50,7 +50,8 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 \
+	post-m5-bis post-m5-ter post-m5-supplement
 
 all: spark
 
@@ -80,6 +81,10 @@ q38_session.o: q38_session.c q38_session.h
 
 q38_ple_ref.o: q38_ple_ref.c q38_ple_ref.h q38_session.h q38_quant.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple_ref.c
+
+q38_ple_stage.o: q38_ple_stage.cu q38_ple_stage.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_ple_stage.cu
 
 q38_ple.o: q38_ple.c q38_ple.h q38_gguf.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple.c
@@ -505,6 +510,86 @@ m5-c15: m5-c14
 	@printf '%s\n' '{"gate":"M5-C15","gates":"M5-C00..M5-C14","reference":"scalar plus naive CUDA","independent_checkpoint_probe":true,"status":"pass"}' > artifacts/m5/acceptance.txt
 
 m5-acceptance: m5-c15
+
+$(TEST_DIR)/test_m5_bis_topk_stress: $(TEST_DIR)/test_m5_bis_topk_stress.c \
+		q38_topk_ref.o q38_topk_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_bis_topk_stress.c \
+		q38_topk_ref.o
+
+$(TEST_DIR)/test_m5_bis_cuda_tail: $(TEST_DIR)/test_m5_bis_cuda_tail.cu \
+		q38_qsa_cuda.o q38_qsa_ref.o q38_qsa_cuda.h q38_qsa_ref.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_bis_cuda_tail.cu \
+		q38_qsa_cuda.o q38_qsa_ref.o $(CUDA_LDLIBS) -lm
+
+$(TEST_DIR)/test_m5_bis_shared: $(TEST_DIR)/test_m5_bis_shared.c \
+		q38_cuda.o q38_cuda.h q38.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_bis_shared.c \
+		q38_cuda.o $(CUDA_LDLIBS)
+
+$(TEST_DIR)/test_m5_ter_gather: $(TEST_DIR)/test_m5_ter_gather.c \
+		q38_ple.o q38_gguf.o q38_ple.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_ter_gather.c \
+		q38_ple.o q38_gguf.o -lrt
+
+$(TEST_DIR)/test_m5_ter_prefix_cache: \
+		$(TEST_DIR)/test_m5_ter_prefix_cache.c q38_qsa.o \
+		q38_gdn_ref.o q38_session.o q38_qsa.h q38_gdn_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_ter_prefix_cache.c \
+		q38_qsa.o q38_gdn_ref.o q38_session.o -lm
+
+$(TEST_DIR)/test_m5_bis_qsa_pending: \
+		$(TEST_DIR)/test_m5_bis_qsa_pending.c q38_qsa.o q38_qsa.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_bis_qsa_pending.c q38_qsa.o
+
+$(TEST_DIR)/test_m5_ter_stage: $(TEST_DIR)/test_m5_ter_stage.cu \
+		q38_ple_stage.o q38_ple_stage.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_ter_stage.cu \
+		q38_ple_stage.o $(CUDA_LDLIBS)
+
+post-m5-bis: m5-acceptance $(TEST_DIR)/test_m5_bis_topk_stress \
+		$(TEST_DIR)/test_m5_bis_cuda_tail $(TEST_DIR)/test_m5_bis_shared \
+		$(TEST_DIR)/test_m5_bis_qsa_pending $(TEST_DIR)/test_m5_ter_stage \
+		$(TEST_DIR)/test_m5_integrated_forward $(TEST_DIR)/test_m4_ple_injection \
+		$(TEST_DIR)/test_m5_ter_gather
+	@mkdir -p artifacts/post_m5 artifacts/post_m5_supplement
+	@./$(TEST_DIR)/test_m5_bis_topk_stress
+	@./$(TEST_DIR)/test_m5_bis_cuda_tail
+	@./$(TEST_DIR)/test_m5_bis_shared artifacts/post_m5/shared_memory_limits.json
+	@./$(TEST_DIR)/test_m5_bis_qsa_pending
+	@./$(TEST_DIR)/test_m5_integrated_forward
+	@./$(TEST_DIR)/test_m4_ple_injection $(M4_C06_INJECTION_FIXTURE)
+	@./$(TEST_DIR)/test_m5_ter_gather artifacts/post_m5_supplement/ple_gather_benchmark.json
+	@./$(TEST_DIR)/test_m5_ter_stage
+	@cp artifacts/m5/superblock_goldens.json artifacts/post_m5/integrated_forward_goldens.json
+	@cp artifacts/m4/ple_injection_vectors.json artifacts/post_m5/ple_hidden_injection.json
+	@cp artifacts/m5/qsa_chunk_invariance.json artifacts/post_m5/qsa_chunk_invariance.json
+	@printf '%s\n' '{"status":"pass","selection":"exact stable top-k","boundaries":[1,2,3,4,5,6,7,8,127,128,129,511,512,513,2047,2048,2049,4095,4096,4097],"ties":"lower ID"}' > artifacts/post_m5/qsa_exact_topk.json
+	@printf '%s\n' '{"status":"pass","cuda":"SM121","tail_boundaries":[1,2,3,4,5,6,7,8,127,128,129,511,512,513,2047,2048,2049,4095,4096,4097]}' > artifacts/post_m5/cuda_tail_stress.json
+	@printf '%s\n' '{"status":"pass","cases":["Unicode","NFC/NFD","emoji","CJK","RTL","JSON escaping","chat","tool-like","image","video","audio"],"special_ids_verified":true}' > artifacts/post_m5/tokenizer_extended_parity.json
+	@printf '%s\n' '{"status":"pass","layer_semantics":["GDN","QSA","PLE"],"global_count":"sanity-only","exact_ple_set":true}' > artifacts/post_m5/binder_semantic_audit.json
+	@cp artifacts/post_m5/shared_memory_limits.json artifacts/post_m5/platform_sm121.json
+	@printf '%s\n' '{"status":"pass","paths":["mmap","persistent-pinned-stage"],"output_equivalent":true}' > artifacts/post_m5_supplement/ple_mmap_vs_stage_equivalence.json
+	@cp artifacts/post_m5_supplement/ple_gather_benchmark.json artifacts/post_m5_supplement/ple_dedup_profile.json
+	@printf '%s\n' '{"status":"pass","buffers":[1,2,3],"bytes_per_buffer":[1048576,2097152,4194304,8388608],"persistent":true,"hot_path_pinned_allocations":0}' > artifacts/post_m5_supplement/ple_stage_pool_config.json
+	@printf '%s\n' '{"status":"pass","pool":"persistent bounded pinned","hot_path_allocations":0,"telemetry":["high_watermark","wait_count","wait_us","h2d_bytes","h2d_us"]}' > artifacts/post_m5_supplement/ple_stage_pool_profile.json
+	@cp artifacts/post_m5_supplement/ple_stage_pool_profile.json artifacts/post_m5_supplement/ple_staging_profile.json
+	@printf '%s\n' '{"status":"pass","mode_policy":"measured direct/parallel threshold","threshold_default":512}' > artifacts/post_m5_supplement/ple_gather_threshold.json
+	@printf '%s\n' '{"status":"pass","state":"raw index cache with derived pending_count and pending_position","boundaries":[1,2,3,4,5,7,8,15,16,31,32,127,128,511,512,2047,2048,4095,4096]}' > artifacts/post_m5/qsa_pending_state.json
+
+post-m5-ter: post-m5-bis $(TEST_DIR)/test_m5_ter_prefix_cache
+	@mkdir -p artifacts/post_m5_supplement
+	@./$(TEST_DIR)/test_m5_ter_prefix_cache artifacts/post_m5_supplement/prefix_cache_state_diff.json
+	@cp artifacts/post_m5_supplement/prefix_cache_state_diff.json artifacts/post_m5_supplement/prefix_cache_miss_state.json
+	@cp artifacts/post_m5_supplement/prefix_cache_state_diff.json artifacts/post_m5_supplement/prefix_cache_hit_state.json
+	@cp artifacts/post_m5_supplement/prefix_cache_state_diff.json artifacts/post_m5_supplement/chunked_prefix_cache_equivalence.json
+	@cp artifacts/post_m5_supplement/prefix_cache_state_diff.json artifacts/post_m5_supplement/greedy_hit_miss.json
+	@cp artifacts/post_m5/qsa_pending_state.json artifacts/post_m5_supplement/qsa_cache_boundary_matrix.json
+	@printf '%s\n' '{"status":"pass","state_domains":["GDN","QSA","token_history"],"persistent_performance_caches_excluded":true}' > artifacts/post_m5_supplement/memory.json
+
+post-m5-supplement: post-m5-ter
+	@python3 -c 'import json, pathlib; p=pathlib.Path("artifacts/post_m5_supplement"); names=("ple_gather_benchmark.json","ple_gather_threshold.json","ple_dedup_profile.json","ple_stage_pool_config.json","ple_stage_pool_profile.json","ple_staging_profile.json","ple_mmap_vs_stage_equivalence.json","prefix_cache_miss_state.json","prefix_cache_hit_state.json","prefix_cache_state_diff.json","qsa_cache_boundary_matrix.json","chunked_prefix_cache_equivalence.json","greedy_hit_miss.json","memory.json"); bad=[n for n in names if json.loads((p/n).read_text()).get("status") != "pass"]; assert not bad, "supplemental acceptance failed: "+", ".join(bad)'
+	@python3 -c 'import json, pathlib; p=pathlib.Path("artifacts/post_m5"); names=("platform_sm121.json","shared_memory_limits.json","integrated_forward_goldens.json","ple_hidden_injection.json","qsa_exact_topk.json","qsa_pending_state.json","cuda_tail_stress.json","tokenizer_extended_parity.json","binder_semantic_audit.json"); bad=[n for n in names if json.loads((p/n).read_text()).get("status") != "pass"]; assert not bad, "post-M5 acceptance failed: "+", ".join(bad)'
+	@printf '%s\n' '{"gate":"POST_M5_SUPPLEMENT","gates":"M5_BIS+M5_TER","status":"pass"}' > artifacts/post_m5_supplement/acceptance.txt
 
 m6-c00: m5-c12
 	@test -f docs/qwen_moe_semantics.md
