@@ -438,12 +438,20 @@ m5-c10: m5-c09 $(TEST_DIR)/test_m5_qsa_chunking
 	@./$(TEST_DIR)/test_m5_qsa_chunking
 	@printf '%s\n' '{"gate":"M5-C10","implementation":"scalar QSA chunk-invariance harness","partitions":["single","one-token","three-five-four"],"compared":["index state","score vectors","selected IDs"],"status":"pass"}' > artifacts/m5/qsa_chunk_invariance.json
 
-m5-c11: m5-c10
+m5-c11: m5-c10 $(TEST_DIR)/test_m5_integrated_forward
 	@test -f q38_forward_probe.c
 	@grep -q "q38_ple_ngram_ids_ref" q38_forward_probe.c
 	@test -f q38_gdn_ref.c
 	@test -f q38_gr_ref.c
+	@./$(TEST_DIR)/test_m5_integrated_forward
 	@printf '%s\n' '{"gate":"M5-C11","contract":"3xGDN + 1xQSA superblock ordering recorded for the reference graph","stages":["GDN","QSA","GR","PLE"],"numeric_hidden_golden":"qsa_forward_goldens.json covers the checkpoint-derived QSA stage; superblock hidden vectors are not claimed or fabricated","status":"pass"}' > artifacts/m5/superblock_goldens.json
+
+$(TEST_DIR)/test_m5_integrated_forward: \
+		$(TEST_DIR)/test_m5_integrated_forward.c q38_ple_ref.o \
+		q38_forward.o q38_qsa.o q38_gguf.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_integrated_forward.c \
+		q38_ple_ref.o q38_forward.o q38_qsa.o q38_gguf.o \
+		q38_session.o q38_quant.o -lm
 
 q38_forward.o: q38_forward.c q38_forward.h q38_qsa.h
 	$(CC) $(CFLAGS) -c -o $@ q38_forward.c

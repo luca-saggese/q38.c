@@ -11,6 +11,21 @@ Scope:
 
 Questa review **non riapre** finding già corretti. L'obiettivo è identificare le macro-problematiche ancora aperte prima di proseguire troppo in M5/M6.
 
+## Verification update — 2026-09-01
+
+The findings were checked against the local checkpoint and the official
+Transformers/Qwen4Exp and llama.cpp PR #27742 sources before implementation:
+
+| Finding | Verified correction/evidence |
+|---|---|
+| P0 PLE injection | `generate_m4_c06_injection_goldens.py` reads only required checkpoint rows/weights; `test_m4_ple_injection` compares independent `hidden_before_ple`, contribution, and `hidden_after_ple` vectors. |
+| PLE storage/residency | mmap remains the reference path; bounded-cache counters and cold/warm artifacts remain separate from semantic goldens. |
+| Integrated forward | the reference QSA graph, PLE injection reference, and existing GDN/GR probes are wired as separate layer-stage gates; no unverified full-model values are claimed. |
+| QSA pending group | upstream uses raw cell-for-cell index state; complete groups are recomputed and the incomplete visible tail is retained, with no persistent pending accumulator. |
+| Tokenizer parity/special IDs | Unicode, escaping, multimodal/audio markers, and runtime verification against the local tokenizer files pass. |
+| Semantic binder | GDN/QSA families and the exact PLE tensor set are validated per layer; global counts are sanity checks only. |
+| Cache telemetry | lookup/hit/miss/insert/eviction counters are emitted by the bounded reference cache; no SSD optimization claim is made. |
+
 ---
 
 # Executive summary
