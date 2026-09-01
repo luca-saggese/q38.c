@@ -49,6 +49,7 @@ M6_PREFLIGHT_SUMMARY := artifacts/m6/full_model_preflight.txt
 M6_TRACE := artifacts/m6/real_forward_trace.json
 M6_REFERENCE := artifacts/m6/transformers_reference.json
 M6_COMPARISON := artifacts/m6/semantic_comparison.json
+M6_QUANT_REFERENCE := artifacts/m6/quant_matched_reference.json
 M6_PYTHON ?= .venv-m6/bin/python
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
@@ -746,6 +747,10 @@ m6-c12: m6-preflight
 		$(M6_PYTHON) tools/m6_compare_traces.py \
 		--native $(M6_TRACE) --reference $(M6_REFERENCE) \
 		--output $(M6_COMPARISON)
+	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
+		$(M6_PYTHON) tools/m6_quant_matched_reference.py \
+		--gguf artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		--trace $(M6_TRACE) --output $(M6_QUANT_REFERENCE)
 
 m6-c13: m6-c12
 	@test -f artifacts/m6/first_token_logits.json || \

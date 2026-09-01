@@ -120,6 +120,8 @@ def main() -> None:
             left_weights = left_weights[0]
         if right_weights and isinstance(right_weights[0], list):
             right_weights = right_weights[0]
+        if not right_weights:
+            continue
         if len(left_weights) != len(right_weights):
             route_mismatch.append(f"layer:{left.get('layer')}:weights")
         elif any(

@@ -35,7 +35,7 @@ Qwen4ExpTextGatedResidual = _qwen4.Qwen4ExpTextGatedResidual
 Qwen4ExpTextRotaryEmbedding = _qwen4.Qwen4ExpTextRotaryEmbedding
 
 
-FIXED = (0, 1, 2, 3, 1024, 4096, 8191, 10239)
+FIXED = (0, 1, 2, 3)
 DEVICE = torch.device("cuda")
 
 

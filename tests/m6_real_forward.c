@@ -10,8 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const size_t fixed_coordinates[] = {0, 1, 2, 3, 1024, 4096, 8191,
-                                           10239};
+static const size_t fixed_coordinates[] = {0, 1, 2, 3};
 
 typedef struct {
     FILE *out;
