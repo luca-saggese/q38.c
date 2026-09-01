@@ -42,13 +42,14 @@ ARTIFACT_DIR := artifacts/m0
 M1_ARTIFACT_DIR := artifacts/m1
 M2_ARTIFACT_DIR := artifacts/m2
 M3_ARTIFACT_DIR := artifacts/m3
+M4_ARTIFACT_DIR := artifacts/m4
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
-	m3-acceptance
+	m3-acceptance m4-c00 m4-c01
 
 all: spark
 
@@ -72,6 +73,9 @@ q38_platform.o: q38_platform.c q38_platform.h q38_cuda.h q38.h
 
 q38_model_config.o: q38_model_config.c q38_model_config.h
 	$(CC) $(CFLAGS) -c -o $@ q38_model_config.c
+
+q38_session.o: q38_session.c q38_session.h
+	$(CC) $(CFLAGS) -c -o $@ q38_session.c
 
 q38_golden.o: q38_golden.c q38_golden.h
 	$(CC) $(CFLAGS) -c -o $@ q38_golden.c
@@ -126,6 +130,20 @@ $(TEST_DIR)/test_m2_weights: $(TEST_DIR)/test_m2_weights.c q38_weights.o \
 $(TEST_DIR)/test_m2_tokenizer: $(TEST_DIR)/test_m2_tokenizer.c \
 		q38_tokenizer.o q38_tokenizer.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_tokenizer.c q38_tokenizer.o
+
+$(TEST_DIR)/test_m4_session: $(TEST_DIR)/test_m4_session.c q38_session.o q38_session.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_session.c q38_session.o
+
+m4-c00:
+	@test -f docs/qwen_ple_semantics.md
+	@grep -q "mixed_n" docs/qwen_ple_semantics.md
+	@grep -q "build_ple" docs/qwen_ple_semantics.md
+	@echo "M4-C00: PLE semantics freeze passed"
+
+m4-c01: m4-c00 $(TEST_DIR)/test_m4_session
+	@./$(TEST_DIR)/test_m4_session
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	printf '%s\n' '{"gate":"M4-C01","history":"two-token session history","eos_reset":true,"chunk_boundary":true,"status":"pass"}' > $(M4_ARTIFACT_DIR)/session_history.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
