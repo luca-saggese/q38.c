@@ -390,6 +390,15 @@ static float full_tensor_scalar(const q38_gguf *model, const q38_tensor *tensor,
                    column * sizeof(value), sizeof(value));
         return value;
     }
+    if (tensor->type == 8 && cols % 32u == 0) {
+        const unsigned char *block =
+            (const unsigned char *)data + row * row_bytes +
+            (column / 32u) * 34u;
+        uint16_t bits;
+        memcpy(&bits, block, sizeof(bits));
+        return q38_half_to_float(bits) *
+            (float)((const int8_t *)(block + 2))[column % 32u];
+    }
     if ((tensor->type == Q38_QUANT_Q2_K ||
          tensor->type == Q38_QUANT_Q4_K) &&
         scratch && scratch_count >= cols &&
@@ -414,7 +423,7 @@ static bool full_tensor_row(const q38_gguf *model, const q38_tensor *tensor,
     if (!full_tensor_data(model, tensor, &data, &rows, &cols, &row_bytes) ||
         row >= rows || count != cols)
         return full_fail(error, error_len, "invalid file-backed tensor row");
-    if (tensor->type == 30 || tensor->type == 0) {
+    if (tensor->type == 30 || tensor->type == 0 || tensor->type == 8) {
         for (size_t i = 0; i < cols; ++i)
             out[i] = full_tensor_scalar(model, tensor, row, i, NULL, 0);
         return true;
@@ -438,8 +447,30 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
         return full_fail(error, error_len, "invalid tensor matvec geometry");
     if (tensor->type == 30 || tensor->type == 0) {
         float sum = 0.0f;
-        for (size_t c = 0; c < cols; ++c)
-            sum += full_tensor_scalar(model, tensor, row, c, NULL, 0) * input[c];
+        const unsigned char *row_data =
+            (const unsigned char *)data + row * row_bytes;
+        if (tensor->type == 30) {
+            const uint16_t *values = (const uint16_t *)row_data;
+            for (size_t c = 0; c < cols; ++c)
+                sum += q38_half_to_float(values[c]) * input[c];
+        } else {
+            const float *values = (const float *)row_data;
+            for (size_t c = 0; c < cols; ++c) sum += values[c] * input[c];
+        }
+        *out = sum;
+        return true;
+    }
+    if (tensor->type == 8 && cols % 32u == 0) {
+        float sum = 0.0f;
+        const unsigned char *row_data =
+            (const unsigned char *)data + row * row_bytes;
+        for (size_t c = 0; c < cols; ++c) {
+            const unsigned char *block = row_data + (c / 32u) * 34u;
+            uint16_t bits;
+            memcpy(&bits, block, sizeof(bits));
+            sum += q38_half_to_float(bits) *
+                   (float)((const int8_t *)(block + 2))[c % 32u] * input[c];
+        }
         *out = sum;
         return true;
     }
@@ -1037,9 +1068,9 @@ bool q38_forward_state_init(q38_forward_state *state,
         return full_fail(error, error_len, "full forward requires 48 bound layers");
     if (!q38_weights_validate_bound(weights, error, error_len)) return false;
     memset(state, 0, sizeof(*state));
-    if (!q38_session_state_init(&state->storage.layout, 0, error, error_len) ||
-        !q38_state_alloc(&state->storage.layout, &state->storage, error,
-                         error_len))
+    q38_session_state layout;
+    if (!q38_session_state_init(&layout, 0, error, error_len) ||
+        !q38_state_alloc(&layout, &state->storage, error, error_len))
         return false;
     for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i) {
         if (weights->layer[i].kind != Q38_LAYER_FULL_ATTENTION) continue;
@@ -1228,6 +1259,10 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             !full_gr_write(model, &layer->mlp_gr, updated, block, token_count,
                            streams, normed, inject, scratch, error, error_len))
             goto fail;
+        if (diagnostics && diagnostics->trace &&
+            !diagnostics->trace(layer_number, streams, token_count, width,
+                                diagnostics->trace_user, error, error_len))
+            goto fail;
         if (diagnostics)
             diagnostics->layer_fingerprint[layer_number] =
                 full_fingerprint(streams, token_count * width);
@@ -1244,6 +1279,11 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             !final_gr.input_mix_weight_up ||
             !full_gr_read(model, &final_gr, streams, token_count, mixed,
                           normed, down, up, scratch, error, error_len))
+            goto fail;
+        if (diagnostics && diagnostics->trace &&
+            !diagnostics->trace(UINT32_MAX, mixed, token_count,
+                                Q38_GR_HIDDEN, diagnostics->trace_user,
+                                error, error_len))
             goto fail;
         for (size_t t = 0; t < token_count; ++t)
             for (size_t v = 0; v < 248320; ++v)
