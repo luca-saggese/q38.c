@@ -18,6 +18,7 @@ typedef struct {
     char *chat_template;
 } q38_tokenizer;
 bool q38_tokenizer_init(q38_tokenizer*, const char*, const char*, char*, size_t);
+bool q38_tokenizer_verify_specials(const q38_tokenizer*, char*, size_t);
 void q38_tokenizer_destroy(q38_tokenizer*);
 bool q38_tokenizer_encode(const q38_tokenizer*, const char*, bool, q38_token_batch*, char*, size_t);
 bool q38_tokenizer_encode_chat_json(const q38_tokenizer*, const char*, bool, bool, q38_token_batch*, char*, size_t);

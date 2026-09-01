@@ -28,7 +28,7 @@ static bool put_utf8(char *b, size_t *n, uint32_t cp) {
     } else return false;
     return true;
 }
-static char *jstr(const char **pp){const char*p=*pp;if(*p!='"')return 0;p++;size_t n=0;char*b=malloc(strlen(p)+1);if(!b)return 0;while(*p&&*p!='"'){if(*p=='\\'){p++;if(*p=='u'){unsigned v=0;for(int i=0;i<4;i++){char c=*++p;v=v*16+(c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c-'A'+10);}if(v>=0xd800&&v<=0xdbff&&p[1]=='\\'&&p[2]=='u'){const char*q=p+3;unsigned w=0;for(int i=0;i<4;i++){char c=q[i];w=w*16+(c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c-'A'+10);}if(w>=0xdc00&&w<=0xdfff){v=0x10000+((v-0xd800)<<10)+(w-0xdc00);p=q+3;}}if(!put_utf8(b,&n,v)){free(b);return 0;}}else{char c=*p;b[n++]=c=='n'?'\n':c=='r'?'\r':c=='t'?'\t':c;}}else b[n++]=*p;p++;}if(*p!='"'){free(b);return 0;}b[n]=0;*pp=p+1;return b;}
+static char *jstr(const char **pp){const char*p=*pp;if(*p!='"')return 0;p++;size_t n=0;char*b=malloc(strlen(p)+1);if(!b)return 0;while(*p&&*p!='"'){if(*p=='\\'){p++;if(*p=='u'){unsigned v=0;for(int i=0;i<4;i++){char c=*++p;v=v*16+(c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c-'A'+10);}if(v>=0xd800&&v<=0xdbff&&p[1]=='\\'&&p[2]=='u'){const char*q=p+3;unsigned w=0;for(int i=0;i<4;i++){char c=q[i];w=w*16+(c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c-'A'+10);}if(w>=0xdc00&&w<=0xdfff){v=0x10000+((v-0xd800)<<10)+(w-0xdc00);p=q+3;}}if(!put_utf8(b,&n,v)){free(b);return 0;}}else{char c=*p;b[n++]=c=='n'?'\n':c=='r'?'\r':c=='t'?'\t':c=='b'?'\b':c=='f'?'\f':c=='/'?'/':c;}}else b[n++]=*p;p++;}if(*p!='"'){free(b);return 0;}b[n]=0;*pp=p+1;return b;}
 static const char *find(const char*b,const char*k){char*q=strstr(b,k);return q?q+strlen(k):0;}
 static bool addv(q38_tokenizer*t,char*s,uint32_t id){if(t->vocab_count*2>=t->vocab_cap){size_t nc=t->vocab_cap? t->vocab_cap*2:524288; q38_vocab_entry*n=calloc(nc,sizeof(*n));if(!n)return 0;for(size_t i=0;i<t->vocab_cap;i++)if(t->vocab[i].s){size_t j=hs(t->vocab[i].s)&(nc-1);while(n[j].s)j=(j+1)&(nc-1);n[j]=t->vocab[i];}free(t->vocab);t->vocab=n;t->vocab_cap=nc;}size_t i=hs(s)&(t->vocab_cap-1);while(t->vocab[i].s&&strcmp(t->vocab[i].s,s))i=(i+1)&(t->vocab_cap-1);if(!t->vocab[i].s){t->vocab[i].s=s;t->vocab_count++;}else free(s);t->vocab[i].id=id;return 1;}
 static int lookup(const q38_tokenizer*t,const char*s){if(!t->vocab_cap)return -1;size_t i=hs(s)&(t->vocab_cap-1);while(t->vocab[i].s){if(!strcmp(t->vocab[i].s,s))return (int)t->vocab[i].id;i=(i+1)&(t->vocab_cap-1);}return -1;}
@@ -181,6 +181,13 @@ static bool encode_text(const q38_tokenizer*t,const char*s,size_t n,
         } else {
             p += l;
             bool grouped_equals = false;
+            if (c == '\\' && p < n) {
+                size_t z = utf8_cp(s + p, n - p, &d);
+                if (d == 'n' || d == 'r' || d == 't' || d == 'b' ||
+                    d == 'f' || d == '"' || d == '\\' || d == '/' ||
+                    d == 'u')
+                    p += z;
+            }
             if (c == '=' && p < n) {
                 size_t z = utf8_cp(s + p, n - p, &d);
                 if (cp_letter(d) || cp_mark(d)) {
@@ -303,7 +310,7 @@ static char *json_content(const char **p) {
     out[used] = 0;
     return out;
 }
-bool q38_tokenizer_init(q38_tokenizer*t,const char*dir,const char*unused,char*e,size_t en){(void)unused;if(e&&en)e[0]=0;if(!t||!dir){err(e,en,"invalid tokenizer arguments");return 0;}memset(t,0,sizeof(*t));t->model_dir=strdup(dir);char p[512];snprintf(p,sizeof(p),"%s/tokenizer.json",dir);size_t z;char*b=file(p,&z);if(!b){err(e,en,"cannot read tokenizer.json");return 0;}const char*v=find(b,"\"vocab\"");v=v?strchr(v,'{'):0;if(!v){free(b);err(e,en,"tokenizer vocab missing");return 0;}v++;while(*v&&*v!='}') {while(*v&&*v!='"')v++;if(!*v||*v=='}')break;char*s=jstr(&v);while(*v&&*v!=':')v++;v++;unsigned long id=strtoul(v,(char**)&v,10);if(!addv(t,s,(uint32_t)id)){free(b);err(e,en,"out of memory");return 0;}while(*v&&*v!=','&&*v!='}')v++;if(*v==',')v++;}char mp[512];snprintf(mp,sizeof(mp),"%s/merges.txt",dir);size_t mz;char*mb=file(mp,&mz);if(mb){char*line=mb;while(line&&*line){char*nl=strchr(line,'\n');if(nl)*nl=0;if(*line&&*line!='#'){char*s=strdup(line);if(!addm(t,s,(uint32_t)t->merge_count)){free(mb);free(b);return 0;}}line=nl?nl+1:0;}free(mb);}else{const char*m=find(b,"\"merges\"");m=m?strchr(m,'['):0;if(m)for(m++;*m&&*m!=']';){while(*m&&*m!='"'&&*m!=']')m++;if(*m==']')break;char*s=jstr(&m);if(!addm(t,s,(uint32_t)t->merge_count)){free(b);return 0;}while(*m&&*m!=','&&*m!=']')m++;if(*m==',')m++;}}const char*a=find(b,"\"added_tokens\"");a=a?strchr(a,'['):0;if(a)for(a++;*a&&*a!=']';){while(*a&&*a!='{')a++;if(*a!='{')break;const char*q=a;char*s=json_field(&q,"\"content\"");const char*idp=strstr(a,"\"id\"");if(idp&&s){uint32_t id=(uint32_t)strtoul(strchr(idp,':')+1,0,10);t->special_text=realloc(t->special_text,(t->special_count+1)*sizeof(char*));t->special_id=realloc(t->special_id,(t->special_count+1)*sizeof(uint32_t));t->special_text[t->special_count]=s;t->special_id[t->special_count++]=id;}else free(s);a=strchr(a,'}');if(a)a++;}static const char*extra[]={"<think>","</think>","<tool_response>","</tool_response>"};static const uint32_t xid[]={248068,248069,248066,248067};for(size_t i=0;i<4;i++){t->special_text=realloc(t->special_text,(t->special_count+1)*sizeof(char*));t->special_id=realloc(t->special_id,(t->special_count+1)*sizeof(uint32_t));t->special_text[t->special_count]=strdup(extra[i]);t->special_id[t->special_count++]=xid[i];}free(b);return 1;}
+bool q38_tokenizer_init(q38_tokenizer*t,const char*dir,const char*unused,char*e,size_t en){(void)unused;if(e&&en)e[0]=0;if(!t||!dir){err(e,en,"invalid tokenizer arguments");return 0;}memset(t,0,sizeof(*t));t->model_dir=strdup(dir);char p[512];snprintf(p,sizeof(p),"%s/tokenizer.json",dir);size_t z;char*b=file(p,&z);if(!b){err(e,en,"cannot read tokenizer.json");return 0;}const char*v=find(b,"\"vocab\"");v=v?strchr(v,'{'):0;if(!v){free(b);err(e,en,"tokenizer vocab missing");return 0;}v++;while(*v&&*v!='}') {while(*v&&*v!='"')v++;if(!*v||*v=='}')break;char*s=jstr(&v);while(*v&&*v!=':')v++;v++;unsigned long id=strtoul(v,(char**)&v,10);if(!addv(t,s,(uint32_t)id)){free(b);err(e,en,"out of memory");return 0;}while(*v&&*v!=','&&*v!='}')v++;if(*v==',')v++;}char mp[512];snprintf(mp,sizeof(mp),"%s/merges.txt",dir);size_t mz;char*mb=file(mp,&mz);if(mb){char*line=mb;while(line&&*line){char*nl=strchr(line,'\n');if(nl)*nl=0;if(*line&&*line!='#'){char*s=strdup(line);if(!addm(t,s,(uint32_t)t->merge_count)){free(mb);free(b);return 0;}}line=nl?nl+1:0;}free(mb);}else{const char*m=find(b,"\"merges\"");m=m?strchr(m,'['):0;if(m)for(m++;*m&&*m!=']';){while(*m&&*m!='"'&&*m!=']')m++;if(*m==']')break;char*s=jstr(&m);if(!addm(t,s,(uint32_t)t->merge_count)){free(b);return 0;}while(*m&&*m!=','&&*m!=']')m++;if(*m==',')m++;}}const char*a=find(b,"\"added_tokens\"");a=a?strchr(a,'['):0;if(a)for(a++;*a&&*a!=']';){while(*a&&*a!='{')a++;if(*a!='{')break;const char*q=a;char*s=json_field(&q,"\"content\"");const char*idp=strstr(a,"\"id\"");if(idp&&s){uint32_t id=(uint32_t)strtoul(strchr(idp,':')+1,0,10);t->special_text=realloc(t->special_text,(t->special_count+1)*sizeof(char*));t->special_id=realloc(t->special_id,(t->special_count+1)*sizeof(uint32_t));t->special_text[t->special_count]=s;t->special_id[t->special_count++]=id;}else free(s);a=strchr(a,'}');if(a)a++;}if(!q38_tokenizer_verify_specials(t,e,en)){free(b);return 0;}free(b);return 1;}
 void q38_tokenizer_destroy(q38_tokenizer*t){if(!t)return;free(t->model_dir);for(size_t i=0;i<t->vocab_cap;i++)free(t->vocab[i].s);free(t->vocab);for(size_t i=0;i<t->merge_count;i++)free(t->merges[i].s);free(t->merges);for(size_t i=0;i<t->special_count;i++)free(t->special_text[i]);free(t->special_text);free(t->special_id);free(t->chat_template);memset(t,0,sizeof(*t));}
 bool q38_tokenizer_encode(const q38_tokenizer*t,const char*s,bool add,q38_token_batch*out,char*e,size_t en){(void)add;if(e&&en)e[0]=0;if(!t||!s||!out){err(e,en,"invalid tokenizer encode arguments");return 0;}q38_token_batch_free(out);char*n=normalize_nfc(s);if(!n){err(e,en,"out of memory");return 0;}bool ok=encode_special(t,n,out);free(n);if(!ok){q38_token_batch_free(out);err(e,en,"native tokenizer failed");return 0;}return 1;}
 static bool append_text(char **dst, size_t *used, size_t *cap, const char *text) {
@@ -356,3 +363,33 @@ static int byte_for_codepoint(uint32_t cp) {
 bool q38_tokenizer_decode(const q38_tokenizer*t,const uint32_t*ids,size_t count,
                           char**out,size_t*len,char*e,size_t en){if(e&&en)e[0]=0;if(!t||(!ids&&count)||!out){err(e,en,"invalid tokenizer decode arguments");return false;}size_t cap=64,used=0;char*r=malloc(cap);if(!r){err(e,en,"out of memory");return false;}for(size_t i=0;i<count;i++){const char*s=token_string(t,ids[i]);if(!s){free(r);err(e,en,"unknown token ID");return false;}const char*special=NULL;for(size_t j=0;j<t->special_count;j++)if(t->special_id[j]==ids[i]){special=t->special_text[j];break;}if(special){size_t n=strlen(special);if(used+n+1>cap){while(used+n+1>cap)cap*=2;char*g=realloc(r,cap);if(!g){free(r);err(e,en,"out of memory");return false;}r=g;}memcpy(r+used,special,n);used+=n;continue;}for(size_t p=0;s[p];){uint32_t cp;size_t z=utf8_cp(s+p,strlen(s+p),&cp);int b=byte_for_codepoint(cp);if(b<0){free(r);err(e,en,"token is not byte-level decodable");return false;}if(used+2>cap){cap*=2;char*g=realloc(r,cap);if(!g){free(r);err(e,en,"out of memory");return false;}r=g;}r[used++]=(char)b;p+=z;}}r[used]=0;*out=r;if(len)*len=used;return true;}
 void q38_token_batch_free(q38_token_batch*b){if(b){free(b->tokens);memset(b,0,sizeof(*b));}}
+
+bool q38_tokenizer_verify_specials(const q38_tokenizer *t, char *error,
+                                   size_t error_len) {
+    static const struct { const char *text; uint32_t id; } required[] = {
+        {"<|endoftext|>", 248044}, {"<|im_start|>", 248045},
+        {"<|im_end|>", 248046}, {"<|vision_start|>", 248053},
+        {"<|vision_end|>", 248054}, {"<|vision_pad|>", 248055},
+        {"<|image_pad|>", 248056}, {"<|video_pad|>", 248057},
+        {"<tool_response>", 248066}, {"</tool_response>", 248067},
+        {"<think>", 248068}, {"</think>", 248069},
+    };
+    if (!t) { err(error, error_len, "tokenizer is null"); return false; }
+    for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); ++i) {
+        int id = -1;
+        for (size_t j = 0; j < t->special_count; ++j)
+            if (!strcmp(t->special_text[j], required[i].text)) {
+                id = (int)t->special_id[j];
+                break;
+            }
+        if (id != (int)required[i].id) {
+            if (error && error_len)
+                snprintf(error, error_len, "special token mismatch for %s: expected %u, got %d",
+                         required[i].text, required[i].id, id);
+            return false;
+        }
+    }
+    ((q38_tokenizer *)t)->bos_id = 248044;
+    ((q38_tokenizer *)t)->eos_id = 248044;
+    return true;
+}
