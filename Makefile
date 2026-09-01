@@ -47,7 +47,7 @@ M3_ARTIFACT_DIR := artifacts/m3
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
-	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11
+	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12
 
 all: spark
 
@@ -262,6 +262,18 @@ m3-c11: m3-c10 $(TEST_DIR)/test_m3_chunk_invariance
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	./$(TEST_DIR)/test_m3_chunk_invariance \
 		$(M3_ARTIFACT_DIR)/chunk_invariance.json
+
+$(TEST_DIR)/test_m3_cuda_profile_baseline: \
+		$(TEST_DIR)/test_m3_cuda_profile_baseline.cu q38_gdn.o \
+		q38_cuda_primitives.o q38_state.o q38_gdn.h q38_state.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ \
+		$(TEST_DIR)/test_m3_cuda_profile_baseline.cu q38_gdn.o \
+		q38_cuda_primitives.o q38_state.o $(CUDA_LDLIBS) -lm
+
+m3-c12: m3-c11 $(TEST_DIR)/test_m3_cuda_profile_baseline
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	./$(TEST_DIR)/test_m3_cuda_profile_baseline \
+		$(M3_ARTIFACT_DIR)/cuda_profile_baseline.json
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -578,5 +590,6 @@ clean:
 		$(TEST_DIR)/test_m3_forward_probe \
 		$(TEST_DIR)/test_m3_multigdn \
 		$(TEST_DIR)/test_m3_chunk_invariance \
+		$(TEST_DIR)/test_m3_cuda_profile_baseline \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
