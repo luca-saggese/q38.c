@@ -1,9 +1,13 @@
 #include "q38_moe_cuda.h"
 #include "q38_moe_ref.h"
+#include "q38_quant.h"
 
 #include <cuda_runtime.h>
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <cmath>
+#include <cuda_fp16.h>
 
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
@@ -39,5 +43,117 @@ extern "C" bool q38_moe_cuda_router(const float *device_hidden,
     const cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess)
         return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
+
+extern "C" bool q38_moe_cuda_route(
+    const float *device_hidden, size_t token_count, const float *device_router,
+    float *device_logits, q38_moe_route10 *host_routes, cudaStream_t stream,
+    char *error, size_t error_len) {
+    if (!host_routes || !q38_moe_cuda_router(device_hidden, token_count,
+                                             device_router, device_logits,
+                                             stream, error, error_len))
+        return false;
+    const size_t count = token_count * Q38_MOE_EXPERTS;
+    float *logits = (float *)malloc(count * sizeof(float));
+    if (!logits) return fail(error, error_len, "CUDA MoE route host allocation failed");
+    cudaError_t status = cudaMemcpyAsync(logits, device_logits,
+                                         count * sizeof(float),
+                                         cudaMemcpyDeviceToHost, stream);
+    if (status == cudaSuccess) status = cudaStreamSynchronize(stream);
+    if (status != cudaSuccess) {
+        free(logits);
+        return fail(error, error_len, cudaGetErrorString(status));
+    }
+    for (size_t t = 0; t < token_count; ++t) {
+        /* Reuse the scalar tie/normalization policy without routing a second
+         * projection: logits are converted to a probability-equivalent
+         * one-hot hidden input only by this local selection loop. */
+        float max_logit = -INFINITY, sum = 0.0f;
+        for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e)
+            max_logit = fmaxf(max_logit, logits[t * Q38_MOE_EXPERTS + e]);
+        for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
+            logits[t * Q38_MOE_EXPERTS + e] =
+                expf(logits[t * Q38_MOE_EXPERTS + e] - max_logit);
+            sum += logits[t * Q38_MOE_EXPERTS + e];
+        }
+        for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e)
+            logits[t * Q38_MOE_EXPERTS + e] /= sum;
+        for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
+            size_t best = Q38_MOE_EXPERTS;
+            for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
+                bool used = false;
+                for (size_t j = 0; j < k; ++j) used |= host_routes[t].expert[j] == e;
+                if (!used && (best == Q38_MOE_EXPERTS ||
+                    logits[t * Q38_MOE_EXPERTS + e] >
+                        logits[t * Q38_MOE_EXPERTS + best] ||
+                    (logits[t * Q38_MOE_EXPERTS + e] ==
+                     logits[t * Q38_MOE_EXPERTS + best] && e < best)))
+                    best = e;
+            }
+            host_routes[t].expert[k] = (uint16_t)best;
+            host_routes[t].weight[k] = logits[t * Q38_MOE_EXPERTS + best];
+        }
+        float selected = 0.0f;
+        for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) selected += host_routes[t].weight[k];
+        for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) host_routes[t].weight[k] /= selected;
+    }
+    free(logits);
+    return true;
+}
+
+__device__ static float q2_value(const q38_q2_k_block *blocks, size_t index) {
+    const q38_q2_k_block *b = &blocks[index / 256];
+    const size_t within = index % 256;
+    const size_t sub = within / 32;
+    const size_t l = within % 16;
+    const size_t qbase = (sub & 1) ? 16 : 0;
+    const unsigned shift = (unsigned)((sub / 2) * 2);
+    const uint8_t scale = b->scales[sub];
+    const float d = __half2float(*reinterpret_cast<const __half *>(&b->d));
+    const float m = __half2float(*reinterpret_cast<const __half *>(&b->dmin));
+    return d * (scale & 0xf) * ((b->qs[qbase + l] >> shift) & 3) -
+           m * (scale >> 4);
+}
+
+__global__ static void q2_gate_up_kernel(const q38_q2_k_block *weights,
+                                         const float *hidden, float *mid) {
+    size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= Q38_MOE_INTERMEDIATE) return;
+    float g = 0.0f, u = 0.0f;
+    for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d) {
+        g += q2_value(weights, i * Q38_MOE_HIDDEN + d) * hidden[d];
+        u += q2_value(weights, (Q38_MOE_INTERMEDIATE + i) *
+                                Q38_MOE_HIDDEN + d) * hidden[d];
+    }
+    mid[i] = (g / (1.0f + expf(-g))) * u;
+}
+
+__global__ static void q2_down_kernel(const q38_q2_k_block *weights,
+                                      const float *mid, float *output) {
+    size_t d = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (d >= Q38_MOE_HIDDEN) return;
+    float value = 0.0f;
+    for (size_t i = 0; i < Q38_MOE_INTERMEDIATE; ++i)
+        value += q2_value(weights, d * Q38_MOE_INTERMEDIATE + i) * mid[i];
+    output[d] = value;
+}
+
+extern "C" bool q38_moe_cuda_expert_q2(
+    const void *device_gate_up, const void *device_down,
+    const float *device_hidden, float *device_output, cudaStream_t stream,
+    char *error, size_t error_len) {
+    if (!device_gate_up || !device_down || !device_hidden || !device_output)
+        return fail(error, error_len, "invalid CUDA Q2 expert arguments");
+    float *mid = nullptr;
+    cudaError_t status = cudaMalloc(&mid, Q38_MOE_INTERMEDIATE * sizeof(float));
+    if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
+    q2_gate_up_kernel<<<3, 256, 0, stream>>>(
+        (const q38_q2_k_block *)device_gate_up, device_hidden, mid);
+    q2_down_kernel<<<10, 256, 0, stream>>>(
+        (const q38_q2_k_block *)device_down, mid, device_output);
+    status = cudaGetLastError();
+    cudaFree(mid);
+    if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
     return true;
 }

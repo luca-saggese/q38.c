@@ -1,1 +1,1 @@
-{"gate":"M6-C01","binder":"separate router/routed/shared expert domains","quantized_routed":"file-backed Q2 slices only","status":"pass"}
+{"gate":"M6-C01","binder":"separate router/routed/shared expert domains","quantized_routed":"file-backed Q2 slices only","shape_validation":"strict","status":"pass"}
