@@ -1,0 +1,1 @@
+{"gate":"M6-C00","reference":"official Transformers Qwen4ExpTextSparseMoeBlock and llama.cpp PR #27742","router":"softmax then deterministic top-10 renormalization","shared_expert":"separate sigmoided gate","status":"pass"}

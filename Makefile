@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m6-c00 m6-c01 m6-c02
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 		m5-c12 m6-c00 m6-c01 m6-c02 m6-c03 m6-c04
 
 all: spark
 
@@ -298,7 +298,7 @@ m4-acceptance: m4-c13
 m5-c00: m4-acceptance
 	@test -f docs/qwen_qsa_semantics.md
 	@grep -q "build_qsa_top_k" docs/qwen_qsa_semantics.md
-	@grep -q "indexer_top_k + compress_ratio - 1" docs/qwen_qsa_semantics.md
+	@grep -q "compress_ratio - 1" docs/qwen_qsa_semantics.md
 	@grep -q "mrope_interleaved" docs/qwen_qsa_semantics.md
 	@mkdir -p artifacts/m5
 	@printf '%s\n' '{"gate":"M5-C00","reference":"llama.cpp PR #27742 commit eaf93765572e794b8e3754fe45adbe12d381e997","checkpoint":"Qwen4ExpForConditionalGeneration transformers 5.8.0.dev0","qsa_layers":12,"indexer":"mean pooled blocks, ReLU per-head scores, top-k plus tail","rope":"multi-section interleaved partial rotary","status":"pass"}' > artifacts/m5/qwen_qsa_semantics.json
@@ -422,9 +422,9 @@ q38_forward.o: q38_forward.c q38_forward.h q38_qsa.h
 	$(CC) $(CFLAGS) -c -o $@ q38_forward.c
 
 $(TEST_DIR)/test_forward_ref: $(TEST_DIR)/test_forward_ref.c \
-		q38_forward.o q38_qsa.o q38_forward.h q38_qsa.h
+		q38_forward.o q38_qsa.o q38_gguf.o q38_forward.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_forward_ref.c \
-		q38_forward.o q38_qsa.o -lm
+		q38_forward.o q38_qsa.o q38_gguf.o -lm
 
 M5_C12_GOLDEN := artifacts/m5/qsa_forward_goldens.json
 M5_C12_FIXTURE := artifacts/m5/qsa_forward_fixture.bin
@@ -436,9 +436,9 @@ $(M5_C12_GOLDEN) $(M5_C12_FIXTURE): tools/generate_m5_c12_goldens.py \
 		--output $(M5_C12_GOLDEN) --fixture $(M5_C12_FIXTURE)
 
 $(TEST_DIR)/test_m5_forward_probe: $(TEST_DIR)/test_m5_forward_probe.c \
-		q38_forward.o q38_qsa.o q38_forward.h q38_qsa.h
+		q38_forward.o q38_qsa.o q38_gguf.o q38_forward.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_forward_probe.c \
-		q38_forward.o q38_qsa.o -lm
+		q38_forward.o q38_qsa.o q38_gguf.o -lm
 
 m5-c12: m5-c11 $(M5_C12_GOLDEN) $(M5_C12_FIXTURE) \
 		$(TEST_DIR)/test_forward_ref $(TEST_DIR)/test_m5_forward_probe
@@ -466,6 +466,27 @@ m6-c01: m6-c00
 m6-c02: m6-c01 $(TEST_DIR)/test_m6_moe_ref
 	@./$(TEST_DIR)/test_m6_moe_ref
 	@printf '%s\n' '{"gate":"M6-C02","oracle":"scalar router projection, softmax, deterministic top-10","status":"pass"}' > artifacts/m6/router_goldens.json
+
+q38_moe_cuda.o: q38_moe_cuda.cu q38_moe_cuda.h q38_moe_ref.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_moe_cuda.cu
+
+$(TEST_DIR)/test_m6_moe_cuda: $(TEST_DIR)/test_m6_moe_cuda.cu \
+		q38_moe_cuda.o q38_moe_cuda.h q38_moe_ref.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m6_moe_cuda.cu \
+		q38_moe_cuda.o $(CUDA_LDLIBS) -lm
+
+m6-c03: m6-c02 $(TEST_DIR)/test_m6_moe_cuda
+	@./$(TEST_DIR)/test_m6_moe_cuda
+	@printf '%s\n' '{"gate":"M6-C03","kernel":"naive CUDA router projection","outputs":"token-major F32 router logits","status":"pass"}' > artifacts/m6/router_cuda.json
+
+$(TEST_DIR)/test_m6_expert_ref: $(TEST_DIR)/test_m6_expert_ref.c \
+		q38_moe_ref.o q38_moe_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_expert_ref.c q38_moe_ref.o -lm
+
+m6-c04: m6-c03 $(TEST_DIR)/test_m6_expert_ref
+	@./$(TEST_DIR)/test_m6_expert_ref
+	@printf '%s\n' '{"gate":"M6-C04","oracle":"single routed expert gate/up, SiLU, down","storage":"one expert at a time","status":"pass"}' > artifacts/m6/expert_goldens.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:

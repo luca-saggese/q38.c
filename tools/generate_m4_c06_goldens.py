@@ -174,6 +174,7 @@ def generate(model_dir: Path) -> dict[str, Any]:
     ).encode()
 
     return {
+        "status": "pass",
         "format": "q38-m4-c06-ple-golden-v1",
         "source": {
             "revision": SOURCE_REVISION,

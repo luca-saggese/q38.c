@@ -774,5 +774,6 @@
       "conversion/qwen4exp.py": "12a0a5aea7877fbb8fe35af041a9c34f8b57b05278871b22c24c650b9760dfc3",
       "src/models/qwen4exp.cpp": "c293b3408f3c73283457996f4cc5ca65c26e27e2c5097db03221db73b912e518"
     }
-  }
+  },
+  "status": "pass"
 }
