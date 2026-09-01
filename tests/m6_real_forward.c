@@ -166,7 +166,7 @@ static void write_logits(FILE *out, const float *logits, size_t count) {
 }
 
 static void write_decisions(FILE *out, const trace_context *context) {
-    fputs(",\n\"routing\":[", out);
+    fputs("\n\"routing\":[", out);
     bool first = true;
     for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
         if (!context->route_count[layer]) continue;
@@ -254,8 +254,9 @@ int main(int argc, char **argv) {
         return 1;
     }
     write_logits(out, logits, 248320);
+    fputs("\n],", out);
     write_decisions(out, &context);
-    fputs("\n]}\n", out);
+    fputs("\n}\n", out);
     fclose(out);
     free(logits);
     q38_forward_state_destroy(&state);

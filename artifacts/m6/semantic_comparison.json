@@ -1,0 +1,172 @@
+{
+  "format": "q38-m6-semantic-comparison-v1",
+  "native": "artifacts/m6/real_forward_trace.json",
+  "reference": "artifacts/m6/transformers_reference.json",
+  "tokens": [
+    9419
+  ],
+  "tolerance": {
+    "absolute": 0.02,
+    "relative": 0.002
+  },
+  "checks": [
+    {
+      "stage": "layer:0",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed_coordinates"
+      ]
+    },
+    {
+      "stage": "layer:3",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed_coordinates"
+      ]
+    },
+    {
+      "stage": "layer:7",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed_coordinates"
+      ]
+    },
+    {
+      "stage": "layer:15",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed_coordinates"
+      ]
+    },
+    {
+      "stage": "layer:31",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed_coordinates"
+      ]
+    },
+    {
+      "stage": "layer:47",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed_coordinates"
+      ]
+    },
+    {
+      "stage": "final_norm:0",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed_coordinates"
+      ]
+    },
+    {
+      "stage": "logits:0",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed_coordinates"
+      ]
+    },
+    {
+      "stage": "logits:top_k",
+      "status": "fail",
+      "reason": "argmax/top-k"
+    },
+    {
+      "stage": "routing",
+      "status": "fail",
+      "reason": "expert decisions",
+      "mismatches": [
+        "layer:0:experts",
+        "layer:1:experts",
+        "layer:2:experts",
+        "layer:3:experts",
+        "layer:4:experts",
+        "layer:5:experts",
+        "layer:6:experts",
+        "layer:7:experts",
+        "layer:8:experts",
+        "layer:9:experts",
+        "layer:10:experts",
+        "layer:11:experts",
+        "layer:12:experts",
+        "layer:13:experts",
+        "layer:14:experts",
+        "layer:15:experts",
+        "layer:16:experts",
+        "layer:17:experts",
+        "layer:18:experts",
+        "layer:19:experts",
+        "layer:20:experts",
+        "layer:21:experts",
+        "layer:22:experts",
+        "layer:23:experts",
+        "layer:24:experts",
+        "layer:25:experts",
+        "layer:26:experts",
+        "layer:27:experts",
+        "layer:28:experts",
+        "layer:29:experts",
+        "layer:30:experts",
+        "layer:31:experts",
+        "layer:32:experts",
+        "layer:33:experts",
+        "layer:34:experts",
+        "layer:35:experts",
+        "layer:36:experts",
+        "layer:37:experts",
+        "layer:38:experts",
+        "layer:39:experts",
+        "layer:40:experts",
+        "layer:41:experts",
+        "layer:42:experts",
+        "layer:43:experts",
+        "layer:44:experts",
+        "layer:45:experts",
+        "layer:46:experts",
+        "layer:47:experts"
+      ]
+    }
+  ],
+  "status": "fail",
+  "first_divergence": "layer:0"
+}

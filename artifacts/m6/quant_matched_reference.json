@@ -1,0 +1,9 @@
+{
+  "format": "q38-m6-quant-matched-reference-v1",
+  "reference": "separate llama.cpp GGUF reader/dequantizer",
+  "gguf": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+  "input_trace": "artifacts/m6/real_forward_trace.json",
+  "q38_forward_called": false,
+  "status": "blocked",
+  "reason": "no separate llama.cpp executable is available to read/dequantize the q38 GGUF; native q38 output cannot serve as this reference"
+}

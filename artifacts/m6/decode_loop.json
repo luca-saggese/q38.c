@@ -1,1 +1,1 @@
-{"gate":"M6-C13","decode_api":"q38_decode invokes q38_forward_full for one committed token and applies deterministic greedy selection","logits":"not claimed without a live full-model run","status":"pass"}
+{"gate":"M6-C13","status":"blocked","reason":"C12 semantic comparison is not green; true autoregressive decode was not run","required":"passing quant-matched C12 gate before decode"}
