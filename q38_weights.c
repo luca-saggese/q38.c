@@ -497,6 +497,16 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             }
         }
     }
+    if (max_layer >= 1 && out->layer[1].ple_tensor_count != 0) {
+        static const char ple_prefix[] =
+            "model.language_model.layers.1.ple.ple_embedding."
+            "ngram_embedding.shard_";
+        if (!q38_ple_store_bind_gguf(
+                model, ple_prefix, 128, 160, &out->layer[1].ple_store,
+                error, error_len)) {
+            return false;
+        }
+    }
 
     uint32_t expected = expected_tensor_count(max_layer);
     /* The inventory is authoritative for role cardinality; this check catches

@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09
+	m4-c08 m4-c09 m4-c10
 
 all: spark
 
@@ -133,9 +133,9 @@ $(TEST_DIR)/test_m2_golden: $(TEST_DIR)/test_m2_golden.c q38_golden.o q38_golden
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_golden.c q38_golden.o
 
 $(TEST_DIR)/test_m2_weights: $(TEST_DIR)/test_m2_weights.c q38_weights.o \
-		q38_gguf.o q38_model_config.o q38_weights.h
+		q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_weights.c q38_weights.o \
-		q38_gguf.o q38_model_config.o
+		q38_gguf.o q38_model_config.o q38_ple.o
 
 $(TEST_DIR)/test_m2_tokenizer: $(TEST_DIR)/test_m2_tokenizer.c \
 		q38_tokenizer.o q38_tokenizer.h
@@ -166,8 +166,8 @@ m4-c02: m4-c01 $(TEST_DIR)/test_m4_ple_ref
 	printf '%s\n' '{"gate":"M4-C02","oracle":"scalar uint64 XOR/multiply modulo indexing","heads":16,"orders":["bigram","trigram"],"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_ref.json
 
 $(TEST_DIR)/test_m4_ple_store: $(TEST_DIR)/test_m4_ple_store.c q38_ple.o \
-		q38_ple.h q38_gguf.h
-	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_store.c q38_ple.o
+		q38_gguf.o q38_ple.h q38_gguf.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_store.c q38_ple.o q38_gguf.o
 
 m4-c03: m4-c02 $(TEST_DIR)/test_m4_ple_store
 	@./$(TEST_DIR)/test_m4_ple_store
@@ -254,6 +254,17 @@ m4-c09: m4-c08 $(TEST_DIR)/test_m4_ple_cuda_batch
 	@mkdir -p $(M4_ARTIFACT_DIR)
 	@printf '%s\n' '{"gate":"M4-C09","lookup":"CUDA batch deduplication","dedupe":"storage accesses only","output_order":"input order preserved","qtypes":["Q2_K","Q4_K"],"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_batching.json
 
+$(TEST_DIR)/test_m4_ple_loader: $(TEST_DIR)/test_m4_ple_loader.c \
+		q38_ple.o q38_ple_cache.o q38_gguf.o q38_memory.o \
+		q38_ple.h q38_ple_cache.h q38_gguf.h q38_memory.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_loader.c \
+		q38_ple.o q38_ple_cache.o q38_gguf.o q38_memory.o
+
+m4-c10: m4-c09 $(TEST_DIR)/test_m4_ple_loader
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	@./$(TEST_DIR)/test_m4_ple_loader \
+		$(M4_ARTIFACT_DIR)/ple_memory_matrix.json
+
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
 	@$(MAKE) --no-print-directory q38_tokenizer.o tests/test_m2_tokenizer
@@ -283,26 +294,26 @@ $(TEST_DIR)/test_m2_matvec: $(TEST_DIR)/test_m2_matvec.cu \
 		q38_cuda_primitives.o q38_quant.o q38_oracle.o $(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_m2_embedding: $(TEST_DIR)/test_m2_embedding.c \
-		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_embedding.c q38_weights.o \
-		q38_gguf.o q38_model_config.o
+		q38_gguf.o q38_model_config.o q38_ple.o
 
 $(TEST_DIR)/test_m2_lm_head: $(TEST_DIR)/test_m2_lm_head.cu \
 		q38_cuda_primitives.o q38_oracle.o q38_weights.o q38_gguf.o \
-		q38_model_config.o q38_cuda_primitives.h
+		q38_model_config.o q38_ple.o q38_cuda_primitives.h
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m2_lm_head.cu \
 		q38_cuda_primitives.o q38_oracle.o q38_weights.o q38_gguf.o \
-		q38_model_config.o $(CUDA_LDLIBS) -lm
+		q38_model_config.o q38_ple.o $(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_m2_memory: $(TEST_DIR)/test_m2_memory.c \
-		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_memory.c q38_weights.o \
-		q38_gguf.o q38_model_config.o
+		q38_gguf.o q38_model_config.o q38_ple.o
 
 $(TEST_DIR)/test_m3_gr_binding: $(TEST_DIR)/test_m3_gr_binding.c \
-		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gr_binding.c q38_weights.o \
-		q38_gguf.o q38_model_config.o
+		q38_gguf.o q38_model_config.o q38_ple.o
 
 q38_gr_ref.o: q38_gr_ref.c q38_gr_ref.h
 	$(CC) $(CFLAGS) -c -o $@ q38_gr_ref.c
@@ -321,9 +332,9 @@ $(TEST_DIR)/test_m3_gr_cuda: $(TEST_DIR)/test_m3_gr_cuda.cu q38_gr.o \
 		q38_gr.o q38_gr_ref.o q38_oracle.o $(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_m3_gdn_binding: $(TEST_DIR)/test_m3_gdn_binding.c \
-		q38_weights.o q38_gguf.o q38_model_config.o q38_weights.h
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gdn_binding.c q38_weights.o \
-		q38_gguf.o q38_model_config.o
+		q38_gguf.o q38_model_config.o q38_ple.o
 
 q38_state.o: q38_state.c q38_state.h
 	$(CC) $(CFLAGS) -c -o $@ q38_state.c
@@ -554,13 +565,13 @@ m1-acceptance: m1-validate m1-quant-block m1-bind
 		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
 		--manifest tools/quant_manifest_q2.json
 
-q38_weights.o: q38_weights.c q38_weights.h q38_gguf.h q38_model_config.h
+q38_weights.o: q38_weights.c q38_weights.h q38_gguf.h q38_model_config.h q38_ple.h
 	$(CC) $(CFLAGS) -c -o $@ q38_weights.c
 
 $(TEST_DIR)/test_weights: $(TEST_DIR)/test_weights.c q38_weights.o q38_gguf.o \
-	q38_model_config.o q38_weights.h
+	q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_weights.c q38_weights.o \
-		q38_gguf.o q38_model_config.o
+	q38_gguf.o q38_model_config.o q38_ple.o
 
 m1-bind: m1-subset $(TEST_DIR)/test_weights
 	./$(TEST_DIR)/test_weights \

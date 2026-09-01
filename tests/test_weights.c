@@ -52,6 +52,11 @@ int main(int argc, char **argv) {
         weights.layer[0].experts.loc[511].local_index != 511 ||
         (max_layer == 0 && weights.layer[1].ple_tensor_count != 0) ||
         (max_layer >= 1 && weights.layer[1].ple_tensor_count != 137) ||
+        (max_layer >= 1 &&
+         (weights.layer[1].ple_store.shard_count != 128 ||
+          weights.layer[1].ple_store.row_width != 160 ||
+          weights.layer[1].ple_store.row_bytes != 170 ||
+          weights.layer[1].ple_store.rows != UINT64_C(320001536))) ||
         weights.layer[0].tensor_count != 24) {
         fprintf(stderr, "unexpected bound subset layout\n");
         q38_gguf_close(model);

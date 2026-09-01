@@ -7,6 +7,7 @@
 
 #include "q38_gguf.h"
 #include "q38_model_config.h"
+#include "q38_ple.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,6 +67,7 @@ typedef struct {
     uint32_t tensor_count;
     q38_tensor *ple_tensor[Q38_MAX_PLE_TENSORS];
     uint32_t ple_tensor_count;
+    q38_ple_store ple_store;
     q38_layer_expert_store experts;
     q38_gr_weights attn_gr;
     q38_gr_weights mlp_gr;
