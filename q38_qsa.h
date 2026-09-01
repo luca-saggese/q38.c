@@ -44,6 +44,9 @@ bool q38_qsa_weights_validate(const q38_qsa_weights *weights,
 bool q38_qsa_state_init(q38_qsa_state *state, size_t main_k_row_bytes,
                         size_t main_v_row_bytes, size_t index_k_row_bytes,
                         char *error, size_t error_len);
+bool q38_qsa_state_append(q38_qsa_state *state, const void *main_k,
+                          const void *main_v, const void *index_k,
+                          size_t row_count, char *error, size_t error_len);
 void q38_qsa_state_reset(q38_qsa_state *state);
 void q38_qsa_state_destroy(q38_qsa_state *state);
 

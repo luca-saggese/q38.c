@@ -1,0 +1,1 @@
+{"gate":"M5-C09","implementation":"separate bounded-growing main K/V and index state","append":"preserves row order and committed position","reset":"clears counts and position without requiring shrink","status":"pass"}
