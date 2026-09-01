@@ -19,7 +19,10 @@
         "mean",
         "rms",
         "max_abs",
-        "fixed_coordinates"
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
       ]
     },
     {
@@ -31,7 +34,10 @@
         "mean",
         "rms",
         "max_abs",
-        "fixed_coordinates"
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
       ]
     },
     {
@@ -43,7 +49,10 @@
         "mean",
         "rms",
         "max_abs",
-        "fixed_coordinates"
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
       ]
     },
     {
@@ -55,7 +64,10 @@
         "mean",
         "rms",
         "max_abs",
-        "fixed_coordinates"
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
       ]
     },
     {
@@ -67,7 +79,10 @@
         "mean",
         "rms",
         "max_abs",
-        "fixed_coordinates"
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
       ]
     },
     {
@@ -79,7 +94,10 @@
         "mean",
         "rms",
         "max_abs",
-        "fixed_coordinates"
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
       ]
     },
     {
@@ -91,7 +109,10 @@
         "mean",
         "rms",
         "max_abs",
-        "fixed_coordinates"
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
       ]
     },
     {
@@ -103,7 +124,10 @@
         "mean",
         "rms",
         "max_abs",
-        "fixed_coordinates"
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
       ]
     },
     {

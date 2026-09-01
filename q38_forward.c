@@ -141,7 +141,7 @@ static size_t select_prefix(const q38_forward_qsa_weights *w,
                     key[d] += index_keys[(begin + j) * w->index_dim + d];
                 key[d] /= (float)w->ratio;
             }
-            rms(key, w->index_k_norm, w->index_dim, true);
+            rms(key, w->index_k_norm, w->index_dim, false);
             rope(key, w->index_dim, w->rotary_dims, begin, w->rope_theta);
             const float *q = query + h * w->index_dim;
             for (size_t d = 0; d < w->index_dim; ++d)
@@ -232,13 +232,13 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
             float *q = queries + (t * w->query_heads + h) * w->head_dim;
             memcpy(q, qfull + t * q_rows + h * w->head_dim * 2,
                    w->head_dim * sizeof(float));
-            rms(q, w->q_norm, w->head_dim, true);
+            rms(q, w->q_norm, w->head_dim, false);
             rope(q, w->head_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
         for (size_t h = 0; h < w->kv_heads; ++h) {
             float *k = keys + (t * w->kv_heads + h) * w->head_dim;
-            rms(k, w->k_norm, w->head_dim, true);
+            rms(k, w->k_norm, w->head_dim, false);
             rope(k, w->head_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
@@ -246,7 +246,7 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
             float *q = indexq + (t * w->index_heads + h) * w->index_dim;
             memcpy(q, index + t * index_rows + h * w->index_dim,
                    w->index_dim * sizeof(float));
-            rms(q, w->index_q_norm, w->index_dim, true);
+            rms(q, w->index_q_norm, w->index_dim, false);
             rope(q, w->index_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
