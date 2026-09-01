@@ -128,7 +128,7 @@ static size_t select_prefix(const q38_forward_qsa_weights *w,
         float total = 0.0f;
         const size_t begin = g * w->ratio;
         for (size_t h = 0; h < w->index_heads; ++h) {
-            float qnorm = 0.0f, knorm = 0.0f, dot = 0.0f;
+            float dot = 0.0f;
             float *key = (float *)calloc(w->index_dim, sizeof(float));
             if (!key) { free(scores); free(order); return 0; }
             for (size_t d = 0; d < w->index_dim; ++d) {
@@ -139,14 +139,9 @@ static size_t select_prefix(const q38_forward_qsa_weights *w,
             rms(key, w->index_k_norm, w->index_dim);
             rope(key, w->index_dim, w->rotary_dims, begin, w->rope_theta);
             const float *q = query + h * w->index_dim;
-            for (size_t d = 0; d < w->index_dim; ++d) {
+            for (size_t d = 0; d < w->index_dim; ++d)
                 dot += q[d] * key[d];
-                qnorm += q[d] * q[d];
-                knorm += key[d] * key[d];
-            }
             free(key);
-            dot /= sqrtf(knorm / (float)w->index_dim + 1e-6f);
-            dot /= sqrtf(qnorm / (float)w->index_dim + 1e-6f);
             total += dot > 0.0f ? dot : 0.0f;
         }
         scores[g] = total / sqrtf((float)w->index_dim);
@@ -209,6 +204,7 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
     float *queries = calloc(token_count * w->query_heads * w->head_dim, sizeof(float));
     float *indexq = calloc(token_count * w->index_heads * w->index_dim, sizeof(float));
     float *attention = calloc(token_count * attention_width, sizeof(float));
+    const size_t base_position = state->position;
     if (!qfull || !keys || !values || !index || !raw_index || !queries ||
         !indexq || !attention) {
         free(qfull); free(keys); free(values); free(index); free(raw_index); free(queries);
@@ -226,18 +222,19 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
         return fail(error, error_len, "forward projection failed");
     }
     for (size_t t = 0; t < token_count; ++t) {
+        const size_t position = base_position + t;
         for (size_t h = 0; h < w->query_heads; ++h) {
             float *q = queries + (t * w->query_heads + h) * w->head_dim;
             memcpy(q, qfull + t * q_rows + h * w->head_dim * 2,
                    w->head_dim * sizeof(float));
             rms(q, w->q_norm, w->head_dim);
-            rope(q, w->head_dim, w->rotary_dims, state->position + t,
+            rope(q, w->head_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
         for (size_t h = 0; h < w->kv_heads; ++h) {
             float *k = keys + (t * w->kv_heads + h) * w->head_dim;
             rms(k, w->k_norm, w->head_dim);
-            rope(k, w->head_dim, w->rotary_dims, state->position + t,
+            rope(k, w->head_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
         for (size_t h = 0; h < w->index_heads; ++h) {
@@ -245,7 +242,7 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
             memcpy(q, index + t * index_rows + h * w->index_dim,
                    w->index_dim * sizeof(float));
             rms(q, w->index_q_norm, w->index_dim);
-            rope(q, w->index_dim, w->rotary_dims, state->position + t,
+            rope(q, w->index_dim, w->rotary_dims, position,
                  w->rope_theta);
         }
         memcpy(raw_index + t * w->index_dim,

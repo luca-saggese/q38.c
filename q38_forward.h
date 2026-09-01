@@ -86,6 +86,9 @@ typedef struct {
     float max_abs_error;
     uint64_t layer_fingerprint[Q38_MODEL_LAYERS];
     bool has_reference;
+    bool (*trace)(uint32_t layer, const float *hidden, size_t token_count,
+                  size_t width, void *user, char *error, size_t error_len);
+    void *trace_user;
 } q38_forward_diagnostics;
 
 bool q38_forward_state_init(q38_forward_state *state,
