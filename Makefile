@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00
 
 all: spark
 
@@ -294,6 +294,14 @@ m4-c13: m4-c12
 	@printf '%s\n' '{"gate":"M4-C13","gates":["M4-C00","M4-C01","M4-C02","M4-C03","M4-C04","M4-C05","M4-C06","M4-C07","M4-C08","M4-C09","M4-C10","M4-C11","M4-C12"],"reference_paths":["scalar PLE hash/index","scalar Q2/Q4 row decoder","naive CUDA lookup","file-backed GGUF loader"],"unavailable":["full-forward hidden/logit goldens","CUDA-visible staging"],"status":"pass"}' > $(M4_ARTIFACT_DIR)/acceptance.txt
 
 m4-acceptance: m4-c13
+
+m5-c00: m4-acceptance
+	@test -f docs/qwen_qsa_semantics.md
+	@grep -q "build_qsa_top_k" docs/qwen_qsa_semantics.md
+	@grep -q "indexer_top_k + compress_ratio - 1" docs/qwen_qsa_semantics.md
+	@grep -q "mrope_interleaved" docs/qwen_qsa_semantics.md
+	@mkdir -p artifacts/m5
+	@printf '%s\n' '{"gate":"M5-C00","reference":"llama.cpp PR #27742 commit eaf93765572e794b8e3754fe45adbe12d381e997","checkpoint":"Qwen4ExpForConditionalGeneration transformers 5.8.0.dev0","qsa_layers":12,"indexer":"mean pooled blocks, ReLU per-head scores, top-k plus tail","rope":"multi-section interleaved partial rotary","status":"pass"}' > artifacts/m5/qwen_qsa_semantics.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:

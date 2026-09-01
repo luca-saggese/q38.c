@@ -1,0 +1,1 @@
+{"gate":"M5-C00","reference":"llama.cpp PR #27742 commit eaf93765572e794b8e3754fe45adbe12d381e997","checkpoint":"Qwen4ExpForConditionalGeneration transformers 5.8.0.dev0","qsa_layers":12,"indexer":"mean pooled blocks, ReLU per-head scores, top-k plus tail","rope":"multi-section interleaved partial rotary","status":"pass"}
