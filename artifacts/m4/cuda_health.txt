@@ -1,0 +1,1 @@
+{"gate":"M4-C12","cuda_fatal":"kernel launch and stream execution errors call _exit(134)","fault_injection":"child process illegal device pointer","continuation":"forbidden","status":"pass"}

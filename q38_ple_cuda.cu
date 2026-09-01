@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 __device__ static float half_to_float_device(uint16_t bits) {
     uint32_t sign = ((uint32_t)bits & 0x8000u) << 16;
@@ -106,6 +107,14 @@ static bool fail(char *error, size_t error_len, const char *message) {
     return false;
 }
 
+static void cuda_fatal(cudaError_t status, const char *phase) {
+    if (status == cudaSuccess) return;
+    fprintf(stderr, "q38: fatal CUDA error during %s: %s\n",
+            phase, cudaGetErrorString(status));
+    fflush(stderr);
+    _exit(134);
+}
+
 __global__ static void expand_rows_kernel(const uint32_t *map,
                                           size_t id_count,
                                           uint32_t row_width,
@@ -144,13 +153,8 @@ extern "C" bool q38_ple_cuda_lookup_rows(uint32_t qtype,
     lookup_rows_kernel<<<(unsigned)((elements + 255) / 256), 256, 0, stream>>>(
         qtype, device_table, table_rows, row_width, device_ids, id_count,
         device_rows);
-    cudaError_t status = cudaGetLastError();
-    if (status != cudaSuccess) {
-        if (error && error_len > 0)
-            snprintf(error, error_len, "CUDA PLE lookup launch failed: %s",
-                     cudaGetErrorString(status));
-        return false;
-    }
+    cuda_fatal(cudaGetLastError(), "PLE row lookup launch");
+    cuda_fatal(cudaStreamSynchronize(stream), "PLE row lookup execution");
     return true;
 }
 
@@ -237,14 +241,8 @@ extern "C" bool q38_ple_cuda_lookup_rows_dedup(
     expand_rows_kernel<<<(unsigned)((output_elements + 255) / 256), 256, 0,
                          stream>>>(
         device_map, id_count, row_width, device_unique_rows, device_rows);
-    if (cudaGetLastError() != cudaSuccess) {
-        fail(error, error_len, "PLE deduplication expansion launch failed");
-        goto cleanup;
-    }
-    if (cudaStreamSynchronize(stream) != cudaSuccess) {
-        fail(error, error_len, "PLE deduplication expansion failed");
-        goto cleanup;
-    }
+    cuda_fatal(cudaGetLastError(), "PLE deduplication expansion launch");
+    cuda_fatal(cudaStreamSynchronize(stream), "PLE deduplication expansion");
     ok = true;
     if (stats) {
         stats->input_count = id_count;

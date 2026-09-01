@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance
 
 all: spark
 
@@ -278,6 +278,22 @@ m4-c11: m4-c10 $(TEST_DIR)/test_m4_ple_prefetch
 	@mkdir -p $(M4_ARTIFACT_DIR)
 	@./$(TEST_DIR)/test_m4_ple_prefetch
 	@printf '%s\n' '{"gate":"M4-C11","implementation":"madvise(MADV_WILLNEED) advisory mapped-row prefetch","default_enabled":false,"cuda_staging":"not present","benefit_gate":"not enabled without measured benefit","persistent_copy":false,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_prefetch_benchmark.json
+
+$(TEST_DIR)/test_m4_ple_cuda_failure: $(TEST_DIR)/test_m4_ple_cuda_failure.cu \
+		q38_ple_cuda.o q38_quant.h q38_ple_cuda.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m4_ple_cuda_failure.cu \
+		q38_ple_cuda.o $(CUDA_LDLIBS)
+
+m4-c12: m4-c11 $(TEST_DIR)/test_m4_ple_cuda_failure
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	@./$(TEST_DIR)/test_m4_ple_cuda_failure
+	@printf '%s\n' '{"gate":"M4-C12","cuda_fatal":"kernel launch and stream execution errors call _exit(134)","fault_injection":"child process illegal device pointer","continuation":"forbidden","status":"pass"}' > $(M4_ARTIFACT_DIR)/cuda_health.txt
+
+m4-c13: m4-c12
+	@python3 -c 'import json, pathlib; p=pathlib.Path("$(M4_ARTIFACT_DIR)"); names=("session_history.json","ple_ref.json","ple_store.json","ple_row_quant_tests.json","ple_cuda_lookup.json","ple_injection_probe.json","ple_chunk_invariance.json","ple_cache_stats.json","ple_batching.json","ple_memory_matrix.json","ple_prefetch_benchmark.json","cuda_health.txt"); bad=[]; [bad.append(n) for n in names if json.loads((p/n).read_text()).get("status") != "pass"]; assert not bad, "M4 acceptance failed: "+", ".join(bad)'
+	@printf '%s\n' '{"gate":"M4-C13","gates":["M4-C00","M4-C01","M4-C02","M4-C03","M4-C04","M4-C05","M4-C06","M4-C07","M4-C08","M4-C09","M4-C10","M4-C11","M4-C12"],"reference_paths":["scalar PLE hash/index","scalar Q2/Q4 row decoder","naive CUDA lookup","file-backed GGUF loader"],"unavailable":["full-forward hidden/logit goldens","CUDA-visible staging"],"status":"pass"}' > $(M4_ARTIFACT_DIR)/acceptance.txt
+
+m4-acceptance: m4-c13
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -798,5 +814,6 @@ clean:
 		$(TEST_DIR)/test_ple_chunking \
 		$(TEST_DIR)/test_m4_ple_cache \
 		$(TEST_DIR)/test_m4_ple_prefetch \
+		$(TEST_DIR)/test_m4_ple_cuda_failure \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
