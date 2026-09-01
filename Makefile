@@ -49,7 +49,8 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
-	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07
+	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
+	m4-c08
 
 all: spark
 
@@ -82,6 +83,9 @@ q38_ple_ref.o: q38_ple_ref.c q38_ple_ref.h q38_session.h q38_quant.h
 
 q38_ple.o: q38_ple.c q38_ple.h q38_gguf.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple.c
+
+q38_ple_cache.o: q38_ple_cache.c q38_ple_cache.h
+	$(CC) $(CFLAGS) -c -o $@ q38_ple_cache.c
 
 q38_golden.o: q38_golden.c q38_golden.h
 	$(CC) $(CFLAGS) -c -o $@ q38_golden.c
@@ -224,6 +228,19 @@ m4-c07: m4-c06 $(TEST_DIR)/test_ple_chunking
 	@./$(TEST_DIR)/test_ple_chunking $(M4_C06_GOLDEN)
 	@mkdir -p $(M4_ARTIFACT_DIR)
 	@printf '%s\n' '{"gate":"M4-C07","harness":"test_ple_chunking","cases":"independent M4-C06 golden corpus","partitions":["single","one-token","two-tail","three-five-tail","four-token","random-seed-1","random-seed-2"],"ids":"exact","hidden_logits":"unavailable; full model forward not implemented","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_chunk_invariance.json
+
+$(TEST_DIR)/test_m4_ple_cache: $(TEST_DIR)/test_m4_ple_cache.c \
+		q38_ple_cache.o q38_ple_ref.o q38_session.o q38_quant.o \
+		q38_ple_cache.h q38_ple_ref.h q38_quant.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_cache.c \
+		q38_ple_cache.o q38_ple_ref.o q38_session.o q38_quant.o -lm
+
+m4-c08: m4-c07 $(TEST_DIR)/test_m4_ple_cache
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	@./$(TEST_DIR)/test_m4_ple_cache \
+		$(M4_ARTIFACT_DIR)/ple_cache_stats_cold.json \
+		$(M4_ARTIFACT_DIR)/ple_cache_stats_warm.json
+	@printf '%s\n' '{"gate":"M4-C08","cache":"bounded deterministic quantized-row cache","value":"quantized row bytes","replacement":"round-robin","cold_warm":"equivalent","full_dequant_mirror":false,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_cache_stats.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -741,5 +758,6 @@ clean:
 		$(TEST_DIR)/test_m4_ple_cuda \
 		$(TEST_DIR)/q38_forward_probe \
 		$(TEST_DIR)/test_ple_chunking \
+		$(TEST_DIR)/test_m4_ple_cache \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)

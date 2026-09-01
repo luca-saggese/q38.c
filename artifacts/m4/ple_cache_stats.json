@@ -1,0 +1,1 @@
+{"gate":"M4-C08","cache":"bounded deterministic quantized-row cache","value":"quantized row bytes","replacement":"round-robin","cold_warm":"equivalent","full_dequant_mirror":false,"status":"pass"}
