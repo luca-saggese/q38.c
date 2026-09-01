@@ -1,0 +1,1 @@
+{"gate":"M5-C08","implementation":"naive CUDA selected-KV gather and dense GQA attention","mask":"selected token cells only; query-to-KV head grouping preserved","fallback":"reference kernel retained","status":"pass"}

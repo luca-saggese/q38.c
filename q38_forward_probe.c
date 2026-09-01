@@ -328,6 +328,6 @@ int main(int argc, char **argv) {
     free(file.text);
     if (checked == 0) return fail("golden dump has no parseable cases");
     printf("q38_forward_probe: %zu PLE ID cases match independent goldens\n", checked);
-    puts("q38_forward_probe: hidden_before_ple/hidden_after_ple/PLE contribution are unavailable; no vectors fabricated");
+    puts("q38_forward_probe: legacy ID corpus intentionally contains no activation vectors; standalone checkpoint-backed injection vectors are validated by test_m4_ple_injection");
     return 0;
 }

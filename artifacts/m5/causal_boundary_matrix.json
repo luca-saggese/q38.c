@@ -1,0 +1,1 @@
+{"gate":"M5-C07","implementation":"scalar causal tail handling","selected_width":"min(n_kv, indexer_top_k + compress_ratio - 1)","ratio":4,"top_k":2048,"boundary_lengths":[1,2,3,4,5,6,7,8,2047,2048,2049],"status":"pass"}

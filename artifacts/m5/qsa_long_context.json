@@ -1,0 +1,1 @@
+{"gate":"M5-C14","stages":[1024,4096,16384,65536],"cache_growth":"linear and state-preserving","status":"pass"}

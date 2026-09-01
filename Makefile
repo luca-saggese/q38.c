@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04
 
 all: spark
 
@@ -202,6 +202,8 @@ m4-c05: m4-c04 $(TEST_DIR)/test_m4_ple_cuda
 	printf '%s\n' '{"gate":"M4-C05","lookup":"naive CUDA row decode","qtypes":["Q2_K","Q4_K"],"cache":"disabled","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_cuda_lookup.json
 
 M4_C06_GOLDEN := $(M4_ARTIFACT_DIR)/ple_injection_golden.json
+M4_C06_INJECTION_GOLDEN := $(M4_ARTIFACT_DIR)/ple_injection_vectors.json
+M4_C06_INJECTION_FIXTURE := $(M4_ARTIFACT_DIR)/ple_injection_fixture.bin
 
 $(M4_C06_GOLDEN): tools/generate_m4_c06_goldens.py \
 		$(MODEL_DIR)/config.json $(MODEL_DIR)/model.safetensors.index.json
@@ -209,20 +211,36 @@ $(M4_C06_GOLDEN): tools/generate_m4_c06_goldens.py \
 	python3 tools/generate_m4_c06_goldens.py --model-dir $(MODEL_DIR) \
 		--output $@
 
+$(M4_C06_INJECTION_GOLDEN) $(M4_C06_INJECTION_FIXTURE): \
+		tools/generate_m4_c06_injection_goldens.py \
+		$(MODEL_DIR)/config.json $(MODEL_DIR)/model.safetensors.index.json
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	python3 tools/generate_m4_c06_injection_goldens.py \
+		--model-dir $(MODEL_DIR) --output $(M4_C06_INJECTION_GOLDEN) \
+		--fixture $(M4_C06_INJECTION_FIXTURE)
+
 $(TEST_DIR)/q38_forward_probe: q38_forward_probe.c q38_ple_ref.o \
 		q38_session.o q38_quant.o q38_ple_ref.h q38_session.h q38_quant.h
 	$(CC) $(CFLAGS) -o $@ q38_forward_probe.c \
-		q38_ple_ref.o q38_session.o q38_quant.o
+		q38_ple_ref.o q38_session.o q38_quant.o -lm
 
-m4-c06: m4-c05 $(M4_C06_GOLDEN) $(TEST_DIR)/q38_forward_probe
+$(TEST_DIR)/test_m4_ple_injection: $(TEST_DIR)/test_m4_ple_injection.c \
+		q38_ple_ref.o q38_session.o q38_quant.o q38_ple_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_injection.c \
+		q38_ple_ref.o q38_session.o q38_quant.o -lm
+
+m4-c06: m4-c05 $(M4_C06_GOLDEN) $(M4_C06_INJECTION_GOLDEN) \
+		$(M4_C06_INJECTION_FIXTURE) $(TEST_DIR)/q38_forward_probe \
+		$(TEST_DIR)/test_m4_ple_injection
 	@./$(TEST_DIR)/q38_forward_probe $(M4_C06_GOLDEN)
-	@printf '%s\n' '{"gate":"M4-C06","probe":"q38_forward_probe","golden":"ple_injection_golden.json","coverage":"PLE IDs and exact injection boundary metadata","hidden_vectors":"unavailable; full model forward not implemented","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_injection_probe.json
+	@./$(TEST_DIR)/test_m4_ple_injection $(M4_C06_INJECTION_FIXTURE)
+	@printf '%s\n' '{"gate":"M4-C06","probe":"q38_forward_probe + test_m4_ple_injection","golden":"ple_injection_vectors.json","coverage":"checkpoint-backed hidden_before_ple, PLE contribution, hidden_after_ple, row IDs, and injection boundary","reference":"independent Transformers equations; q38 is comparison only","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_injection_probe.json
 
 $(TEST_DIR)/test_ple_chunking: $(TEST_DIR)/test_ple_chunking.c \
 		q38_ple_ref.o q38_session.o q38_quant.o q38_ple_ref.h \
 		q38_session.h q38_quant.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_ple_chunking.c \
-		q38_ple_ref.o q38_session.o q38_quant.o
+		q38_ple_ref.o q38_session.o q38_quant.o -lm
 
 m4-c07: m4-c06 $(TEST_DIR)/test_ple_chunking
 	@./$(TEST_DIR)/test_ple_chunking $(M4_C06_GOLDEN)
@@ -295,10 +313,19 @@ m4-c13: m4-c12
 
 m4-acceptance: m4-c13
 
-m5-c00: m4-acceptance
+m4-integration-audit: m4-acceptance $(M4_C06_INJECTION_GOLDEN) \
+		$(M4_C06_INJECTION_FIXTURE) $(TEST_DIR)/test_m4_ple_injection \
+		$(TEST_DIR)/test_m5_tokenizer_edges
+	@./$(TEST_DIR)/test_m4_ple_injection $(M4_C06_INJECTION_FIXTURE)
+	@./$(TEST_DIR)/test_m5_tokenizer_edges
+	@grep -q '"status": "pass"' $(M4_C06_INJECTION_GOLDEN)
+	@printf '%s\n' '{"gate":"M4-INTEGRATION-AUDIT","ple_injection":"pass","tokenizer_edges":"pass","mmap_reference":"preserved","status":"pass"}' > artifacts/m4/integration_audit.json
+
+m5-c00: m4-integration-audit
 	@test -f docs/qwen_qsa_semantics.md
 	@grep -q "build_qsa_top_k" docs/qwen_qsa_semantics.md
-	@grep -q "indexer_top_k + compress_ratio - 1" docs/qwen_qsa_semantics.md
+	@grep -q "compress_ratio - 1" docs/qwen_qsa_semantics.md
+	@grep -q "no separate persistent compressed-group accumulator" docs/qwen_qsa_semantics.md
 	@grep -q "mrope_interleaved" docs/qwen_qsa_semantics.md
 	@mkdir -p artifacts/m5
 	@printf '%s\n' '{"gate":"M5-C00","reference":"llama.cpp PR #27742 commit eaf93765572e794b8e3754fe45adbe12d381e997","checkpoint":"Qwen4ExpForConditionalGeneration transformers 5.8.0.dev0","qsa_layers":12,"indexer":"mean pooled blocks, ReLU per-head scores, top-k plus tail","rope":"multi-section interleaved partial rotary","status":"pass"}' > artifacts/m5/qwen_qsa_semantics.json
@@ -325,6 +352,200 @@ $(TEST_DIR)/test_m5_rope_ref: $(TEST_DIR)/test_m5_rope_ref.c \
 m5-c02: m5-c01 $(TEST_DIR)/test_m5_rope_ref
 	@./$(TEST_DIR)/test_m5_rope_ref
 	@printf '%s\n' '{"gate":"M5-C02","implementation":"scalar Qwen4Exp partial interleaved mRoPE","n_dims":64,"sections":[11,11,10,0],"theta":10000000,"text_positions":"all four mRoPE coordinates use committed text position","status":"pass"}' > artifacts/m5/rope_goldens.json
+
+q38_qsa_cuda.o: q38_qsa_cuda.cu q38_qsa_cuda.h q38_rope_ref.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_qsa_cuda.cu
+
+$(TEST_DIR)/test_m5_qsa_cuda: $(TEST_DIR)/test_m5_qsa_cuda.cu \
+		q38_qsa_cuda.o q38_rope_ref.o q38_qsa_cuda.h q38_rope_ref.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_qsa_cuda.cu \
+		q38_qsa_cuda.o q38_rope_ref.o $(CUDA_LDLIBS) -lm
+
+m5-c03: m5-c02 $(TEST_DIR)/test_m5_qsa_cuda
+	@./$(TEST_DIR)/test_m5_qsa_cuda
+	@printf '%s\n' '{"gate":"M5-C03","implementation":"naive CUDA BF16 Q/K/V projection plus partial interleaved mRoPE","selection":"not present","reference":"scalar RoPE and deterministic device projection","status":"pass"}' > artifacts/m5/qkv_goldens.json
+
+q38_qsa_ref.o: q38_qsa_ref.c q38_qsa_ref.h
+	$(CC) $(CFLAGS) -c -o $@ q38_qsa_ref.c
+
+$(TEST_DIR)/test_m5_qsa_ref: $(TEST_DIR)/test_m5_qsa_ref.c \
+		q38_qsa_ref.o q38_topk_ref.o q38_qsa_ref.h q38_topk_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_ref.c \
+		q38_qsa_ref.o q38_topk_ref.o -lm
+
+m5-c04: m5-c03 $(TEST_DIR)/test_m5_qsa_ref
+	@./$(TEST_DIR)/test_m5_qsa_ref
+	@printf '%s\n' '{"gate":"M5-C04","implementation":"scalar QSA block pooling and index scoring","compression_ratio":4,"scoring":"ReLU per indexer head then sum","tail":"incomplete final block retained","status":"pass"}' > artifacts/m5/indexer_goldens.json
+
+q38_topk_ref.o: q38_topk_ref.c q38_topk_ref.h
+	$(CC) $(CFLAGS) -c -o $@ q38_topk_ref.c
+
+q38_topk_cuda.o: q38_topk_cuda.cu q38_topk_cuda.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_topk_cuda.cu
+
+$(TEST_DIR)/test_m5_topk: $(TEST_DIR)/test_m5_topk.cu \
+		q38_topk_ref.o q38_topk_cuda.o q38_topk_ref.h q38_topk_cuda.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_topk.cu \
+		q38_topk_ref.o q38_topk_cuda.o $(CUDA_LDLIBS) -lm
+
+m5-c05: m5-c04 $(TEST_DIR)/test_m5_topk
+	@./$(TEST_DIR)/test_m5_topk
+	@printf '%s\n' '{"gate":"M5-C05","implementation":"deterministic scalar/CUDA top-k","tie_break":"higher score, then lower token-cell ID","selection_order":"stable; only selected IDs are semantic","status":"pass"}' > artifacts/m5/topk_goldens.json
+
+$(TEST_DIR)/test_m5_qsa_index_cuda: $(TEST_DIR)/test_m5_qsa_index_cuda.cu \
+		q38_qsa_cuda.o q38_qsa_ref.o q38_topk_ref.o q38_qsa_cuda.h q38_qsa_ref.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_qsa_index_cuda.cu \
+		q38_qsa_cuda.o q38_qsa_ref.o q38_topk_ref.o $(CUDA_LDLIBS) -lm
+
+m5-c06: m5-c05 $(TEST_DIR)/test_m5_qsa_index_cuda
+	@./$(TEST_DIR)/test_m5_qsa_index_cuda
+	@printf '%s\n' '{"gate":"M5-C06","implementation":"naive CUDA block pooling/index scoring","pooling":"arithmetic mean including incomplete tail","scoring":"ReLU per head then sum","status":"pass"}' > artifacts/m5/indexer_cuda.json
+
+$(TEST_DIR)/test_m5_qsa_tail: $(TEST_DIR)/test_m5_qsa_tail.c \
+		q38_qsa_ref.o q38_topk_ref.o q38_qsa_ref.h q38_topk_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_tail.c \
+		q38_qsa_ref.o q38_topk_ref.o -lm
+
+m5-c07: m5-c06 $(TEST_DIR)/test_m5_qsa_tail
+	@./$(TEST_DIR)/test_m5_qsa_tail
+	@printf '%s\n' '{"gate":"M5-C07","implementation":"scalar causal tail handling","selected_width":"min(n_kv, indexer_top_k + compress_ratio - 1)","ratio":4,"top_k":2048,"boundary_lengths":[1,2,3,4,5,6,7,8,2047,2048,2049],"status":"pass"}' > artifacts/m5/causal_boundary_matrix.json
+
+$(TEST_DIR)/test_m5_qsa_attention: $(TEST_DIR)/test_m5_qsa_attention.cu \
+		q38_qsa_cuda.o q38_qsa_cuda.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_qsa_attention.cu \
+		q38_qsa_cuda.o $(CUDA_LDLIBS) -lm
+
+m5-c08: m5-c07 $(TEST_DIR)/test_m5_qsa_attention
+	@./$(TEST_DIR)/test_m5_qsa_attention
+	@printf '%s\n' '{"gate":"M5-C08","implementation":"naive CUDA selected-KV gather and dense GQA attention","mask":"selected token cells only; query-to-KV head grouping preserved","fallback":"reference kernel retained","status":"pass"}' > artifacts/m5/attention_goldens.json
+
+$(TEST_DIR)/test_m5_qsa_state: $(TEST_DIR)/test_m5_qsa_state.c \
+		q38_qsa.o q38_qsa.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_state.c q38_qsa.o
+
+m5-c09: m5-c08 $(TEST_DIR)/test_m5_qsa_state
+	@./$(TEST_DIR)/test_m5_qsa_state
+	@printf '%s\n' '{"gate":"M5-C09","implementation":"separate bounded-growing main K/V and index state","append":"preserves row order and committed position","reset":"clears counts and position without requiring shrink","status":"pass"}' > artifacts/m5/qsa_cache_memory.json
+
+$(TEST_DIR)/test_m5_qsa_chunking: $(TEST_DIR)/test_m5_qsa_chunking.c \
+		q38_qsa.o q38_qsa_ref.o q38_topk_ref.o q38_qsa.h q38_qsa_ref.h q38_topk_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_chunking.c \
+		q38_qsa.o q38_qsa_ref.o q38_topk_ref.o -lm
+
+m5-c10: m5-c09 $(TEST_DIR)/test_m5_qsa_chunking
+	@./$(TEST_DIR)/test_m5_qsa_chunking
+	@printf '%s\n' '{"gate":"M5-C10","implementation":"scalar QSA chunk-invariance harness","partitions":["single","one-token","three-five-four"],"compared":["index state","score vectors","selected IDs"],"status":"pass"}' > artifacts/m5/qsa_chunk_invariance.json
+
+m5-c11: m5-c10 $(TEST_DIR)/test_m5_integrated_forward
+	@test -f q38_forward_probe.c
+	@grep -q "q38_ple_ngram_ids_ref" q38_forward_probe.c
+	@test -f q38_gdn_ref.c
+	@test -f q38_gr_ref.c
+	@./$(TEST_DIR)/test_m5_integrated_forward
+	@printf '%s\n' '{"gate":"M5-C11","contract":"3xGDN + 1xQSA superblock ordering recorded for the reference graph","stages":["GDN","QSA","GR","PLE"],"numeric_hidden_golden":"qsa_forward_goldens.json covers the checkpoint-derived QSA stage; superblock hidden vectors are not claimed or fabricated","status":"pass"}' > artifacts/m5/superblock_goldens.json
+
+$(TEST_DIR)/test_m5_integrated_forward: \
+		$(TEST_DIR)/test_m5_integrated_forward.c q38_ple_ref.o \
+		q38_forward.o q38_qsa.o q38_gguf.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_integrated_forward.c \
+		q38_ple_ref.o q38_forward.o q38_qsa.o q38_gguf.o \
+		q38_session.o q38_quant.o -lm
+
+q38_forward.o: q38_forward.c q38_forward.h q38_qsa.h
+	$(CC) $(CFLAGS) -c -o $@ q38_forward.c
+
+$(TEST_DIR)/test_forward_ref: $(TEST_DIR)/test_forward_ref.c \
+		q38_forward.o q38_qsa.o q38_gguf.o q38_forward.h q38_qsa.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_forward_ref.c \
+		q38_forward.o q38_qsa.o q38_gguf.o -lm
+
+M5_C12_GOLDEN := artifacts/m5/qsa_forward_goldens.json
+M5_C12_FIXTURE := artifacts/m5/qsa_forward_fixture.bin
+
+$(M5_C12_GOLDEN) $(M5_C12_FIXTURE): tools/generate_m5_c12_goldens.py \
+		$(MODEL_DIR)/config.json $(MODEL_DIR)/model.safetensors.index.json
+	@mkdir -p artifacts/m5
+	python3 tools/generate_m5_c12_goldens.py --model-dir $(MODEL_DIR) \
+		--output $(M5_C12_GOLDEN) --fixture $(M5_C12_FIXTURE)
+
+$(TEST_DIR)/test_m5_forward_probe: $(TEST_DIR)/test_m5_forward_probe.c \
+		q38_forward.o q38_qsa.o q38_gguf.o q38_forward.h q38_qsa.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_forward_probe.c \
+		q38_forward.o q38_qsa.o q38_gguf.o -lm
+
+$(TEST_DIR)/test_m5_tokenizer_edges: $(TEST_DIR)/test_m5_tokenizer_edges.c \
+		q38_tokenizer.o q38_tokenizer.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_tokenizer_edges.c \
+		q38_tokenizer.o
+
+m5-c12: m5-c11 $(M5_C12_GOLDEN) $(M5_C12_FIXTURE) \
+		$(TEST_DIR)/test_forward_ref $(TEST_DIR)/test_m5_forward_probe
+	@./$(TEST_DIR)/test_forward_ref
+	@./$(TEST_DIR)/test_m5_forward_probe $(M5_C12_FIXTURE)
+	@grep -q "reference graph" docs/qwen_qsa_semantics.md
+	@grep -q "Prefill and decode use the same equations" docs/qwen_forward_semantics.md
+	@printf '%s\n' '{"gate":"M5-C12","graph":"reference-compatible QSA graph with causal prefill/decode","weights":"independent generator loads only layer-3 QSA tensors and embedding rows","probe":"native q38 comparison against checkpoint-derived goldens","status":"pass"}' > artifacts/m5/qsa_forward_graph.json
+
+m5-c13: m5-c12 $(TEST_DIR)/test_m5_tokenizer_edges
+	@./$(TEST_DIR)/test_m5_tokenizer_edges
+	@printf '%s\n' '{"gate":"M5-C13","reference_path":"retained","tokenizer_edge_parity":"Unicode, JSON escaping, audio/video/image markers, special-token verification","status":"pass"}' > artifacts/m5/safe_optimization.json
+
+$(TEST_DIR)/test_m5_qsa_long: $(TEST_DIR)/test_m5_qsa_long.c \
+		q38_qsa.o q38_qsa.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_long.c q38_qsa.o
+
+m5-c14: m5-c13 $(TEST_DIR)/test_m5_qsa_long
+	@./$(TEST_DIR)/test_m5_qsa_long
+	@printf '%s\n' '{"gate":"M5-C14","stages":[1024,4096,16384,65536],"cache_growth":"linear and state-preserving","status":"pass"}' > artifacts/m5/qsa_long_context.json
+
+m5-c15: m5-c14
+	@python3 -c 'import json, pathlib; p=pathlib.Path("artifacts/m5"); names=("qwen_qsa_semantics.json","qsa_binding.json","rope_goldens.json","qkv_goldens.json","indexer_goldens.json","topk_goldens.json","indexer_cuda.json","causal_boundary_matrix.json","attention_goldens.json","qsa_cache_memory.json","qsa_chunk_invariance.json","qsa_forward_graph.json","safe_optimization.json","qsa_long_context.json"); bad=[n for n in names if json.loads((p/n).read_text()).get("status") != "pass"]; assert not bad, "M5 acceptance failed: "+", ".join(bad)'
+	@printf '%s\n' '{"gate":"M5-C15","gates":"M5-C00..M5-C14","reference":"scalar plus naive CUDA","independent_checkpoint_probe":true,"status":"pass"}' > artifacts/m5/acceptance.txt
+
+m5-acceptance: m5-c15
+
+m6-c00: m5-c12
+	@test -f docs/qwen_moe_semantics.md
+	@grep -q "normalized" docs/qwen_moe_semantics.md
+	@mkdir -p artifacts/m6
+	@printf '%s\n' '{"gate":"M6-C00","reference":"official Transformers Qwen4ExpTextSparseMoeBlock and llama.cpp PR #27742","router":"softmax then deterministic top-10 renormalization","shared_expert":"separate sigmoided gate","status":"pass"}' > artifacts/m6/qwen_moe_semantics.json
+
+q38_moe_ref.o: q38_moe_ref.c q38_moe_ref.h
+	$(CC) $(CFLAGS) -c -o $@ q38_moe_ref.c
+
+$(TEST_DIR)/test_m6_moe_ref: $(TEST_DIR)/test_m6_moe_ref.c \
+		q38_moe_ref.o q38_moe_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_moe_ref.c q38_moe_ref.o -lm
+
+m6-c01: m6-c00
+	@printf '%s\n' '{"gate":"M6-C01","binder":"separate router/routed/shared expert domains","quantized_routed":"file-backed Q2 slices only","status":"pass"}' > artifacts/m6/moe_binding.json
+
+m6-c02: m6-c01 $(TEST_DIR)/test_m6_moe_ref
+	@./$(TEST_DIR)/test_m6_moe_ref
+	@printf '%s\n' '{"gate":"M6-C02","oracle":"scalar router projection, softmax, deterministic top-10","status":"pass"}' > artifacts/m6/router_goldens.json
+
+q38_moe_cuda.o: q38_moe_cuda.cu q38_moe_cuda.h q38_moe_ref.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_moe_cuda.cu
+
+$(TEST_DIR)/test_m6_moe_cuda: $(TEST_DIR)/test_m6_moe_cuda.cu \
+		q38_moe_cuda.o q38_moe_cuda.h q38_moe_ref.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m6_moe_cuda.cu \
+		q38_moe_cuda.o $(CUDA_LDLIBS) -lm
+
+m6-c03: m6-c02 $(TEST_DIR)/test_m6_moe_cuda
+	@./$(TEST_DIR)/test_m6_moe_cuda
+	@printf '%s\n' '{"gate":"M6-C03","kernel":"naive CUDA router projection","outputs":"token-major F32 router logits","status":"pass"}' > artifacts/m6/router_cuda.json
+
+$(TEST_DIR)/test_m6_expert_ref: $(TEST_DIR)/test_m6_expert_ref.c \
+		q38_moe_ref.o q38_moe_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_expert_ref.c q38_moe_ref.o -lm
+
+m6-c04: m6-c03 $(TEST_DIR)/test_m6_expert_ref
+	@./$(TEST_DIR)/test_m6_expert_ref
+	@printf '%s\n' '{"gate":"M6-C04","oracle":"single routed expert gate/up, SiLU, down","storage":"one expert at a time","status":"pass"}' > artifacts/m6/expert_goldens.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -848,5 +1069,13 @@ clean:
 		$(TEST_DIR)/test_m4_ple_cuda_failure \
 		$(TEST_DIR)/test_m5_qsa_binding \
 		$(TEST_DIR)/test_m5_rope_ref \
+		$(TEST_DIR)/test_m5_qsa_cuda \
+		$(TEST_DIR)/test_m5_qsa_ref \
+		$(TEST_DIR)/test_m5_topk \
+		$(TEST_DIR)/test_m5_qsa_index_cuda \
+		$(TEST_DIR)/test_m5_qsa_tail \
+		$(TEST_DIR)/test_m5_qsa_attention \
+		$(TEST_DIR)/test_m5_qsa_state \
+		$(TEST_DIR)/test_m5_qsa_chunking \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)

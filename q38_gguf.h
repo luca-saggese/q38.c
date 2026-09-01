@@ -79,6 +79,9 @@ bool q38_gguf_get_bool(const q38_gguf *m, const char *key, bool *out);
 const char *q38_gguf_type_name(uint32_t type);
 bool q38_gguf_type_nbytes(uint32_t type, uint64_t elements, uint64_t *bytes);
 
+/* Return a read-only pointer into the mmap-backed tensor payload. */
+const void *q38_gguf_tensor_data(const q38_gguf *m, const q38_tensor *tensor);
+
 #ifdef __cplusplus
 }
 #endif

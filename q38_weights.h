@@ -17,6 +17,8 @@ extern "C" {
 #define Q38_MAX_BANKS_PER_LAYER 512
 #define Q38_MAX_LAYER_TENSORS 192
 #define Q38_MAX_PLE_TENSORS 160
+#define Q38_PLE_SHARD_COUNT 128
+#define Q38_PLE_AUX_TENSORS 9 /* key/value, three norms, conv, three hash arrays */
 
 typedef struct {
     uint8_t bank_id;

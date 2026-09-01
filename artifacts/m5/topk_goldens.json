@@ -1,0 +1,1 @@
+{"gate":"M5-C05","implementation":"deterministic scalar/CUDA top-k","tie_break":"higher score, then lower token-cell ID","selection_order":"stable; only selected IDs are semantic","status":"pass"}

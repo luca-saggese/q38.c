@@ -318,21 +318,20 @@ artifacts/m5/
 
 - Se long-context OOM avviene prima del budget previsto: correggere accounting/layout prima di introdurre SSD. 
 
-## **16. UNKNOWN** 
+## **16. Historical UNKNOWNs resolved by the official references**
 
-- Formula esatta indexer/compression/grouping della revisione Qwen4Exp congelata. 
+- Formula exact indexer/compression/grouping is frozen in `docs/qwen_qsa_semantics.md`.
 
-- Semantica precisa della causal tail. 
+- Causal-tail semantics are frozen as complete groups plus the incomplete visible tail.
 
-- Tie-breaking esatto del top-k reference. 
+- Top-k tie-breaking is explicit and stable: score descending, cell ID ascending.
 
-- Text-only handling di mRoPE/interleaving e dimensioni partial rotary. 
+- Text-only mRoPE uses the T coordinate with interleaved `[11,11,10]` sections and 64 rotary dimensions.
 
-- Layout ottimale main KV/index state per GB10: da misurare dopo correctness. 
+- GB10 layout remains a performance question; the correctness graph uses separate growing caches.
 
 ## **17. Riferimenti** 
 
 **Qwen3.8-Flash-Next config.json:** https://huggingface.co/Qwen/Qwen3.8-Flash-Next/blob/main/config.json **Qwen3.8-Flash-Next repository:** https://github.com/QwenLM/Qwen3.8-Flash-Next **Qwen3.8-Flash-Next technical overview:** https://qwen.ai/blog?id=qwen3.8-flash-next **llama.cpp qwen4exp support / source tree:** https://github.com/ggml-org/llama.cpp **llama.cpp qwen4exp multi-segment issue #27797:** https://github.com/ggml-org/llama.cpp/issues/27797 **llama.cpp qwen4exp CUDA issue #27763:** https://github.com/ggml-org/llama.cpp/issues/27763 **ds4 DGX Spark full GGUF registration issue #293:** https://github.com/antirez/ds4/issues/293 **ds4 DGX Spark OOM regression #585:** https://github.com/antirez/ds4/issues/585 **ds4 DGX Spark fatal CUDA context issue #759:** https://github.com/antirez/ds4/issues/759 **ds4 discrete/unified registration analysis #791:** https://github.com/antirez/ds4/issues/791 **NVIDIA DGX Spark:** https://www.nvidia.com/products/workstations/dgx-spark/ 
 
 Target: GB10 / 128 GB unified coherent memory / CUDA only 
-

@@ -1,1 +1,1 @@
-{"gate":"M4-C06","probe":"q38_forward_probe","golden":"ple_injection_golden.json","coverage":"PLE IDs and exact injection boundary metadata","hidden_vectors":"unavailable; full model forward not implemented","status":"pass"}
+{"gate":"M4-C06","probe":"q38_forward_probe + test_m4_ple_injection","golden":"ple_injection_vectors.json","coverage":"checkpoint-backed hidden_before_ple, PLE contribution, hidden_after_ple, row IDs, and injection boundary","reference":"independent Transformers equations; q38 is comparison only","status":"pass"}

@@ -1,0 +1,1 @@
+{"gate":"M5-C15","gates":"M5-C00..M5-C14","reference":"scalar plus naive CUDA","independent_checkpoint_probe":true,"status":"pass"}

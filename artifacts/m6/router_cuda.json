@@ -1,0 +1,1 @@
+{"gate":"M6-C03","kernel":"naive CUDA router projection","outputs":"token-major F32 router logits","status":"pass"}

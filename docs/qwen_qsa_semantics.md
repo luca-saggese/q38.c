@@ -1,11 +1,13 @@
 # Qwen4Exp sparse-attention (QSA) semantics
 
 This document freezes the text-only QSA contract for the local checkpoint.
-The primary implementation reference is the official Qwen4Exp graph as
-implemented by `ggml-org/llama.cpp` PR #27742, commit
+The primary references are the official Qwen4Exp implementation in
+`huggingface/transformers` (main as inspected on 2026-09-01) and the
+`ggml-org/llama.cpp` implementation from PR #27742, merge commit
 `eaf93765572e794b8e3754fe45adbe12d381e997`. The local checkpoint is
-`/home/lvx/q38model`, `config.json` revision `Qwen4ExpForConditionalGeneration`,
-with `transformers_version` `5.8.0.dev0`.
+`/home/lvx/q38model`, `config.json` revision
+`Qwen4ExpForConditionalGeneration`, with `transformers_version`
+`5.8.0.dev0`.
 
 ## Layer schedule and tensors
 
@@ -45,28 +47,32 @@ main Q/K/V:
 
 1. `index_k_proj` produces one raw 128-wide key per token; raw keys are written
    to a separate index cache without norm or RoPE.
-2. Tokens are grouped into contiguous blocks of the layer's
-   `compress_ratio` (4 for this checkpoint). An incomplete final block is
-   retained.
-3. Each block key is the arithmetic mean of its member raw keys.
-4. Block keys are RMS-normalized, then receive the same multi-section RoPE at
-   block positions. Indexer Q is projected to four 128-wide heads, RMS-normalized,
-   and RoPE-transformed at query positions.
-5. Each query/head dot product with each pooled block is rectified with ReLU,
-   then summed across the four indexer heads.
-6. Causal mask/bias is applied to the block score. The block score is expanded
-   to each member token.
-7. The selected width is
-   `min(n_kv, indexer_top_k + compress_ratio - 1)`. `indexer_top_k` is 2048.
-   `ggml_top_k` returns token-cell IDs; the sparse attention path unmasks
-   exactly those cells. This deliberately includes the incomplete causal tail.
+2. For each query, the reference enumerates visible token cells in cache
+   order. Complete groups are the first
+   `floor(visible_count / compress_ratio)` contiguous groups. An incomplete
+   final group is not scored; it is retained verbatim as the causal tail.
+3. Each complete group key is the arithmetic mean of its member raw keys.
+4. Group keys are RMS-normalized, then receive multi-section RoPE at the
+   position of the group's first visible cell. Indexer Q is projected to four
+   128-wide heads, RMS-normalized, and RoPE-transformed at the current query
+   positions.
+5. Each query/head dot product with each pooled group is rectified with ReLU,
+   summed across the four indexer heads, and divided by
+   `sqrt(indexer_head_dim)`.
+6. The top `indexer_budget / compress_ratio` complete groups are selected with
+   stable `(score descending, first-cell ID ascending)` ordering. Selected
+   groups expand to all member token cells, in group order.
+7. The incomplete tail is appended after selected complete groups. The
+   resulting width is `min(visible_count, indexer_budget +
+   compress_ratio - 1)`. The sparse attention path unmasks exactly these
+   token-cell IDs.
 
 The reference index cache tracks the main attention cache cell-for-cell and
 uses per-stream cell mappings. For text-only single-sequence operation, the
 runtime must preserve the same logical cell order. Selected IDs are semantic
 outputs and must be deterministic; score floating-point comparisons may use a
 documented tolerance, but IDs may not change except for a formally equivalent
-tie.
+tie. Top-k is over complete-group scores, not over expanded token scores.
 
 ## Main sparse attention
 
@@ -90,10 +96,19 @@ gathered positions, and output must therefore be invariant under chunking.
 Cache growth preserves prior cells; reset clears main KV, indexer cache,
 position, and committed-token count together.
 
-The reference requires token counts divisible by the hyper-connection stream
-count (4) for the sparse graph's block layout. The scalar/runtime reference
-path must reject unsupported multi-sequence sharing rather than silently
-inventing predecessor or stream mappings.
+There is no separate persistent compressed-group accumulator in the official
+text path. A partial group is represented by its raw per-token index-cache
+cells; on each query, complete groups are pooled from those cells and the
+remaining cells form the causal tail. Chunk boundaries therefore do not
+commit or discard a group, and there is no hidden “pending group count” to
+restore. Rewind/restore must restore the raw index cells and committed
+position together with main K/V cells.
+
+The llama.cpp graph requires token counts divisible by the hyper-connection
+stream count (4) for its multi-stream block layout. The scalar/runtime
+reference path rejects unsupported multi-sequence sharing rather than silently
+inventing predecessor or stream mappings. The Transformers single-sequence
+text path uses the cache's causal visible-cell mask.
 
 ## Reference source locations
 
@@ -102,10 +117,12 @@ inventing predecessor or stream mappings.
 | hyperparameters and layer schedule | `src/models/qwen4exp.cpp::load_arch_hparams` |
 | tensor names and shapes | `src/models/qwen4exp.cpp::load_arch_tensors` |
 | index cache input and cell mapping | `llm_graph_input_qsa::set_input` |
-| block pooling, score, ReLU, expansion, top-k | `graph::build_qsa_top_k` |
+| block pooling, score, ReLU, expansion, top-k | `Qwen4ExpTextQSAIndexer.forward`, `graph::build_qsa_top_k` |
 | RoPE and main Q/K/V order | `graph::build_layer_attn` |
 | selected-cell mask and gather | `graph::build_attn_qsa` |
 
 No QSA fusion, flash implementation, SSD movement, or alternate top-k
 algorithm is semantic. Those are permitted only after the scalar probes and
-the naive CUDA path match this contract.
+the naive CUDA path match this contract. The reference graph and golden
+generator load only tensors needed by a requested probe; they never mirror the
+checkpoint and never invoke q38 to generate expected values.

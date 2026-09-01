@@ -32,6 +32,30 @@ static bool cache_init(q38_qsa_cache *cache, size_t row_bytes,
     return true;
 }
 
+static bool cache_reserve(q38_qsa_cache *cache, size_t extra,
+                          char *error, size_t error_len) {
+    if (extra > SIZE_MAX - cache->count)
+        return fail(error, error_len, "QSA cache row count overflows");
+    const size_t needed = cache->count + extra;
+    if (needed <= cache->capacity) return true;
+    size_t capacity = cache->capacity ? cache->capacity : 16;
+    while (capacity < needed) {
+        if (capacity > SIZE_MAX / 2) {
+            capacity = needed;
+            break;
+        }
+        capacity *= 2;
+    }
+    if (capacity > SIZE_MAX / cache->row_bytes)
+        return fail(error, error_len, "QSA cache byte size overflows");
+    uint8_t *grown = (uint8_t *)realloc(
+        cache->data, capacity * cache->row_bytes);
+    if (!grown) return fail(error, error_len, "QSA cache growth failed");
+    cache->data = grown;
+    cache->capacity = capacity;
+    return true;
+}
+
 bool q38_qsa_state_init(q38_qsa_state *state, size_t main_k_row_bytes,
                         size_t main_v_row_bytes, size_t index_k_row_bytes,
                         char *error, size_t error_len) {
@@ -44,6 +68,36 @@ bool q38_qsa_state_init(q38_qsa_state *state, size_t main_k_row_bytes,
         q38_qsa_state_destroy(state);
         return false;
     }
+    return true;
+}
+
+bool q38_qsa_state_append(q38_qsa_state *state, const void *main_k,
+                          const void *main_v, const void *index_k,
+                          size_t row_count, char *error, size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (!state || !main_k || !main_v || !index_k || !row_count)
+        return fail(error, error_len, "invalid QSA state append arguments");
+    if (row_count > SIZE_MAX / state->main_k.row_bytes ||
+        row_count > SIZE_MAX / state->main_v.row_bytes ||
+        row_count > SIZE_MAX / state->index_k.row_bytes ||
+        row_count > UINT64_MAX - state->position ||
+        row_count > UINT64_MAX - state->committed_tokens)
+        return fail(error, error_len, "QSA state append size overflows");
+    if (!cache_reserve(&state->main_k, row_count, error, error_len) ||
+        !cache_reserve(&state->main_v, row_count, error, error_len) ||
+        !cache_reserve(&state->index_k, row_count, error, error_len))
+        return false;
+    memcpy(state->main_k.data + state->main_k.count * state->main_k.row_bytes,
+           main_k, row_count * state->main_k.row_bytes);
+    memcpy(state->main_v.data + state->main_v.count * state->main_v.row_bytes,
+           main_v, row_count * state->main_v.row_bytes);
+    memcpy(state->index_k.data + state->index_k.count * state->index_k.row_bytes,
+           index_k, row_count * state->index_k.row_bytes);
+    state->main_k.count += row_count;
+    state->main_v.count += row_count;
+    state->index_k.count += row_count;
+    state->position += row_count;
+    state->committed_tokens += row_count;
     return true;
 }
 
