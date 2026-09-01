@@ -67,6 +67,27 @@ int main() {
         return 1;
     }
     cudaFree(dgu); cudaFree(dd); cudaFree(do_);
+    std::vector<float> sg(Q38_MOE_INTERMEDIATE * Q38_MOE_HIDDEN, 0.0f);
+    std::vector<float> su(Q38_MOE_INTERMEDIATE * Q38_MOE_HIDDEN, 0.0f);
+    std::vector<float> sd(Q38_MOE_HIDDEN * Q38_MOE_INTERMEDIATE, 0.0f);
+    std::vector<float> sw(Q38_MOE_HIDDEN, 0.0f);
+    sg[0] = 1.0f; su[0] = 2.0f; sd[0] = 3.0f;
+    float *dsg = nullptr, *dsu = nullptr, *dsd = nullptr, *dsw = nullptr;
+    if (cudaMalloc(&dsg, sg.size()*sizeof(float)) != cudaSuccess ||
+        cudaMalloc(&dsu, su.size()*sizeof(float)) != cudaSuccess ||
+        cudaMalloc(&dsd, sd.size()*sizeof(float)) != cudaSuccess ||
+        cudaMalloc(&dsw, sw.size()*sizeof(float)) != cudaSuccess ||
+        cudaMalloc(&do_, Q38_MOE_HIDDEN*sizeof(float)) != cudaSuccess) return 1;
+    cudaMemcpy(dsg, sg.data(), sg.size()*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dsu, su.data(), su.size()*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dsd, sd.data(), sd.size()*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dsw, sw.data(), sw.size()*sizeof(float), cudaMemcpyHostToDevice);
+    if (!q38_moe_cuda_shared_f32(dh, 1, dsg, dsu, dsd, dsw, do_, 0,
+                                 error, sizeof(error)) ||
+        cudaDeviceSynchronize() != cudaSuccess) return 1;
+    cudaMemcpy(expert.data(), do_, expert.size()*sizeof(float), cudaMemcpyDeviceToHost);
+    if (std::fabs(expert[0] - 2.1931757f) > 1e-4f) return 1;
+    cudaFree(dsg); cudaFree(dsu); cudaFree(dsd); cudaFree(dsw); cudaFree(do_);
     cudaFree(dh); cudaFree(dr); cudaFree(dl);
     std::puts("test_m6_moe_cuda: naive router projection passed");
     return 0;

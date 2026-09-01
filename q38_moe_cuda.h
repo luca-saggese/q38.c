@@ -28,6 +28,14 @@ bool q38_moe_cuda_expert_q2(const void *device_gate_up, const void *device_down,
                             cudaStream_t stream, char *error,
                             size_t error_len);
 
+bool q38_moe_cuda_shared_f32(const float *device_hidden, size_t token_count,
+                             const float *device_gate_proj,
+                             const float *device_up_proj,
+                             const float *device_down_proj,
+                             const float *device_gate_weight,
+                             float *device_output, cudaStream_t stream,
+                             char *error, size_t error_len);
+
 #ifdef __cplusplus
 }
 #endif

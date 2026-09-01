@@ -157,3 +157,47 @@ extern "C" bool q38_moe_cuda_expert_q2(
     if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
     return true;
 }
+
+__global__ static void shared_kernel(const float *hidden, size_t tokens,
+                                     const float *gate_proj, const float *up_proj,
+                                     const float *down_proj,
+                                     const float *gate_weight, float *output) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= tokens * Q38_MOE_HIDDEN) return;
+    const size_t token = index / Q38_MOE_HIDDEN;
+    const size_t d = index % Q38_MOE_HIDDEN;
+    const float *x = hidden + token * Q38_MOE_HIDDEN;
+    float shared_gate = 0.0f;
+    for (size_t j = 0; j < Q38_MOE_HIDDEN; ++j)
+        shared_gate += gate_weight[j] * x[j];
+    shared_gate = 1.0f / (1.0f + expf(-shared_gate));
+    float value = 0.0f;
+    for (size_t i = 0; i < Q38_MOE_INTERMEDIATE; ++i) {
+        float g = 0.0f, u = 0.0f;
+        for (size_t j = 0; j < Q38_MOE_HIDDEN; ++j) {
+            g += gate_proj[i * Q38_MOE_HIDDEN + j] * x[j];
+            u += up_proj[i * Q38_MOE_HIDDEN + j] * x[j];
+        }
+        const float mid = (g / (1.0f + expf(-g))) * u;
+        value += down_proj[d * Q38_MOE_INTERMEDIATE + i] * mid;
+    }
+    output[index] = value * shared_gate;
+}
+
+extern "C" bool q38_moe_cuda_shared_f32(
+    const float *device_hidden, size_t token_count,
+    const float *device_gate_proj, const float *device_up_proj,
+    const float *device_down_proj, const float *device_gate_weight,
+    float *device_output, cudaStream_t stream, char *error, size_t error_len) {
+    if (!device_hidden || !token_count || !device_gate_proj ||
+        !device_up_proj || !device_down_proj || !device_gate_weight ||
+        !device_output || token_count > SIZE_MAX / Q38_MOE_HIDDEN)
+        return fail(error, error_len, "invalid CUDA shared expert arguments");
+    const size_t total = token_count * Q38_MOE_HIDDEN;
+    shared_kernel<<<(unsigned)((total + 255) / 256), 256, 0, stream>>>(
+        device_hidden, token_count, device_gate_proj, device_up_proj,
+        device_down_proj, device_gate_weight, device_output);
+    const cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
