@@ -1,0 +1,1 @@
+{"status":"pass","buffers":[1,2,3],"bytes_per_buffer":[1048576,2097152,4194304,8388608],"persistent":true,"hot_path_pinned_allocations":0}

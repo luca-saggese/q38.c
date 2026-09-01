@@ -1,0 +1,1 @@
+{"gate":"M5-C10","implementation":"scalar QSA chunk-invariance harness","partitions":["single","one-token","three-five-four"],"compared":["index state","score vectors","selected IDs"],"status":"pass"}

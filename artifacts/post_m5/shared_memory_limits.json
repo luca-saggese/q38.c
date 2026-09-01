@@ -1,0 +1,1 @@
+{"cc":"sm_121","max_shared_memory_per_block":49152,"max_shared_memory_per_block_optin":101376,"warp_size":32,"multiprocessor_count":48,"variants":[{"tile":"small","shared_bytes":0},{"tile":"large","shared_bytes":101376}],"status":"pass"}

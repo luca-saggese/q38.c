@@ -2,6 +2,7 @@
 """Generate independent, checkpoint-backed PLE injection vectors."""
 
 import argparse
+import hashlib
 import json
 import struct
 from pathlib import Path
@@ -130,13 +131,22 @@ def main():
     values = run(args.model_dir, tokens)
     ids, hidden, embedding, key_proj, value_proj, nk, nq, nc, conv, contribution, after = values
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    def digest(t):
+        return hashlib.sha256(t.numpy().astype("float32").tobytes()).hexdigest()
+
     args.output.write_text(json.dumps({
         "format": "q38-m4-c06-ple-injection-v1", "status": "pass",
         "tokens": tokens, "row_ids": ids, "layer": 1,
+        "ngram_ids": ids, "model_revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540",
+        "reference_revision": "llama.cpp:eaf93765572e794b8e3754fe45adbe12d381e997",
         "input": "checkpoint embed_tokens repeated across four streams",
         "reference": "official Qwen4Exp PLE equations",
-        "vectors": {"hidden_before_ple": True, "ple_contribution": True,
-                    "hidden_after_ple": True},
+        "hidden_before_ple": hidden.tolist(),
+        "ple_contribution": contribution.tolist(),
+        "hidden_after_ple": after.tolist(),
+        "checksums": {"hidden_before_ple": digest(hidden),
+                      "ple_contribution": digest(contribution),
+                      "hidden_after_ple": digest(after)},
     }, indent=2) + "\n")
     arrays = [hidden, embedding, key_proj, value_proj, nk, nq, nc, conv,
               contribution, after]

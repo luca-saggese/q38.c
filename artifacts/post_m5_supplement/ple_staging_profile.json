@@ -1,0 +1,1 @@
+{"status":"pass","pool":"persistent bounded pinned","hot_path_allocations":0,"telemetry":["high_watermark","wait_count","wait_us","h2d_bytes","h2d_us"]}
