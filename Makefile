@@ -43,6 +43,7 @@ M1_ARTIFACT_DIR := artifacts/m1
 M2_ARTIFACT_DIR := artifacts/m2
 M3_ARTIFACT_DIR := artifacts/m3
 M4_ARTIFACT_DIR := artifacts/m4
+M6_GOLDEN := artifacts/m6/checkpoint_minimal_goldens.json
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -54,6 +55,9 @@ M4_ARTIFACT_DIR := artifacts/m4
 	post-m5-bis post-m5-ter post-m5-supplement
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
+
+q38_decode.o: q38_decode.c q38_decode.h q38_forward.h
+	$(CC) $(CFLAGS) -c -o $@ q38_decode.c
 
 all: spark
 
@@ -455,18 +459,25 @@ m5-c11: m5-c10 $(TEST_DIR)/test_m5_integrated_forward
 
 $(TEST_DIR)/test_m5_integrated_forward: \
 		$(TEST_DIR)/test_m5_integrated_forward.c q38_ple_ref.o \
-		q38_forward.o q38_qsa.o q38_gguf.o
+		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_model_config.o q38_ple.o q38_state.o q38_gdn_ref.o q38_gr_ref.o
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_integrated_forward.c \
-		q38_ple_ref.o q38_forward.o q38_qsa.o q38_gguf.o \
-		q38_session.o q38_quant.o -lm
+		q38_ple_ref.o q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o \
+		q38_weights.o q38_model_config.o q38_ple.o q38_state.o \
+		q38_session.o q38_quant.o q38_gdn_ref.o q38_gr_ref.o -lm
 
-q38_forward.o: q38_forward.c q38_forward.h q38_qsa.h
+q38_forward.o: q38_forward.c q38_forward.h q38_qsa.h q38_weights.h \
+		q38_gdn_ref.h q38_gr_ref.h q38_moe.h q38_ple_ref.h q38_quant.h
 	$(CC) $(CFLAGS) -c -o $@ q38_forward.c
 
 $(TEST_DIR)/test_forward_ref: $(TEST_DIR)/test_forward_ref.c \
-		q38_forward.o q38_qsa.o q38_gguf.o q38_forward.h q38_qsa.h
+		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_model_config.o q38_ple.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_forward.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_forward_ref.c \
-		q38_forward.o q38_qsa.o q38_gguf.o -lm
+		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_model_config.o q38_ple.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
 M5_C12_GOLDEN := artifacts/m5/qsa_forward_goldens.json
 M5_C12_FIXTURE := artifacts/m5/qsa_forward_fixture.bin
@@ -478,9 +489,13 @@ $(M5_C12_GOLDEN) $(M5_C12_FIXTURE): tools/generate_m5_c12_goldens.py \
 		--output $(M5_C12_GOLDEN) --fixture $(M5_C12_FIXTURE)
 
 $(TEST_DIR)/test_m5_forward_probe: $(TEST_DIR)/test_m5_forward_probe.c \
-		q38_forward.o q38_qsa.o q38_gguf.o q38_forward.h q38_qsa.h
+		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_model_config.o q38_ple.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_forward.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_forward_probe.c \
-		q38_forward.o q38_qsa.o q38_gguf.o -lm
+		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_model_config.o q38_ple.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
 $(TEST_DIR)/test_m5_tokenizer_edges: $(TEST_DIR)/test_m5_tokenizer_edges.c \
 		q38_tokenizer.o q38_tokenizer.h
@@ -654,6 +669,15 @@ $(TEST_DIR)/test_m6_dispatch: $(TEST_DIR)/test_m6_dispatch.c \
 		q38_moe_ref.o q38_moe_ref.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_dispatch.c q38_moe_ref.o -lm
 
+$(TEST_DIR)/test_m6_forward_api: $(TEST_DIR)/test_m6_forward_api.c \
+		q38_forward.o q38_decode.o q38_moe.o q38_weights.o \
+		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o q38_state.o \
+		q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_forward_api.c \
+		q38_forward.o q38_decode.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
+
 m6-c07: m6-c06 $(TEST_DIR)/test_m6_dispatch
 	@./$(TEST_DIR)/test_m6_dispatch
 	@printf '%s\n' '{"gate":"M6-C07","path":"stable token-major routed pair dispatch and weighted combine","status":"pass"}' > artifacts/m6/dispatch_combine_goldens.json
@@ -678,20 +702,40 @@ m6-c11: m6-c10 $(TEST_DIR)/test_m5_integrated_forward
 	@printf '%s\n' '{"gate":"M6-C11","superblock":"GDN/QSA/PLE stage graph plus MoE boundary","golden":"stage-level only; no fabricated full hidden/logit vectors","status":"pass"}' > artifacts/m6/superblock.json
 
 m6-c12: m6-c11
+	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api
+	@./$(TEST_DIR)/test_m6_forward_api
+	@python3 tools/m6_checkpoint_goldens.py --model-dir $(MODEL_DIR) \
+		--output $(M6_GOLDEN)
 	@python3 tools/m6_forward_readiness.py --model-dir $(MODEL_DIR) \
 		--output artifacts/m6/forward_48_layer.json
 
-m6-c13: m6-c12
-	@printf '%s\n' '{"gate":"M6-C13","decode":"MoE decode API preserves token_count=1 equations","status":"pass"}' > artifacts/m6/decode_loop.json
+m6-c13: m6-c12 $(TEST_DIR)/test_m6_forward_api
+	@./$(TEST_DIR)/test_m6_forward_api
+	@printf '%s\n' '{"gate":"M6-C13","decode_api":"q38_decode invokes q38_forward_full for one committed token and applies deterministic greedy selection","logits":"not claimed without a live full-model run","status":"pass"}' > artifacts/m6/decode_loop.json
 
-m6-c14: m6-c13
-	@printf '%s\n' '{"gate":"M6-C14","sessions":"semantic state reset and clone APIs covered by pre-M6 cache probes","status":"pass"}' > artifacts/m6/session_contamination.json
+$(TEST_DIR)/test_m6_session_contamination: $(TEST_DIR)/test_m6_session_contamination.c \
+		q38_qsa.o q38_session.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_session_contamination.c \
+		q38_qsa.o q38_session.o
 
-m6-c15: m6-c14
-	@printf '%s\n' '{"gate":"M6-C15","memory_perf":"reference allocation and route statistics APIs available; GB10 end-to-end benchmark deferred until full model path","status":"pass"}' > artifacts/m6/baseline.json
+m6-c14: m6-c13 $(TEST_DIR)/test_m6_session_contamination
+	@./$(TEST_DIR)/test_m6_session_contamination
+	@printf '%s\n' '{"gate":"M6-C14","sessions":"QSA clone/reset and token-history reset are independently verified","status":"pass"}' > artifacts/m6/session_contamination.json
+
+$(TEST_DIR)/test_m6_memory_baseline: $(TEST_DIR)/test_m6_memory_baseline.c q38_state.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_memory_baseline.c q38_state.o
+
+$(TEST_DIR)/test_m6_cuda_health: $(TEST_DIR)/test_m6_cuda_health.cu
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< $(CUDA_LDLIBS)
+
+m6-c15: m6-c14 $(TEST_DIR)/test_m6_memory_baseline \
+		$(TEST_DIR)/test_m6_cuda_health
+	@./$(TEST_DIR)/test_m6_memory_baseline > artifacts/m6/memory_baseline.txt
+	@./$(TEST_DIR)/test_m6_cuda_health > artifacts/m6/cuda_health.txt
+	@printf '%s\n' '{"gate":"M6-C15","memory":"verified state layout baseline","cuda":"verified device health","full_model_benchmark":"not claimed without executing the 48-layer graph","status":"pass"}' > artifacts/m6/baseline.json
 
 m6-c16: m6-c15
-	@printf '%s\n' '{"gate":"M6-C16","gates":"M6-C00..M6-C15","status":"pass"}' > artifacts/m6/acceptance.txt
+	@printf '%s\n' '{"gate":"M6-C16","gates":"M6-C00..M6-C15","apis":"full forward/decode present","runtime_logits":"not claimed; requires live 48-layer execution","status":"blocked"}' > artifacts/m6/acceptance.txt
 
 m6-acceptance: m6-c16
 

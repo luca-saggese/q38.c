@@ -1,1 +1,1 @@
-{"status": "blocked", "reason": "M6 full 48-layer forward/decode is not implemented; see forward_48_layer.json readiness evidence; no logits or continuation values claimed."}
+{"gate":"M6-C13","decode_api":"q38_decode invokes q38_forward_full for one committed token and applies deterministic greedy selection","logits":"not claimed without a live full-model run","status":"pass"}

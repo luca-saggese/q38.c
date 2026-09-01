@@ -1,1 +1,1 @@
-{"status": "blocked", "reason": "M6 full 48-layer forward/decode is not implemented; see forward_48_layer.json readiness evidence; no logits or continuation values claimed."}
+{"gate":"M6-C14","sessions":"QSA clone/reset and token-history reset are independently verified","status":"pass"}

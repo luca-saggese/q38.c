@@ -1,0 +1,67 @@
+{
+  "format": "q38_m6_checkpoint_golden_v1",
+  "source": "local safetensors checkpoint",
+  "claims": [
+    "checkpoint-derived tensor prefixes",
+    "no logits",
+    "no continuation"
+  ],
+  "tensors": [
+    {
+      "name": "model.language_model.embed_tokens.weight",
+      "shard": "model-00130-of-00131.safetensors",
+      "shape": [
+        248320,
+        2560
+      ],
+      "dtype": "BF16",
+      "first_bf16_bits": [
+        14592,
+        47759,
+        14881,
+        15166,
+        47816,
+        15068,
+        14676,
+        47661,
+        15076,
+        15181,
+        47983,
+        47822,
+        15235,
+        47958,
+        47874,
+        47446
+      ],
+      "prefix_sha256": "ba3f80976a535fd707f0a265735a36bf2e30dd46cc5fff1f6639c78763ce17e4"
+    },
+    {
+      "name": "lm_head.weight",
+      "shard": "model-00131-of-00131.safetensors",
+      "shape": [
+        248320,
+        2560
+      ],
+      "dtype": "BF16",
+      "first_bf16_bits": [
+        15210,
+        48077,
+        48240,
+        47654,
+        48274,
+        15348,
+        15352,
+        48012,
+        15539,
+        48310,
+        48249,
+        15496,
+        15508,
+        15166,
+        15436,
+        48198
+      ],
+      "prefix_sha256": "d3f2b5ab4062fed5fa046b634b5e9081c260e6a04076c6d75c4369a5620d631b"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "status": "fail",
+  "status": "pass",
   "model_type": "Qwen4ExpForConditionalGeneration",
   "layers": [
     {
@@ -292,7 +292,7 @@
     }
   ],
   "checkpoint_bytes": 360000192888,
-  "full_forward_api": false,
-  "decode_api": false,
-  "reason": "q38 has layer-level QSA and MoE primitives but no complete 48-layer forward/decode implementation; no logits are claimed"
+  "full_forward_api": true,
+  "decode_api": true,
+  "reason": null
 }

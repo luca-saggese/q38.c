@@ -1,0 +1,1 @@
+test_m6_memory_baseline: persistent=117669888 activation=40960
