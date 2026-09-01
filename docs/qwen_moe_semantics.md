@@ -29,3 +29,15 @@ The reference/runtime APIs keep router, routed experts, and shared expert
 storage separate. Routed weights may remain file-backed and be materialized
 only for selected expert slices; expected values must come from the reference
 calculation, never from q38.
+
+## Frozen source and checkpoint evidence
+
+The primary source is
+`transformers/src/transformers/models/qwen4_exp/modeling_qwen4_exp.py`:
+`Qwen4ExpTextTopKRouter.forward`,
+`Qwen4ExpTextExperts.forward`, and
+`Qwen4ExpTextSparseMoeBlock.forward`. The secondary implementation is
+`llama.cpp` PR #27742, `src/models/qwen4exp.cpp::build_layer_ffn`.
+`/home/lvx/q38model/config.json` confirms 512 experts, top-10 routing,
+intermediate widths 640, hidden size 2560, and `norm_topk_prob` behavior is
+verified from the reference code rather than inferred from config alone.
