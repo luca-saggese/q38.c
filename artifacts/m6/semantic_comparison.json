@@ -677,7 +677,69 @@
     {
       "stage": "layer2_moe_trace",
       "status": "fail",
-      "reason": "missing layer-2 boundary trace"
+      "vectors": {
+        "router_input": {
+          "status": "fail",
+          "max_abs": 0.8348429199999998
+        },
+        "router_logits_pre_cast": {
+          "status": "fail",
+          "max_abs": 0.440107824470215
+        },
+        "router_logits_effective": {
+          "status": "fail",
+          "max_abs": 0.4375
+        },
+        "selected_weights_pre_cast": {
+          "status": "pass",
+          "max_abs": 0.015010982660064676
+        },
+        "selected_weights_effective": {
+          "status": "pass",
+          "max_abs": 0.013671875
+        },
+        "routed_output": {
+          "status": "pass",
+          "max_abs": 0.0113987894725
+        }
+      },
+      "top15_rank": {
+        "status": "fail",
+        "native": [
+          75,
+          12,
+          209,
+          134,
+          87,
+          286,
+          222,
+          280,
+          185,
+          257,
+          269,
+          84,
+          338,
+          370,
+          61
+        ],
+        "reference": [
+          75,
+          12,
+          209,
+          134,
+          87,
+          286,
+          280,
+          257,
+          222,
+          185,
+          269,
+          84,
+          370,
+          338,
+          61
+        ]
+      }
     }
   ],
   "status": "fail",
