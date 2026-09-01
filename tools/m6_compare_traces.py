@@ -65,6 +65,7 @@ def main() -> None:
         key=lambda key: (
             0 if key.startswith("layer:") else 1,
             int(key.split(":", 1)[1]),
+            key.split(":", 1)[0],
         ),
     )
     for key in stage_keys:
