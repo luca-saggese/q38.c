@@ -49,7 +49,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
-	m3-acceptance m4-c00 m4-c01 m4-c02
+	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03
 
 all: spark
 
@@ -79,6 +79,9 @@ q38_session.o: q38_session.c q38_session.h
 
 q38_ple_ref.o: q38_ple_ref.c q38_ple_ref.h q38_session.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple_ref.c
+
+q38_ple.o: q38_ple.c q38_ple.h q38_gguf.h
+	$(CC) $(CFLAGS) -c -o $@ q38_ple.c
 
 q38_golden.o: q38_golden.c q38_golden.h
 	$(CC) $(CFLAGS) -c -o $@ q38_golden.c
@@ -157,6 +160,15 @@ m4-c02: m4-c01 $(TEST_DIR)/test_m4_ple_ref
 	@./$(TEST_DIR)/test_m4_ple_ref
 	@mkdir -p $(M4_ARTIFACT_DIR)
 	printf '%s\n' '{"gate":"M4-C02","oracle":"scalar uint64 XOR/multiply modulo indexing","heads":16,"orders":["bigram","trigram"],"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_ref.json
+
+$(TEST_DIR)/test_m4_ple_store: $(TEST_DIR)/test_m4_ple_store.c q38_ple.o \
+		q38_ple.h q38_gguf.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_store.c q38_ple.o
+
+m4-c03: m4-c02 $(TEST_DIR)/test_m4_ple_store
+	@./$(TEST_DIR)/test_m4_ple_store
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	printf '%s\n' '{"gate":"M4-C03","table":"dedicated PLE descriptor","row_width":2560,"strict_geometry":true,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_store.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
