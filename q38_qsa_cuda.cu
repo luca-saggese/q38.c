@@ -57,6 +57,35 @@ __global__ static void rope_kernel(float *tensor, size_t tokens, size_t heads,
     tensor[b] = x * s + y * c;
 }
 
+__global__ static void index_scores_kernel(
+    const float *raw_keys, size_t token_count, const float *queries,
+    size_t query_count, size_t heads, size_t head_dim, size_t ratio,
+    float *scores) {
+    const size_t blocks = (token_count + ratio - 1) / ratio;
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= query_count * blocks) return;
+    const size_t query = index / blocks;
+    const size_t block = index % blocks;
+    const size_t begin = block * ratio;
+    const size_t end = begin + ratio < token_count ? begin + ratio : token_count;
+    float total = 0.0f;
+    for (size_t head = 0; head < heads; ++head) {
+        float dot = 0.0f;
+        float norm = 0.0f;
+        for (size_t d = 0; d < head_dim; ++d) {
+            float pooled = 0.0f;
+            for (size_t token = begin; token < end; ++token)
+                pooled += raw_keys[token * head_dim + d];
+            pooled /= (float)(end - begin);
+            dot += queries[(query * heads + head) * head_dim + d] * pooled;
+            norm += pooled * pooled;
+        }
+        dot /= sqrtf(norm / (float)head_dim + 1e-6f);
+        total += dot > 0.0f ? dot : 0.0f;
+    }
+    scores[index] = total;
+}
+
 extern "C" bool q38_qsa_cuda_project_main(
     const uint16_t *q_proj, size_t q_rows, const uint16_t *k_proj,
     size_t k_rows, const uint16_t *v_proj, size_t v_rows, size_t cols,
@@ -108,5 +137,29 @@ extern "C" bool q38_qsa_cuda_apply_rope(
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess)
         return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
+
+extern "C" bool q38_qsa_cuda_index_scores(
+    const float *device_raw_keys, size_t token_count,
+    const float *device_queries, size_t query_count, size_t heads,
+    size_t head_dim, size_t ratio, float *device_scores, cudaStream_t stream,
+    char *error, size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (!device_raw_keys || !token_count || !device_queries || !query_count ||
+        !heads || !head_dim || !ratio || !device_scores ||
+        ratio > SIZE_MAX - token_count + 1 ||
+        heads > SIZE_MAX / head_dim) {
+        return fail(error, error_len, "invalid CUDA QSA index arguments");
+    }
+    const size_t blocks = (token_count + ratio - 1) / ratio;
+    if (query_count > SIZE_MAX / blocks)
+        return fail(error, error_len, "CUDA QSA index size overflows");
+    const size_t elements = query_count * blocks;
+    index_scores_kernel<<<(unsigned)((elements + 255) / 256), 256, 0, stream>>>(
+        device_raw_keys, token_count, device_queries, query_count, heads,
+        head_dim, ratio, device_scores);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
     return true;
 }

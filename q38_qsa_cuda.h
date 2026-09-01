@@ -26,6 +26,14 @@ bool q38_qsa_cuda_apply_rope(float *device_tensor, size_t token_count,
                              const uint32_t sections[4], cudaStream_t stream,
                              char *error, size_t error_len);
 
+bool q38_qsa_cuda_index_scores(const float *device_raw_keys,
+                               size_t token_count,
+                               const float *device_queries,
+                               size_t query_count, size_t heads,
+                               size_t head_dim, size_t ratio,
+                               float *device_scores, cudaStream_t stream,
+                               char *error, size_t error_len);
+
 #ifdef __cplusplus
 }
 #endif
