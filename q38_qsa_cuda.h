@@ -34,6 +34,14 @@ bool q38_qsa_cuda_index_scores(const float *device_raw_keys,
                                float *device_scores, cudaStream_t stream,
                                char *error, size_t error_len);
 
+bool q38_qsa_cuda_gather_attention(
+    const float *device_k, const float *device_v, size_t kv_count,
+    size_t kv_heads, size_t head_dim, const uint32_t *device_ids,
+    size_t selected_count, float *device_selected_k,
+    float *device_selected_v, const float *device_query, size_t query_count,
+    size_t query_heads, float *device_output, cudaStream_t stream,
+    char *error, size_t error_len);
+
 #ifdef __cplusplus
 }
 #endif

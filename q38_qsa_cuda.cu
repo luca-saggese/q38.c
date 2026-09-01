@@ -163,3 +163,87 @@ extern "C" bool q38_qsa_cuda_index_scores(
     if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
     return true;
 }
+
+__global__ static void gather_kernel(
+    const float *source, size_t kv_count, size_t kv_heads, size_t head_dim,
+    const uint32_t *ids, size_t selected_count, float *output) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t elements = selected_count * kv_heads * head_dim;
+    if (index >= elements) return;
+    const size_t d = index % head_dim;
+    const size_t head = (index / head_dim) % kv_heads;
+    const size_t selected = index / (kv_heads * head_dim);
+    const uint32_t row = ids[selected];
+    if ((size_t)row >= kv_count) {
+        output[index] = __int_as_float(0x7fc00000);
+        return;
+    }
+    output[index] = source[((size_t)row * kv_heads + head) * head_dim + d];
+}
+
+__global__ static void attention_kernel(
+    const float *query, size_t query_count, size_t query_heads,
+    size_t head_dim, const float *selected_k, const float *selected_v,
+    size_t selected_count, size_t kv_heads, float *output) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t elements = query_count * query_heads * head_dim;
+    if (index >= elements) return;
+    const size_t d = index % head_dim;
+    const size_t head = (index / head_dim) % query_heads;
+    const size_t token = index / (query_heads * head_dim);
+    const size_t group = query_heads / kv_heads;
+    const size_t kv_head = head / group;
+    const float *q = query + (token * query_heads + head) * head_dim;
+    float maximum = -1.0e30f;
+    for (size_t row = 0; row < selected_count; ++row) {
+        const float *k = selected_k + (row * kv_heads + kv_head) * head_dim;
+        float dot = 0.0f;
+        for (size_t i = 0; i < head_dim; ++i) dot += q[i] * k[i];
+        maximum = fmaxf(maximum, dot / sqrtf((float)head_dim));
+    }
+    float denominator = 0.0f, numerator = 0.0f;
+    for (size_t row = 0; row < selected_count; ++row) {
+        const float *k = selected_k + (row * kv_heads + kv_head) * head_dim;
+        const float *v = selected_v + (row * kv_heads + kv_head) * head_dim;
+        float dot = 0.0f;
+        for (size_t i = 0; i < head_dim; ++i) dot += q[i] * k[i];
+        const float weight = expf(dot / sqrtf((float)head_dim) - maximum);
+        denominator += weight;
+        if (d < head_dim) numerator += weight * v[d];
+    }
+    output[index] = numerator / denominator;
+}
+
+extern "C" bool q38_qsa_cuda_gather_attention(
+    const float *device_k, const float *device_v, size_t kv_count,
+    size_t kv_heads, size_t head_dim, const uint32_t *device_ids,
+    size_t selected_count, float *device_selected_k,
+    float *device_selected_v, const float *device_query, size_t query_count,
+    size_t query_heads, float *device_output, cudaStream_t stream,
+    char *error, size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (!device_k || !device_v || !kv_count || !kv_heads || !head_dim ||
+        !device_ids || !selected_count || !device_selected_k ||
+        !device_selected_v || !device_query || !query_count || !query_heads ||
+        query_heads < kv_heads || query_heads % kv_heads != 0 ||
+        kv_heads > SIZE_MAX / head_dim ||
+        query_heads > SIZE_MAX / head_dim ||
+        selected_count > SIZE_MAX / (kv_heads * head_dim) ||
+        query_count > SIZE_MAX / (query_heads * head_dim))
+        return fail(error, error_len, "invalid CUDA QSA gather arguments");
+    const size_t gather_elements = selected_count * kv_heads * head_dim;
+    const size_t attention_elements = query_count * query_heads * head_dim;
+    gather_kernel<<<(unsigned)((gather_elements + 255) / 256), 256, 0,
+                    stream>>>(device_k, kv_count, kv_heads, head_dim,
+                              device_ids, selected_count, device_selected_k);
+    gather_kernel<<<(unsigned)((gather_elements + 255) / 256), 256, 0,
+                    stream>>>(device_v, kv_count, kv_heads, head_dim,
+                              device_ids, selected_count, device_selected_v);
+    attention_kernel<<<(unsigned)((attention_elements + 255) / 256), 256, 0,
+                       stream>>>(device_query, query_count, query_heads,
+                                 head_dim, device_selected_k, device_selected_v,
+                                 selected_count, kv_heads, device_output);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
