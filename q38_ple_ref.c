@@ -1,4 +1,5 @@
 #include "q38_ple_ref.h"
+#include "q38_quant.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -60,4 +61,22 @@ bool q38_ple_ngram_ids_ref(const q38_ple_hash_config *config,
         }
     }
     return true;
+}
+
+bool q38_ple_decode_row_ref(uint32_t qtype, const void *blocks,
+                            uint32_t row_width, float *out,
+                            size_t out_elements, char *error,
+                            size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (qtype != Q38_QUANT_Q2_K && qtype != Q38_QUANT_Q4_K) {
+        return fail(error, error_len, "unsupported PLE row quantization type");
+    }
+    if (!blocks || !out || row_width == 0 ||
+        row_width % Q38_QUANT_QK_K != 0 ||
+        out_elements != (size_t)row_width) {
+        return fail(error, error_len, "invalid PLE quantized row arguments");
+    }
+    return q38_quant_dequantize_row(
+        qtype, blocks, row_width / Q38_QUANT_QK_K, out, out_elements,
+        error, error_len);
 }

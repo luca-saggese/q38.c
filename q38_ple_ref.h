@@ -31,6 +31,11 @@ bool q38_ple_ngram_ids_ref(const q38_ple_hash_config *config,
                            uint32_t *ids, size_t ids_count,
                            char *error, size_t error_len);
 
+bool q38_ple_decode_row_ref(uint32_t qtype, const void *blocks,
+                            uint32_t row_width, float *out,
+                            size_t out_elements, char *error,
+                            size_t error_len);
+
 #ifdef __cplusplus
 }
 #endif

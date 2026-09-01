@@ -49,7 +49,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
-	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03
+	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04
 
 all: spark
 
@@ -77,7 +77,7 @@ q38_model_config.o: q38_model_config.c q38_model_config.h
 q38_session.o: q38_session.c q38_session.h
 	$(CC) $(CFLAGS) -c -o $@ q38_session.c
 
-q38_ple_ref.o: q38_ple_ref.c q38_ple_ref.h q38_session.h
+q38_ple_ref.o: q38_ple_ref.c q38_ple_ref.h q38_session.h q38_quant.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple_ref.c
 
 q38_ple.o: q38_ple.c q38_ple.h q38_gguf.h
@@ -152,9 +152,9 @@ m4-c01: m4-c00 $(TEST_DIR)/test_m4_session
 	printf '%s\n' '{"gate":"M4-C01","history":"two-token session history","eos_reset":true,"chunk_boundary":true,"status":"pass"}' > $(M4_ARTIFACT_DIR)/session_history.json
 
 $(TEST_DIR)/test_m4_ple_ref: $(TEST_DIR)/test_m4_ple_ref.c q38_ple_ref.o \
-		q38_session.o q38_ple_ref.h q38_session.h
+		q38_session.o q38_quant.o q38_ple_ref.h q38_session.h q38_quant.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_ref.c \
-		q38_ple_ref.o q38_session.o
+		q38_ple_ref.o q38_session.o q38_quant.o -lm
 
 m4-c02: m4-c01 $(TEST_DIR)/test_m4_ple_ref
 	@./$(TEST_DIR)/test_m4_ple_ref
@@ -169,6 +169,17 @@ m4-c03: m4-c02 $(TEST_DIR)/test_m4_ple_store
 	@./$(TEST_DIR)/test_m4_ple_store
 	@mkdir -p $(M4_ARTIFACT_DIR)
 	printf '%s\n' '{"gate":"M4-C03","table":"dedicated PLE descriptor","row_width":2560,"strict_geometry":true,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_store.json
+
+$(TEST_DIR)/test_m4_ple_row: $(TEST_DIR)/test_m4_ple_row.c \
+		q38_ple_ref.o q38_session.o q38_quant.o q38_ple_ref.h \
+		q38_session.h q38_quant.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_row.c \
+		q38_ple_ref.o q38_session.o q38_quant.o -lm
+
+m4-c04: m4-c03 $(TEST_DIR)/test_m4_ple_row
+	@./$(TEST_DIR)/test_m4_ple_row
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	printf '%s\n' '{"gate":"M4-C04","decoder":"scalar PLE row","qtypes":["Q2_K","Q4_K"],"row_width":2560,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_row_quant_tests.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
