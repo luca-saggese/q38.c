@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10
 
 all: spark
 
@@ -400,6 +400,15 @@ $(TEST_DIR)/test_m5_qsa_state: $(TEST_DIR)/test_m5_qsa_state.c \
 m5-c09: m5-c08 $(TEST_DIR)/test_m5_qsa_state
 	@./$(TEST_DIR)/test_m5_qsa_state
 	@printf '%s\n' '{"gate":"M5-C09","implementation":"separate bounded-growing main K/V and index state","append":"preserves row order and committed position","reset":"clears counts and position without requiring shrink","status":"pass"}' > artifacts/m5/qsa_cache_memory.json
+
+$(TEST_DIR)/test_m5_qsa_chunking: $(TEST_DIR)/test_m5_qsa_chunking.c \
+		q38_qsa.o q38_qsa_ref.o q38_topk_ref.o q38_qsa.h q38_qsa_ref.h q38_topk_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_chunking.c \
+		q38_qsa.o q38_qsa_ref.o q38_topk_ref.o -lm
+
+m5-c10: m5-c09 $(TEST_DIR)/test_m5_qsa_chunking
+	@./$(TEST_DIR)/test_m5_qsa_chunking
+	@printf '%s\n' '{"gate":"M5-C10","implementation":"scalar QSA chunk-invariance harness","partitions":["single","one-token","three-five-four"],"compared":["index state","score vectors","selected IDs"],"status":"pass"}' > artifacts/m5/qsa_chunk_invariance.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -930,5 +939,6 @@ clean:
 		$(TEST_DIR)/test_m5_qsa_tail \
 		$(TEST_DIR)/test_m5_qsa_attention \
 		$(TEST_DIR)/test_m5_qsa_state \
+		$(TEST_DIR)/test_m5_qsa_chunking \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
