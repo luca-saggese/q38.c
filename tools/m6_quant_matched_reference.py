@@ -35,8 +35,10 @@ def main() -> None:
         executable = Path(found) if found else None
     if executable is None or not executable.exists():
         report["reason"] = (
-            "no separate llama.cpp executable is available to read/dequantize "
-            "the q38 GGUF; native q38 output cannot serve as this reference"
+            "blocked: no separate llama.cpp executable is available, and an "
+            "independent GGUF reader/dequantizer alone cannot produce a "
+            "quant-matched 48-layer Qwen4Exp trace without reimplementing the "
+            "full forward graph; native q38 output cannot serve as reference"
         )
     else:
         report["reason"] = (

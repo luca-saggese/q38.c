@@ -80,6 +80,25 @@ typedef struct {
     bool initialized;
 } q38_forward_state;
 
+typedef struct q38_moe_trace {
+    const float *router_input;
+    size_t router_input_count;
+    const float *router_logits_pre_cast;
+    const float *router_logits_effective;
+    size_t router_logits_count;
+    const uint16_t *top15_rank;
+    const float *top15_value;
+    size_t top15_count;
+    float margin_rank10_rank11;
+    const uint16_t *selected_experts;
+    const float *selected_weights_pre_cast;
+    const float *selected_weights_effective;
+    size_t selected_count;
+    const float *routed_output;
+    size_t routed_output_count;
+    q38_forward_dtype router_dtype;
+} q38_moe_trace;
+
 typedef struct {
     uint32_t first_divergence_layer;
     uint32_t first_divergence_token;
@@ -94,6 +113,15 @@ typedef struct {
     bool (*qsa_trace)(uint32_t layer, const uint32_t *selected, size_t count,
                       void *user, char *error, size_t error_len);
     void *trace_user;
+    /*
+     * The pointers in q38_moe_trace are valid only for the callback.  The
+     * layer-2 probe uses them to compare the FP32 scalar path with the
+     * router's effective output dtype without changing GGUF storage.
+     */
+    bool (*moe_trace)(uint32_t layer, const q38_moe_trace *trace,
+                      void *user, char *error, size_t error_len);
+    bool (*router_trace)(uint32_t layer, const float *logits, size_t count,
+                         void *user, char *error, size_t error_len);
 } q38_forward_diagnostics;
 
 bool q38_forward_state_init(q38_forward_state *state,

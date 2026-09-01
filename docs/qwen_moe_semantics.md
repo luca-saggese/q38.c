@@ -7,12 +7,16 @@ uses the same `build_moe_ffn` formulation.
 
 * The router is a bias-free linear projection with weight shape
   `[num_experts, hidden_size]`.
-* Router logits are `hidden @ weight.T`. Softmax is evaluated in float32.
-* `topk` selects 10 experts by descending probability. Equal values use the
-  framework's deterministic lower-index ordering; q38 uses the explicit
-  `(probability descending, expert ID ascending)` ordering.
-* Selected probabilities are renormalized to sum to one (`norm_topk_prob` is
-  true for this checkpoint), then converted back to the router output dtype.
+* Router logits are `hidden @ weight.T`; with the checkpoint's BF16 model dtype
+  the linear result is BF16. Softmax is evaluated in float32 after that
+  effective BF16 result is produced.
+* `topk` selects 10 experts by descending probability. Transformers delegates
+  equal-value ordering to `torch.topk`; the independent q38 reference uses
+  explicit `(probability descending, expert ID ascending)` ordering. q38 keeps
+  that pre-cast selection until the layer-2 effective-logit diagnostic agrees.
+* Selected probabilities are renormalized to sum to one
+  (`norm_topk_prob` is true for this checkpoint), then converted back to the
+  router output dtype (BF16).
 * Routed expert weights are separate 3-D tensors:
   `gate_up_proj [512, 2*640, 2560]` and
   `down_proj [512, 2560, 640]`. For each selected expert:

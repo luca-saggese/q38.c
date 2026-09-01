@@ -1,5 +1,5 @@
 {
-  "format": "q38-m6-semantic-comparison-v1",
+  "format": "q38-m6-semantic-comparison-v2",
   "native": "artifacts/m6/real_forward_trace.json",
   "reference": "artifacts/m6/transformers_reference.json",
   "tokens": [
@@ -13,12 +13,60 @@
     {
       "stage": "layer:0",
       "status": "pass",
-      "mismatches": []
+      "mismatches": [],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:1",
+      "status": "pass",
+      "mismatches": [],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:2",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
     },
     {
       "stage": "layer:3",
       "status": "pass",
-      "mismatches": []
+      "mismatches": [],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:4",
+      "status": "pass",
+      "mismatches": [],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:5",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:6",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
     },
     {
       "stage": "layer:7",
@@ -26,7 +74,81 @@
       "mismatches": [
         "min",
         "max_abs"
-      ]
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:8",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:9",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:10",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:11",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:12",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:13",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:14",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
     },
     {
       "stage": "layer:15",
@@ -34,7 +156,186 @@
       "mismatches": [
         "min",
         "max_abs"
-      ]
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:16",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:17",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:18",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:19",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:20",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:21",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:22",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:23",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:24",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:25",
+      "status": "fail",
+      "mismatches": [
+        "max",
+        "fixed[0]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:26",
+      "status": "fail",
+      "mismatches": [
+        "max",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:27",
+      "status": "fail",
+      "mismatches": [
+        "max",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:28",
+      "status": "fail",
+      "mismatches": [
+        "max",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:29",
+      "status": "fail",
+      "mismatches": [
+        "max",
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:30",
+      "status": "fail",
+      "mismatches": [
+        "max",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
     },
     {
       "stage": "layer:31",
@@ -44,7 +345,213 @@
         "fixed[0]",
         "fixed[2]",
         "fixed[3]"
-      ]
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:32",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:33",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[1]",
+        "fixed[2]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:34",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[1]",
+        "fixed[2]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:35",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:36",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:37",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max_abs",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:38",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:39",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:40",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[1]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:41",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:42",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:43",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:44",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:45",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[2]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "layer:46",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "max_abs",
+        "fixed[0]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
     },
     {
       "stage": "layer:47",
@@ -55,10 +562,28 @@
         "rms",
         "max_abs",
         "fixed[0]",
+        "fixed[2]",
+        "fixed[3]"
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
+    },
+    {
+      "stage": "logits:0",
+      "status": "fail",
+      "mismatches": [
+        "min",
+        "max",
+        "mean",
+        "rms",
+        "max_abs",
+        "fixed[0]",
         "fixed[1]",
         "fixed[2]",
         "fixed[3]"
-      ]
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
     },
     {
       "stage": "final_norm:0",
@@ -73,21 +598,9 @@
         "fixed[1]",
         "fixed[2]",
         "fixed[3]"
-      ]
-    },
-    {
-      "stage": "logits:0",
-      "status": "fail",
-      "mismatches": [
-        "min",
-        "max",
-        "mean",
-        "rms",
-        "max_abs",
-        "fixed[0]",
-        "fixed[1]",
-        "fixed[3]"
-      ]
+      ],
+      "coordinate_mismatches": [],
+      "checksum_equal": false
     },
     {
       "stage": "logits:top_k",
@@ -109,9 +622,11 @@
         "layer:11:experts",
         "layer:12:experts",
         "layer:13:experts",
+        "layer:13:weights",
         "layer:14:experts",
         "layer:15:experts",
         "layer:16:experts",
+        "layer:17:weights",
         "layer:18:experts",
         "layer:19:experts",
         "layer:20:experts",
@@ -119,32 +634,52 @@
         "layer:22:experts",
         "layer:23:experts",
         "layer:24:experts",
+        "layer:24:weights",
         "layer:25:experts",
+        "layer:25:weights",
         "layer:26:experts",
+        "layer:26:weights",
         "layer:27:experts",
+        "layer:27:weights",
         "layer:28:experts",
+        "layer:28:weights",
         "layer:29:experts",
         "layer:30:experts",
         "layer:31:experts",
         "layer:32:experts",
+        "layer:32:weights",
         "layer:33:experts",
         "layer:34:experts",
+        "layer:34:weights",
         "layer:35:experts",
+        "layer:35:weights",
         "layer:36:experts",
         "layer:37:experts",
         "layer:38:experts",
         "layer:39:experts",
+        "layer:39:weights",
         "layer:40:experts",
         "layer:41:experts",
+        "layer:41:weights",
         "layer:42:experts",
+        "layer:42:weights",
         "layer:43:experts",
+        "layer:43:weights",
         "layer:44:experts",
+        "layer:44:weights",
         "layer:45:experts",
+        "layer:45:weights",
         "layer:46:experts",
+        "layer:46:weights",
         "layer:47:experts"
       ]
+    },
+    {
+      "stage": "layer2_moe_trace",
+      "status": "fail",
+      "reason": "missing layer-2 boundary trace"
     }
   ],
   "status": "fail",
-  "first_divergence": "layer:7"
+  "first_divergence": "layer:2"
 }

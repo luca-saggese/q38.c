@@ -9,8 +9,6 @@ import math
 from pathlib import Path
 
 
-STAGES = ("layer:0", "layer:3", "layer:7", "layer:15", "layer:31",
-          "layer:47", "final_norm:0", "logits:0")
 ATOL = 0.02
 RTOL = 0.002
 
@@ -28,6 +26,18 @@ def close(a: float | None, b: float | None) -> bool:
     return math.isclose(a, b, rel_tol=RTOL, abs_tol=ATOL)
 
 
+def vector_check(left: list[float], right: list[float]) -> dict:
+    if len(left) != len(right):
+        return {"status": "fail", "reason": "length", "left": len(left),
+                "right": len(right)}
+    errors = [abs(a - b) for a, b in zip(left, right)]
+    return {
+        "status": "pass" if all(close(a, b) for a, b in zip(left, right))
+        else "fail",
+        "max_abs": max(errors, default=0.0),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--native", type=Path, required=True)
@@ -37,7 +47,7 @@ def main() -> None:
     native = json.loads(args.native.read_text())
     reference = json.loads(args.reference.read_text())
     result = {
-        "format": "q38-m6-semantic-comparison-v1",
+        "format": "q38-m6-semantic-comparison-v2",
         "native": str(args.native),
         "reference": str(args.reference),
         "tokens": native.get("tokens"),
@@ -50,7 +60,14 @@ def main() -> None:
         result["first_divergence"] = "input_tokens"
     native_stages = stage_map(native)
     reference_stages = stage_map(reference)
-    for key in STAGES:
+    stage_keys = sorted(
+        set(native_stages) | set(reference_stages),
+        key=lambda key: (
+            0 if key.startswith("layer:") else 1,
+            int(key.split(":", 1)[1]),
+        ),
+    )
+    for key in stage_keys:
         left, right = native_stages.get(key), reference_stages.get(key)
         check = {"stage": key, "status": "pass"}
         if left is None or right is None:
@@ -67,10 +84,14 @@ def main() -> None:
             result["checks"].append(check)
             continue
         mismatches = []
+        coordinate_mismatches = []
         for field in ("min", "max", "mean", "rms", "max_abs"):
             if not close(left_stats.get(field), right_stats.get(field)):
                 mismatches.append(field)
-        for field in ("nan_count", "inf_count"):
+        for field in ("min_index", "max_index", "max_abs_index"):
+            if left_stats.get(field) != right_stats.get(field):
+                coordinate_mismatches.append(field)
+        for field in ("finite_count", "nan_count", "inf_count"):
             if left_stats.get(field) != right_stats.get(field):
                 mismatches.append(field)
         left_fixed = left_stats.get("fixed", left.get("fixed", []))
@@ -84,6 +105,10 @@ def main() -> None:
                 ):
                     mismatches.append(f"fixed[{lcoord.get('index')}]")
         check["mismatches"] = mismatches
+        check["coordinate_mismatches"] = coordinate_mismatches
+        check["checksum_equal"] = (
+            left_stats.get("checksum") == right_stats.get("checksum")
+        )
         if mismatches:
             check["status"] = "fail"
             result["status"] = "fail"
@@ -136,6 +161,52 @@ def main() -> None:
             {"stage": "routing", "status": "fail", "reason": "expert decisions",
              "mismatches": route_mismatch}
         )
+    native_moe = native.get("layer2_moe_trace")
+    ref_moe = reference.get("layer2_moe_trace")
+    if native_moe is None or ref_moe is None:
+        result["status"] = "fail"
+        result.setdefault("first_divergence", "layer2_moe_trace")
+        result["checks"].append(
+            {"stage": "layer2_moe_trace", "status": "fail",
+             "reason": "missing layer-2 boundary trace"}
+        )
+    else:
+        moe_check = {"stage": "layer2_moe_trace", "status": "pass",
+                     "vectors": {}}
+        for field in (
+            "router_input",
+            "router_logits_pre_cast",
+            "router_logits_effective",
+            "selected_weights_pre_cast",
+            "selected_weights_effective",
+            "routed_output",
+        ):
+            check = vector_check(native_moe.get(field, []),
+                                 ref_moe.get(field, []))
+            moe_check["vectors"][field] = check
+            if check["status"] != "pass":
+                moe_check["status"] = "fail"
+        native_rank = [item.get("expert") for item in native_moe.get(
+            "top15_rank", [])]
+        ref_rank = [item.get("expert") for item in ref_moe.get(
+            "top15_rank", [])]
+        if native_rank != ref_rank:
+            moe_check["status"] = "fail"
+            moe_check["top15_rank"] = {"status": "fail",
+                                       "native": native_rank,
+                                       "reference": ref_rank}
+        if not close(native_moe.get("margin_rank10_rank11"),
+                     ref_moe.get("margin_rank10_rank11")):
+            moe_check["status"] = "fail"
+            moe_check["margin_rank10_rank11"] = {
+                "status": "fail",
+                "native": native_moe.get("margin_rank10_rank11"),
+                "reference": ref_moe.get("margin_rank10_rank11"),
+            }
+        result["checks"].append(moe_check)
+        if moe_check["status"] != "pass":
+            result["status"] = "fail"
+            result.setdefault("first_divergence", "layer2_moe_trace")
     if native.get("qsa_selection") != reference.get("qsa_selection"):
         result["status"] = "fail"
         result.setdefault("first_divergence", "qsa_selection")

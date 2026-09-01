@@ -379,6 +379,19 @@ static float full_bf16_to_float(uint16_t bits) {
     return value;
 }
 
+static float full_float_to_bf16(float value) {
+    uint32_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    /* Match the round-to-nearest-even conversion used by torch.bfloat16. */
+    bits += 0x7fffu + ((bits >> 16) & 1u);
+    bits &= 0xffff0000u;
+    return full_bf16_to_float((uint16_t)(bits >> 16));
+}
+
+static float full_cast_forward_dtype(float value, q38_forward_dtype dtype) {
+    return dtype == Q38_FORWARD_BF16 ? full_float_to_bf16(value) : value;
+}
+
 static float full_tensor_scalar(const q38_gguf *model, const q38_tensor *tensor,
                                 size_t row, size_t column, float *scratch,
                                 size_t scratch_count) {
@@ -483,14 +496,14 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
         *out = sum;
         return true;
     }
-    if ((tensor->type != Q38_QUANT_Q2_K &&
-         tensor->type != Q38_QUANT_Q4_K) ||
-        !scratch || scratch != input) {
-        if (tensor->type != Q38_QUANT_Q2_K &&
-            tensor->type != Q38_QUANT_Q4_K)
-            return full_fail(error, error_len, "unsupported tensor matvec type");
-        if (!scratch) return full_fail(error, error_len, "missing tensor row scratch");
-    }
+    if (tensor->type != Q38_QUANT_Q2_K &&
+        tensor->type != Q38_QUANT_Q4_K)
+        return full_fail(error, error_len, "unsupported tensor matvec type");
+    if (!scratch)
+        return full_fail(error, error_len, "missing tensor row scratch");
+    if (scratch == input)
+        return full_fail(error, error_len,
+                         "quantized tensor row scratch aliases input");
     if (!q38_quant_dequantize_row(
             tensor->type, (const unsigned char *)data + row * row_bytes,
             cols / Q38_QUANT_QK_K, scratch, cols, error, error_len))
@@ -820,20 +833,44 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
     }
     for (size_t t = 0; t < tokens; ++t) {
         const float *x = input + t * Q38_GR_HIDDEN;
-        float probs[Q38_MOE_EXPERTS];
-        float max_logit = -INFINITY;
+        const q38_forward_dtype router_dtype =
+            weights.router->type == 30 ? Q38_FORWARD_BF16
+                                        : Q38_FORWARD_F32;
+        float logits_pre_cast[Q38_MOE_EXPERTS];
+        float logits_effective[Q38_MOE_EXPERTS];
+        float probs_pre_cast[Q38_MOE_EXPERTS];
+        float probs_effective[Q38_MOE_EXPERTS];
+        float max_pre_cast = -INFINITY;
+        float max_effective = -INFINITY;
         for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
             if (!full_row_dot(model, weights.router, e, x, Q38_GR_HIDDEN,
-                              scratch, &probs[e], error, error_len))
+                              scratch, &logits_pre_cast[e], error, error_len))
                 goto fail;
-            if (probs[e] > max_logit) max_logit = probs[e];
+            logits_effective[e] = full_cast_forward_dtype(
+                logits_pre_cast[e], router_dtype);
+            if (logits_pre_cast[e] > max_pre_cast)
+                max_pre_cast = logits_pre_cast[e];
+            if (logits_effective[e] > max_effective)
+                max_effective = logits_effective[e];
         }
-        float sum = 0.0f;
+        if (diagnostics && diagnostics->router_trace &&
+            !diagnostics->router_trace(layer_number, logits_effective,
+                                       Q38_MOE_EXPERTS,
+                                       diagnostics->trace_user, error,
+                                       error_len))
+            goto fail;
+        float sum_pre_cast = 0.0f, sum_effective = 0.0f;
         for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
-            probs[e] = expf(probs[e] - max_logit);
-            sum += probs[e];
+            probs_pre_cast[e] = expf(logits_pre_cast[e] - max_pre_cast);
+            probs_effective[e] =
+                expf(logits_effective[e] - max_effective);
+            sum_pre_cast += probs_pre_cast[e];
+            sum_effective += probs_effective[e];
         }
-        for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) probs[e] /= sum;
+        for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
+            probs_pre_cast[e] /= sum_pre_cast;
+            probs_effective[e] /= sum_effective;
+        }
         q38_moe_route10 route;
         for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
             size_t best = Q38_MOE_EXPERTS;
@@ -842,18 +879,45 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                 for (size_t j = 0; j < k; ++j)
                     used |= route.expert[j] == e;
                 if (!used && (best == Q38_MOE_EXPERTS ||
-                              probs[e] > probs[best] ||
-                              (probs[e] == probs[best] && e < best)))
+                              probs_pre_cast[e] > probs_pre_cast[best] ||
+                              (probs_pre_cast[e] == probs_pre_cast[best] &&
+                               e < best)))
                     best = e;
             }
             route.expert[k] = (uint16_t)best;
-            route.weight[k] = probs[best];
+            route.weight[k] = probs_effective[best];
         }
         float selected_sum = 0.0f;
         for (size_t k = 0; k < Q38_MOE_TOP_K; ++k)
             selected_sum += route.weight[k];
+        float selected_weights_pre_cast[Q38_MOE_TOP_K];
+        float selected_weights_effective[Q38_MOE_TOP_K];
         for (size_t k = 0; k < Q38_MOE_TOP_K; ++k)
-            route.weight[k] /= selected_sum;
+            selected_weights_pre_cast[k] = route.weight[k] / selected_sum;
+        for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
+            selected_weights_effective[k] = full_cast_forward_dtype(
+                selected_weights_pre_cast[k], router_dtype);
+            route.weight[k] = selected_weights_effective[k];
+        }
+        uint16_t top15_rank[15];
+        float top15_value[15];
+        for (size_t rank = 0; rank < 15; ++rank) {
+            size_t best = Q38_MOE_EXPERTS;
+            for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
+                bool used = false;
+                for (size_t j = 0; j < rank; ++j)
+                    used |= top15_rank[j] == e;
+                if (!used && (best == Q38_MOE_EXPERTS ||
+                              probs_effective[e] > probs_effective[best] ||
+                              (probs_effective[e] == probs_effective[best] &&
+                               e < best)))
+                    best = e;
+            }
+            top15_rank[rank] = (uint16_t)best;
+            top15_value[rank] = probs_effective[best];
+        }
+        const float margin_rank10_rank11 =
+            top15_value[9] - top15_value[10];
         if (diagnostics && diagnostics->route_trace &&
             !diagnostics->route_trace(layer_number, route.expert, route.weight,
                                       Q38_MOE_TOP_K,
@@ -882,6 +946,30 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                 goto fail;
             for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
                 output[t * Q38_GR_HIDDEN + d] += route.weight[k] * routed[d];
+        }
+        if (layer_number == 2 && diagnostics && diagnostics->moe_trace) {
+            const q38_moe_trace trace = {
+                .router_input = x,
+                .router_input_count = Q38_GR_HIDDEN,
+                .router_logits_pre_cast = logits_pre_cast,
+                .router_logits_effective = logits_effective,
+                .router_logits_count = Q38_MOE_EXPERTS,
+                .top15_rank = top15_rank,
+                .top15_value = top15_value,
+                .top15_count = 15,
+                .margin_rank10_rank11 = margin_rank10_rank11,
+                .selected_experts = route.expert,
+                .selected_weights_pre_cast = selected_weights_pre_cast,
+                .selected_weights_effective = selected_weights_effective,
+                .selected_count = Q38_MOE_TOP_K,
+                .routed_output = output + t * Q38_GR_HIDDEN,
+                .routed_output_count = Q38_GR_HIDDEN,
+                .router_dtype = router_dtype,
+            };
+            if (!diagnostics->moe_trace(layer_number, &trace,
+                                        diagnostics->trace_user, error,
+                                        error_len))
+                goto fail;
         }
         if (!full_matvec(model, weights.shared_gate_proj, x, 640,
                          Q38_GR_HIDDEN, gate, scratch, error, error_len) ||

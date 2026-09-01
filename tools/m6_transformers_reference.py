@@ -45,6 +45,7 @@ def stats(values: torch.Tensor) -> dict:
     finite_values = flat[finite]
     nan_count = int(torch.isnan(flat).sum())
     inf_count = int(torch.isinf(flat).sum())
+    finite_count = int(finite.sum())
     raw = flat.numpy().tobytes()
     digest = hashlib.sha256(raw).hexdigest()
     if finite_values.numel():
@@ -53,8 +54,13 @@ def stats(values: torch.Tensor) -> dict:
         mean = float(finite_values.mean())
         rms = float(torch.sqrt(torch.mean(finite_values * finite_values)))
         max_abs = float(torch.max(torch.abs(finite_values)))
+        finite_indices = torch.where(finite)[0]
+        min_index = int(finite_indices[torch.argmin(finite_values)])
+        max_index = int(finite_indices[torch.argmax(finite_values)])
+        max_abs_index = int(finite_indices[torch.argmax(torch.abs(finite_values))])
     else:
         minimum = maximum = mean = rms = max_abs = None
+        min_index = max_index = max_abs_index = None
     fixed = [
         {"index": i, "value": float(flat[i]) if i < flat.numel() else None}
         for i in FIXED
@@ -65,6 +71,10 @@ def stats(values: torch.Tensor) -> dict:
         "mean": mean,
         "rms": rms,
         "max_abs": max_abs,
+        "finite_count": finite_count,
+        "min_index": min_index,
+        "max_index": max_index,
+        "max_abs_index": max_abs_index,
         "nan_count": nan_count,
         "inf_count": inf_count,
         "checksum": digest,
@@ -241,6 +251,7 @@ def main() -> None:
     stages = []
     routing = []
     qsa_selection = []
+    layer2_moe_trace = None
 
     for layer_index in range(config.num_hidden_layers):
         print(f"reference layer {layer_index}", flush=True)
@@ -251,6 +262,16 @@ def main() -> None:
             captured["router"] = output
 
         hook = layer.mlp.gate.register_forward_hook(capture)
+        moe_input_hook = layer.mlp.register_forward_pre_hook(
+            lambda _module, inputs: captured.__setitem__(
+                "moe_input", inputs[0].detach()
+            )
+        )
+        routed_output_hook = layer.mlp.experts.register_forward_hook(
+            lambda _module, _inputs, output: captured.__setitem__(
+                "routed_output", output.detach()
+            )
+        )
         qsa_hook = None
         if layer.layer_type != "linear_attention":
             def capture_qsa(_module, _inputs, output):
@@ -267,6 +288,8 @@ def main() -> None:
                 ple_input_ids=input_ids,
             )
         hook.remove()
+        moe_input_hook.remove()
+        routed_output_hook.remove()
         if qsa_hook is not None:
             qsa_hook.remove()
         router = captured.get("router")
@@ -282,22 +305,57 @@ def main() -> None:
                 .float()
                 .cpu()
                 .tolist(),
+                "logits_top": top_k(router[0].reshape(-1)),
             }
         )
+        if layer_index == 2:
+            moe_input = captured["moe_input"].reshape(-1, config.hidden_size)
+            effective_logits = router[0].reshape(-1).float()
+            pre_cast_logits = torch.nn.functional.linear(
+                moe_input.float(), layer.mlp.gate.weight.float()
+            ).reshape(-1)
+            effective_probs = torch.softmax(effective_logits, dim=-1)
+            selected = router[2].reshape(-1)
+            selected_pre_cast = effective_probs.index_select(0, selected)
+            selected_pre_cast = selected_pre_cast / selected_pre_cast.sum()
+            selected_effective = router[1].reshape(-1).float()
+            order = sorted(
+                range(config.num_experts),
+                key=lambda i: (-float(effective_probs[i]), i),
+            )
+            layer2_moe_trace = {
+                "router_input": moe_input[0].cpu().tolist(),
+                "router_logits_pre_cast": pre_cast_logits.cpu().tolist(),
+                "router_logits_effective": effective_logits.cpu().tolist(),
+                "top15_rank": [
+                    {"rank": rank + 1, "expert": expert,
+                     "value": float(effective_probs[expert])}
+                    for rank, expert in enumerate(order[:15])
+                ],
+                "margin_rank10_rank11": float(
+                    effective_probs[order[9]] - effective_probs[order[10]]
+                ),
+                "selected_experts": selected.cpu().tolist(),
+                "selected_weights_pre_cast": selected_pre_cast.cpu().tolist(),
+                "selected_weights_effective": selected_effective.cpu().tolist(),
+                "routed_output": captured["routed_output"].reshape(-1)[0:config.hidden_size]
+                .cpu()
+                .tolist(),
+                "router_dtype": str(router[0].dtype).replace("torch.", ""),
+            }
         if "qsa" in captured:
             visible = captured["qsa"][0, 0, 0].bool().cpu()
             qsa_selection.append(
                 {"layer": layer_index, "selected": torch.where(visible)[0].tolist()}
             )
-        if layer_index in {0, 3, 7, 15, 31, 47}:
-            stages.append(
-                {
-                    "stage": "layer",
-                    "layer": layer_index,
-                    "width": hidden.shape[-1],
-                    "stats": stats(hidden),
-                }
-            )
+        stages.append(
+            {
+                "stage": "layer",
+                "layer": layer_index,
+                "width": hidden.shape[-1],
+                "stats": stats(hidden),
+            }
+        )
         del layer, router
         torch.cuda.empty_cache()
 
@@ -331,13 +389,14 @@ def main() -> None:
         }
     )
     report = {
-        "format": "q38-m6-transformers-reference-v1",
+        "format": "q38-m6-transformers-reference-v3",
         "reference": "official Transformers Qwen4Exp implementation",
         "model_dir": str(args.model_dir),
         "tokens": tokens,
         "stages": stages,
         "routing": routing,
         "qsa_selection": qsa_selection,
+        "layer2_moe_trace": layer2_moe_trace,
         "status": "pass"
         if all(
             stage["stats"]["nan_count"] == 0 and stage["stats"]["inf_count"] == 0

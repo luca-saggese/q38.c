@@ -18,6 +18,20 @@ typedef struct {
     uint16_t routed[Q38_MODEL_LAYERS][Q38_MOE_TOP_K];
     float route_weights[Q38_MODEL_LAYERS][Q38_MOE_TOP_K];
     size_t route_count[Q38_MODEL_LAYERS];
+    float router_logits[Q38_MODEL_LAYERS][Q38_MOE_EXPERTS];
+    size_t router_count[Q38_MODEL_LAYERS];
+    bool moe_trace_valid;
+    float router_input[Q38_MOE_HIDDEN];
+    float router_logits_pre_cast[Q38_MOE_EXPERTS];
+    float router_logits_effective[Q38_MOE_EXPERTS];
+    uint16_t top15_rank[15];
+    float top15_value[15];
+    float selected_weights_pre_cast[Q38_MOE_TOP_K];
+    float selected_weights_effective[Q38_MOE_TOP_K];
+    uint16_t selected_experts[Q38_MOE_TOP_K];
+    float routed_output[Q38_MOE_HIDDEN];
+    float margin_rank10_rank11;
+    q38_forward_dtype router_dtype;
     uint32_t qsa_selected[Q38_MODEL_LAYERS][2051];
     size_t qsa_count[Q38_MODEL_LAYERS];
 } trace_context;
@@ -43,7 +57,8 @@ static uint64_t checksum(const float *values, size_t count) {
 static void write_stats(FILE *out, const float *values, size_t count) {
     double sum = 0.0, squares = 0.0;
     float minimum = INFINITY, maximum = -INFINITY, maximum_abs = 0.0f;
-    size_t nan_count = 0, inf_count = 0;
+    size_t minimum_index = 0, maximum_index = 0, maximum_abs_index = 0;
+    size_t finite_count = 0, nan_count = 0, inf_count = 0;
     for (size_t i = 0; i < count; ++i) {
         const float value = values[i];
         if (isnan(value)) {
@@ -54,9 +69,19 @@ static void write_stats(FILE *out, const float *values, size_t count) {
             ++inf_count;
             continue;
         }
-        if (value < minimum) minimum = value;
-        if (value > maximum) maximum = value;
-        if (fabsf(value) > maximum_abs) maximum_abs = fabsf(value);
+        ++finite_count;
+        if (value < minimum) {
+            minimum = value;
+            minimum_index = i;
+        }
+        if (value > maximum) {
+            maximum = value;
+            maximum_index = i;
+        }
+        if (fabsf(value) > maximum_abs) {
+            maximum_abs = fabsf(value);
+            maximum_abs_index = i;
+        }
         sum += value;
         squares += (double)value * value;
     }
@@ -64,12 +89,15 @@ static void write_stats(FILE *out, const float *values, size_t count) {
     json_float(out, minimum);
     fprintf(out, ",\"max\":");
     json_float(out, maximum);
-    fprintf(out, ",\"mean\":%.17g,\"rms\":%.17g,\"max_abs\":%.9g,"
+    fprintf(out, ",\"finite_count\":%zu,\"mean\":%.17g,\"rms\":%.17g,\"max_abs\":%.9g,"
+                "\"min_index\":%zu,\"max_index\":%zu,\"max_abs_index\":%zu,"
                 "\"nan_count\":%zu,\"inf_count\":%zu,\"checksum\":\"%016" PRIx64
                 "\"",
-            count ? sum / (double)count : NAN,
-            count ? sqrt(squares / (double)count) : NAN, maximum_abs,
-            nan_count, inf_count, checksum(values, count));
+            finite_count, finite_count ? sum / (double)finite_count : NAN,
+            finite_count ? sqrt(squares / (double)finite_count) : NAN,
+            maximum_abs,
+            minimum_index, maximum_index, maximum_abs_index, nan_count, inf_count,
+            checksum(values, count));
 }
 
 static void write_fixed(FILE *out, const float *values, size_t count) {
@@ -94,10 +122,6 @@ static bool trace(uint32_t layer, const float *hidden, size_t tokens,
     trace_context *context = opaque;
     if (!context || !context->out || tokens != 1 || !hidden)
         return false;
-    if (layer != UINT32_MAX &&
-        layer != 0 && layer != 3 && layer != 7 && layer != 15 &&
-        layer != 31 && layer != 47)
-        return true;
     FILE *out = context->out;
     fprintf(out, "%s{\"stage\":\"%s\",\"layer\":%u,\"width\":%zu,"
                 "\"elements\":%zu,\"stats\":{",
@@ -123,6 +147,54 @@ static bool route_trace(uint32_t layer, const uint16_t *experts,
     context->route_count[layer] = count;
     memcpy(context->routed[layer], experts, count * sizeof(*experts));
     memcpy(context->route_weights[layer], weights, count * sizeof(*weights));
+    (void)error;
+    (void)error_len;
+    return true;
+}
+
+static bool router_trace(uint32_t layer, const float *logits, size_t count,
+                         void *opaque, char *error, size_t error_len) {
+    trace_context *context = opaque;
+    if (!context || layer >= Q38_MODEL_LAYERS || count > Q38_MOE_EXPERTS)
+        return false;
+    context->router_count[layer] = count;
+    memcpy(context->router_logits[layer], logits, count * sizeof(*logits));
+    (void)error;
+    (void)error_len;
+    return true;
+}
+
+static bool moe_trace(uint32_t layer, const q38_moe_trace *trace,
+                      void *opaque, char *error, size_t error_len) {
+    trace_context *context = opaque;
+    if (!context || !trace || layer != 2 ||
+        trace->router_input_count != Q38_MOE_HIDDEN ||
+        trace->router_logits_count != Q38_MOE_EXPERTS ||
+        trace->top15_count != 15 ||
+        trace->selected_count != Q38_MOE_TOP_K ||
+        trace->routed_output_count != Q38_MOE_HIDDEN)
+        return false;
+    memcpy(context->router_input, trace->router_input,
+           sizeof(context->router_input));
+    memcpy(context->router_logits_pre_cast, trace->router_logits_pre_cast,
+           sizeof(context->router_logits_pre_cast));
+    memcpy(context->router_logits_effective, trace->router_logits_effective,
+           sizeof(context->router_logits_effective));
+    memcpy(context->top15_rank, trace->top15_rank, sizeof(context->top15_rank));
+    memcpy(context->top15_value, trace->top15_value,
+           sizeof(context->top15_value));
+    memcpy(context->selected_experts, trace->selected_experts,
+           sizeof(context->selected_experts));
+    memcpy(context->selected_weights_pre_cast, trace->selected_weights_pre_cast,
+           sizeof(context->selected_weights_pre_cast));
+    memcpy(context->selected_weights_effective,
+           trace->selected_weights_effective,
+           sizeof(context->selected_weights_effective));
+    memcpy(context->routed_output, trace->routed_output,
+           sizeof(context->routed_output));
+    context->margin_rank10_rank11 = trace->margin_rank10_rank11;
+    context->router_dtype = trace->router_dtype;
+    context->moe_trace_valid = true;
     (void)error;
     (void)error_len;
     return true;
@@ -198,6 +270,94 @@ static void write_decisions(FILE *out, const trace_context *context) {
         fputs("]}", out);
     }
     fputs("]", out);
+    fputs(",\n\"router_logits\":[", out);
+    first = true;
+    for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
+        if (!context->router_count[layer]) continue;
+        if (!first) fputc(',', out);
+        first = false;
+        fprintf(out, "{\"layer\":%zu,\"top\":[", layer);
+        size_t order[Q38_MOE_EXPERTS];
+        for (size_t i = 0; i < context->router_count[layer]; ++i)
+            order[i] = i;
+        for (size_t i = 1; i < context->router_count[layer]; ++i) {
+            size_t at = i;
+            size_t candidate = order[i];
+            while (at > 0) {
+                size_t previous = order[at - 1];
+                if (context->router_logits[layer][previous] >
+                        context->router_logits[layer][candidate] ||
+                    (context->router_logits[layer][previous] ==
+                         context->router_logits[layer][candidate] &&
+                     previous < candidate))
+                    break;
+                order[at] = order[at - 1];
+                --at;
+            }
+            order[at] = candidate;
+        }
+        const size_t top_count = context->router_count[layer] < 10
+            ? context->router_count[layer] : 10;
+        for (size_t i = 0; i < top_count; ++i) {
+            if (i) fputc(',', out);
+            fprintf(out, "{\"id\":%zu,\"value\":", order[i]);
+            json_float(out, context->router_logits[layer][order[i]]);
+            fputc('}', out);
+        }
+        fputs("]}", out);
+    }
+    fputs("]", out);
+    if (context->moe_trace_valid) {
+        fputs(",\n\"layer2_moe_trace\":{\"router_dtype\":\"", out);
+        fputs(context->router_dtype == Q38_FORWARD_BF16 ? "bf16" : "f32",
+              out);
+        fputs("\",\"router_input\":[", out);
+        for (size_t i = 0; i < Q38_MOE_HIDDEN; ++i) {
+            if (i) fputc(',', out);
+            json_float(out, context->router_input[i]);
+        }
+        fputs("],\"router_logits_pre_cast\":[", out);
+        for (size_t i = 0; i < Q38_MOE_EXPERTS; ++i) {
+            if (i) fputc(',', out);
+            json_float(out, context->router_logits_pre_cast[i]);
+        }
+        fputs("],\"router_logits_effective\":[", out);
+        for (size_t i = 0; i < Q38_MOE_EXPERTS; ++i) {
+            if (i) fputc(',', out);
+            json_float(out, context->router_logits_effective[i]);
+        }
+        fputs("],\"top15_rank\":[", out);
+        for (size_t i = 0; i < 15; ++i) {
+            if (i) fputc(',', out);
+            fprintf(out, "{\"rank\":%zu,\"expert\":%u,\"value\":",
+                    i + 1, context->top15_rank[i]);
+            json_float(out, context->top15_value[i]);
+            fputc('}', out);
+        }
+        fputs("],\"margin_rank10_rank11\":", out);
+        json_float(out, context->margin_rank10_rank11);
+        fputs(",\"selected_experts\":[", out);
+        for (size_t i = 0; i < Q38_MOE_TOP_K; ++i) {
+            if (i) fputc(',', out);
+            fprintf(out, "%u", context->selected_experts[i]);
+        }
+        fputs("],\"selected_weights_pre_cast\":[", out);
+        for (size_t i = 0; i < Q38_MOE_TOP_K; ++i) {
+            if (i) fputc(',', out);
+            json_float(out, context->selected_weights_pre_cast[i]);
+        }
+        fputs("],\"selected_weights_effective\":[", out);
+        for (size_t i = 0; i < Q38_MOE_TOP_K; ++i) {
+            if (i) fputc(',', out);
+            json_float(out, context->selected_weights_effective[i]);
+        }
+        fputs("],\"routed_output\":[", out);
+        for (size_t i = 0; i < Q38_MOE_HIDDEN; ++i) {
+            if (i) fputc(',', out);
+            json_float(out, context->routed_output[i]);
+        }
+        fputs("]}", out);
+    }
 }
 
 int main(int argc, char **argv) {
@@ -231,7 +391,7 @@ int main(int argc, char **argv) {
         q38_gguf_close(model);
         return 1;
     }
-    fputs("{\"format\":\"q38-m6-full-trace-v2\",\"tokens\":[9419],"
+    fputs("{\"format\":\"q38-m6-full-trace-v4\",\"tokens\":[9419],"
           "\"stages\":[\n",
           out);
     trace_context context = {.out = out, .first = true};
@@ -239,6 +399,8 @@ int main(int argc, char **argv) {
     memset(&diagnostics, 0, sizeof(diagnostics));
     diagnostics.trace = trace;
     diagnostics.route_trace = route_trace;
+    diagnostics.router_trace = router_trace;
+    diagnostics.moe_trace = moe_trace;
     diagnostics.qsa_trace = qsa_trace;
     diagnostics.trace_user = &context;
     float *logits = calloc(248320, sizeof(float));

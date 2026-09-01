@@ -694,6 +694,10 @@ $(TEST_DIR)/m6_real_forward: $(TEST_DIR)/m6_real_forward.c \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
+m6-trace-stats:
+	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
+		$(M6_PYTHON) tests/test_m6_trace_stats.py
+
 m6-c07: m6-c06 $(TEST_DIR)/test_m6_dispatch
 	@./$(TEST_DIR)/test_m6_dispatch
 	@printf '%s\n' '{"gate":"M6-C07","path":"stable token-major routed pair dispatch and weighted combine","status":"pass"}' > artifacts/m6/dispatch_combine_goldens.json
@@ -727,7 +731,7 @@ m6-preflight: m6-c11
 		--summary $(M6_PREFLIGHT_SUMMARY)
 	@cat $(M6_PREFLIGHT_SUMMARY)
 
-m6-c12: m6-preflight
+m6-c12: m6-preflight m6-trace-stats
 	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api \
 		$(TEST_DIR)/m6_real_forward
 	@./$(TEST_DIR)/test_m6_forward_api
