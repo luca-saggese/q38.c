@@ -148,6 +148,61 @@ __global__ static void gdn_repeat_key_kernel(const float *key, size_t tokens,
                        key_head * Q38_GDN_HEAD_DIM + dimension];
 }
 
+/*
+ * One thread owns one value head so every token's decay, prediction, update,
+ * and read are completed in reference order before that thread advances.
+ * This intentionally favors a transparent FP32 baseline over throughput.
+ */
+__global__ static void gdn_recurrence_kernel(
+    float *state, size_t tokens, const float *q, const float *k,
+    const float *v, const float *decay, const float *beta, float scale,
+    float *output) {
+    const size_t head = threadIdx.x;
+    const size_t head_stride = (size_t)Q38_GDN_HEAD_DIM;
+    const size_t state_stride = head_stride * head_stride;
+    float delta[Q38_GDN_HEAD_DIM];
+    float *matrix = state + head * state_stride;
+
+    for (size_t token = 0; token < tokens; token++) {
+        const float decay_head = decay[token * Q38_GDN_VALUE_HEADS + head];
+        const float beta_head = beta[token * Q38_GDN_VALUE_HEADS + head];
+        const float *q_head =
+            q + token * Q38_GDN_VALUE_CHANNELS + head * head_stride;
+        const float *k_head =
+            k + token * Q38_GDN_VALUE_CHANNELS + head * head_stride;
+        const float *v_head =
+            v + token * Q38_GDN_VALUE_CHANNELS + head * head_stride;
+        float *output_head =
+            output + token * Q38_GDN_VALUE_CHANNELS + head * head_stride;
+
+        for (size_t row = 0; row < head_stride; row++) {
+            float *state_row = matrix + row * head_stride;
+            for (size_t column = 0; column < head_stride; column++)
+                state_row[column] *= decay_head;
+        }
+
+        for (size_t column = 0; column < head_stride; column++) {
+            float prediction = 0.0f;
+            for (size_t row = 0; row < head_stride; row++)
+                prediction += matrix[row * head_stride + column] * k_head[row];
+            delta[column] = (v_head[column] - prediction) * beta_head;
+        }
+
+        for (size_t row = 0; row < head_stride; row++) {
+            float *state_row = matrix + row * head_stride;
+            for (size_t column = 0; column < head_stride; column++)
+                state_row[column] += k_head[row] * delta[column];
+        }
+
+        for (size_t column = 0; column < head_stride; column++) {
+            float value = 0.0f;
+            for (size_t row = 0; row < head_stride; row++)
+                value += matrix[row * head_stride + column] * q_head[row];
+            output_head[column] = scale * value;
+        }
+    }
+}
+
 static void set_error(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
 }
@@ -302,6 +357,51 @@ extern "C" bool q38_cuda_gdn_repeat_key_heads(
     if (status != cudaSuccess) {
         if (error && error_len)
             snprintf(error, error_len, "GDN head-repeat launch failed: %s",
+                     cudaGetErrorString(status));
+        return false;
+    }
+    return true;
+}
+
+extern "C" bool q38_cuda_gdn_recurrence(
+    float *state, size_t tokens, const float *q, const float *k,
+    const float *v, const float *decay, const float *beta, float scale,
+    float *output, cudaStream_t stream, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!state || !tokens || !q || !k || !v || !decay || !beta || !output ||
+        tokens > SIZE_MAX / Q38_GDN_VALUE_CHANNELS ||
+        tokens > SIZE_MAX / Q38_GDN_VALUE_HEADS) {
+        set_error(error, error_len, "invalid GDN recurrence arguments");
+        return false;
+    }
+    gdn_recurrence_kernel<<<1, Q38_GDN_VALUE_HEADS, 0, stream>>>(
+        state, tokens, q, k, v, decay, beta, scale, output);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) {
+        if (error && error_len)
+            snprintf(error, error_len, "GDN recurrence launch failed: %s",
+                     cudaGetErrorString(status));
+        return false;
+    }
+    return true;
+}
+
+extern "C" bool q38_cuda_gdn_recurrence_reset(float *state,
+                                               cudaStream_t stream,
+                                               char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!state) {
+        set_error(error, error_len, "invalid GDN recurrence reset state");
+        return false;
+    }
+    cudaError_t status = cudaMemsetAsync(
+        state, 0,
+        (size_t)Q38_GDN_VALUE_HEADS * Q38_GDN_HEAD_DIM * Q38_GDN_HEAD_DIM *
+            sizeof(float),
+        stream);
+    if (status != cudaSuccess) {
+        if (error && error_len)
+            snprintf(error, error_len, "GDN recurrence reset failed: %s",
                      cudaGetErrorString(status));
         return false;
     }

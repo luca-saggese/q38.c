@@ -89,6 +89,21 @@ bool q38_cuda_gdn_repeat_key_heads(const float *key, size_t tokens,
                                    float *value, cudaStream_t stream,
                                    char *error, size_t error_len);
 
+/*
+ * Apply the scalar reference recurrence to one sequence.  State is the
+ * contiguous logical [sequence=1, value_head, row, column] FP32 region.
+ * q/k/v are token-major [tokens, value_head, dimension], decay and beta are
+ * token-major [tokens, value_head], and output has the q/k/v shape.
+ */
+bool q38_cuda_gdn_recurrence(
+    float *state, size_t tokens, const float *q, const float *k,
+    const float *v, const float *decay, const float *beta, float scale,
+    float *output, cudaStream_t stream, char *error, size_t error_len);
+
+/* Asynchronously clear the logical single-sequence FP32 recurrent state. */
+bool q38_cuda_gdn_recurrence_reset(float *state, cudaStream_t stream,
+                                    char *error, size_t error_len);
+
 #ifdef __cplusplus
 }
 #endif
