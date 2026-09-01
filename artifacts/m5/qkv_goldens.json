@@ -1,0 +1,1 @@
+{"gate":"M5-C03","implementation":"naive CUDA BF16 Q/K/V projection plus partial interleaved mRoPE","selection":"not present","reference":"scalar RoPE and deterministic device projection","status":"pass"}

@@ -1,0 +1,33 @@
+#ifndef Q38_QSA_CUDA_H
+#define Q38_QSA_CUDA_H
+
+#include <cuda_runtime_api.h>
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+bool q38_qsa_cuda_project_main(const uint16_t *q_proj, size_t q_rows,
+                               const uint16_t *k_proj, size_t k_rows,
+                               const uint16_t *v_proj, size_t v_rows,
+                               size_t cols, const float *device_input,
+                               size_t token_count, float *device_q,
+                               float *device_k, float *device_v,
+                               cudaStream_t stream, char *error,
+                               size_t error_len);
+
+bool q38_qsa_cuda_apply_rope(float *device_tensor, size_t token_count,
+                             size_t head_count, size_t head_dim,
+                             size_t rotary_dims, int64_t position,
+                             const uint32_t sections[4], cudaStream_t stream,
+                             char *error, size_t error_len);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
