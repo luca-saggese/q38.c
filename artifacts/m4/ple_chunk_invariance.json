@@ -1,0 +1,1 @@
+{"gate":"M4-C07","harness":"test_ple_chunking","cases":"independent M4-C06 golden corpus","partitions":["single","one-token","two-tail","three-five-tail","four-token","random-seed-1","random-seed-2"],"ids":"exact","hidden_logits":"unavailable; full model forward not implemented","status":"pass"}

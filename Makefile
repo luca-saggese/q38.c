@@ -49,7 +49,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
-	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06
+	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07
 
 all: spark
 
@@ -213,6 +213,17 @@ $(TEST_DIR)/q38_forward_probe: q38_forward_probe.c q38_ple_ref.o \
 m4-c06: m4-c05 $(M4_C06_GOLDEN) $(TEST_DIR)/q38_forward_probe
 	@./$(TEST_DIR)/q38_forward_probe $(M4_C06_GOLDEN)
 	@printf '%s\n' '{"gate":"M4-C06","probe":"q38_forward_probe","golden":"ple_injection_golden.json","coverage":"PLE IDs and exact injection boundary metadata","hidden_vectors":"unavailable; full model forward not implemented","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_injection_probe.json
+
+$(TEST_DIR)/test_ple_chunking: $(TEST_DIR)/test_ple_chunking.c \
+		q38_ple_ref.o q38_session.o q38_quant.o q38_ple_ref.h \
+		q38_session.h q38_quant.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_ple_chunking.c \
+		q38_ple_ref.o q38_session.o q38_quant.o
+
+m4-c07: m4-c06 $(TEST_DIR)/test_ple_chunking
+	@./$(TEST_DIR)/test_ple_chunking $(M4_C06_GOLDEN)
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	@printf '%s\n' '{"gate":"M4-C07","harness":"test_ple_chunking","cases":"independent M4-C06 golden corpus","partitions":["single","one-token","two-tail","three-five-tail","four-token","random-seed-1","random-seed-2"],"ids":"exact","hidden_logits":"unavailable; full model forward not implemented","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_chunk_invariance.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -729,5 +740,6 @@ clean:
 		$(TEST_DIR)/test_m4_ple_row \
 		$(TEST_DIR)/test_m4_ple_cuda \
 		$(TEST_DIR)/q38_forward_probe \
+		$(TEST_DIR)/test_ple_chunking \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
