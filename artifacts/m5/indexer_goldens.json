@@ -1,0 +1,1 @@
+{"gate":"M5-C04","implementation":"scalar QSA block pooling and index scoring","compression_ratio":4,"scoring":"ReLU per indexer head then sum","tail":"incomplete final block retained","status":"pass"}

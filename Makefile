@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04
 
 all: spark
 
@@ -338,6 +338,18 @@ $(TEST_DIR)/test_m5_qsa_cuda: $(TEST_DIR)/test_m5_qsa_cuda.cu \
 m5-c03: m5-c02 $(TEST_DIR)/test_m5_qsa_cuda
 	@./$(TEST_DIR)/test_m5_qsa_cuda
 	@printf '%s\n' '{"gate":"M5-C03","implementation":"naive CUDA BF16 Q/K/V projection plus partial interleaved mRoPE","selection":"not present","reference":"scalar RoPE and deterministic device projection","status":"pass"}' > artifacts/m5/qkv_goldens.json
+
+q38_qsa_ref.o: q38_qsa_ref.c q38_qsa_ref.h
+	$(CC) $(CFLAGS) -c -o $@ q38_qsa_ref.c
+
+$(TEST_DIR)/test_m5_qsa_ref: $(TEST_DIR)/test_m5_qsa_ref.c \
+		q38_qsa_ref.o q38_qsa_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_ref.c \
+		q38_qsa_ref.o -lm
+
+m5-c04: m5-c03 $(TEST_DIR)/test_m5_qsa_ref
+	@./$(TEST_DIR)/test_m5_qsa_ref
+	@printf '%s\n' '{"gate":"M5-C04","implementation":"scalar QSA block pooling and index scoring","compression_ratio":4,"scoring":"ReLU per indexer head then sum","tail":"incomplete final block retained","status":"pass"}' > artifacts/m5/indexer_goldens.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -862,5 +874,6 @@ clean:
 		$(TEST_DIR)/test_m5_qsa_binding \
 		$(TEST_DIR)/test_m5_rope_ref \
 		$(TEST_DIR)/test_m5_qsa_cuda \
+		$(TEST_DIR)/test_m5_qsa_ref \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
