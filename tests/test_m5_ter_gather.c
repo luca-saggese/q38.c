@@ -30,6 +30,7 @@ int main(int argc, char **argv) {
     if (!out) return 2;
     fprintf(out, "{\"cases\":[");
     const size_t cases[] = {1,2,4,8,16,32,64,128,256,384,512,768,1024,2048,4096};
+    size_t measured_threshold = 0;
     for (size_t c = 0; c < sizeof(cases)/sizeof(cases[0]); ++c) {
         size_t count = cases[c];
         for (size_t i = 0; i < count; ++i) ids[i] = (i * 17) % rows;
@@ -49,11 +50,14 @@ int main(int argc, char **argv) {
         clock_gettime(CLOCK_MONOTONIC, &b);
         double parallel_us = elapsed(&a, &b);
         if (memcmp(direct, parallel, count * row_bytes) != 0) return 1;
+        if (!measured_threshold && parallel_us <= direct_us)
+            measured_threshold = count;
         fprintf(out, "%s{\"unique_rows\":%zu,\"direct_us\":%.3f,\"parallel_us\":%.3f,\"bytes\":%zu,\"deduplicated\":%" PRIu64 "}",
                 c ? "," : "", count, direct_us, parallel_us, count * row_bytes,
                 ps.deduplicated_rows);
     }
-    fprintf(out, "],\"status\":\"pass\",\"threshold_policy\":\"measured; default 512 only when no tuning is supplied\"}\n");
+    fprintf(out, "],\"status\":\"pass\",\"measured_threshold\":%zu,\"threshold_policy\":\"measured; default 512 only when no tuning is supplied\"}\n",
+            measured_threshold);
     fclose(out);
     free(payload); free(direct); free(parallel); free(ids);
     puts("test_m5_ter_gather: direct/parallel row bytes are equivalent");
