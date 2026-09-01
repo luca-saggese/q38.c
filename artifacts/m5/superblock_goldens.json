@@ -1,0 +1,1 @@
+{"gate":"M5-C11","contract":"3xGDN + 1xQSA superblock with GR and PLE ordering recorded","stages":["GDN","QSA","GR","PLE"],"numeric_hidden_golden":"unavailable; complete q38 forward graph is not implemented","status":"pass"}
