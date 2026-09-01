@@ -1,0 +1,1 @@
+{"gate":"M6-C05","kernel":"naive Q2 routed expert matvec","dequant":"per-block Q2_K on device","global_dequant_mirror":false,"status":"pass"}

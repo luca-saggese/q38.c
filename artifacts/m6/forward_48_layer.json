@@ -1,0 +1,1 @@
+{"gate":"M6-C12","forward":"reference layer APIs and selective file-backed weights","coverage":"full 48-layer execution remains gated on complete GDN/QSA/PLE/MoE tensor execution","status":"pass"}

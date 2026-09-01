@@ -1,0 +1,1 @@
+{"gate":"M6-C09","ubatch":"1..64 plus mandatory tail sizes through 1017","route_buffer":"single max-width allocation with stable token order","status":"pass"}
