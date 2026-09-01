@@ -1,1 +1,1 @@
-{"gate":"M6-C15","memory_perf":"reference allocation and route statistics APIs available; GB10 end-to-end benchmark deferred until full model path","status":"pass"}
+{"status": "blocked", "reason": "M6 full 48-layer forward/decode is not implemented; see forward_48_layer.json readiness evidence; no logits or continuation values claimed."}

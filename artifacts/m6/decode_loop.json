@@ -1,1 +1,1 @@
-{"gate":"M6-C13","decode":"MoE decode API preserves token_count=1 equations","status":"pass"}
+{"status": "blocked", "reason": "M6 full 48-layer forward/decode is not implemented; see forward_48_layer.json readiness evidence; no logits or continuation values claimed."}

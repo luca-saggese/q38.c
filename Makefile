@@ -678,7 +678,8 @@ m6-c11: m6-c10 $(TEST_DIR)/test_m5_integrated_forward
 	@printf '%s\n' '{"gate":"M6-C11","superblock":"GDN/QSA/PLE stage graph plus MoE boundary","golden":"stage-level only; no fabricated full hidden/logit vectors","status":"pass"}' > artifacts/m6/superblock.json
 
 m6-c12: m6-c11
-	@printf '%s\n' '{"gate":"M6-C12","forward":"reference layer APIs and selective file-backed weights","coverage":"full 48-layer execution remains gated on complete GDN/QSA/PLE/MoE tensor execution","status":"pass"}' > artifacts/m6/forward_48_layer.json
+	@python3 tools/m6_forward_readiness.py --model-dir $(MODEL_DIR) \
+		--output artifacts/m6/forward_48_layer.json
 
 m6-c13: m6-c12
 	@printf '%s\n' '{"gate":"M6-C13","decode":"MoE decode API preserves token_count=1 equations","status":"pass"}' > artifacts/m6/decode_loop.json

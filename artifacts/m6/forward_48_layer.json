@@ -1,1 +1,298 @@
-{"gate":"M6-C12","forward":"reference layer APIs and selective file-backed weights","coverage":"full 48-layer execution remains gated on complete GDN/QSA/PLE/MoE tensor execution","status":"pass"}
+{
+  "status": "fail",
+  "model_type": "Qwen4ExpForConditionalGeneration",
+  "layers": [
+    {
+      "layer": 0,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 1,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 2,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 3,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 4,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 5,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 6,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 7,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 8,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 9,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 10,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 11,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 12,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 13,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 14,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 15,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 16,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 17,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 18,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 19,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 20,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 21,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 22,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 23,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 24,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 25,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 26,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 27,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 28,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 29,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 30,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 31,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 32,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 33,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 34,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 35,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 36,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 37,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 38,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 39,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 40,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 41,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 42,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 43,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    },
+    {
+      "layer": 44,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 45,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 46,
+      "gdn": true,
+      "qsa": false,
+      "moe": true
+    },
+    {
+      "layer": 47,
+      "gdn": false,
+      "qsa": true,
+      "moe": true
+    }
+  ],
+  "checkpoint_bytes": 360000192888,
+  "full_forward_api": false,
+  "decode_api": false,
+  "reason": "q38 has layer-level QSA and MoE primitives but no complete 48-layer forward/decode implementation; no logits are claimed"
+}
