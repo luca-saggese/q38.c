@@ -10,6 +10,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model-dir", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
+    p.add_argument("--preflight", type=Path,
+                   default=Path("artifacts/m6/preflight.json"))
     args = p.parse_args()
     config = json.loads((args.model_dir / "config.json").read_text())
     text = config["text_config"]
@@ -27,8 +29,10 @@ def main():
     source = Path("q38_forward.c").read_text()
     has_full = "q38_forward_full" in source
     has_decode = Path("q38_decode.c").exists()
+    preflight = json.loads(args.preflight.read_text())
+    preflight_pass = preflight.get("status") == "pass"
     report = {
-        "status": "pass" if has_full and has_decode else "fail",
+        "status": "pass" if has_full and has_decode and preflight_pass else "fail",
         "model_type": config["architectures"][0],
         "layers": layers,
         "checkpoint_bytes": sum(
@@ -37,10 +41,18 @@ def main():
         ),
         "full_forward_api": has_full,
         "decode_api": has_decode,
-        "reason": None if has_full and has_decode else
-            "q38 has layer-level QSA and MoE primitives but no complete "
-            "48-layer forward/decode implementation; no logits are claimed",
+        "preflight": str(args.preflight),
+        "preflight_pass": preflight_pass,
+        "first_token_logits_verified": False,
+        "decode_verified": False,
+        "reason": None if has_full and has_decode and preflight_pass else
+            "complete 48-layer forward/decode APIs and a passing tensor "
+            "preflight are required; no logits are claimed",
     }
+    if report["status"] == "pass":
+        report["reason"] = (
+            "structural preflight passed; first-token hidden/logit goldens "
+            "still require a live full-model execution")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     if report["status"] != "pass":

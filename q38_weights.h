@@ -94,6 +94,11 @@ typedef struct {
 bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
                              q38_weights *out, char *error, size_t error_len);
 
+/* Validate that every tensor required by the complete execution graph is
+ * bound before a forward state or activation is allocated. */
+bool q38_weights_validate_bound(const q38_weights *weights, char *error,
+                                size_t error_len);
+
 /* Construct an O(1) uniform bank mapping for 512 experts. */
 bool q38_expert_store_init_uniform(q38_layer_expert_store *store,
                                    uint32_t qtype);

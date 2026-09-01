@@ -294,5 +294,9 @@
   "checkpoint_bytes": 360000192888,
   "full_forward_api": true,
   "decode_api": true,
-  "reason": null
+  "preflight": "artifacts/m6/preflight.json",
+  "preflight_pass": true,
+  "first_token_logits_verified": false,
+  "decode_verified": false,
+  "reason": "structural preflight passed; first-token hidden/logit goldens still require a live full-model execution"
 }

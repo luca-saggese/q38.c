@@ -44,6 +44,7 @@ M2_ARTIFACT_DIR := artifacts/m2
 M3_ARTIFACT_DIR := artifacts/m3
 M4_ARTIFACT_DIR := artifacts/m4
 M6_GOLDEN := artifacts/m6/checkpoint_minimal_goldens.json
+M6_PREFLIGHT := artifacts/m6/preflight.json
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -51,7 +52,7 @@ M6_GOLDEN := artifacts/m6/checkpoint_minimal_goldens.json
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-c12 m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance \
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-c12 m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance \
 	post-m5-bis post-m5-ter post-m5-supplement
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
@@ -701,17 +702,27 @@ m6-c11: m6-c10 $(TEST_DIR)/test_m5_integrated_forward
 	@./$(TEST_DIR)/test_m5_integrated_forward
 	@printf '%s\n' '{"gate":"M6-C11","superblock":"GDN/QSA/PLE stage graph plus MoE boundary","golden":"stage-level only; no fabricated full hidden/logit vectors","status":"pass"}' > artifacts/m6/superblock.json
 
-m6-c12: m6-c11
+m6-preflight: m6-c11
+	@test -f $(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf || \
+		{ echo "M6 preflight: complete bootstrap artifact is unavailable" >&2; exit 1; }
+	@python3 tools/q38_preflight.py --model-dir $(MODEL_DIR) \
+		--artifact $(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
+		--manifest tools/quant_manifest_q2.json --output $(M6_PREFLIGHT)
+
+m6-c12: m6-preflight
 	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api
 	@./$(TEST_DIR)/test_m6_forward_api
 	@python3 tools/m6_checkpoint_goldens.py --model-dir $(MODEL_DIR) \
 		--output $(M6_GOLDEN)
 	@python3 tools/m6_forward_readiness.py --model-dir $(MODEL_DIR) \
-		--output artifacts/m6/forward_48_layer.json
+		--output artifacts/m6/forward_48_layer.json --preflight $(M6_PREFLIGHT)
 
-m6-c13: m6-c12 $(TEST_DIR)/test_m6_forward_api
-	@./$(TEST_DIR)/test_m6_forward_api
-	@printf '%s\n' '{"gate":"M6-C13","decode_api":"q38_decode invokes q38_forward_full for one committed token and applies deterministic greedy selection","logits":"not claimed without a live full-model run","status":"pass"}' > artifacts/m6/decode_loop.json
+m6-c13: m6-c12
+	@test -f artifacts/m6/first_token_logits.json || \
+		{ echo "M6-C13 gated: first-token logits golden is required before decode" >&2; exit 1; }
+	@python3 -c 'import json; p=json.load(open("artifacts/m6/first_token_logits.json")); assert p.get("status") == "pass", "first-token logits golden is not passing"'
+	@printf '%s\n' '{"gate":"M6-C13","decode_api":"q38_decode runs after a passing first-token logits golden","status":"pass"}' > artifacts/m6/decode_loop.json
 
 $(TEST_DIR)/test_m6_session_contamination: $(TEST_DIR)/test_m6_session_contamination.c \
 		q38_qsa.o q38_session.o

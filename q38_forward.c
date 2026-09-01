@@ -1033,8 +1033,9 @@ bool q38_forward_state_init(q38_forward_state *state,
                             const q38_weights *weights, uint32_t eos_token,
                             char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
-    if (!state || !weights || weights->bound_layers != Q38_MODEL_LAYERS)
+    if (!state)
         return full_fail(error, error_len, "full forward requires 48 bound layers");
+    if (!q38_weights_validate_bound(weights, error, error_len)) return false;
     memset(state, 0, sizeof(*state));
     if (!q38_session_state_init(&state->storage.layout, 0, error, error_len) ||
         !q38_state_alloc(&state->storage.layout, &state->storage, error,
@@ -1152,9 +1153,9 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                       size_t error_len) {
     if (error && error_len) error[0] = '\0';
     if (!model || !weights || !state || !state->initialized || !tokens ||
-        !token_count || !logits || logits_stride < 248320 ||
-        weights->bound_layers != Q38_MODEL_LAYERS)
+        !token_count || !logits || logits_stride < 248320)
         return full_fail(error, error_len, "invalid full forward arguments");
+    if (!q38_weights_validate_bound(weights, error, error_len)) return false;
     if (token_count > SIZE_MAX / (4u * Q38_GR_HIDDEN) ||
         token_count > SIZE_MAX / Q38_FULL_QSA_SELECTED_STRIDE)
         return full_fail(error, error_len, "full forward token count overflows");

@@ -257,6 +257,29 @@ static bool validate_layer_complete(const q38_layer_weights *layer,
     return true;
 }
 
+bool q38_weights_validate_bound(const q38_weights *weights, char *error,
+                                size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!weights || weights->bound_layers != Q38_MODEL_LAYERS) {
+        set_error(error, error_len,
+                  "complete forward requires all 48 layers");
+        return false;
+    }
+    if (!weights->token_embd || !weights->output) {
+        set_error(error, error_len, "embedding/output tensor set is incomplete");
+        return false;
+    }
+    if (weights->global_tensor_count != 3) {
+        set_error(error, error_len, "global tensor set is incomplete");
+        return false;
+    }
+    for (uint32_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer)
+        if (!validate_layer_complete(&weights->layer[layer], layer, error,
+                                     error_len))
+            return false;
+    return true;
+}
+
 bool q38_expert_store_init_uniform(q38_layer_expert_store *store,
                                    uint32_t qtype) {
     if (!store) return false;
