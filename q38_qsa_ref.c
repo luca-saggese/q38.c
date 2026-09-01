@@ -89,6 +89,10 @@ bool q38_qsa_select_tokens_ref(const float *raw_keys, size_t token_count,
         if (end < begin || end - begin > token_count) {
             return fail(error, error_len, "QSA visible-cell range is invalid");
         }
+        for (size_t i = begin; i < end; ++i) {
+            if ((size_t)visible[i] >= token_count)
+                return fail(error, error_len, "QSA visible cell is out of range");
+        }
         const size_t visible_count = end - begin;
         const size_t complete = visible_count / ratio;
         const size_t group_budget = budget / ratio;
