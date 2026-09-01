@@ -53,12 +53,24 @@ int main(int argc, char **argv) {
     };
     float history[9u * 10240u] = {0};
     float contribution[4u * 10240u], after[4u * 10240u];
+    float chunk_history[9u * 10240u] = {0};
+    float chunk_contribution[4u * 10240u], chunk_after[4u * 10240u];
     char error[256];
     if (!q38_ple_forward_ref(&config, a[0], 4, a[1], a[2], a[3], a[4],
                              a[5], a[6], a[7], history, contribution, after,
                              error, sizeof(error)) ||
         !equal(contribution, a[8], 4u * 10240u) ||
-        !equal(after, a[9], 4u * 10240u)) {
+        !equal(after, a[9], 4u * 10240u) ||
+        !q38_ple_forward_ref(&config, a[0], 1, a[1], a[2], a[3], a[4],
+                             a[5], a[6], a[7], chunk_history,
+                             chunk_contribution, chunk_after, error,
+                             sizeof(error)) ||
+        !q38_ple_forward_ref(&config, a[0] + 10240, 3, a[1] + 2560,
+                             a[2], a[3], a[4], a[5], a[6], a[7],
+                             chunk_history, chunk_contribution + 10240,
+                             chunk_after + 10240, error, sizeof(error)) ||
+        !equal(chunk_after, after, 4u * 10240u) ||
+        !equal(chunk_contribution, contribution, 4u * 10240u)) {
         fprintf(stderr, "PLE injection mismatch: %s\n", error);
         return 1;
     }

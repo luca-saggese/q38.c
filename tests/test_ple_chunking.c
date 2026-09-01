@@ -424,7 +424,7 @@ int main(int argc, char **argv) {
     if (checked_cases == 0) return fail("golden corpus has no parseable cases");
     printf("test_ple_chunking: %zu cases and %zu deterministic partitions passed\n",
            checked_cases, partition_checks);
-    puts("test_ple_chunking: hidden/intermediate/logit invariance is unavailable; "
-         "no vectors fabricated");
+    puts("test_ple_chunking: row-ID/history invariance passed; activation "
+         "invariance is covered by the checkpoint-backed M4-C06 injection probe");
     return 0;
 }
