@@ -46,7 +46,8 @@ M3_ARTIFACT_DIR := artifacts/m3
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
-	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05
+	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
+	m3-c06
 
 all: spark
 
@@ -193,6 +194,13 @@ q38_state.o: q38_state.c q38_state.h
 
 $(TEST_DIR)/test_m3_state: $(TEST_DIR)/test_m3_state.c q38_state.o q38_state.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_state.c q38_state.o
+
+q38_gdn_ref.o: q38_gdn_ref.c q38_gdn_ref.h q38_state.h
+	$(CC) $(CFLAGS) -c -o $@ q38_gdn_ref.c
+
+$(TEST_DIR)/test_m3_gdn_ref: $(TEST_DIR)/test_m3_gdn_ref.c q38_gdn_ref.o \
+		q38_gdn_ref.h q38_state.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gdn_ref.c q38_gdn_ref.o -lm
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf
@@ -470,6 +478,13 @@ m3-c05: m3-c04 $(TEST_DIR)/test_m3_state
 		'{"gate":"M3-C05","persistent_recurrent_state_bytes":3145728,"conv_history_bytes":122880,"gr_state_bytes":40960,"workspace_bytes":0,"persistent_bytes":3309568,"allocation_bytes":3309568,"status":"pass"}' \
 		> $(M3_ARTIFACT_DIR)/state_memory.json
 
+m3-c06: m3-c05 $(TEST_DIR)/test_m3_gdn_ref
+	./$(TEST_DIR)/test_m3_gdn_ref
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	printf '%s\n' \
+		'{"gate":"M3-C06","dtype":"F32","state_logical_shape":["sequence","value_head","row","column"],"value_heads":48,"head_dim":128,"equations":["Sbar=decay*S_prev","prediction=Sbar^T*k","delta=(v-prediction)*beta","S_next=Sbar+k*delta^T","y=scale*S_next^T*q"],"ordering":["decay","prediction","delta","outer_product_update","read","scale"],"microtests":["zero_state","beta_zero","decay_ordering","exact_prediction","basis_orientation","two_timesteps","head_mapping"],"physical_layout":"contiguous logical state; no GB10 optimization or packing","status":"pass"}' \
+		> $(M3_ARTIFACT_DIR)/gdn_microtests.json
+
 clean:
 	rm -f q38 *.o $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 		$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
@@ -489,5 +504,6 @@ clean:
 		$(TEST_DIR)/test_m3_gr_cuda \
 		$(TEST_DIR)/test_m3_gdn_binding \
 		$(TEST_DIR)/test_m3_state \
+		$(TEST_DIR)/test_m3_gdn_ref \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
