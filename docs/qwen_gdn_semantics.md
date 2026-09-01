@@ -428,4 +428,5 @@ by the q38 converter. The currently supported artifact metadata is
 `q38.runtime_only`, `q38.max_layer`, `q38.excluded_vision`,
 `q38.excluded_mtp`, and `q38.quantized`; no transformed llama.cpp tensor ABI is
 assumed. The tokenizer used during M2/M3 is the validated Python/Hugging Face
-reference bridge; a native tokenizer remains future work.
+reference oracle for golden generation; the runtime tokenizer is native C and
+has no Python process or Python-library dependency.

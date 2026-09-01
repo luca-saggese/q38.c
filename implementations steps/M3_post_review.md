@@ -439,7 +439,7 @@ Session checkpoint serialization must not contain GR activation buffers.
 
 ## Current situation
 
-The current tokenizer implementation appears to invoke Python / Hugging Face tooling, e.g. through:
+The historical implementation invoked Python / Hugging Face tooling, e.g. through:
 
 ```text
 fork
@@ -447,11 +447,14 @@ exec python3
 Transformers/tokenizers
 ```
 
-This is acceptable as a **reference bridge** during M2/M3.
+That bridge remains available only as a **test oracle** for frozen golden
+vectors. The runtime implementation now loads the tokenizer files and performs
+encoding, decoding, special-token handling, multimodal recognition, and the
+frozen chat rendering natively in C.
 
 It is useful because it guarantees token IDs from the frozen official tokenizer.
 
-However, it should not be considered the final native runtime implementation.
+The native path is the only production/runtime path.
 
 ## Why it matters later
 
@@ -466,22 +469,9 @@ Leaving Python/tokenizers in the production path introduces:
 
 ## Required action
 
-Do not block current M3 work solely for this.
-
-But change project status language from:
-
-```text
-tokenizer complete
-```
-
-to:
-
-```text
-reference tokenizer bridge validated
-native tokenizer pending
-```
-
-Implement the native tokenizer before final M6 end-to-end acceptance / server hardening.
+The corrective audit gate passes only when the native parity suite and
+`tokenizer-runtime-gate` pass. Keep the native tokenizer as the only runtime
+path through final end-to-end acceptance and server hardening.
 
 ## Native acceptance criterion
 

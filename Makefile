@@ -47,7 +47,8 @@ M3_ARTIFACT_DIR := artifacts/m3
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
 	m2-c02 m2-c03 m2-c04 m2-c05 m2-c06 m2-c07 m2-c08 m2-c09 m2-c10 \
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
-	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit
+	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
+	m3-acceptance
 
 all: spark
 
@@ -125,6 +126,14 @@ $(TEST_DIR)/test_m2_weights: $(TEST_DIR)/test_m2_weights.c q38_weights.o \
 $(TEST_DIR)/test_m2_tokenizer: $(TEST_DIR)/test_m2_tokenizer.c \
 		q38_tokenizer.o q38_tokenizer.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_tokenizer.c q38_tokenizer.o
+
+.PHONY: tokenizer-runtime-gate
+tokenizer-runtime-gate:
+	@$(MAKE) --no-print-directory q38_tokenizer.o tests/test_m2_tokenizer
+	@! nm -u q38_tokenizer.o 2>/dev/null | grep -E 'fork|exec|python|transformers|tokenizers' >/dev/null
+	@! grep -nE 'fork|exec|python|transformers|tokenizers' q38_tokenizer.c q38_tokenizer.h >/dev/null
+	@./$(TEST_DIR)/test_m2_tokenizer
+	@echo "native tokenizer runtime gate: passed"
 
 $(TEST_DIR)/test_m2_quant: $(TEST_DIR)/test_m2_quant.c q38_quant.o \
 		q38_oracle.o q38_quant.h q38_oracle.h
@@ -282,12 +291,12 @@ $(TEST_DIR)/test_m3_gdn_fused: \
 		$(TEST_DIR)/test_m3_gdn_fused.cu q38_gdn.o q38_gdn_ref.o \
 		q38_cuda_primitives.o $(CUDA_LDLIBS) -lm
 
-m3-c13: m3-c12 $(TEST_DIR)/test_m3_gdn_fused
+m3-c13: m3-c12 m3-audit $(TEST_DIR)/test_m3_gdn_fused
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	./$(TEST_DIR)/test_m3_gdn_fused \
 		$(M3_ARTIFACT_DIR)/cuda_profile_fused.json
 
-m3-audit: $(TEST_DIR)/test_m3_gr_ref $(TEST_DIR)/test_m3_gr_cuda \
+m3-audit: tokenizer-runtime-gate $(TEST_DIR)/test_m3_gr_ref $(TEST_DIR)/test_m3_gr_cuda \
 		$(TEST_DIR)/test_m3_state $(TEST_DIR)/test_weights
 	@test -f $(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf
 	./$(TEST_DIR)/test_m3_gr_ref
@@ -300,8 +309,15 @@ m3-audit: $(TEST_DIR)/test_m3_gr_ref $(TEST_DIR)/test_m3_gr_cuda \
 	done
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	printf '%s\n' \
-		'{"gate":"M3-AUDIT","gr":"external non-zero scalar/CUDA goldens with negative SiLU and hc_count scaling","state":"36 independent GDN slots with explicit 48-layer mapping; GR activation excluded from persistent bytes","ple":{"zero_based_layer":1,"counts":{"max_layer_0":29,"max_layer_1":190,"max_layer_2":214,"max_layer_3":238},"finding":"no off-by-one; frozen fixture places PLE at layers.1"},"tokenizer":"reference bridge; native tokenizer pending","status":"pass"}' \
+		'{"gate":"M3-AUDIT","gr":"external non-zero scalar/CUDA goldens with negative SiLU and hc_count scaling","state":"36 independent GDN slots with explicit 48-layer mapping; GR activation excluded from persistent bytes","ple":{"zero_based_layer":1,"counts":{"max_layer_0":29,"max_layer_1":190,"max_layer_2":214,"max_layer_3":238},"finding":"no off-by-one; frozen fixture places PLE at layers.1"},"tokenizer":"native C byte-level BPE, decode, special tokens, multimodal markers, and frozen chat-template vectors; Python oracle is test-only","status":"pass"}' \
 		> $(M3_ARTIFACT_DIR)/audit.json
+
+m3-acceptance: m3-c13
+	@python3 -c 'import json, pathlib; p=pathlib.Path("$(M3_ARTIFACT_DIR)"); names=("audit.json","gr_golden.json","gr_cuda_accuracy.json","state_layout.json","state_memory.json","gdn_microtests.json","gdn_projection_conv.json","gdn_recurrence_cuda.json","layer0_intermediates.json","multigdn_intermediates.json","chunk_invariance.json","cuda_profile_baseline.json","cuda_profile_fused.json"); bad=[n for n in names if json.loads((p/n).read_text()).get("status") != "pass"]; raise SystemExit("M3 acceptance failed: "+", ".join(bad)) if bad else None'
+	@mkdir -p $(M3_ARTIFACT_DIR)
+	@printf '%s\n' \
+		'{"gate":"M3-C14","gates":["M3-AUDIT","M3-C00","M3-C01","M3-C02","M3-C03","M3-C04","M3-C05","M3-C06","M3-C07","M3-C08","M3-C09","M3-C10","M3-C11","M3-C12","M3-C13"],"status":"pass","physical_layout":"reference/simple logical-contiguous path; no GB10 layout optimization"}' \
+		> $(M3_ARTIFACT_DIR)/acceptance.txt
 
 test: $(TEST_BINS)
 	./$(TEST_DIR)/test_gguf

@@ -1,6 +1,7 @@
 #include "q38_tokenizer.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int check_text(const q38_tokenizer *tokenizer, const char *name,
@@ -44,6 +45,23 @@ static int check_chat(const q38_tokenizer *tokenizer, const char *name,
     return failed;
 }
 
+static int check_roundtrip(const q38_tokenizer *tokenizer, const char *name,
+                           const char *text) {
+    q38_token_batch batch = {0};
+    char *decoded = NULL, error[256];
+    size_t decoded_len = 0;
+    int failed = !q38_tokenizer_encode(tokenizer, text, false, &batch, error,
+                                       sizeof(error)) ||
+        !q38_tokenizer_decode(tokenizer, batch.tokens, batch.token_count,
+                              &decoded, &decoded_len, error, sizeof(error)) ||
+        decoded_len != strlen(text) || memcmp(decoded, text, decoded_len) != 0;
+    if (failed) fprintf(stderr, "%s: native decode roundtrip failed: %s\n",
+                        name, error);
+    free(decoded);
+    q38_token_batch_free(&batch);
+    return failed;
+}
+
 int main(void) {
     static const uint32_t ascii[] = {9419, 11, 1814, 0, 198, 15207, 1500, 13};
     static const uint32_t whitespace[] = {220, 6187, 1838, 26453, 198, 1021, 256};
@@ -60,6 +78,7 @@ int main(void) {
         37730, 13290, 13290, 13290, 13290, 13290, 13290, 13290, 13290, 13290,
         220};
     static const uint32_t special[] = {248045, 74455, 198, 248068, 198};
+    static const uint32_t vision[] = {248053, 248056, 248054};
     static const uint32_t tool[] = {4754, 591, 3147, 20377, 2129, 15889, 21624,
                                     80, 3147, 27, 87, 5608, 29958, 198, 248058,
                                     198, 248059};
@@ -83,6 +102,9 @@ int main(void) {
         15704, 60922, 29, 198, 13290, 198, 510, 15704, 29, 198, 510, 1628,
         29, 198, 248059, 248046, 198, 248045, 846, 198, 248066, 198, 4754, 547,
         763, 1802, 92, 198, 248067, 248046, 198};
+    static const uint32_t chat_vision[] = {
+        248045, 846, 198, 10071, 220, 248053, 248056, 248054, 1381,
+        248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271};
     q38_tokenizer tokenizer;
     char error[256];
     if (!q38_tokenizer_init(&tokenizer, "/home/lvx/q38model",
@@ -111,6 +133,9 @@ int main(void) {
     failed |= check_text(&tokenizer, "special",
                          "<|im_start|>assistant\n<think>\n", special,
                          sizeof(special) / sizeof(*special));
+    failed |= check_text(&tokenizer, "multimodal_special",
+                         "<|vision_start|><|image_pad|><|vision_end|>",
+                         vision, sizeof(vision) / sizeof(*vision));
     failed |= check_text(&tokenizer, "tool",
                          "{\"name\":\"lookup\",\"arguments\":{\"q\":\"<x>&\"}}\n"
                          "<tool_call>\n</tool_call>",
@@ -138,6 +163,15 @@ int main(void) {
         "{\"name\":\"lookup\",\"arguments\":{\"q\":\"abc\"}}}]},"
         "{\"role\":\"tool\",\"content\":\"{\\\"ok\\\":true}\"}]",
         chat_tool, sizeof(chat_tool) / sizeof(*chat_tool), false, false);
+    failed |= check_chat(
+        &tokenizer, "chat_multimodal",
+        "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Look \"},"
+        "{\"type\":\"image\",\"image\":\"x\"},{\"type\":\"text\",\"text\":\" now\"}]}]",
+        chat_vision, sizeof(chat_vision) / sizeof(*chat_vision), true, false);
+    failed |= check_roundtrip(&tokenizer, "decode_ascii",
+                              "Hello, world!\nSecond line.");
+    failed |= check_roundtrip(&tokenizer, "decode_unicode",
+                              "Caffè déjà vu — 你好世界 🙂 é");
     q38_tokenizer_destroy(&tokenizer);
     if (failed) return 1;
     puts("test_m2_tokenizer: frozen raw and chat token IDs passed");
