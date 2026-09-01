@@ -42,3 +42,4 @@ artifacts/m4/ple_injection_fixture.bin
 tools/__pycache__/
 .*.swp
 .DS_Store
+.venv-m6
