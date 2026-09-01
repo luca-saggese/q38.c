@@ -569,7 +569,7 @@
       "checksum_equal": false
     },
     {
-      "stage": "logits:0",
+      "stage": "final_norm:0",
       "status": "fail",
       "mismatches": [
         "min",
@@ -586,7 +586,7 @@
       "checksum_equal": false
     },
     {
-      "stage": "final_norm:0",
+      "stage": "logits:0",
       "status": "fail",
       "mismatches": [
         "min",
