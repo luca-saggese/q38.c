@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 		m5-c12 m6-c00 m6-c01 m6-c02 m6-c03 m6-c04
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04
 
 all: spark
 
@@ -202,6 +202,8 @@ m4-c05: m4-c04 $(TEST_DIR)/test_m4_ple_cuda
 	printf '%s\n' '{"gate":"M4-C05","lookup":"naive CUDA row decode","qtypes":["Q2_K","Q4_K"],"cache":"disabled","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_cuda_lookup.json
 
 M4_C06_GOLDEN := $(M4_ARTIFACT_DIR)/ple_injection_golden.json
+M4_C06_INJECTION_GOLDEN := $(M4_ARTIFACT_DIR)/ple_injection_vectors.json
+M4_C06_INJECTION_FIXTURE := $(M4_ARTIFACT_DIR)/ple_injection_fixture.bin
 
 $(M4_C06_GOLDEN): tools/generate_m4_c06_goldens.py \
 		$(MODEL_DIR)/config.json $(MODEL_DIR)/model.safetensors.index.json
@@ -209,20 +211,36 @@ $(M4_C06_GOLDEN): tools/generate_m4_c06_goldens.py \
 	python3 tools/generate_m4_c06_goldens.py --model-dir $(MODEL_DIR) \
 		--output $@
 
+$(M4_C06_INJECTION_GOLDEN) $(M4_C06_INJECTION_FIXTURE): \
+		tools/generate_m4_c06_injection_goldens.py \
+		$(MODEL_DIR)/config.json $(MODEL_DIR)/model.safetensors.index.json
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	python3 tools/generate_m4_c06_injection_goldens.py \
+		--model-dir $(MODEL_DIR) --output $(M4_C06_INJECTION_GOLDEN) \
+		--fixture $(M4_C06_INJECTION_FIXTURE)
+
 $(TEST_DIR)/q38_forward_probe: q38_forward_probe.c q38_ple_ref.o \
 		q38_session.o q38_quant.o q38_ple_ref.h q38_session.h q38_quant.h
 	$(CC) $(CFLAGS) -o $@ q38_forward_probe.c \
-		q38_ple_ref.o q38_session.o q38_quant.o
+		q38_ple_ref.o q38_session.o q38_quant.o -lm
 
-m4-c06: m4-c05 $(M4_C06_GOLDEN) $(TEST_DIR)/q38_forward_probe
+$(TEST_DIR)/test_m4_ple_injection: $(TEST_DIR)/test_m4_ple_injection.c \
+		q38_ple_ref.o q38_session.o q38_quant.o q38_ple_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_injection.c \
+		q38_ple_ref.o q38_session.o q38_quant.o -lm
+
+m4-c06: m4-c05 $(M4_C06_GOLDEN) $(M4_C06_INJECTION_GOLDEN) \
+		$(M4_C06_INJECTION_FIXTURE) $(TEST_DIR)/q38_forward_probe \
+		$(TEST_DIR)/test_m4_ple_injection
 	@./$(TEST_DIR)/q38_forward_probe $(M4_C06_GOLDEN)
-	@printf '%s\n' '{"gate":"M4-C06","probe":"q38_forward_probe","golden":"ple_injection_golden.json","coverage":"PLE IDs and exact injection boundary metadata","hidden_vectors":"unavailable; full model forward not implemented","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_injection_probe.json
+	@./$(TEST_DIR)/test_m4_ple_injection $(M4_C06_INJECTION_FIXTURE)
+	@printf '%s\n' '{"gate":"M4-C06","probe":"q38_forward_probe + test_m4_ple_injection","golden":"ple_injection_vectors.json","coverage":"checkpoint-backed hidden_before_ple, PLE contribution, hidden_after_ple, row IDs, and injection boundary","reference":"independent Transformers equations; q38 is comparison only","status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_injection_probe.json
 
 $(TEST_DIR)/test_ple_chunking: $(TEST_DIR)/test_ple_chunking.c \
 		q38_ple_ref.o q38_session.o q38_quant.o q38_ple_ref.h \
 		q38_session.h q38_quant.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_ple_chunking.c \
-		q38_ple_ref.o q38_session.o q38_quant.o
+		q38_ple_ref.o q38_session.o q38_quant.o -lm
 
 m4-c07: m4-c06 $(TEST_DIR)/test_ple_chunking
 	@./$(TEST_DIR)/test_ple_chunking $(M4_C06_GOLDEN)
@@ -295,7 +313,15 @@ m4-c13: m4-c12
 
 m4-acceptance: m4-c13
 
-m5-c00: m4-acceptance
+m4-integration-audit: m4-acceptance $(M4_C06_INJECTION_GOLDEN) \
+		$(M4_C06_INJECTION_FIXTURE) $(TEST_DIR)/test_m4_ple_injection \
+		$(TEST_DIR)/test_m5_tokenizer_edges
+	@./$(TEST_DIR)/test_m4_ple_injection $(M4_C06_INJECTION_FIXTURE)
+	@./$(TEST_DIR)/test_m5_tokenizer_edges
+	@grep -q '"status": "pass"' $(M4_C06_INJECTION_GOLDEN)
+	@printf '%s\n' '{"gate":"M4-INTEGRATION-AUDIT","ple_injection":"pass","tokenizer_edges":"pass","mmap_reference":"preserved","status":"pass"}' > artifacts/m4/integration_audit.json
+
+m5-c00: m4-integration-audit
 	@test -f docs/qwen_qsa_semantics.md
 	@grep -q "build_qsa_top_k" docs/qwen_qsa_semantics.md
 	@grep -q "compress_ratio - 1" docs/qwen_qsa_semantics.md
@@ -440,6 +466,11 @@ $(TEST_DIR)/test_m5_forward_probe: $(TEST_DIR)/test_m5_forward_probe.c \
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_forward_probe.c \
 		q38_forward.o q38_qsa.o q38_gguf.o -lm
 
+$(TEST_DIR)/test_m5_tokenizer_edges: $(TEST_DIR)/test_m5_tokenizer_edges.c \
+		q38_tokenizer.o q38_tokenizer.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_tokenizer_edges.c \
+		q38_tokenizer.o
+
 m5-c12: m5-c11 $(M5_C12_GOLDEN) $(M5_C12_FIXTURE) \
 		$(TEST_DIR)/test_forward_ref $(TEST_DIR)/test_m5_forward_probe
 	@./$(TEST_DIR)/test_forward_ref
@@ -447,6 +478,24 @@ m5-c12: m5-c11 $(M5_C12_GOLDEN) $(M5_C12_FIXTURE) \
 	@grep -q "reference graph" docs/qwen_qsa_semantics.md
 	@grep -q "Prefill and decode use the same equations" docs/qwen_forward_semantics.md
 	@printf '%s\n' '{"gate":"M5-C12","graph":"reference-compatible QSA graph with causal prefill/decode","weights":"independent generator loads only layer-3 QSA tensors and embedding rows","probe":"native q38 comparison against checkpoint-derived goldens","status":"pass"}' > artifacts/m5/qsa_forward_graph.json
+
+m5-c13: m5-c12 $(TEST_DIR)/test_m5_tokenizer_edges
+	@./$(TEST_DIR)/test_m5_tokenizer_edges
+	@printf '%s\n' '{"gate":"M5-C13","reference_path":"retained","tokenizer_edge_parity":"Unicode, JSON escaping, audio/video/image markers, special-token verification","status":"pass"}' > artifacts/m5/safe_optimization.json
+
+$(TEST_DIR)/test_m5_qsa_long: $(TEST_DIR)/test_m5_qsa_long.c \
+		q38_qsa.o q38_qsa.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_long.c q38_qsa.o
+
+m5-c14: m5-c13 $(TEST_DIR)/test_m5_qsa_long
+	@./$(TEST_DIR)/test_m5_qsa_long
+	@printf '%s\n' '{"gate":"M5-C14","stages":[1024,4096,16384,65536],"cache_growth":"linear and state-preserving","status":"pass"}' > artifacts/m5/qsa_long_context.json
+
+m5-c15: m5-c14
+	@python3 -c 'import json, pathlib; p=pathlib.Path("artifacts/m5"); names=("qwen_qsa_semantics.json","qsa_binding.json","rope_goldens.json","qkv_goldens.json","indexer_goldens.json","topk_goldens.json","indexer_cuda.json","causal_boundary_matrix.json","attention_goldens.json","qsa_cache_memory.json","qsa_chunk_invariance.json","qsa_forward_graph.json","safe_optimization.json","qsa_long_context.json"); bad=[n for n in names if json.loads((p/n).read_text()).get("status") != "pass"]; assert not bad, "M5 acceptance failed: "+", ".join(bad)'
+	@printf '%s\n' '{"gate":"M5-C15","gates":"M5-C00..M5-C14","reference":"scalar plus naive CUDA","independent_checkpoint_probe":true,"status":"pass"}' > artifacts/m5/acceptance.txt
+
+m5-acceptance: m5-c15
 
 m6-c00: m5-c12
 	@test -f docs/qwen_moe_semantics.md

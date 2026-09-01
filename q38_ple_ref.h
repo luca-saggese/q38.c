@@ -36,6 +36,29 @@ bool q38_ple_decode_row_ref(uint32_t qtype, const void *blocks,
                             size_t out_elements, char *error,
                             size_t error_len);
 
+typedef struct {
+    size_t hidden;
+    size_t streams;
+    size_t heads;
+    size_t row_width;
+    size_t kernel;
+    size_t dilation;
+    float eps;
+} q38_ple_forward_config;
+
+/*
+ * Reference PLE injection. All matrices are output-by-input, rows are
+ * token-major, and `history` contains the normalized convolution tail from
+ * the preceding call. The history is updated in place.
+ */
+bool q38_ple_forward_ref(const q38_ple_forward_config *config,
+                         const float *hidden, size_t token_count,
+                         const float *embedding, const float *key_proj,
+                         const float *value_proj, const float *norm_key,
+                         const float *norm_query, const float *norm_conv,
+                         const float *conv, float *history, float *contribution,
+                         float *after, char *error, size_t error_len);
+
 #ifdef __cplusplus
 }
 #endif

@@ -38,7 +38,7 @@ support or invent offsets from safetensors metadata.
 ## Residency evidence boundary
 
 The M4-C10 host test measures GGUF mapping size, requested row copies, and the
-configured bounded cache. It does not report CUDA staging, page faults, or
-full-forward overlap: the repository still lacks a complete PLE-enabled
-forward runtime and no CUDA-visible staging API exists for this loader.
-Those fields remain explicitly unmeasured rather than synthesized.
+configured bounded cache. The M4-C06 injection probe separately validates the
+reference contribution from checkpoint rows. CUDA staging, page faults, and
+full-forward overlap remain performance measurements, not semantic claims;
+they are reported only when a corresponding runtime path is exercised.

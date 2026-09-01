@@ -247,11 +247,12 @@ values. Sixteen heads therefore form the logical 2560-wide gathered embedding.
 The 2560-wide synthetic rows used by the earlier decoder tests are not a
 claim about the production checkpoint layout.
 
-This repository does not yet contain a complete q38 model-forward graph, and
-the local Qwen checkpoint is approximately 336 GiB. No independent hidden
-vectors are available without running that missing/unsuitable full forward.
-Consequently the C probe validates the production hash/row-ID path and records
-the exact reference injection boundary (`hidden + gated + conv_out`), while
-`hidden_before_ple`, `hidden_after_ple`, and `ple_contribution_vector` remain
-explicitly `null`. The probe rejects fabricated vectors; a future full-forward
-oracle can populate these fields without changing the file format.
+`tools/generate_m4_c06_injection_goldens.py` additionally opens only the
+embedding rows and PLE projection/norm/convolution tensors needed for a
+four-token layer-1 injection probe. It computes a checkpoint-backed
+`hidden_before_ple` (the checkpoint embedding repeated across the four
+streams), the sixteen gathered physical 160-wide rows, the full
+`ple_contribution`, and `hidden_after_ple` independently in PyTorch. The
+native `test_m4_ple_injection` replays the same contract without invoking the
+generator or q38 for expected values. This is a standalone PLE injection
+golden, not a claim that layers 0–1 have already been folded into the input.
