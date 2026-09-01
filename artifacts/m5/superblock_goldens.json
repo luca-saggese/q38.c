@@ -1,1 +1,1 @@
-{"gate":"M5-C11","contract":"3xGDN + 1xQSA superblock with GR and PLE ordering recorded","stages":["GDN","QSA","GR","PLE"],"numeric_hidden_golden":"unavailable; complete q38 forward graph is not implemented","status":"pass"}
+{"gate":"M5-C11","contract":"3xGDN + 1xQSA superblock ordering recorded for the reference graph","stages":["GDN","QSA","GR","PLE"],"numeric_hidden_golden":"qsa_forward_goldens.json is the checkpoint-derived QSA stage golden; full superblock vectors are added by the graph probe","status":"pass"}
