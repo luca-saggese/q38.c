@@ -445,6 +445,7 @@ m5-c12: m5-c11 $(M5_C12_GOLDEN) $(M5_C12_FIXTURE) \
 	@./$(TEST_DIR)/test_forward_ref
 	@./$(TEST_DIR)/test_m5_forward_probe $(M5_C12_FIXTURE)
 	@grep -q "reference graph" docs/qwen_qsa_semantics.md
+	@grep -q "Prefill and decode use the same equations" docs/qwen_forward_semantics.md
 	@printf '%s\n' '{"gate":"M5-C12","graph":"reference-compatible QSA graph with causal prefill/decode","weights":"independent generator loads only layer-3 QSA tensors and embedding rows","probe":"native q38 comparison against checkpoint-derived goldens","status":"pass"}' > artifacts/m5/qsa_forward_graph.json
 
 m6-c00: m5-c12
