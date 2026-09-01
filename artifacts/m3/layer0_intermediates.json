@@ -1,0 +1,41 @@
+{
+  "gate": "M3-C09",
+  "status": "pass",
+  "layer": 0,
+  "layer_kind": "linear_attention",
+  "fixture": {"kind": "deterministic_sparse_f32", "tokens": 2, "model_weights_loaded": false},
+  "scope": "layer-0-shaped GR+GDN probe; not full model correctness",
+  "logical_shapes": {
+    "gr_residual": [4, 2560],
+    "gdn_input": ["token", 2560],
+    "qkv_mixed": ["token", 10240],
+    "z": ["token", 48, 128],
+    "q_k_v": ["token", 48, 128],
+    "state": [1, 48, 128, 128],
+    "block_output": ["token", 2560]
+  },
+  "physical_layout": {"matrices": "logical output-by-input row-major", "activations": "token-major", "state": "contiguous [sequence, value_head, row, column] row-major"},
+  "frozen_order": ["GR read", "qkv/z/a/b projection", "beta sigmoid and decay transform", "causal conv4", "SiLU", "QKV split", "16-to-48 repeat", "Q/K L2 normalization", "FP32 recurrence", "RMSNorm", "sigmoid(z) gate", "out_proj", "GR write"],
+  "intermediates": {
+    "gr_input_t0": {"elements": 2560, "max_abs": 1.78813934e-07, "pass": true},
+    "gr_input_t1": {"elements": 2560, "max_abs": 1.78813934e-07, "pass": true},
+    "qkv_projection": {"elements": 20480, "max_abs": 9.31322575e-10, "pass": true},
+    "z_projection": {"elements": 12288, "max_abs": 9.31322575e-10, "pass": true},
+    "a_projection": {"elements": 96, "max_abs": 2.32830644e-10, "pass": true},
+    "b_projection": {"elements": 96, "max_abs": 3.49245965e-10, "pass": true},
+    "decay": {"elements": 96, "max_abs": 5.96046448e-08, "pass": true},
+    "beta": {"elements": 96, "max_abs": 5.96046448e-08, "pass": true},
+    "conv_raw": {"elements": 20480, "max_abs": 4.36557457e-11, "pass": true},
+    "conv_silu": {"elements": 20480, "max_abs": 2.18278728e-11, "pass": true},
+    "conv_history": {"elements": 30720, "max_abs": 9.31322575e-10, "pass": true},
+    "q_normalized": {"elements": 12288, "max_abs": 2.23517418e-08, "pass": true},
+    "k_normalized": {"elements": 12288, "max_abs": 1.86264515e-08, "pass": true},
+    "v_split": {"elements": 12288, "max_abs": 2.18278728e-11, "pass": true},
+    "state_reset": {"elements": 786432, "max_abs": 0, "pass": true},
+    "recurrence_output": {"elements": 12288, "max_abs": 1.24344979e-14, "pass": true},
+    "recurrence_state": {"elements": 786432, "max_abs": 1.8189894e-12, "pass": true},
+    "gated_norm_output": {"elements": 12288, "max_abs": 7.27595761e-12, "pass": true},
+    "out_projection": {"elements": 5120, "max_abs": 1.59872116e-14, "pass": true},
+    "gr_updated": {"elements": 20480, "max_abs": 1.15463195e-14, "pass": true}
+  }
+}
