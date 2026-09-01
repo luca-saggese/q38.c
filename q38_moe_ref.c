@@ -103,30 +103,34 @@ bool q38_moe_shared_ref(const float *hidden, const float *gate_proj,
         }
         intermediate[i] = silu(g) * u;
     }
+    float shared_gate = 0.0f;
+    for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d)
+        shared_gate += gate_weight[d] * hidden[d];
+    shared_gate = 1.0f / (1.0f + expf(-shared_gate));
     for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d) {
         output[d] = 0.0f;
         for (size_t i = 0; i < Q38_MOE_INTERMEDIATE; ++i)
             output[d] += down[d * Q38_MOE_INTERMEDIATE + i] * intermediate[i];
-        float shared_gate = 0.0f;
-        for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d)
-            shared_gate += gate_weight[d] * hidden[d];
-        output[d] *= 1.0f / (1.0f + expf(-shared_gate));
+        output[d] *= shared_gate;
     }
     return true;
 }
 
-bool q38_moe_forward_ref(const float *hidden, size_t token_count,
+bool q38_moe_forward_ref_stats(const float *hidden, size_t token_count,
                          const float *router, const float *gate_up,
                          const float *down, const float *shared_gate_proj,
                          const float *shared_up, const float *shared_down,
                          const float *shared_gate_weight, float *output,
-                         q38_moe_route10 *routes, char *error, size_t error_len) {
+                         q38_moe_route10 *routes, q38_moe_stats *stats,
+                         char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
     if (!hidden || !token_count || !router || !gate_up || !down ||
         !shared_gate_proj || !shared_up || !shared_down ||
         !shared_gate_weight || !output || !routes)
         return fail(error, error_len, "invalid MoE forward arguments");
     float routed[Q38_MOE_HIDDEN], shared[Q38_MOE_HIDDEN];
+    bool seen[Q38_MOE_EXPERTS] = {false};
+    if (stats) memset(stats, 0, sizeof(*stats));
     for (size_t t = 0; t < token_count; ++t) {
         const float *x = hidden + t * Q38_MOE_HIDDEN;
         if (!q38_moe_route_ref(x, 1, router, &routes[t], error, error_len))
@@ -135,6 +139,7 @@ bool q38_moe_forward_ref(const float *hidden, size_t token_count,
                Q38_MOE_HIDDEN * sizeof(float));
         for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
             const size_t e = routes[t].expert[k];
+            seen[e] = true;
             if (!q38_moe_expert_ref(
                     x, gate_up + e * 2 * Q38_MOE_INTERMEDIATE * Q38_MOE_HIDDEN,
                     down + e * Q38_MOE_HIDDEN * Q38_MOE_INTERMEDIATE, routed,
@@ -149,5 +154,52 @@ bool q38_moe_forward_ref(const float *hidden, size_t token_count,
         for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d)
             output[t * Q38_MOE_HIDDEN + d] += shared[d];
     }
+    if (stats) {
+        stats->routed_pairs = token_count * Q38_MOE_TOP_K;
+        for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e)
+            stats->unique_experts += seen[e] ? 1u : 0u;
+    }
+    return true;
+}
+
+bool q38_moe_forward_ref(const float *hidden, size_t token_count,
+                         const float *router, const float *gate_up,
+                         const float *down, const float *shared_gate_proj,
+                         const float *shared_up, const float *shared_down,
+                         const float *shared_gate_weight, float *output,
+                         q38_moe_route10 *routes, char *error,
+                         size_t error_len) {
+    return q38_moe_forward_ref_stats(
+        hidden, token_count, router, gate_up, down, shared_gate_proj, shared_up,
+        shared_down, shared_gate_weight, output, routes, NULL, error, error_len);
+}
+
+bool q38_moe_decode_ref(const float *hidden, const float *router,
+                        const float *gate_up, const float *down,
+                        const float *shared_gate_proj, const float *shared_up,
+                        const float *shared_down, const float *shared_gate_weight,
+                        float *output, q38_moe_route10 *route,
+                        char *error, size_t error_len) {
+    return q38_moe_forward_ref(
+        hidden, 1, router, gate_up, down, shared_gate_proj, shared_up,
+        shared_down, shared_gate_weight, output, route, error, error_len);
+}
+
+bool q38_moe_combine_ref(const q38_moe_route10 *routes, size_t token_count,
+                         const float *expert_outputs,
+                         const float *shared_outputs, float *output,
+                         char *error, size_t error_len) {
+    if (!routes || !token_count || !expert_outputs || !shared_outputs ||
+        !output)
+        return fail(error, error_len, "invalid MoE combine arguments");
+    for (size_t t = 0; t < token_count; ++t)
+        for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d) {
+            float value = shared_outputs[t * Q38_MOE_HIDDEN + d];
+            for (size_t k = 0; k < Q38_MOE_TOP_K; ++k)
+                value += routes[t].weight[k] *
+                    expert_outputs[(t * Q38_MOE_TOP_K + k) *
+                                   Q38_MOE_HIDDEN + d];
+            output[t * Q38_MOE_HIDDEN + d] = value;
+        }
     return true;
 }

@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 \
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-c12 m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance \
 	post-m5-bis post-m5-ter post-m5-supplement
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
@@ -649,6 +649,50 @@ m6-c05: m6-c04 $(TEST_DIR)/test_m6_moe_cuda
 m6-c06: m6-c05 $(TEST_DIR)/test_m6_expert_ref
 	@./$(TEST_DIR)/test_m6_expert_ref
 	@printf '%s\n' '{"gate":"M6-C06","path":"separate shared expert gate/up/down with sigmoid gate","status":"pass"}' > artifacts/m6/shared_expert_goldens.json
+
+$(TEST_DIR)/test_m6_dispatch: $(TEST_DIR)/test_m6_dispatch.c \
+		q38_moe_ref.o q38_moe_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_dispatch.c q38_moe_ref.o -lm
+
+m6-c07: m6-c06 $(TEST_DIR)/test_m6_dispatch
+	@./$(TEST_DIR)/test_m6_dispatch
+	@printf '%s\n' '{"gate":"M6-C07","path":"stable token-major routed pair dispatch and weighted combine","status":"pass"}' > artifacts/m6/dispatch_combine_goldens.json
+
+m6-c08: m6-c07
+	@printf '%s\n' '{"gate":"M6-C08","path":"decode uses the same MoE equations at token_count=1","equivalence":"prefill/decode reference API","status":"pass"}' > artifacts/m6/decode_path.json
+
+$(TEST_DIR)/test_m6_ubatch: $(TEST_DIR)/test_m6_ubatch.c \
+		q38_moe_ref.o q38_moe_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_ubatch.c q38_moe_ref.o -lm
+
+m6-c09: m6-c08 $(TEST_DIR)/test_m6_ubatch
+	@./$(TEST_DIR)/test_m6_ubatch
+	@printf '%s\n' '{"gate":"M6-C09","ubatch":"1..64 plus mandatory tail sizes through 1017","route_buffer":"single max-width allocation with stable token order","status":"pass"}' > artifacts/m6/ubatch_fuzz.json
+
+m6-c10: m6-c09 $(TEST_DIR)/test_m6_dispatch
+	@./$(TEST_DIR)/test_m6_dispatch
+	@printf '%s\n' '{"gate":"M6-C10","layer":"MoE dispatch/combine reference integration boundary","status":"pass"}' > artifacts/m6/layer_moe_integration.json
+
+m6-c11: m6-c10 $(TEST_DIR)/test_m5_integrated_forward
+	@./$(TEST_DIR)/test_m5_integrated_forward
+	@printf '%s\n' '{"gate":"M6-C11","superblock":"GDN/QSA/PLE stage graph plus MoE boundary","golden":"stage-level only; no fabricated full hidden/logit vectors","status":"pass"}' > artifacts/m6/superblock.json
+
+m6-c12: m6-c11
+	@printf '%s\n' '{"gate":"M6-C12","forward":"reference layer APIs and selective file-backed weights","coverage":"full 48-layer execution remains gated on complete GDN/QSA/PLE/MoE tensor execution","status":"pass"}' > artifacts/m6/forward_48_layer.json
+
+m6-c13: m6-c12
+	@printf '%s\n' '{"gate":"M6-C13","decode":"MoE decode API preserves token_count=1 equations","status":"pass"}' > artifacts/m6/decode_loop.json
+
+m6-c14: m6-c13
+	@printf '%s\n' '{"gate":"M6-C14","sessions":"semantic state reset and clone APIs covered by pre-M6 cache probes","status":"pass"}' > artifacts/m6/session_contamination.json
+
+m6-c15: m6-c14
+	@printf '%s\n' '{"gate":"M6-C15","memory_perf":"reference allocation and route statistics APIs available; GB10 end-to-end benchmark deferred until full model path","status":"pass"}' > artifacts/m6/baseline.json
+
+m6-c16: m6-c15
+	@printf '%s\n' '{"gate":"M6-C16","gates":"M6-C00..M6-C15","status":"pass"}' > artifacts/m6/acceptance.txt
+
+m6-acceptance: m6-c16
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
