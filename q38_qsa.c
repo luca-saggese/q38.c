@@ -98,6 +98,8 @@ bool q38_qsa_state_append(q38_qsa_state *state, const void *main_k,
     state->index_k.count += row_count;
     state->position += row_count;
     state->committed_tokens += row_count;
+    state->pending_count = (uint32_t)(state->index_k.count % 4);
+    state->pending_position = state->position - state->pending_count;
     return true;
 }
 
@@ -108,6 +110,8 @@ void q38_qsa_state_reset(q38_qsa_state *state) {
     state->index_k.count = 0;
     state->position = 0;
     state->committed_tokens = 0;
+    state->pending_count = 0;
+    state->pending_position = 0;
 }
 
 void q38_qsa_state_destroy(q38_qsa_state *state) {
@@ -116,4 +120,23 @@ void q38_qsa_state_destroy(q38_qsa_state *state) {
     free(state->main_v.data);
     free(state->index_k.data);
     memset(state, 0, sizeof(*state));
+}
+
+bool q38_qsa_state_clone(const q38_qsa_state *source, q38_qsa_state *copy,
+                         char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!source || !copy)
+        return fail(error, error_len, "invalid QSA state clone arguments");
+    if (!q38_qsa_state_init(copy, source->main_k.row_bytes,
+                            source->main_v.row_bytes,
+                            source->index_k.row_bytes, error, error_len))
+        return false;
+    if (source->main_k.count &&
+        !q38_qsa_state_append(copy, source->main_k.data,
+                              source->main_v.data, source->index_k.data,
+                              source->main_k.count, error, error_len)) {
+        q38_qsa_state_destroy(copy);
+        return false;
+    }
+    return true;
 }

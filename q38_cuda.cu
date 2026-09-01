@@ -44,6 +44,7 @@ int q38_cuda_probe(q38_platform_info *out) {
                 cudaGetErrorString(err));
         return -1;
     }
+
     out->cuda_device_count = count;
     if (count < 1) {
         fprintf(stderr, "q38: no CUDA devices found\n");
@@ -86,5 +87,20 @@ int q38_cuda_probe(q38_platform_info *out) {
         out->cuda_total_bytes = (uint64_t)total_b;
     }
 
+    return 0;
+}
+
+int q38_cuda_get_shared_memory_info(q38_cuda_shared_memory_info *out) {
+    if (!out || q38_cuda_init() != 0) return -1;
+    int dev = 0;
+    if (cudaGetDevice(&dev) != cudaSuccess) return -1;
+    cudaDeviceProp prop;
+    if (cudaGetDeviceProperties(&prop, dev) != cudaSuccess) return -1;
+    out->max_shared_memory_per_block = prop.sharedMemPerBlock;
+    out->max_shared_memory_per_block_optin = prop.sharedMemPerBlockOptin;
+    out->warp_size = prop.warpSize;
+    out->multiprocessor_count = prop.multiProcessorCount;
+    out->cc_major = prop.major;
+    out->cc_minor = prop.minor;
     return 0;
 }

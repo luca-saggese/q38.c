@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #include "q38.h"
 
@@ -21,6 +22,17 @@ extern "C" {
 /* Interrogate the CUDA device. Returns 0 on success, non-zero on failure.
  * On failure the platform is considered unsupported and must be refused. */
 int q38_cuda_probe(q38_platform_info *out);
+
+typedef struct {
+    int max_shared_memory_per_block;
+    int max_shared_memory_per_block_optin;
+    int warp_size;
+    int multiprocessor_count;
+    int cc_major;
+    int cc_minor;
+} q38_cuda_shared_memory_info;
+
+int q38_cuda_get_shared_memory_info(q38_cuda_shared_memory_info *out);
 
 /* Minimal device lifecycle. Returns 0 on success. */
 int q38_cuda_init(void);

@@ -36,6 +36,8 @@ typedef struct {
     q38_qsa_cache index_k;
     uint64_t position;
     uint64_t committed_tokens;
+    uint32_t pending_count;
+    uint64_t pending_position;
 } q38_qsa_state;
 
 bool q38_qsa_weights_validate(const q38_qsa_weights *weights,
@@ -49,6 +51,8 @@ bool q38_qsa_state_append(q38_qsa_state *state, const void *main_k,
                           size_t row_count, char *error, size_t error_len);
 void q38_qsa_state_reset(q38_qsa_state *state);
 void q38_qsa_state_destroy(q38_qsa_state *state);
+bool q38_qsa_state_clone(const q38_qsa_state *source, q38_qsa_state *copy,
+                         char *error, size_t error_len);
 
 #ifdef __cplusplus
 }
