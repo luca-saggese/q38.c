@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10
+	m4-c08 m4-c09 m4-c10 m4-c11
 
 all: spark
 
@@ -264,6 +264,20 @@ m4-c10: m4-c09 $(TEST_DIR)/test_m4_ple_loader
 	@mkdir -p $(M4_ARTIFACT_DIR)
 	@./$(TEST_DIR)/test_m4_ple_loader \
 		$(M4_ARTIFACT_DIR)/ple_memory_matrix.json
+
+$(TEST_DIR)/test_m4_ple_prefetch: $(TEST_DIR)/test_m4_ple_prefetch.c \
+		q38_ple_prefetch.o q38_ple.o q38_gguf.o \
+		q38_ple_prefetch.h q38_ple.h q38_gguf.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_prefetch.c \
+		q38_ple_prefetch.o q38_ple.o q38_gguf.o
+
+q38_ple_prefetch.o: q38_ple_prefetch.c q38_ple_prefetch.h q38_ple.h
+	$(CC) $(CFLAGS) -c -o $@ q38_ple_prefetch.c
+
+m4-c11: m4-c10 $(TEST_DIR)/test_m4_ple_prefetch
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	@./$(TEST_DIR)/test_m4_ple_prefetch
+	@printf '%s\n' '{"gate":"M4-C11","implementation":"madvise(MADV_WILLNEED) advisory mapped-row prefetch","default_enabled":false,"cuda_staging":"not present","benefit_gate":"not enabled without measured benefit","persistent_copy":false,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_prefetch_benchmark.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -783,5 +797,6 @@ clean:
 		$(TEST_DIR)/q38_forward_probe \
 		$(TEST_DIR)/test_ple_chunking \
 		$(TEST_DIR)/test_m4_ple_cache \
+		$(TEST_DIR)/test_m4_ple_prefetch \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)

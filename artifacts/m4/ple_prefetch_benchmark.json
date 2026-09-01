@@ -1,0 +1,1 @@
+{"gate":"M4-C11","implementation":"madvise(MADV_WILLNEED) advisory mapped-row prefetch","default_enabled":false,"cuda_staging":"not present","benefit_gate":"not enabled without measured benefit","persistent_copy":false,"status":"pass"}
