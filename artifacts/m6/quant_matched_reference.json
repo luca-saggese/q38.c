@@ -5,5 +5,5 @@
   "input_trace": "artifacts/m6/real_forward_trace.json",
   "q38_forward_called": false,
   "status": "blocked",
-  "reason": "no separate llama.cpp executable is available to read/dequantize the q38 GGUF; native q38 output cannot serve as this reference"
+  "reason": "blocked: no separate llama.cpp executable is available, and an independent GGUF reader/dequantizer alone cannot produce a quant-matched 48-layer Qwen4Exp trace without reimplementing the full forward graph; native q38 output cannot serve as reference"
 }
