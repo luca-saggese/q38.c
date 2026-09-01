@@ -343,9 +343,9 @@ q38_qsa_ref.o: q38_qsa_ref.c q38_qsa_ref.h
 	$(CC) $(CFLAGS) -c -o $@ q38_qsa_ref.c
 
 $(TEST_DIR)/test_m5_qsa_ref: $(TEST_DIR)/test_m5_qsa_ref.c \
-		q38_qsa_ref.o q38_qsa_ref.h
+		q38_qsa_ref.o q38_topk_ref.o q38_qsa_ref.h q38_topk_ref.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_ref.c \
-		q38_qsa_ref.o -lm
+		q38_qsa_ref.o q38_topk_ref.o -lm
 
 m5-c04: m5-c03 $(TEST_DIR)/test_m5_qsa_ref
 	@./$(TEST_DIR)/test_m5_qsa_ref
@@ -368,17 +368,18 @@ m5-c05: m5-c04 $(TEST_DIR)/test_m5_topk
 	@printf '%s\n' '{"gate":"M5-C05","implementation":"deterministic scalar/CUDA top-k","tie_break":"higher score, then lower token-cell ID","selection_order":"stable; only selected IDs are semantic","status":"pass"}' > artifacts/m5/topk_goldens.json
 
 $(TEST_DIR)/test_m5_qsa_index_cuda: $(TEST_DIR)/test_m5_qsa_index_cuda.cu \
-		q38_qsa_cuda.o q38_qsa_ref.o q38_qsa_cuda.h q38_qsa_ref.h
+		q38_qsa_cuda.o q38_qsa_ref.o q38_topk_ref.o q38_qsa_cuda.h q38_qsa_ref.h
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m5_qsa_index_cuda.cu \
-		q38_qsa_cuda.o q38_qsa_ref.o $(CUDA_LDLIBS) -lm
+		q38_qsa_cuda.o q38_qsa_ref.o q38_topk_ref.o $(CUDA_LDLIBS) -lm
 
 m5-c06: m5-c05 $(TEST_DIR)/test_m5_qsa_index_cuda
 	@./$(TEST_DIR)/test_m5_qsa_index_cuda
 	@printf '%s\n' '{"gate":"M5-C06","implementation":"naive CUDA block pooling/index scoring","pooling":"arithmetic mean including incomplete tail","scoring":"ReLU per head then sum","status":"pass"}' > artifacts/m5/indexer_cuda.json
 
 $(TEST_DIR)/test_m5_qsa_tail: $(TEST_DIR)/test_m5_qsa_tail.c \
-		q38_qsa_ref.o q38_qsa_ref.h
-	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_tail.c q38_qsa_ref.o -lm
+		q38_qsa_ref.o q38_topk_ref.o q38_qsa_ref.h q38_topk_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_tail.c \
+		q38_qsa_ref.o q38_topk_ref.o -lm
 
 m5-c07: m5-c06 $(TEST_DIR)/test_m5_qsa_tail
 	@./$(TEST_DIR)/test_m5_qsa_tail

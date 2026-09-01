@@ -72,6 +72,7 @@ __global__ static void index_scores_kernel(
     for (size_t head = 0; head < heads; ++head) {
         float dot = 0.0f;
         float norm = 0.0f;
+        float qnorm = 0.0f;
         for (size_t d = 0; d < head_dim; ++d) {
             float pooled = 0.0f;
             for (size_t token = begin; token < end; ++token)
@@ -79,11 +80,14 @@ __global__ static void index_scores_kernel(
             pooled /= (float)(end - begin);
             dot += queries[(query * heads + head) * head_dim + d] * pooled;
             norm += pooled * pooled;
+            const float q = queries[(query * heads + head) * head_dim + d];
+            qnorm += q * q;
         }
         dot /= sqrtf(norm / (float)head_dim + 1e-6f);
+        dot /= sqrtf(qnorm / (float)head_dim + 1e-6f);
         total += dot > 0.0f ? dot : 0.0f;
     }
-    scores[index] = total;
+    scores[index] = total / sqrtf((float)head_dim);
 }
 
 extern "C" bool q38_qsa_cuda_project_main(

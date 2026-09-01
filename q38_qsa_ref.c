@@ -1,5 +1,4 @@
 #include "q38_qsa_ref.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -55,12 +54,118 @@ bool q38_qsa_index_scores_ref(const float *raw_keys, size_t token_count,
                 float dot = 0.0f;
                 for (size_t d = 0; d < head_dim; ++d)
                     dot += q[d] * pooled[block * head_dim + d];
+                double q_norm = 0.0;
+                for (size_t d = 0; d < head_dim; ++d)
+                    q_norm += (double)q[d] * q[d];
+                dot *= 1.0f / sqrtf((float)(q_norm / (double)head_dim) + 1e-6f);
                 total += dot > 0.0f ? dot : 0.0f;
             }
-            scores[query * blocks + block] = total;
+            scores[query * blocks + block] = total / sqrtf((float)head_dim);
         }
+
     }
     free(pooled);
+    return true;
+}
+
+bool q38_qsa_select_tokens_ref(const float *raw_keys, size_t token_count,
+                               const float *queries, size_t query_count,
+                               size_t heads, size_t head_dim, size_t ratio,
+                               size_t budget, const uint32_t *visible,
+                               const size_t *visible_offsets,
+                               uint32_t *selected, size_t selected_stride,
+                               size_t *selected_counts, char *error,
+                               size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (!raw_keys || !token_count || !queries || !query_count || !heads ||
+        !head_dim || !ratio || !budget || !visible || !visible_offsets ||
+        !selected || !selected_counts || !selected_stride ||
+        visible_offsets[0] != 0) {
+        return fail(error, error_len, "invalid QSA token selection arguments");
+    }
+    for (size_t query = 0; query < query_count; ++query) {
+        const size_t begin = visible_offsets[query];
+        const size_t end = visible_offsets[query + 1];
+        if (end < begin || end - begin > token_count) {
+            return fail(error, error_len, "QSA visible-cell range is invalid");
+        }
+        const size_t visible_count = end - begin;
+        const size_t complete = visible_count / ratio;
+        const size_t group_budget = budget / ratio;
+        const size_t groups = complete < group_budget ? complete : group_budget;
+        if (complete > UINT32_MAX || groups > SIZE_MAX / ratio ||
+            groups * ratio > selected_stride ||
+            visible_count - complete * ratio > selected_stride - groups * ratio) {
+            return fail(error, error_len, "QSA selection output stride is too small");
+        }
+        float *group_scores = (float *)malloc(complete * sizeof(*group_scores));
+        uint32_t *group_ids = (uint32_t *)malloc(complete * sizeof(*group_ids));
+        if ((complete && (!group_scores || !group_ids))) {
+            free(group_scores);
+            free(group_ids);
+            return fail(error, error_len, "QSA score allocation failed");
+        }
+        for (size_t group = 0; group < complete; ++group) {
+            const size_t member = begin + group * ratio;
+            float total = 0.0f;
+            for (size_t head = 0; head < heads; ++head) {
+                const float *q = queries + (query * heads + head) * head_dim;
+                float dot = 0.0f;
+                double norm = 0.0;
+                for (size_t d = 0; d < head_dim; ++d) {
+                    float pooled = 0.0f;
+                    for (size_t j = 0; j < ratio; ++j)
+                        pooled += raw_keys[(size_t)visible[member + j] *
+                                           head_dim + d];
+                    pooled /= (float)ratio;
+                    dot += q[d] * pooled;
+                    norm += (double)pooled * pooled;
+                }
+                dot /= sqrtf((float)(norm / (double)head_dim) + 1e-6f);
+                double qnorm = 0.0;
+                for (size_t d = 0; d < head_dim; ++d)
+                    qnorm += (double)q[d] * q[d];
+                dot *= 1.0f /
+                       sqrtf((float)(qnorm / (double)head_dim) + 1e-6f);
+                total += dot > 0.0f ? dot : 0.0f;
+            }
+            group_scores[group] = total / sqrtf((float)head_dim);
+            group_ids[group] = (uint32_t)group;
+        }
+        size_t used = 0;
+        for (size_t candidate = 0; candidate < complete; ++candidate) {
+            size_t at = used;
+            while (at > 0) {
+                const size_t previous = group_ids[at - 1];
+                const uint32_t previous_cell = visible[begin + previous * ratio];
+                const uint32_t candidate_cell = visible[begin + candidate * ratio];
+                if (group_scores[previous] > group_scores[candidate] ||
+                    (group_scores[previous] == group_scores[candidate] &&
+                     previous_cell < candidate_cell)) {
+                    break;
+                }
+                --at;
+            }
+            if (at < groups) {
+                if (used < groups) ++used;
+                for (size_t j = used; j > at + 1; --j)
+                    group_ids[j - 1] = group_ids[j - 2];
+                group_ids[at] = (uint32_t)candidate;
+            }
+        }
+        size_t out = 0;
+        for (size_t rank = 0; rank < groups; ++rank) {
+            const size_t group = group_ids[rank];
+            for (size_t j = 0; j < ratio; ++j)
+                selected[query * selected_stride + out++] =
+                    visible[begin + group * ratio + j];
+        }
+        for (size_t i = complete * ratio; i < visible_count; ++i)
+            selected[query * selected_stride + out++] = visible[begin + i];
+        selected_counts[query] = out;
+        free(group_scores);
+        free(group_ids);
+    }
     return true;
 }
 
