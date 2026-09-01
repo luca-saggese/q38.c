@@ -1,0 +1,1 @@
+{"gate": "M5-C12", "source": "Qwen3.8-Flash-Next checkpoint", "layer": 3, "tokens": [248044, 9707, 11, 576], "selected": [[0], [0, 1], [0, 1, 2], [0, 1, 2, 3]], "output_shape": [4, 2560], "status": "pass"}

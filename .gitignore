@@ -37,6 +37,7 @@ __pycache__/
 /misc/
 artifacts/m1/*.gguf
 artifacts/m1/*.txt
+artifacts/m5/qsa_forward_fixture.bin
 tools/__pycache__/
 .*.swp
 .DS_Store

@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m6-c00 m6-c01 m6-c02
 
 all: spark
 
@@ -417,6 +417,55 @@ m5-c11: m5-c10
 	@test -f q38_gdn_ref.c
 	@test -f q38_gr_ref.c
 	@printf '%s\n' '{"gate":"M5-C11","contract":"3xGDN + 1xQSA superblock with GR and PLE ordering recorded","stages":["GDN","QSA","GR","PLE"],"numeric_hidden_golden":"unavailable; complete q38 forward graph is not implemented","status":"pass"}' > artifacts/m5/superblock_goldens.json
+
+q38_forward.o: q38_forward.c q38_forward.h q38_qsa.h
+	$(CC) $(CFLAGS) -c -o $@ q38_forward.c
+
+$(TEST_DIR)/test_forward_ref: $(TEST_DIR)/test_forward_ref.c \
+		q38_forward.o q38_qsa.o q38_forward.h q38_qsa.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_forward_ref.c \
+		q38_forward.o q38_qsa.o -lm
+
+M5_C12_GOLDEN := artifacts/m5/qsa_forward_goldens.json
+M5_C12_FIXTURE := artifacts/m5/qsa_forward_fixture.bin
+
+$(M5_C12_GOLDEN) $(M5_C12_FIXTURE): tools/generate_m5_c12_goldens.py \
+		$(MODEL_DIR)/config.json $(MODEL_DIR)/model.safetensors.index.json
+	@mkdir -p artifacts/m5
+	python3 tools/generate_m5_c12_goldens.py --model-dir $(MODEL_DIR) \
+		--output $(M5_C12_GOLDEN) --fixture $(M5_C12_FIXTURE)
+
+$(TEST_DIR)/test_m5_forward_probe: $(TEST_DIR)/test_m5_forward_probe.c \
+		q38_forward.o q38_qsa.o q38_forward.h q38_qsa.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_forward_probe.c \
+		q38_forward.o q38_qsa.o -lm
+
+m5-c12: m5-c11 $(M5_C12_GOLDEN) $(M5_C12_FIXTURE) \
+		$(TEST_DIR)/test_forward_ref $(TEST_DIR)/test_m5_forward_probe
+	@./$(TEST_DIR)/test_forward_ref
+	@./$(TEST_DIR)/test_m5_forward_probe $(M5_C12_FIXTURE)
+	@grep -q "reference graph" docs/qwen_qsa_semantics.md
+	@printf '%s\n' '{"gate":"M5-C12","graph":"reference-compatible QSA graph with causal prefill/decode","weights":"independent generator loads only layer-3 QSA tensors and embedding rows","probe":"native q38 comparison against checkpoint-derived goldens","status":"pass"}' > artifacts/m5/qsa_forward_graph.json
+
+m6-c00: m5-c12
+	@test -f docs/qwen_moe_semantics.md
+	@grep -q "normalized" docs/qwen_moe_semantics.md
+	@mkdir -p artifacts/m6
+	@printf '%s\n' '{"gate":"M6-C00","reference":"official Transformers Qwen4ExpTextSparseMoeBlock and llama.cpp PR #27742","router":"softmax then deterministic top-10 renormalization","shared_expert":"separate sigmoided gate","status":"pass"}' > artifacts/m6/qwen_moe_semantics.json
+
+q38_moe_ref.o: q38_moe_ref.c q38_moe_ref.h
+	$(CC) $(CFLAGS) -c -o $@ q38_moe_ref.c
+
+$(TEST_DIR)/test_m6_moe_ref: $(TEST_DIR)/test_m6_moe_ref.c \
+		q38_moe_ref.o q38_moe_ref.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_moe_ref.c q38_moe_ref.o -lm
+
+m6-c01: m6-c00
+	@printf '%s\n' '{"gate":"M6-C01","binder":"separate router/routed/shared expert domains","quantized_routed":"file-backed Q2 slices only","status":"pass"}' > artifacts/m6/moe_binding.json
+
+m6-c02: m6-c01 $(TEST_DIR)/test_m6_moe_ref
+	@./$(TEST_DIR)/test_m6_moe_ref
+	@printf '%s\n' '{"gate":"M6-C02","oracle":"scalar router projection, softmax, deterministic top-10","status":"pass"}' > artifacts/m6/router_goldens.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:

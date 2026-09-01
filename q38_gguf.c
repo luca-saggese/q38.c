@@ -165,6 +165,13 @@ bool q38_gguf_type_nbytes(uint32_t type, uint64_t elements, uint64_t *bytes) {
     return true;
 }
 
+const void *q38_gguf_tensor_data(const q38_gguf *m, const q38_tensor *tensor) {
+    if (!m || !tensor || tensor->abs_offset > m->size ||
+        tensor->bytes > m->size - tensor->abs_offset)
+        return NULL;
+    return m->map + tensor->abs_offset;
+}
+
 static uint64_t scalar_value_size(uint32_t type) {
     switch (type) {
     case GGUF_VALUE_UINT8:
