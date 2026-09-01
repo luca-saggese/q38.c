@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 __device__ static float half_to_float_device(uint16_t bits) {
     uint32_t sign = ((uint32_t)bits & 0x8000u) << 16;
@@ -105,6 +106,20 @@ static bool fail(char *error, size_t error_len, const char *message) {
     return false;
 }
 
+__global__ static void expand_rows_kernel(const uint32_t *map,
+                                          size_t id_count,
+                                          uint32_t row_width,
+                                          const float *unique_rows,
+                                          float *out) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t elements = id_count * (size_t)row_width;
+    if (index >= elements) return;
+    const size_t selected = index / row_width;
+    const size_t element = index % row_width;
+    const size_t unique = (size_t)map[selected];
+    out[index] = unique_rows[unique * (size_t)row_width + element];
+}
+
 extern "C" bool q38_ple_cuda_lookup_rows(uint32_t qtype,
                                          const void *device_table,
                                          uint64_t table_rows,
@@ -137,4 +152,110 @@ extern "C" bool q38_ple_cuda_lookup_rows(uint32_t qtype,
         return false;
     }
     return true;
+}
+
+extern "C" bool q38_ple_cuda_lookup_rows_dedup(
+    uint32_t qtype, const void *device_table, uint64_t table_rows,
+    uint32_t row_width, const uint32_t *host_ids, size_t id_count,
+    float *device_rows, cudaStream_t stream, q38_ple_cuda_lookup_stats *stats,
+    char *error, size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (stats) {
+        stats->input_count = 0;
+        stats->unique_count = 0;
+    }
+    if (qtype != Q38_QUANT_Q2_K && qtype != Q38_QUANT_Q4_K) {
+        return fail(error, error_len, "unsupported CUDA PLE row type");
+    }
+    if (!device_table || table_rows == 0 || row_width == 0 ||
+        row_width % Q38_QUANT_QK_K != 0 || !host_ids || id_count == 0 ||
+        id_count > UINT32_MAX || !device_rows) {
+        return fail(error, error_len, "invalid CUDA PLE dedup arguments");
+    }
+    if (id_count > SIZE_MAX / row_width) {
+        return fail(error, error_len, "PLE output size overflows");
+    }
+    if (id_count > SIZE_MAX / sizeof(*host_ids)) {
+        return fail(error, error_len, "invalid host PLE ID batch");
+    }
+    const size_t output_elements = id_count * (size_t)row_width;
+
+    uint32_t *unique_ids =
+        (uint32_t *)malloc(id_count * sizeof(*unique_ids));
+    uint32_t *map = (uint32_t *)malloc(id_count * sizeof(*map));
+    if (!unique_ids || !map) {
+        free(unique_ids);
+        free(map);
+        return fail(error, error_len, "PLE ID deduplication allocation failed");
+    }
+    size_t unique_count = 0;
+    for (size_t i = 0; i < id_count; ++i) {
+        size_t found = unique_count;
+        for (size_t j = 0; j < unique_count; ++j) {
+            if (unique_ids[j] == host_ids[i]) {
+                found = j;
+                break;
+            }
+        }
+        if (found == unique_count) unique_ids[unique_count++] = host_ids[i];
+        map[i] = (uint32_t)found;
+    }
+    if (unique_count > SIZE_MAX / row_width ||
+        unique_count * (size_t)row_width > SIZE_MAX / sizeof(float)) {
+        free(map);
+        free(unique_ids);
+        return fail(error, error_len, "PLE unique output size overflows");
+    }
+
+    uint32_t *device_ids = nullptr;
+    uint32_t *device_map = nullptr;
+    float *device_unique_rows = nullptr;
+    bool ok = false;
+    if (cudaMalloc(&device_ids, unique_count * sizeof(*device_ids)) !=
+            cudaSuccess ||
+        cudaMalloc(&device_map, id_count * sizeof(*device_map)) !=
+            cudaSuccess ||
+        cudaMalloc(&device_unique_rows,
+                   unique_count * (size_t)row_width * sizeof(float)) !=
+            cudaSuccess) {
+        fail(error, error_len, "PLE deduplication CUDA allocation failed");
+        goto cleanup;
+    }
+    if (cudaMemcpyAsync(device_ids, unique_ids,
+                        unique_count * sizeof(*unique_ids),
+                        cudaMemcpyHostToDevice, stream) != cudaSuccess ||
+        cudaMemcpyAsync(device_map, map, id_count * sizeof(*map),
+                        cudaMemcpyHostToDevice, stream) != cudaSuccess) {
+        fail(error, error_len, "PLE deduplication CUDA copy failed");
+        goto cleanup;
+    }
+    if (!q38_ple_cuda_lookup_rows(
+            qtype, device_table, table_rows, row_width, device_ids,
+            unique_count, device_unique_rows, stream, error, error_len)) {
+        goto cleanup;
+    }
+    expand_rows_kernel<<<(unsigned)((output_elements + 255) / 256), 256, 0,
+                         stream>>>(
+        device_map, id_count, row_width, device_unique_rows, device_rows);
+    if (cudaGetLastError() != cudaSuccess) {
+        fail(error, error_len, "PLE deduplication expansion launch failed");
+        goto cleanup;
+    }
+    if (cudaStreamSynchronize(stream) != cudaSuccess) {
+        fail(error, error_len, "PLE deduplication expansion failed");
+        goto cleanup;
+    }
+    ok = true;
+    if (stats) {
+        stats->input_count = id_count;
+        stats->unique_count = unique_count;
+    }
+
+cleanup:
+    if (device_unique_rows) cudaFree(device_unique_rows);
+    if (device_map) cudaFree(device_map);
+    if (device_ids) cudaFree(device_ids);
+    free(map);
+    free(unique_ids);
+    return ok;
 }

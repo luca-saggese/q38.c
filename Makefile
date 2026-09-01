@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08
+	m4-c08 m4-c09
 
 all: spark
 
@@ -241,6 +241,18 @@ m4-c08: m4-c07 $(TEST_DIR)/test_m4_ple_cache
 		$(M4_ARTIFACT_DIR)/ple_cache_stats_cold.json \
 		$(M4_ARTIFACT_DIR)/ple_cache_stats_warm.json
 	@printf '%s\n' '{"gate":"M4-C08","cache":"bounded deterministic quantized-row cache","value":"quantized row bytes","replacement":"round-robin","cold_warm":"equivalent","full_dequant_mirror":false,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_cache_stats.json
+
+$(TEST_DIR)/test_m4_ple_cuda_batch: $(TEST_DIR)/test_m4_ple_cuda_batch.cu \
+		q38_ple_cuda.o q38_ple_ref.o q38_session.o q38_quant.o \
+		q38_ple_cuda.h q38_ple_ref.h q38_quant.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m4_ple_cuda_batch.cu \
+		q38_ple_cuda.o q38_ple_ref.o q38_session.o q38_quant.o \
+		$(CUDA_LDLIBS) -lm
+
+m4-c09: m4-c08 $(TEST_DIR)/test_m4_ple_cuda_batch
+	@./$(TEST_DIR)/test_m4_ple_cuda_batch
+	@mkdir -p $(M4_ARTIFACT_DIR)
+	@printf '%s\n' '{"gate":"M4-C09","lookup":"CUDA batch deduplication","dedupe":"storage accesses only","output_order":"input order preserved","qtypes":["Q2_K","Q4_K"],"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_batching.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -756,6 +768,7 @@ clean:
 		$(TEST_DIR)/test_m4_ple_store \
 		$(TEST_DIR)/test_m4_ple_row \
 		$(TEST_DIR)/test_m4_ple_cuda \
+		$(TEST_DIR)/test_m4_ple_cuda_batch \
 		$(TEST_DIR)/q38_forward_probe \
 		$(TEST_DIR)/test_ple_chunking \
 		$(TEST_DIR)/test_m4_ple_cache \

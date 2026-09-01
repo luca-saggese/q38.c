@@ -1,0 +1,1 @@
+{"gate":"M4-C09","lookup":"CUDA batch deduplication","dedupe":"storage accesses only","output_order":"input order preserved","qtypes":["Q2_K","Q4_K"],"status":"pass"}
