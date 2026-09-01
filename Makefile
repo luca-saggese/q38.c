@@ -325,6 +325,7 @@ m5-c00: m4-integration-audit
 	@test -f docs/qwen_qsa_semantics.md
 	@grep -q "build_qsa_top_k" docs/qwen_qsa_semantics.md
 	@grep -q "compress_ratio - 1" docs/qwen_qsa_semantics.md
+	@grep -q "no separate persistent compressed-group accumulator" docs/qwen_qsa_semantics.md
 	@grep -q "mrope_interleaved" docs/qwen_qsa_semantics.md
 	@mkdir -p artifacts/m5
 	@printf '%s\n' '{"gate":"M5-C00","reference":"llama.cpp PR #27742 commit eaf93765572e794b8e3754fe45adbe12d381e997","checkpoint":"Qwen4ExpForConditionalGeneration transformers 5.8.0.dev0","qsa_layers":12,"indexer":"mean pooled blocks, ReLU per-head scores, top-k plus tail","rope":"multi-section interleaved partial rotary","status":"pass"}' > artifacts/m5/qwen_qsa_semantics.json

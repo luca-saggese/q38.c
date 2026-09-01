@@ -96,6 +96,14 @@ gathered positions, and output must therefore be invariant under chunking.
 Cache growth preserves prior cells; reset clears main KV, indexer cache,
 position, and committed-token count together.
 
+There is no separate persistent compressed-group accumulator in the official
+text path. A partial group is represented by its raw per-token index-cache
+cells; on each query, complete groups are pooled from those cells and the
+remaining cells form the causal tail. Chunk boundaries therefore do not
+commit or discard a group, and there is no hidden “pending group count” to
+restore. Rewind/restore must restore the raw index cells and committed
+position together with main K/V cells.
+
 The llama.cpp graph requires token counts divisible by the hyper-connection
 stream count (4) for its multi-stream block layout. The scalar/runtime
 reference path rejects unsupported multi-sequence sharing rather than silently

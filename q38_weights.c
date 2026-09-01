@@ -138,6 +138,52 @@ static bool validate_core_tensor(const q38_tensor *tensor, char *error,
     return true;
 }
 
+static bool validate_ple_tensor_set(const q38_layer_weights *layer,
+                                    uint32_t layer_number, char *error,
+                                    size_t error_len) {
+    uint32_t shards = 0, key = 0, value = 0, norm_key = 0;
+    uint32_t norm_query = 0, norm_conv = 0, conv = 0, multipliers = 0;
+    uint32_t offsets = 0, sizes = 0;
+    static const uint64_t key_shape[] = {10240, 2560};
+    static const uint64_t value_shape[] = {2560, 2560};
+    static const uint64_t norm_shape[] = {10240};
+    static const uint64_t conv_shape[] = {10240, 1, 4};
+    static const uint64_t vector3[] = {3};
+    static const uint64_t vector16[] = {16};
+    for (uint32_t i = 0; i < layer->ple_tensor_count; ++i) {
+        const q38_tensor *t = layer->ple_tensor[i];
+        if (name_has(t, ".ngram_embedding.shard_")) shards++;
+        else if (name_has(t, ".ple.key_proj.weight")) {
+            key++; if (!shape_is(t, key_shape, 2)) goto mismatch;
+        } else if (name_has(t, ".ple.value_proj.weight")) {
+            value++; if (!shape_is(t, value_shape, 2)) goto mismatch;
+        } else if (name_has(t, ".ple.norm_key.weight")) {
+            norm_key++; if (!shape_is(t, norm_shape, 1)) goto mismatch;
+        } else if (name_has(t, ".ple.norm_query.weight")) {
+            norm_query++; if (!shape_is(t, norm_shape, 1)) goto mismatch;
+        } else if (name_has(t, ".ple.norm_conv.weight")) {
+            norm_conv++; if (!shape_is(t, norm_shape, 1)) goto mismatch;
+        } else if (name_has(t, ".ple.conv1d.weight")) {
+            conv++; if (!shape_is(t, conv_shape, 3)) goto mismatch;
+        } else if (name_has(t, "layer_multipliers")) {
+            multipliers++; if (!shape_is(t, vector3, 1)) goto mismatch;
+        } else if (name_has(t, "ngram_heads_offsets")) {
+            offsets++; if (!shape_is(t, vector16, 1)) goto mismatch;
+        } else if (name_has(t, "ngram_heads_vocab_sizes")) {
+            sizes++; if (!shape_is(t, vector16, 1)) goto mismatch;
+        } else goto mismatch;
+    }
+    if (shards != Q38_PLE_SHARD_COUNT || key != 1 || value != 1 ||
+        norm_key != 1 || norm_query != 1 || norm_conv != 1 || conv != 1 ||
+        multipliers != 1 || offsets != 1 || sizes != 1) goto mismatch;
+    return true;
+mismatch:
+    if (error && error_len)
+        snprintf(error, error_len, "layer %u PLE semantic tensor set mismatch",
+                 layer_number);
+    return false;
+}
+
 static bool validate_layer_complete(const q38_layer_weights *layer,
                                     uint32_t layer_number, char *error,
                                     size_t error_len) {
@@ -173,10 +219,41 @@ static bool validate_layer_complete(const q38_layer_weights *layer,
                 layer->experts.bank[0].down);
         return false;
     }
+    if (layer->kind == Q38_LAYER_LINEAR_ATTENTION) {
+        if (layer->gdn.in_proj_qkv == NULL || layer->gdn.in_proj_z == NULL ||
+            layer->gdn.in_proj_a == NULL || layer->gdn.in_proj_b == NULL ||
+            layer->gdn.conv1d == NULL || layer->gdn.A_log == NULL ||
+            layer->gdn.dt_bias == NULL || layer->gdn.norm == NULL ||
+            layer->gdn.out_proj == NULL ||
+            layer->qsa.q_proj != NULL || layer->qsa.k_proj != NULL) {
+            if (error && error_len)
+                snprintf(error, error_len,
+                         "layer %u semantic GDN/QSA family mismatch",
+                         layer_number);
+            return false;
+        }
+    } else {
+        if (layer->qsa.q_proj == NULL || layer->qsa.k_proj == NULL ||
+            layer->qsa.v_proj == NULL || layer->qsa.o_proj == NULL ||
+            layer->qsa.q_norm == NULL || layer->qsa.k_norm == NULL ||
+            layer->qsa.index_qk_proj == NULL ||
+            layer->qsa.index_q_norm == NULL ||
+            layer->qsa.index_k_norm == NULL ||
+            layer->gdn.in_proj_qkv != NULL) {
+            if (error && error_len)
+                snprintf(error, error_len,
+                         "layer %u semantic QSA/GDN family mismatch",
+                         layer_number);
+            return false;
+        }
+    }
     if (layer->kind == Q38_LAYER_FULL_ATTENTION) {
         if (!q38_qsa_weights_validate(&layer->qsa, error, error_len))
             return false;
     }
+    if (layer_number == 1 && !validate_ple_tensor_set(layer, layer_number,
+                                                       error, error_len))
+        return false;
     return true;
 }
 
@@ -243,16 +320,10 @@ static bool validate_metadata(const q38_gguf *model, uint32_t max_layer,
 
 static uint32_t expected_tensor_count(uint32_t max_layer) {
     uint32_t layers = max_layer + 1;
-    uint32_t full = 0;
-    for (uint32_t i = 0; i < layers; i++) {
-        full += (i % 4 == 3) ? 9 : 9; /* one core family per layer */
-    }
-    /* The frozen fixture names PLE tensors under layers.1; max_layer is
-     * zero-based, so layer 1 is included when max_layer >= 1. */
-    uint32_t ple = max_layer >= 1 ? Q38_MAX_PLE_TENSORS - 23 : 0;
-    /* 8 hyper-connection, 7 MoE/router, and one core family are represented
-     * by the inventory; zero-based layer 1 additionally owns 137 PLE tensors. */
-    return 5 + full + layers * 15 + ple;
+    const uint32_t common = 9 /* core */ + 8 /* GR */ + 7 /* MoE */;
+    const uint32_t ple = max_layer >= 1
+        ? Q38_PLE_SHARD_COUNT + Q38_PLE_AUX_TENSORS : 0;
+    return 5 + layers * common + ple;
 }
 
 bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
