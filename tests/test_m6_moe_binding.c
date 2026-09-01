@@ -26,6 +26,16 @@ int main(void) {
     char error[128];
     if (!q38_moe_bind_layer(&layer, true, &out, error, sizeof(error)))
         return 1;
+    q38_gguf model = {.size = 8192};
+    gu.bytes = 512 * 8; gu.abs_offset = 128;
+    uint64_t offset = 0, bytes = 0;
+    if (!q38_moe_expert_slice(&model, &gu, 511, &offset, &bytes,
+                              error, sizeof(error)) ||
+        offset != 128 + 511 * 8 || bytes != 8) {
+        fprintf(stderr, "slice failed: %s offset=%llu bytes=%llu\n", error,
+                (unsigned long long)offset, (unsigned long long)bytes);
+        return 1;
+    }
     puts("test_m6_moe_binding: routed/router/shared tensor domains bound strictly");
     return 0;
 }

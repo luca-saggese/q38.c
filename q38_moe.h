@@ -23,5 +23,8 @@ bool q38_moe_weights_validate(const q38_moe_weights *weights,
                               char *error, size_t error_len);
 bool q38_moe_bind_layer(const q38_layer_weights *layer, bool quantized,
                         q38_moe_weights *out, char *error, size_t error_len);
+bool q38_moe_expert_slice(const q38_gguf *model, const q38_tensor *tensor,
+                          uint32_t expert, uint64_t *offset, uint64_t *bytes,
+                          char *error, size_t error_len);
 
 #endif

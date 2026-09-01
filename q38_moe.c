@@ -61,3 +61,22 @@ bool q38_moe_bind_layer(const q38_layer_weights *layer, bool quantized,
     out->routed_quantized = quantized;
     return q38_moe_weights_validate(out, error, error_len);
 }
+
+bool q38_moe_expert_slice(const q38_gguf *model, const q38_tensor *tensor,
+                          uint32_t expert, uint64_t *offset, uint64_t *bytes,
+                          char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!model || !tensor || !offset || !bytes || tensor->ndim != 3 ||
+        tensor->dim[0] != Q38_MODEL_EXPERTS || expert >= Q38_MODEL_EXPERTS ||
+        tensor->bytes % tensor->dim[0] != 0)
+        return fail(error, error_len, "invalid routed expert slice");
+    const uint64_t slice = tensor->bytes / tensor->dim[0];
+    if (expert > UINT64_MAX / slice ||
+        tensor->abs_offset > UINT64_MAX - expert * slice)
+        return fail(error, error_len, "routed expert slice overflows");
+    *offset = tensor->abs_offset + expert * slice;
+    *bytes = slice;
+    if (*offset > model->size || *bytes > model->size - *offset)
+        return fail(error, error_len, "routed expert slice exceeds model mapping");
+    return true;
+}
