@@ -8,6 +8,7 @@
 #include "q38_gguf.h"
 #include "q38_model_config.h"
 #include "q38_ple.h"
+#include "q38_qsa.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -72,6 +73,7 @@ typedef struct {
     q38_gr_weights attn_gr;
     q38_gr_weights mlp_gr;
     q38_gdn_weights gdn;
+    q38_qsa_weights qsa;
 } q38_layer_weights;
 
 typedef struct {

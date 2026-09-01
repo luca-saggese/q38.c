@@ -50,7 +50,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m5-c00 m5-c01
 
 all: spark
 
@@ -302,6 +302,17 @@ m5-c00: m4-acceptance
 	@grep -q "mrope_interleaved" docs/qwen_qsa_semantics.md
 	@mkdir -p artifacts/m5
 	@printf '%s\n' '{"gate":"M5-C00","reference":"llama.cpp PR #27742 commit eaf93765572e794b8e3754fe45adbe12d381e997","checkpoint":"Qwen4ExpForConditionalGeneration transformers 5.8.0.dev0","qsa_layers":12,"indexer":"mean pooled blocks, ReLU per-head scores, top-k plus tail","rope":"multi-section interleaved partial rotary","status":"pass"}' > artifacts/m5/qwen_qsa_semantics.json
+
+q38_qsa.o: q38_qsa.c q38_qsa.h q38_gguf.h
+	$(CC) $(CFLAGS) -c -o $@ q38_qsa.c
+
+$(TEST_DIR)/test_m5_qsa_binding: $(TEST_DIR)/test_m5_qsa_binding.c \
+		q38_qsa.o q38_qsa.h q38_gguf.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_qsa_binding.c q38_qsa.o
+
+m5-c01: m5-c00 $(TEST_DIR)/test_m5_qsa_binding
+	@./$(TEST_DIR)/test_m5_qsa_binding
+	@printf '%s\n' '{"gate":"M5-C01","binder":"separate QSA tensor family","state":["main_k","main_v","index_k","position","committed_tokens"],"strict_shapes":"validated by q38_weights binder","status":"pass"}' > artifacts/m5/qsa_binding.json
 
 .PHONY: tokenizer-runtime-gate
 tokenizer-runtime-gate:
@@ -603,13 +614,13 @@ m1-acceptance: m1-validate m1-quant-block m1-bind
 		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
 		--manifest tools/quant_manifest_q2.json
 
-q38_weights.o: q38_weights.c q38_weights.h q38_gguf.h q38_model_config.h q38_ple.h
+q38_weights.o: q38_weights.c q38_weights.h q38_gguf.h q38_model_config.h q38_ple.h q38_qsa.h
 	$(CC) $(CFLAGS) -c -o $@ q38_weights.c
 
 $(TEST_DIR)/test_weights: $(TEST_DIR)/test_weights.c q38_weights.o q38_gguf.o \
-	q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
+	q38_model_config.o q38_ple.o q38_qsa.o q38_weights.h q38_ple.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_weights.c q38_weights.o \
-	q38_gguf.o q38_model_config.o q38_ple.o
+	q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
 
 m1-bind: m1-subset $(TEST_DIR)/test_weights
 	./$(TEST_DIR)/test_weights \
@@ -823,5 +834,6 @@ clean:
 		$(TEST_DIR)/test_m4_ple_cache \
 		$(TEST_DIR)/test_m4_ple_prefetch \
 		$(TEST_DIR)/test_m4_ple_cuda_failure \
+		$(TEST_DIR)/test_m5_qsa_binding \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)

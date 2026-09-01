@@ -173,6 +173,10 @@ static bool validate_layer_complete(const q38_layer_weights *layer,
                 layer->experts.bank[0].down);
         return false;
     }
+    if (layer->kind == Q38_LAYER_FULL_ATTENTION) {
+        if (!q38_qsa_weights_validate(&layer->qsa, error, error_len))
+            return false;
+    }
     return true;
 }
 
@@ -464,6 +468,34 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
                         set_error(error, error_len, "unknown GDN tensor role");
                     else if (*slot)
                         set_error(error, error_len, "duplicate GDN tensor");
+                    else
+                        *slot = tensor;
+                } else if ((!error || !error[0]) &&
+                           name_has(tensor, ".self_attn.")) {
+                    q38_qsa_weights *qsa = &dst->qsa;
+                    q38_tensor **slot = NULL;
+                    if (name_has(tensor, ".q_proj.weight"))
+                        slot = &qsa->q_proj;
+                    else if (name_has(tensor, ".k_proj.weight"))
+                        slot = &qsa->k_proj;
+                    else if (name_has(tensor, ".v_proj.weight"))
+                        slot = &qsa->v_proj;
+                    else if (name_has(tensor, ".o_proj.weight"))
+                        slot = &qsa->o_proj;
+                    else if (name_has(tensor, ".q_norm.weight"))
+                        slot = &qsa->q_norm;
+                    else if (name_has(tensor, ".k_norm.weight"))
+                        slot = &qsa->k_norm;
+                    else if (name_has(tensor, ".indexer.index_qk_proj.weight"))
+                        slot = &qsa->index_qk_proj;
+                    else if (name_has(tensor, ".indexer.q_layernorm.weight"))
+                        slot = &qsa->index_q_norm;
+                    else if (name_has(tensor, ".indexer.k_layernorm.weight"))
+                        slot = &qsa->index_k_norm;
+                    if (!slot)
+                        set_error(error, error_len, "unknown QSA tensor role");
+                    else if (*slot)
+                        set_error(error, error_len, "duplicate QSA tensor");
                     else
                         *slot = tensor;
                 }

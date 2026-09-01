@@ -1,0 +1,1 @@
+{"gate":"M5-C01","binder":"separate QSA tensor family","state":["main_k","main_v","index_k","position","committed_tokens"],"strict_shapes":"validated by q38_weights binder","status":"pass"}
