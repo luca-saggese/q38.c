@@ -1,0 +1,1 @@
+{"gate":"M6-GPU","path":"separate CUDA diagnostic forward with scalar sequencing and CUDA row matvecs","validation":["BF16 matvec","Q8 matvec","Q2 expert"],"status":"pass"}

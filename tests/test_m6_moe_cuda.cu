@@ -45,7 +45,7 @@ int main() {
                          route.expert[k], route.weight[k]);
             return 1;
         }
-    std::vector<q38_q2_k_block> gate_up(1280 * 10), down(2560 * 3);
+    std::vector<q38_q2_k_block> gate_up(1280 * 10), down(640 * 10);
     for (auto &block : gate_up) { block.d = 0x3c00; block.dmin = 0; block.scales[0] = 1; }
     for (auto &block : down) { block.d = 0x3c00; block.dmin = 0; block.scales[0] = 1; }
     void *dgu = nullptr, *dd = nullptr;

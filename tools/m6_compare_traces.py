@@ -87,6 +87,8 @@ def main() -> None:
     parser.add_argument("--native", type=Path, required=True)
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--start-layer", type=int, default=0,
+                        help="route hard-gate comparisons begin at this layer")
     args = parser.parse_args()
     native = json.loads(args.native.read_text())
     reference = json.loads(args.reference.read_text())
@@ -206,16 +208,22 @@ def main() -> None:
     ref_routes = reference.get("routing", [])
     route_mismatch = []
     route_diagnostics = []
+    first_selected_set_divergence_layer = None
+    route_checks = []
     if len(native_routes) != len(ref_routes):
         route_mismatch.append("route_count")
     for left, right in zip(native_routes, ref_routes):
         left_experts, left_weights = route_values(left)
         right_experts, right_weights = route_values(right)
         layer = left.get("layer")
-        if set(left_experts) != set(right_experts):
+        selected_set_exact = set(left_experts) == set(right_experts)
+        if not selected_set_exact and layer >= args.start_layer:
             route_mismatch.append(f"layer:{layer}:selected_set")
         elif left_experts != right_experts:
             route_diagnostics.append(f"layer:{layer}:selected_order")
+        if (not selected_set_exact and layer >= args.start_layer and
+                first_selected_set_divergence_layer is None):
+            first_selected_set_divergence_layer = layer
         if not right_weights:
             continue
         if len(left_weights) != len(right_weights):
@@ -227,7 +235,30 @@ def main() -> None:
                 not close(left_by_expert[expert], right_by_expert[expert])
                 for expert in right_by_expert
             ):
-                route_mismatch.append(f"layer:{layer}:weights_by_expert")
+                if layer >= args.start_layer:
+                    route_mismatch.append(f"layer:{layer}:weights_by_expert")
+        detail = {"layer": layer, "selected_set_exact": selected_set_exact}
+        for field in ("hidden_input", "router_logits", "routed_output"):
+            if field in left and field in right:
+                detail[field] = vector_metrics(left[field], right[field])
+                if (detail[field]["status"] == "fail" and
+                        layer >= args.start_layer):
+                    route_mismatch.append(f"layer:{layer}:{field}")
+        for field in ("rank10", "rank11"):
+            if left.get(field) and right.get(field):
+                detail[field] = {
+                    "native": left[field], "reference": right[field],
+                    "score_close": close(left[field].get("score"),
+                                         right[field].get("score")),
+                }
+        if "margin_rank10_rank11" in left and "margin_rank10_rank11" in right:
+            detail["margin_rank10_rank11"] = {
+                "native": left["margin_rank10_rank11"],
+                "reference": right["margin_rank10_rank11"],
+                "close": close(left["margin_rank10_rank11"],
+                                right["margin_rank10_rank11"]),
+            }
+        route_checks.append(detail)
     if route_mismatch or route_diagnostics:
         if route_mismatch:
             result["status"] = "fail"
@@ -241,7 +272,10 @@ def main() -> None:
              ),
              "selected_order_exact": not route_diagnostics,
              "mismatches": route_mismatch,
-             "diagnostics": route_diagnostics}
+             "diagnostics": route_diagnostics,
+             "per_layer": route_checks,
+             "first_selected_set_divergence_layer":
+                 first_selected_set_divergence_layer}
         )
         result["hard_gates"]["routing_selected_set"] = {
             "status": "fail" if route_mismatch else "pass",
@@ -249,6 +283,8 @@ def main() -> None:
                 item.endswith(":selected_set") for item in route_mismatch
             ),
             "weights_by_expert_checked": True,
+            "first_selected_set_divergence_layer":
+                first_selected_set_divergence_layer,
         }
     native_moe = native.get("layer2_moe_trace")
     ref_moe = reference.get("layer2_moe_trace")

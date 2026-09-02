@@ -124,6 +124,16 @@ typedef struct {
                          void *user, char *error, size_t error_len);
 } q38_forward_diagnostics;
 
+/*
+ * Optional diagnostic matvec backend.  The default q38_forward_full path
+ * remains entirely scalar; callers may install this callback on the separate
+ * CUDA diagnostic path to execute individual file-backed rows on a device.
+ */
+typedef bool (*q38_forward_matvec_backend)(
+    const q38_gguf *model, const q38_tensor *tensor, size_t row,
+    const float *input, size_t cols, float *output, void *user, char *error,
+    size_t error_len);
+
 bool q38_forward_state_init(q38_forward_state *state,
                             const q38_weights *weights, uint32_t eos_token,
                             char *error, size_t error_len);
@@ -141,6 +151,19 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                       size_t token_count, float *logits, size_t logits_stride,
                       q38_forward_diagnostics *diagnostics, char *error,
                       size_t error_len);
+
+/*
+ * Run the same graph with a diagnostic row-matvec backend.  This is
+ * intentionally a wrapper around the scalar graph: all sequencing, state,
+ * callbacks, and trace semantics are unchanged, while supported matrix rows
+ * can be evaluated by CUDA.
+ */
+bool q38_forward_full_with_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend backend, void *backend_user, char *error,
+    size_t error_len);
 
 #ifdef __cplusplus
 }

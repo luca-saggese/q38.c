@@ -338,6 +338,9 @@ static bool full_fail(char *error, size_t error_len, const char *message) {
     return false;
 }
 
+static q38_forward_matvec_backend full_backend;
+static void *full_backend_user;
+
 static bool full_mul(size_t a, size_t b, size_t *out) {
     if (b && a > SIZE_MAX / b) return false;
     *out = a * b;
@@ -461,6 +464,17 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
                          size_t row, const float *input, size_t count,
                          float *scratch, float *out, char *error,
                          size_t error_len) {
+    if (full_backend) {
+        if (full_backend(model, tensor, row, input, count, out,
+                         full_backend_user, error, error_len))
+            return true;
+        /*
+         * A backend may decline very wide diagnostic-only matrices by
+         * returning false without an error.  A populated error remains a
+         * hard execution failure.
+         */
+        if (error && error_len && error[0] != '\0') return false;
+    }
     const void *data;
     size_t rows, cols, row_bytes;
     if (!input || !out ||
@@ -947,7 +961,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
             for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
                 output[t * Q38_GR_HIDDEN + d] += route.weight[k] * routed[d];
         }
-        if (layer_number == 2 && diagnostics && diagnostics->moe_trace) {
+        if (diagnostics && diagnostics->moe_trace) {
             const q38_moe_trace trace = {
                 .router_input = x,
                 .router_input_count = Q38_GR_HIDDEN,
@@ -1424,4 +1438,22 @@ fail:
     free(streams); free(mixed); free(block); free(updated); free(scratch);
     free(normed); free(down); free(up); free(inject); free(selected); free(counts);
     return false;
+}
+
+bool q38_forward_full_with_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend backend, void *backend_user, char *error,
+    size_t error_len) {
+    const q38_forward_matvec_backend previous_backend = full_backend;
+    void *const previous_user = full_backend_user;
+    full_backend = backend;
+    full_backend_user = backend_user;
+    const bool ok = q38_forward_full(
+        model, weights, state, tokens, token_count, logits, logits_stride,
+        diagnostics, error, error_len);
+    full_backend = previous_backend;
+    full_backend_user = previous_user;
+    return ok;
 }

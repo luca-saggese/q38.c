@@ -102,17 +102,22 @@ extern "C" bool q38_moe_cuda_route(
     return true;
 }
 
-__device__ static float q2_value(const q38_q2_k_block *blocks, size_t index) {
-    const q38_q2_k_block *b = &blocks[index / 256];
-    const size_t within = index % 256;
-    const size_t sub = within / 32;
+__device__ static float q2_value(const q38_q2_k_block *blocks,
+                                 size_t row, size_t column,
+                                 size_t blocks_per_row) {
+    const size_t element = column % 256;
+    const q38_q2_k_block *b =
+        blocks + row * blocks_per_row + column / 256;
+    const size_t half = element / 128;
+    const size_t within = element % 128;
+    const size_t group = within / 16;
     const size_t l = within % 16;
-    const size_t qbase = (sub & 1) ? 16 : 0;
-    const unsigned shift = (unsigned)((sub / 2) * 2);
-    const uint8_t scale = b->scales[sub];
+    const unsigned shift = (unsigned)((group / 2) * 2);
+    const uint8_t scale = b->scales[half * 8 + group];
+    const size_t qindex = half * 32 + (group & 1) * 16 + l;
     const float d = __half2float(*reinterpret_cast<const __half *>(&b->d));
     const float m = __half2float(*reinterpret_cast<const __half *>(&b->dmin));
-    return d * (scale & 0xf) * ((b->qs[qbase + l] >> shift) & 3) -
+    return d * (scale & 0xf) * ((b->qs[qindex] >> shift) & 3) -
            m * (scale >> 4);
 }
 
@@ -122,9 +127,9 @@ __global__ static void q2_gate_up_kernel(const q38_q2_k_block *weights,
     if (i >= Q38_MOE_INTERMEDIATE) return;
     float g = 0.0f, u = 0.0f;
     for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d) {
-        g += q2_value(weights, i * Q38_MOE_HIDDEN + d) * hidden[d];
-        u += q2_value(weights, (Q38_MOE_INTERMEDIATE + i) *
-                                Q38_MOE_HIDDEN + d) * hidden[d];
+        g += q2_value(weights, i, d, 10) * hidden[d];
+        u += q2_value(weights, Q38_MOE_INTERMEDIATE + i, d, 10) *
+             hidden[d];
     }
     mid[i] = (g / (1.0f + expf(-g))) * u;
 }
@@ -135,7 +140,7 @@ __global__ static void q2_down_kernel(const q38_q2_k_block *weights,
     if (d >= Q38_MOE_HIDDEN) return;
     float value = 0.0f;
     for (size_t i = 0; i < Q38_MOE_INTERMEDIATE; ++i)
-        value += q2_value(weights, d * Q38_MOE_INTERMEDIATE + i) * mid[i];
+        value += q2_value(weights, i, d, 10) * mid[i];
     output[d] = value;
 }
 
