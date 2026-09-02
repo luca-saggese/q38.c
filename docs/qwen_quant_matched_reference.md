@@ -22,7 +22,10 @@ scores and margin, selected experts, weights by expert, and routed output.
 Layer 9 additionally records the pre-router GR input, its RMSNorm output,
 the GR output feeding the router, BF16 source-byte checksums and values for
 ranking-relevant router rows, pre-cast matvecs, effective BF16 results, and
-row-by-row matvec self-checks.
+row-by-row matvec self-checks. It also records FP32 reduction versus
+`F.linear` accumulation, BF16-input/BF16-weight matmul, the explicit
+FP32-to-BF16 cast, and the corresponding BF16 bit patterns; these rounding
+diagnostics do not alter routing or tolerance gates.
 
 Example:
 

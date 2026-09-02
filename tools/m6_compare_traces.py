@@ -353,6 +353,37 @@ def main() -> None:
                 "reason": "independent row-by-row GGUF BF16 matvec checks",
                 "reference": right.get("router_matvec_checks", []),
             }
+            rounding = right.get("rounding_diagnostics", {})
+            native_effective = native_router_detail.get("logits")
+            detail["rounding_diagnostics"] = {
+                "reference": {
+                    name: value for name, value in rounding.items()
+                    if name.endswith("_vs_cuda_matmul")
+                    or name.endswith("_vs_fp32_cast")
+                    or name.endswith("_bits")
+                },
+                "native_effective": (
+                    vector_metrics(native_effective,
+                                   rounding["fp32_cast_effective"])
+                    if native_effective is not None and
+                    "fp32_cast_effective" in rounding else
+                    {"status": "diagnostic", "reason":
+                     "native effective logits are not present"}),
+                "native_vs_bf16_matmul": (
+                    vector_metrics(native_effective,
+                                   rounding["bf16_matmul_effective"])
+                    if native_effective is not None and
+                    "bf16_matmul_effective" in rounding else
+                    {"status": "diagnostic", "reason":
+                     "native effective logits or BF16 matmul stage missing"}),
+                "native_effective_bits": {
+                    "status": "diagnostic",
+                    "native_present": native_router_detail.get(
+                        "effective_bits") is not None,
+                    "reference_present":
+                        rounding.get("fp32_cast_effective_bits") is not None,
+                },
+            }
         left_margin = left.get("margin_rank10_rank11",
                                native_router_detail.get("margin_rank10_rank11"))
         if left_margin is not None and "margin_rank10_rank11" in right:

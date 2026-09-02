@@ -362,15 +362,23 @@ class QuantExperts(nn.Module):
 
 class QuantRouter(nn.Module):
     """Native q38-compatible router: BF16 effective logits and pre-cast IDs."""
-    def __init__(self, weight: torch.Tensor, top_k: int, device: torch.device):
+    def __init__(self, weight: torch.Tensor, top_k: int, device: torch.device,
+                 diagnostics: bool = False):
         super().__init__()
         self.weight = nn.Parameter(weight)
-        self.top_k, self.device = top_k, device
+        self.top_k, self.device, self.diagnostics = top_k, device, diagnostics
 
     def forward(self, hidden_states: torch.Tensor):
         x = hidden_states.reshape(-1, hidden_states.shape[-1]).float()
         pre_cast = F.linear(x, self.weight.float())
         effective = pre_cast.to(torch.bfloat16)
+        if self.diagnostics:
+            self.last_fp32_reduction = torch.sum(
+                x[:, None, :] * self.weight.float()[None, :, :], dim=-1
+            ).detach()
+            self.last_bf16_matmul = F.linear(
+                x.to(torch.bfloat16), self.weight.to(torch.bfloat16)
+            ).detach()
         probs_pre = torch.softmax(pre_cast, dim=-1)
         order = torch.argsort(probs_pre, dim=-1, descending=True, stable=True)
         selected = order[:, :self.top_k]
@@ -421,8 +429,9 @@ def materialize_layer(reader: GGUF, config, index: int,
         if full_name in reader.tensors:
             replace_buffer(layer, name, reader.dense(full_name, device))
     gate_name = prefix + "mlp.gate.weight"
-    layer.mlp.gate = QuantRouter(reader.dense(gate_name, device),
-                                 config.num_experts_per_tok, device)
+    layer.mlp.gate = QuantRouter(
+        reader.dense(gate_name, device), config.num_experts_per_tok, device,
+        diagnostics=index == 9)
     layer.mlp.experts = QuantExperts(
         reader, prefix + "mlp.experts.gate_up_proj",
         prefix + "mlp.experts.down_proj", config.moe_intermediate_size, device)
@@ -626,6 +635,28 @@ def main() -> None:
                         "close": math.isclose(float(dot), float(expected),
                                               rel_tol=1e-6, abs_tol=1e-6),
                     })
+                route["rounding_diagnostics"] = {
+                    "fp32_reduction": values(
+                        layer.mlp.gate.last_fp32_reduction),
+                    "cuda_matmul_pre_cast": route["router_matvec_pre_cast"],
+                    "fp32_cast_effective": route["router_effective_bf16"],
+                    "fp32_cast_effective_bits": route["effective_bits"],
+                    "bf16_matmul_effective": values(
+                        layer.mlp.gate.last_bf16_matmul),
+                    "bf16_matmul_effective_bits": bf16_bits(
+                        layer.mlp.gate.last_bf16_matmul),
+                    "cuda_matmul_effective": route["router_effective_bf16"],
+                    "cuda_matmul_effective_bits": route["effective_bits"],
+                    "fp32_reduction_vs_cuda_matmul": vector_metrics(
+                        values(layer.mlp.gate.last_fp32_reduction),
+                        route["router_matvec_pre_cast"]),
+                    "bf16_matmul_vs_cuda_matmul": vector_metrics(
+                        values(layer.mlp.gate.last_bf16_matmul),
+                        route["router_effective_bf16"]),
+                    "bf16_matmul_vs_fp32_cast": vector_metrics(
+                        values(layer.mlp.gate.last_bf16_matmul),
+                        route["router_effective_bf16"]),
+                }
             routing.append(route)
             if layer_index == 2:
                 layer2_moe_trace = {
