@@ -82,6 +82,10 @@ def stats(values: torch.Tensor) -> dict:
     }
 
 
+def trace_values(values: torch.Tensor) -> list[float]:
+    return values.detach().float().reshape(-1).cpu().tolist()
+
+
 class Checkpoint:
     def __init__(self, root: Path):
         self.root = root
@@ -354,6 +358,7 @@ def main() -> None:
                 "layer": layer_index,
                 "width": hidden.shape[-1],
                 "stats": stats(hidden),
+                **({"values": trace_values(hidden)} if layer_index == 7 else {}),
             }
         )
         del layer, router

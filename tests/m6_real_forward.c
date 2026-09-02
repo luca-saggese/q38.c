@@ -131,6 +131,14 @@ static bool trace(uint32_t layer, const float *hidden, size_t tokens,
     write_stats(out, hidden, width);
     fputs("},", out);
     write_fixed(out, hidden, width);
+    if (layer == 7) {
+        fputs(",\"values\":[", out);
+        for (size_t i = 0; i < width; ++i) {
+            if (i) fputc(',', out);
+            json_float(out, hidden[i]);
+        }
+        fputc(']', out);
+    }
     fputc('}', out);
     context->first = false;
     (void)error;

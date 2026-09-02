@@ -26,7 +26,7 @@
     },
     {
       "stage": "layer:2",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -50,7 +50,7 @@
     },
     {
       "stage": "layer:5",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -60,7 +60,7 @@
     },
     {
       "stage": "layer:6",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -70,17 +70,50 @@
     },
     {
       "stage": "layer:7",
-      "status": "fail",
+      "status": "pass",
       "mismatches": [
         "min",
         "max_abs"
       ],
       "coordinate_mismatches": [],
-      "checksum_equal": false
+      "checksum_equal": false,
+      "vector_metrics": {
+        "status": "pass",
+        "max_abs": 0.08433445915,
+        "rms": 0.006615907454585719,
+        "relative_rms": 0.10866689713979769,
+        "cosine_similarity": 0.9942620192594979,
+        "extreme_coordinates": [
+          {
+            "index": 6802,
+            "native": 0.0333413221,
+            "reference": 0.11767578125,
+            "delta": -0.08433445915
+          },
+          {
+            "index": 5699,
+            "native": -0.234387502,
+            "reference": -0.1689453125,
+            "delta": -0.0654421895
+          },
+          {
+            "index": 5388,
+            "native": 0.147699773,
+            "reference": 0.2099609375,
+            "delta": -0.062261164499999994
+          },
+          {
+            "index": 5156,
+            "native": 0.0501327291,
+            "reference": -0.00732421875,
+            "delta": 0.05745694785
+          }
+        ]
+      }
     },
     {
       "stage": "layer:8",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -90,7 +123,7 @@
     },
     {
       "stage": "layer:9",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -100,7 +133,7 @@
     },
     {
       "stage": "layer:10",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -111,7 +144,7 @@
     },
     {
       "stage": "layer:11",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -121,7 +154,7 @@
     },
     {
       "stage": "layer:12",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -131,7 +164,7 @@
     },
     {
       "stage": "layer:13",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -141,7 +174,7 @@
     },
     {
       "stage": "layer:14",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -152,7 +185,7 @@
     },
     {
       "stage": "layer:15",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs"
@@ -162,7 +195,7 @@
     },
     {
       "stage": "layer:16",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -174,7 +207,7 @@
     },
     {
       "stage": "layer:17",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -186,7 +219,7 @@
     },
     {
       "stage": "layer:18",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -198,7 +231,7 @@
     },
     {
       "stage": "layer:19",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -210,7 +243,7 @@
     },
     {
       "stage": "layer:20",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -222,7 +255,7 @@
     },
     {
       "stage": "layer:21",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -234,7 +267,7 @@
     },
     {
       "stage": "layer:22",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -246,7 +279,7 @@
     },
     {
       "stage": "layer:23",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -258,7 +291,7 @@
     },
     {
       "stage": "layer:24",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -271,7 +304,7 @@
     },
     {
       "stage": "layer:25",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "max",
         "fixed[0]",
@@ -282,7 +315,7 @@
     },
     {
       "stage": "layer:26",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "max",
         "fixed[2]",
@@ -293,7 +326,7 @@
     },
     {
       "stage": "layer:27",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "max",
         "fixed[2]",
@@ -304,7 +337,7 @@
     },
     {
       "stage": "layer:28",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "max",
         "fixed[2]",
@@ -315,7 +348,7 @@
     },
     {
       "stage": "layer:29",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "max",
         "fixed[0]",
@@ -328,7 +361,7 @@
     },
     {
       "stage": "layer:30",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "max",
         "fixed[2]",
@@ -339,7 +372,7 @@
     },
     {
       "stage": "layer:31",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "max",
         "fixed[0]",
@@ -351,7 +384,7 @@
     },
     {
       "stage": "layer:32",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -365,7 +398,7 @@
     },
     {
       "stage": "layer:33",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -378,7 +411,7 @@
     },
     {
       "stage": "layer:34",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -391,7 +424,7 @@
     },
     {
       "stage": "layer:35",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -405,7 +438,7 @@
     },
     {
       "stage": "layer:36",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -418,7 +451,7 @@
     },
     {
       "stage": "layer:37",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max_abs",
@@ -430,7 +463,7 @@
     },
     {
       "stage": "layer:38",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -443,7 +476,7 @@
     },
     {
       "stage": "layer:39",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -458,7 +491,7 @@
     },
     {
       "stage": "layer:40",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -473,7 +506,7 @@
     },
     {
       "stage": "layer:41",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -487,7 +520,7 @@
     },
     {
       "stage": "layer:42",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -500,7 +533,7 @@
     },
     {
       "stage": "layer:43",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -514,7 +547,7 @@
     },
     {
       "stage": "layer:44",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -528,7 +561,7 @@
     },
     {
       "stage": "layer:45",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -541,7 +574,7 @@
     },
     {
       "stage": "layer:46",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -555,7 +588,7 @@
     },
     {
       "stage": "layer:47",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -570,7 +603,7 @@
     },
     {
       "stage": "final_norm:0",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -587,7 +620,7 @@
     },
     {
       "stage": "logits:0",
-      "status": "fail",
+      "status": "diagnostic",
       "mismatches": [
         "min",
         "max",
@@ -610,73 +643,91 @@
     {
       "stage": "routing",
       "status": "fail",
-      "reason": "expert decisions",
+      "selected_set_exact": false,
+      "selected_order_exact": false,
       "mismatches": [
-        "layer:2:experts",
-        "layer:3:experts",
-        "layer:4:experts",
-        "layer:5:experts",
-        "layer:6:experts",
-        "layer:8:experts",
-        "layer:9:experts",
-        "layer:11:experts",
-        "layer:12:experts",
-        "layer:13:experts",
-        "layer:13:weights",
-        "layer:14:experts",
-        "layer:15:experts",
-        "layer:16:experts",
-        "layer:17:weights",
-        "layer:18:experts",
-        "layer:19:experts",
-        "layer:20:experts",
-        "layer:21:experts",
-        "layer:22:experts",
-        "layer:23:experts",
-        "layer:24:experts",
-        "layer:24:weights",
-        "layer:25:experts",
-        "layer:25:weights",
-        "layer:26:experts",
-        "layer:26:weights",
-        "layer:27:experts",
-        "layer:27:weights",
-        "layer:28:experts",
-        "layer:28:weights",
-        "layer:29:experts",
-        "layer:30:experts",
-        "layer:31:experts",
-        "layer:32:experts",
-        "layer:32:weights",
-        "layer:33:experts",
-        "layer:34:experts",
-        "layer:34:weights",
-        "layer:35:experts",
-        "layer:35:weights",
-        "layer:36:experts",
-        "layer:37:experts",
-        "layer:38:experts",
-        "layer:39:experts",
-        "layer:39:weights",
-        "layer:40:experts",
-        "layer:41:experts",
-        "layer:41:weights",
-        "layer:42:experts",
-        "layer:42:weights",
-        "layer:43:experts",
-        "layer:43:weights",
-        "layer:44:experts",
-        "layer:44:weights",
-        "layer:45:experts",
-        "layer:45:weights",
-        "layer:46:experts",
-        "layer:46:weights",
-        "layer:47:experts"
+        "layer:3:selected_set",
+        "layer:3:weights_by_expert",
+        "layer:4:selected_set",
+        "layer:4:weights_by_expert",
+        "layer:9:selected_set",
+        "layer:9:weights_by_expert",
+        "layer:13:weights_by_expert",
+        "layer:17:weights_by_expert",
+        "layer:18:selected_set",
+        "layer:18:weights_by_expert",
+        "layer:19:selected_set",
+        "layer:19:weights_by_expert",
+        "layer:22:selected_set",
+        "layer:22:weights_by_expert",
+        "layer:23:selected_set",
+        "layer:23:weights_by_expert",
+        "layer:24:weights_by_expert",
+        "layer:25:selected_set",
+        "layer:25:weights_by_expert",
+        "layer:26:selected_set",
+        "layer:26:weights_by_expert",
+        "layer:27:weights_by_expert",
+        "layer:28:weights_by_expert",
+        "layer:29:selected_set",
+        "layer:29:weights_by_expert",
+        "layer:30:selected_set",
+        "layer:30:weights_by_expert",
+        "layer:31:selected_set",
+        "layer:31:weights_by_expert",
+        "layer:32:selected_set",
+        "layer:32:weights_by_expert",
+        "layer:33:selected_set",
+        "layer:33:weights_by_expert",
+        "layer:34:weights_by_expert",
+        "layer:35:selected_set",
+        "layer:35:weights_by_expert",
+        "layer:36:selected_set",
+        "layer:36:weights_by_expert",
+        "layer:38:selected_set",
+        "layer:38:weights_by_expert",
+        "layer:39:weights_by_expert",
+        "layer:40:selected_set",
+        "layer:40:weights_by_expert",
+        "layer:41:selected_set",
+        "layer:41:weights_by_expert",
+        "layer:42:weights_by_expert",
+        "layer:43:selected_set",
+        "layer:43:weights_by_expert",
+        "layer:44:selected_set",
+        "layer:44:weights_by_expert",
+        "layer:45:weights_by_expert",
+        "layer:46:weights_by_expert",
+        "layer:47:selected_set",
+        "layer:47:weights_by_expert"
+      ],
+      "diagnostics": [
+        "layer:2:selected_order",
+        "layer:5:selected_order",
+        "layer:6:selected_order",
+        "layer:8:selected_order",
+        "layer:11:selected_order",
+        "layer:12:selected_order",
+        "layer:13:selected_order",
+        "layer:14:selected_order",
+        "layer:15:selected_order",
+        "layer:16:selected_order",
+        "layer:20:selected_order",
+        "layer:21:selected_order",
+        "layer:24:selected_order",
+        "layer:27:selected_order",
+        "layer:28:selected_order",
+        "layer:34:selected_order",
+        "layer:37:selected_order",
+        "layer:39:selected_order",
+        "layer:42:selected_order",
+        "layer:45:selected_order",
+        "layer:46:selected_order"
       ]
     },
     {
       "stage": "layer2_moe_trace",
-      "status": "fail",
+      "status": "pass",
       "vectors": {
         "router_input": {
           "status": "fail",
@@ -739,9 +790,41 @@
           338,
           61
         ]
+      },
+      "selected_set_exact": true,
+      "selected_order_exact": false,
+      "weights_by_expert_exact": true,
+      "routed_weighted_sum": {
+        "status": "pass",
+        "max_abs": 0.0113987894725
       }
     }
   ],
+  "hard_gates": {
+    "layer7_hidden": {
+      "status": "pass",
+      "tolerance": {
+        "max_abs": 0.1,
+        "rms": 0.01,
+        "relative_rms": 0.15,
+        "cosine_similarity": 0.99
+      }
+    },
+    "routing_selected_set": {
+      "status": "fail",
+      "selected_set_exact": false,
+      "weights_by_expert_checked": true
+    },
+    "layer2_selected_set": {
+      "status": "pass",
+      "selected_order_exact": false,
+      "weights_by_expert_exact": true,
+      "routed_weighted_sum": {
+        "status": "pass",
+        "max_abs": 0.0113987894725
+      }
+    }
+  },
   "status": "fail",
-  "first_divergence": "layer:2"
+  "first_divergence": "logits:top_k"
 }

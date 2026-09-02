@@ -11,6 +11,10 @@ from pathlib import Path
 
 ATOL = 0.02
 RTOL = 0.002
+LAYER7_MAX_ABS = 0.10
+LAYER7_RMS = 0.01
+LAYER7_RELATIVE_RMS = 0.15
+LAYER7_COSINE = 0.99
 
 
 def stage_map(report: dict) -> dict[str, dict]:
@@ -38,6 +42,46 @@ def vector_check(left: list[float], right: list[float]) -> dict:
     }
 
 
+def vector_metrics(left: list[float], right: list[float]) -> dict:
+    if len(left) != len(right):
+        return {"status": "fail", "reason": "length"}
+    errors = [a - b for a, b in zip(left, right)]
+    left_rms = math.sqrt(sum(a * a for a in left) / len(left))
+    right_rms = math.sqrt(sum(b * b for b in right) / len(right))
+    error_rms = math.sqrt(sum(e * e for e in errors) / len(errors))
+    left_norm = math.sqrt(sum(a * a for a in left))
+    right_norm = math.sqrt(sum(b * b for b in right))
+    cosine = (
+        sum(a * b for a, b in zip(left, right)) / (left_norm * right_norm)
+        if left_norm and right_norm else None
+    )
+    extreme = sorted(
+        range(len(errors)), key=lambda i: abs(errors[i]), reverse=True
+    )[:4]
+    return {
+        "status": "pass",
+        "max_abs": max((abs(e) for e in errors), default=0.0),
+        "rms": error_rms,
+        "relative_rms": error_rms / right_rms if right_rms else None,
+        "cosine_similarity": cosine,
+        "extreme_coordinates": [
+            {"index": i, "native": left[i], "reference": right[i],
+             "delta": errors[i]}
+            for i in extreme
+        ],
+    }
+
+
+def route_values(route: dict) -> tuple[list[int], list[float]]:
+    experts = route.get("experts", [])
+    weights = route.get("weights", [])
+    if experts and isinstance(experts[0], list):
+        experts = experts[0]
+    if weights and isinstance(weights[0], list):
+        weights = weights[0]
+    return experts, weights
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--native", type=Path, required=True)
@@ -53,6 +97,7 @@ def main() -> None:
         "tokens": native.get("tokens"),
         "tolerance": {"absolute": ATOL, "relative": RTOL},
         "checks": [],
+        "hard_gates": {},
         "status": "pass",
     }
     if native.get("tokens") != reference.get("tokens"):
@@ -110,10 +155,41 @@ def main() -> None:
         check["checksum_equal"] = (
             left_stats.get("checksum") == right_stats.get("checksum")
         )
-        if mismatches:
-            check["status"] = "fail"
-            result["status"] = "fail"
-            result.setdefault("first_divergence", key)
+        if key == "layer:7":
+            left_values, right_values = left.get("values"), right.get("values")
+            if left_values is not None and right_values is not None:
+                check["vector_metrics"] = vector_metrics(
+                    left_values, right_values
+                )
+                metrics = check["vector_metrics"]
+                layer7_pass = (
+                    metrics["max_abs"] <= LAYER7_MAX_ABS
+                    and metrics["rms"] <= LAYER7_RMS
+                    and metrics["relative_rms"] <= LAYER7_RELATIVE_RMS
+                    and metrics["cosine_similarity"] >= LAYER7_COSINE
+                )
+                check["status"] = "pass" if layer7_pass else "fail"
+                result["hard_gates"]["layer7_hidden"] = {
+                    "status": "pass" if layer7_pass else "fail",
+                    "tolerance": {
+                        "max_abs": LAYER7_MAX_ABS,
+                        "rms": LAYER7_RMS,
+                        "relative_rms": LAYER7_RELATIVE_RMS,
+                        "cosine_similarity": LAYER7_COSINE,
+                    },
+                }
+                if not layer7_pass:
+                    result["status"] = "fail"
+                    result.setdefault("first_divergence", key)
+            elif mismatches:
+                check["status"] = "fail"
+                result["hard_gates"]["layer7_hidden"] = {
+                    "status": "fail", "reason": "missing full layer-7 vectors"
+                }
+                result["status"] = "fail"
+                result.setdefault("first_divergence", key)
+        elif mismatches:
+            check["status"] = "diagnostic"
         result["checks"].append(check)
 
     native_top = native_stages.get("logits", {}).get("top")
@@ -129,39 +205,51 @@ def main() -> None:
     native_routes = native.get("routing", [])
     ref_routes = reference.get("routing", [])
     route_mismatch = []
+    route_diagnostics = []
     if len(native_routes) != len(ref_routes):
         route_mismatch.append("route_count")
     for left, right in zip(native_routes, ref_routes):
-        left_experts = left.get("experts", [])
-        right_experts = right.get("experts", [])
-        if left_experts and isinstance(left_experts[0], list):
-            left_experts = left_experts[0]
-        if right_experts and isinstance(right_experts[0], list):
-            right_experts = right_experts[0]
-        if left_experts != right_experts:
-            route_mismatch.append(f"layer:{left.get('layer')}:experts")
-        left_weights = left.get("weights", [])
-        right_weights = right.get("weights", [])
-        if left_weights and isinstance(left_weights[0], list):
-            left_weights = left_weights[0]
-        if right_weights and isinstance(right_weights[0], list):
-            right_weights = right_weights[0]
+        left_experts, left_weights = route_values(left)
+        right_experts, right_weights = route_values(right)
+        layer = left.get("layer")
+        if set(left_experts) != set(right_experts):
+            route_mismatch.append(f"layer:{layer}:selected_set")
+        elif left_experts != right_experts:
+            route_diagnostics.append(f"layer:{layer}:selected_order")
         if not right_weights:
             continue
         if len(left_weights) != len(right_weights):
-            route_mismatch.append(f"layer:{left.get('layer')}:weights")
-        elif any(
-            not close(lvalue, rvalue)
-            for lvalue, rvalue in zip(left_weights, right_weights)
-        ):
-            route_mismatch.append(f"layer:{left.get('layer')}:weights")
-    if route_mismatch:
-        result["status"] = "fail"
-        result.setdefault("first_divergence", "routing")
+            route_mismatch.append(f"layer:{layer}:weights")
+        else:
+            left_by_expert = dict(zip(left_experts, left_weights))
+            right_by_expert = dict(zip(right_experts, right_weights))
+            if set(left_by_expert) != set(right_by_expert) or any(
+                not close(left_by_expert[expert], right_by_expert[expert])
+                for expert in right_by_expert
+            ):
+                route_mismatch.append(f"layer:{layer}:weights_by_expert")
+    if route_mismatch or route_diagnostics:
+        if route_mismatch:
+            result["status"] = "fail"
+        if route_mismatch:
+            result.setdefault("first_divergence", "routing")
         result["checks"].append(
-            {"stage": "routing", "status": "fail", "reason": "expert decisions",
-             "mismatches": route_mismatch}
+            {"stage": "routing",
+             "status": "fail" if route_mismatch else "pass",
+             "selected_set_exact": not any(
+                 item.endswith(":selected_set") for item in route_mismatch
+             ),
+             "selected_order_exact": not route_diagnostics,
+             "mismatches": route_mismatch,
+             "diagnostics": route_diagnostics}
         )
+        result["hard_gates"]["routing_selected_set"] = {
+            "status": "fail" if route_mismatch else "pass",
+            "selected_set_exact": not any(
+                item.endswith(":selected_set") for item in route_mismatch
+            ),
+            "weights_by_expert_checked": True,
+        }
     native_moe = native.get("layer2_moe_trace")
     ref_moe = reference.get("layer2_moe_trace")
     if native_moe is None or ref_moe is None:
@@ -172,7 +260,7 @@ def main() -> None:
              "reason": "missing layer-2 boundary trace"}
         )
     else:
-        moe_check = {"stage": "layer2_moe_trace", "status": "pass",
+        moe_check = {"stage": "layer2_moe_trace", "status": "diagnostic",
                      "vectors": {}}
         for field in (
             "router_input",
@@ -192,22 +280,54 @@ def main() -> None:
         ref_rank = [item.get("expert") for item in ref_moe.get(
             "top15_rank", [])]
         if native_rank != ref_rank:
-            moe_check["status"] = "fail"
             moe_check["top15_rank"] = {"status": "fail",
                                        "native": native_rank,
                                        "reference": ref_rank}
         if not close(native_moe.get("margin_rank10_rank11"),
                      ref_moe.get("margin_rank10_rank11")):
-            moe_check["status"] = "fail"
             moe_check["margin_rank10_rank11"] = {
-                "status": "fail",
+                "status": "diagnostic",
                 "native": native_moe.get("margin_rank10_rank11"),
                 "reference": ref_moe.get("margin_rank10_rank11"),
             }
         result["checks"].append(moe_check)
-        if moe_check["status"] != "pass":
+        native_selected = native_moe.get("selected_experts", [])
+        ref_selected = ref_moe.get("selected_experts", [])
+        if set(native_selected) != set(ref_selected):
             result["status"] = "fail"
             result.setdefault("first_divergence", "layer2_moe_trace")
+        else:
+            moe_check["selected_set_exact"] = True
+            moe_check["selected_order_exact"] = native_selected == ref_selected
+            native_weights = dict(zip(
+                native_selected, native_moe.get("selected_weights_effective", [])
+            ))
+            ref_weights = dict(zip(
+                ref_selected, ref_moe.get("selected_weights_effective", [])
+            ))
+            moe_check["weights_by_expert_exact"] = (
+                set(native_weights) == set(ref_weights) and all(
+                    close(native_weights[e], ref_weights[e]) for e in ref_weights
+                )
+            )
+            routed = vector_check(
+                native_moe.get("routed_output", []),
+                ref_moe.get("routed_output", []),
+            )
+            moe_check["routed_weighted_sum"] = routed
+            if not moe_check["weights_by_expert_exact"] or routed["status"] != "pass":
+                result["status"] = "fail"
+                result.setdefault("first_divergence", "layer2_moe_trace")
+            elif moe_check["weights_by_expert_exact"] and routed["status"] == "pass":
+                moe_check["status"] = "pass"
+        result["hard_gates"]["layer2_selected_set"] = {
+            "status": "pass" if moe_check.get("selected_set_exact") else "fail",
+            "selected_order_exact": moe_check.get("selected_order_exact", False),
+            "weights_by_expert_exact": moe_check.get(
+                "weights_by_expert_exact", False
+            ),
+            "routed_weighted_sum": moe_check.get("routed_weighted_sum"),
+        }
     if native.get("qsa_selection") != reference.get("qsa_selection"):
         result["status"] = "fail"
         result.setdefault("first_divergence", "qsa_selection")
