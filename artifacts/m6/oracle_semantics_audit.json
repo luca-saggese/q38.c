@@ -4,7 +4,7 @@
     "b3046af8a",
     "d25cc5565"
   ],
-  "current_commit": "4b903f0c3",
+  "current_commit": "HEAD (this audit commit)",
   "status": "pass",
   "diff_review": {
     "tools/m6_stateful_gguf_oracle.py": {
