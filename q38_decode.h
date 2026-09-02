@@ -20,6 +20,9 @@ typedef struct {
     uint64_t main_k_hash;
     uint64_t main_v_hash;
     uint64_t index_k_hash;
+    uint64_t pending_main_k_hash;
+    uint64_t pending_main_v_hash;
+    uint64_t pending_index_k_hash;
 } q38_decode_qsa_snapshot;
 
 /*
@@ -36,6 +39,23 @@ typedef struct {
     uint64_t gdn_state_hash;
     uint64_t conv_history_hash;
     uint64_t ple_history_hash;
+    uint64_t gdn_layer_hash[Q38_MODEL_LAYERS];
+    uint64_t conv_layer_hash[Q38_MODEL_LAYERS];
+    uint32_t ple_prev_token_1;
+    uint32_t ple_prev_token_2;
+    bool ple_have_prev_1;
+    bool ple_have_prev_2;
+    uint64_t logits_hash;
+    uint32_t argmax;
+    float argmax_value;
+    float logits_min;
+    float logits_max;
+    float logits_mean;
+    float logits_rms;
+    float logits_max_abs;
+    uint32_t top_ids[10];
+    float top_values[10];
+    bool logits_finite;
     bool finite;
     q38_decode_qsa_snapshot qsa[Q38_MODEL_LAYERS];
 } q38_decode_step;

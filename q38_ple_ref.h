@@ -46,6 +46,10 @@ typedef struct {
     float eps;
 } q38_ple_forward_config;
 
+void q38_ple_grouped_norm_inplace(float *values, const float *weight,
+                                   size_t tokens, size_t streams,
+                                   size_t hidden, float eps);
+
 /*
  * Reference PLE injection. All matrices are output-by-input, rows are
  * token-major, and `history` contains the normalized convolution tail from

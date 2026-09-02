@@ -84,8 +84,8 @@ bool q38_ple_decode_row_ref(uint32_t qtype, const void *blocks,
         error, error_len);
 }
 
-static void grouped_norm(float *x, const float *weight, size_t tokens,
-                         size_t streams, size_t hidden, float eps) {
+void q38_ple_grouped_norm_inplace(float *x, const float *weight, size_t tokens,
+                                  size_t streams, size_t hidden, float eps) {
     for (size_t t = 0; t < tokens; ++t)
         for (size_t s = 0; s < streams; ++s) {
             float *row = x + (t * streams + s) * hidden;
@@ -146,10 +146,11 @@ bool q38_ple_forward_ref(const q38_ple_forward_config *config,
     matmul_rows(embedding, token_count, emb_dim, value_proj, config->hidden,
                 value);
     memcpy(query, hidden, token_count * channels * sizeof(float));
-    grouped_norm(key, norm_key, token_count, config->streams, config->hidden,
-                 config->eps);
-    grouped_norm(query, norm_query, token_count, config->streams,
-                 config->hidden, config->eps);
+    q38_ple_grouped_norm_inplace(key, norm_key, token_count, config->streams,
+                                 config->hidden, config->eps);
+    q38_ple_grouped_norm_inplace(query, norm_query, token_count,
+                                 config->streams, config->hidden,
+                                 config->eps);
     for (size_t t = 0; t < token_count; ++t)
         for (size_t s = 0; s < config->streams; ++s) {
             float score = 0.0f;
@@ -164,8 +165,9 @@ bool q38_ple_forward_ref(const q38_ple_forward_config *config,
                     value[t * config->hidden + d] * gate;
         }
     memcpy(normalized, gated, token_count * channels * sizeof(float));
-    grouped_norm(normalized, norm_conv, token_count, config->streams,
-                 config->hidden, config->eps);
+    q38_ple_grouped_norm_inplace(normalized, norm_conv, token_count,
+                                 config->streams, config->hidden,
+                                 config->eps);
     memcpy(padded + hist * channels, normalized,
            token_count * channels * sizeof(float));
     if (hist) memcpy(padded, history, hist * channels * sizeof(float));

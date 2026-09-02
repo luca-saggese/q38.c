@@ -693,6 +693,20 @@ $(TEST_DIR)/test_m6_forward_api: $(TEST_DIR)/test_m6_forward_api.c \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
+$(TEST_DIR)/m6_decode: $(TEST_DIR)/m6_decode.c q38_decode.o \
+		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m6_decode.c q38_decode.o \
+		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
+
+$(TEST_DIR)/test_m6_ple_grouped_norm: $(TEST_DIR)/test_m6_ple_grouped_norm.c \
+		q38_ple_ref.o q38_quant.o q38_session.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_ple_grouped_norm.c \
+		q38_ple_ref.o q38_quant.o q38_session.o -lm
+
 $(TEST_DIR)/m6_real_forward: $(TEST_DIR)/m6_real_forward.c \
 		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
@@ -701,6 +715,15 @@ $(TEST_DIR)/m6_real_forward: $(TEST_DIR)/m6_real_forward.c \
 		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
+
+$(TEST_DIR)/m6_decode_trace: $(TEST_DIR)/m6_decode_trace.c \
+		q38_decode.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m6_decode_trace.c \
+		q38_decode.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
 $(TEST_DIR)/test_m6_gpu_forward: $(TEST_DIR)/test_m6_gpu_forward.cu \
 		q38_moe_cuda.o q38_cuda_primitives.o q38_gdn.o q38_quant.o \
@@ -821,7 +844,9 @@ m6-preflight: m6-c11
 		--summary $(M6_PREFLIGHT_SUMMARY)
 	@cat $(M6_PREFLIGHT_SUMMARY)
 
-m6-c12: m6-preflight m6-trace-stats m6-dequant-fixtures
+m6-c12: m6-preflight m6-trace-stats m6-dequant-fixtures \
+		$(TEST_DIR)/test_m6_ple_grouped_norm
+	@./$(TEST_DIR)/test_m6_ple_grouped_norm
 	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api \
 		$(TEST_DIR)/m6_real_forward
 	@./$(TEST_DIR)/test_m6_forward_api
@@ -855,10 +880,9 @@ m6-c12: m6-preflight m6-trace-stats m6-dequant-fixtures
 		m6-progressive-boundaries
 
 m6-c13: m6-c12
-	@test -f artifacts/m6/first_token_logits.json || \
-		{ echo "M6-C13 gated: first-token logits golden is required before decode" >&2; exit 1; }
-	@python3 -c 'import json; p=json.load(open("artifacts/m6/first_token_logits.json")); assert p.get("status") == "pass", "first-token logits golden is not passing"'
-	@printf '%s\n' '{"gate":"M6-C13","decode_api":"q38_decode runs after a passing first-token logits golden","status":"pass"}' > artifacts/m6/decode_loop.json
+	@test -f artifacts/m6/decode_loop.json || \
+		{ echo "M6-C13 gated: real decode evidence is required" >&2; exit 1; }
+	@python3 -c 'import json; p=json.load(open("artifacts/m6/decode_loop.json")); assert p.get("status") == "pass" and p.get("token_by_token_exact") is True and p.get("state_exact") is True, "M6-C13 real decode gate is not passing"'
 
 $(TEST_DIR)/test_m6_session_contamination: $(TEST_DIR)/test_m6_session_contamination.c \
 		q38_qsa.o q38_session.o

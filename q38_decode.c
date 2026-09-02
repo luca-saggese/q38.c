@@ -19,11 +19,63 @@ static uint64_t hash_bytes(const void *data, size_t bytes) {
     return hash;
 }
 
+static uint64_t hash_qsa_pending(const q38_qsa_cache *cache,
+                                 uint32_t pending_count) {
+    if (!cache || !pending_count || pending_count > cache->count)
+        return hash_bytes(NULL, 0);
+    const size_t start = (cache->count - pending_count) * cache->row_bytes;
+    return hash_bytes(cache->data + start, pending_count * cache->row_bytes);
+}
+
 static bool finite_floats(const float *values, size_t count) {
     if (!values && count) return false;
     for (size_t i = 0; i < count; ++i)
         if (!isfinite(values[i])) return false;
     return true;
+}
+
+static uint64_t hash_logits(const float *logits) {
+    return hash_bytes(logits, Q38_DECODE_VOCAB_SIZE * sizeof(*logits));
+}
+
+static void snapshot_top10(const float *logits, q38_decode_step *snapshot) {
+    for (size_t rank = 0; rank < 10; ++rank) {
+        size_t top = Q38_DECODE_VOCAB_SIZE;
+        float best = -INFINITY;
+        for (size_t j = 0; j < Q38_DECODE_VOCAB_SIZE; ++j) {
+            bool used = false;
+            for (size_t previous = 0; previous < rank; ++previous)
+                used |= snapshot->top_ids[previous] == j;
+            if (!used && (top == Q38_DECODE_VOCAB_SIZE || logits[j] > best)) {
+                top = j;
+                best = logits[j];
+            }
+        }
+        snapshot->top_ids[rank] = (uint32_t)top;
+        snapshot->top_values[rank] = logits[top];
+    }
+}
+
+static void snapshot_logits_metrics(const float *logits,
+                                    q38_decode_step *snapshot) {
+    double sum = 0.0;
+    double squares = 0.0;
+    float minimum = INFINITY;
+    float maximum = -INFINITY;
+    float maximum_abs = 0.0f;
+    for (size_t i = 0; i < Q38_DECODE_VOCAB_SIZE; ++i) {
+        minimum = fminf(minimum, logits[i]);
+        maximum = fmaxf(maximum, logits[i]);
+        maximum_abs = fmaxf(maximum_abs, fabsf(logits[i]));
+        sum += logits[i];
+        squares += (double)logits[i] * logits[i];
+    }
+    snapshot->logits_min = minimum;
+    snapshot->logits_max = maximum;
+    snapshot->logits_mean = (float)(sum / Q38_DECODE_VOCAB_SIZE);
+    snapshot->logits_rms = (float)sqrt(
+        squares / Q38_DECODE_VOCAB_SIZE);
+    snapshot->logits_max_abs = maximum_abs;
 }
 
 static bool snapshot_state(const q38_forward_state *state,
@@ -38,6 +90,22 @@ static bool snapshot_state(const q38_forward_state *state,
     snapshot->ple_history_hash = hash_bytes(
         state->ple_history,
         state->ple_history_elements * sizeof(*state->ple_history));
+    for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
+        const int slot = storage->layout.layer_to_gdn_slot[layer];
+        if (slot < 0) continue;
+        snapshot->gdn_layer_hash[layer] = hash_bytes(
+            storage->recurrent_state +
+                (size_t)slot * storage->layout.recurrent.elements_per_slot,
+            (size_t)storage->layout.recurrent.bytes_per_slot);
+        snapshot->conv_layer_hash[layer] = hash_bytes(
+            storage->conv_history +
+                (size_t)slot * storage->layout.conv_history.elements_per_slot,
+            (size_t)storage->layout.conv_history.bytes_per_slot);
+    }
+    snapshot->ple_prev_token_1 = state->token_history.prev_token_1;
+    snapshot->ple_prev_token_2 = state->token_history.prev_token_2;
+    snapshot->ple_have_prev_1 = state->token_history.have_prev_1;
+    snapshot->ple_have_prev_2 = state->token_history.have_prev_2;
     snapshot->finite =
         finite_floats(storage->recurrent_state,
                       (size_t)storage->layout.recurrent.elements) &&
@@ -60,6 +128,12 @@ static bool snapshot_state(const q38_forward_state *state,
             qsa->main_v.data, qsa->main_v.count * qsa->main_v.row_bytes);
         out->index_k_hash = hash_bytes(
             qsa->index_k.data, qsa->index_k.count * qsa->index_k.row_bytes);
+        out->pending_main_k_hash = hash_qsa_pending(
+            &qsa->main_k, qsa->pending_count);
+        out->pending_main_v_hash = hash_qsa_pending(
+            &qsa->main_v, qsa->pending_count);
+        out->pending_index_k_hash = hash_qsa_pending(
+            &qsa->index_k, qsa->pending_count);
         if (!finite_floats((const float *)qsa->main_k.data,
                            qsa->main_k.count * qsa->main_k.row_bytes /
                                sizeof(float)) ||
@@ -130,9 +204,19 @@ bool q38_decode_stream(
             snapshot.input_token = prompt[i];
             snapshot.next_token = next;
             snapshot.committed_tokens = snapshot.step + 1;
+            snapshot.argmax = next;
+            snapshot.argmax_value = logits[next];
+            snapshot_logits_metrics(logits, &snapshot);
+            snapshot_top10(logits, &snapshot);
+            snapshot.logits_hash = hash_logits(logits);
+            snapshot.logits_finite =
+                finite_floats(logits, Q38_DECODE_VOCAB_SIZE);
             if (!snapshot.finite)
                 return fail(error, error_len,
                             "decode state contains a non-finite value");
+            if (!snapshot.logits_finite)
+                return fail(error, error_len,
+                            "decode logits contain a non-finite value");
             if (!trace(&snapshot, trace_user, error, error_len))
                 return false;
         }
@@ -154,9 +238,19 @@ bool q38_decode_stream(
             snapshot.input_token = input;
             snapshot.next_token = next;
             snapshot.committed_tokens = snapshot.step + 1;
+            snapshot.argmax = next;
+            snapshot.argmax_value = logits[next];
+            snapshot_logits_metrics(logits, &snapshot);
+            snapshot_top10(logits, &snapshot);
+            snapshot.logits_hash = hash_logits(logits);
+            snapshot.logits_finite =
+                finite_floats(logits, Q38_DECODE_VOCAB_SIZE);
             if (!snapshot.finite)
                 return fail(error, error_len,
                             "decode state contains a non-finite value");
+            if (!snapshot.logits_finite)
+                return fail(error, error_len,
+                            "decode logits contain a non-finite value");
             if (!trace(&snapshot, trace_user, error, error_len))
                 return false;
         }
