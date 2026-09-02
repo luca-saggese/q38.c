@@ -10,6 +10,18 @@ extern "C" {
 #define Q38_DECODE_VOCAB_SIZE 248320u
 
 typedef struct {
+    float min;
+    float max;
+    float mean;
+    float rms;
+    float max_abs;
+    size_t finite_count;
+    size_t nan_count;
+    size_t inf_count;
+    uint64_t checksum;
+} q38_decode_stats;
+
+typedef struct {
     uint64_t position;
     uint64_t committed_tokens;
     uint32_t pending_count;
@@ -23,6 +35,9 @@ typedef struct {
     uint64_t pending_main_k_hash;
     uint64_t pending_main_v_hash;
     uint64_t pending_index_k_hash;
+    q38_decode_stats main_k_stats;
+    q38_decode_stats main_v_stats;
+    q38_decode_stats index_k_stats;
 } q38_decode_qsa_snapshot;
 
 /*
@@ -41,6 +56,11 @@ typedef struct {
     uint64_t ple_history_hash;
     uint64_t gdn_layer_hash[Q38_MODEL_LAYERS];
     uint64_t conv_layer_hash[Q38_MODEL_LAYERS];
+    q38_decode_stats gdn_state_stats;
+    q38_decode_stats conv_history_stats;
+    q38_decode_stats ple_history_stats;
+    q38_decode_stats gdn_layer_stats[Q38_MODEL_LAYERS];
+    q38_decode_stats conv_layer_stats[Q38_MODEL_LAYERS];
     uint32_t ple_prev_token_1;
     uint32_t ple_prev_token_2;
     bool ple_have_prev_1;

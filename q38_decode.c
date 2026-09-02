@@ -19,6 +19,41 @@ static uint64_t hash_bytes(const void *data, size_t bytes) {
     return hash;
 }
 
+static q38_decode_stats stats_floats(const float *values, size_t count) {
+    q38_decode_stats result;
+    memset(&result, 0, sizeof(result));
+    result.min = INFINITY;
+    result.max = -INFINITY;
+    result.checksum = hash_bytes(values, count * sizeof(*values));
+    for (size_t i = 0; i < count; ++i) {
+        const float value = values[i];
+        if (isnan(value)) {
+            result.nan_count++;
+            continue;
+        }
+        if (isinf(value)) {
+            result.inf_count++;
+            continue;
+        }
+        result.finite_count++;
+        result.min = fminf(result.min, value);
+        result.max = fmaxf(result.max, value);
+        result.max_abs = fmaxf(result.max_abs, fabsf(value));
+        result.mean += value;
+        result.rms += (double)value * value;
+    }
+    if (result.finite_count) {
+        result.mean /= (float)result.finite_count;
+        result.rms = (float)sqrt(result.rms / (double)result.finite_count);
+    } else {
+        result.min = 0.0f;
+        result.max = 0.0f;
+        result.mean = 0.0f;
+        result.rms = 0.0f;
+    }
+    return result;
+}
+
 static uint64_t hash_qsa_pending(const q38_qsa_cache *cache,
                                  uint32_t pending_count) {
     if (!cache || !pending_count || pending_count > cache->count)
@@ -85,11 +120,19 @@ static bool snapshot_state(const q38_forward_state *state,
     const q38_state_storage *storage = &state->storage;
     snapshot->gdn_state_hash = hash_bytes(
         storage->recurrent_state, (size_t)storage->layout.recurrent.bytes);
+    snapshot->gdn_state_stats = stats_floats(
+        storage->recurrent_state,
+        (size_t)storage->layout.recurrent.elements);
     snapshot->conv_history_hash = hash_bytes(
         storage->conv_history, (size_t)storage->layout.conv_history.bytes);
+    snapshot->conv_history_stats = stats_floats(
+        storage->conv_history,
+        (size_t)storage->layout.conv_history.elements);
     snapshot->ple_history_hash = hash_bytes(
         state->ple_history,
         state->ple_history_elements * sizeof(*state->ple_history));
+    snapshot->ple_history_stats = stats_floats(
+        state->ple_history, state->ple_history_elements);
     for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
         const int slot = storage->layout.layer_to_gdn_slot[layer];
         if (slot < 0) continue;
@@ -97,10 +140,18 @@ static bool snapshot_state(const q38_forward_state *state,
             storage->recurrent_state +
                 (size_t)slot * storage->layout.recurrent.elements_per_slot,
             (size_t)storage->layout.recurrent.bytes_per_slot);
+        snapshot->gdn_layer_stats[layer] = stats_floats(
+            storage->recurrent_state +
+            (size_t)slot * storage->layout.recurrent.elements_per_slot,
+            (size_t)storage->layout.recurrent.elements_per_slot);
         snapshot->conv_layer_hash[layer] = hash_bytes(
             storage->conv_history +
                 (size_t)slot * storage->layout.conv_history.elements_per_slot,
             (size_t)storage->layout.conv_history.bytes_per_slot);
+        snapshot->conv_layer_stats[layer] = stats_floats(
+            storage->conv_history +
+            (size_t)slot * storage->layout.conv_history.elements_per_slot,
+            (size_t)storage->layout.conv_history.elements_per_slot);
     }
     snapshot->ple_prev_token_1 = state->token_history.prev_token_1;
     snapshot->ple_prev_token_2 = state->token_history.prev_token_2;
@@ -124,10 +175,19 @@ static bool snapshot_state(const q38_forward_state *state,
         out->index_k_count = qsa->index_k.count;
         out->main_k_hash = hash_bytes(
             qsa->main_k.data, qsa->main_k.count * qsa->main_k.row_bytes);
+        out->main_k_stats = stats_floats(
+            (const float *)qsa->main_k.data,
+            qsa->main_k.count * qsa->main_k.row_bytes / sizeof(float));
         out->main_v_hash = hash_bytes(
             qsa->main_v.data, qsa->main_v.count * qsa->main_v.row_bytes);
+        out->main_v_stats = stats_floats(
+            (const float *)qsa->main_v.data,
+            qsa->main_v.count * qsa->main_v.row_bytes / sizeof(float));
         out->index_k_hash = hash_bytes(
             qsa->index_k.data, qsa->index_k.count * qsa->index_k.row_bytes);
+        out->index_k_stats = stats_floats(
+            (const float *)qsa->index_k.data,
+            qsa->index_k.count * qsa->index_k.row_bytes / sizeof(float));
         out->pending_main_k_hash = hash_qsa_pending(
             &qsa->main_k, qsa->pending_count);
         out->pending_main_v_hash = hash_qsa_pending(

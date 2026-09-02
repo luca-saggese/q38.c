@@ -76,8 +76,9 @@ tie. Top-k is over complete-group scores, not over expanded token scores.
 
 ## Main sparse attention
 
-Main Q/K/V are projected from the same input stream. Q and K receive RMSNorm
-and multi-section RoPE; V is reshaped but not rotated. Q/K/V are appended to
+Main Q/K/V are projected from the same input stream. Q and K receive the
+Qwen4 RMSNorm form (`x * rsqrt(mean(x²) + eps) * (1 + weight)`) and
+multi-section RoPE; V is reshaped but not rotated. Q/K/V are appended to
 the main KV cache before the sparse read. Attention is ordinary dense GQA
 restricted by a mask whose unmasked cells are exactly the selected indexer
 IDs, with the normal causal mask retained. Attention output is multiplied by

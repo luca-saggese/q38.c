@@ -1,0 +1,154 @@
+{
+  "format": "q38-m6-decode-comparison-v2",
+  "native": "artifacts/m6/decode_gpu_1.json",
+  "oracle": "artifacts/m6/stateful_gguf_oracle_probe.json",
+  "checks": [
+    {
+      "step": 0,
+      "native_input_token": 9419,
+      "oracle_input_token": 9419,
+      "native_next_token": 11,
+      "oracle_next_token": 11,
+      "status": "pass"
+    },
+    {
+      "step": 1,
+      "native_input_token": 11,
+      "oracle_input_token": 11,
+      "native_next_token": 353,
+      "oracle_next_token": 353,
+      "status": "pass"
+    }
+  ],
+  "fresh_seed": {
+    "step": 0,
+    "native_input_token": 9419,
+    "oracle_input_token": 9419,
+    "native_next_token": 11,
+    "oracle_next_token": 11,
+    "status": "pass"
+  },
+  "c12_fresh_comparison": {
+    "status": "pass",
+    "expected_token": 11,
+    "actual_token": 11,
+    "prefix": [
+      9419
+    ],
+    "position": 0,
+    "final_norm": {
+      "status": "pass",
+      "tolerance": 2e-05,
+      "deltas": {
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "rms": 0.0,
+        "max_abs": 0.0
+      },
+      "failed_fields": [],
+      "checksum_equal": true
+    },
+    "logits": {
+      "status": "pass",
+      "tolerance": 2e-05,
+      "deltas": {
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "rms": 0.0,
+        "max_abs": 0.0
+      },
+      "failed_fields": [],
+      "checksum_equal": true
+    },
+    "checkpoints": {
+      "0": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "3": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "7": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "15": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "31": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "47": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      }
+    }
+  },
+  "native_generated": [
+    353
+  ],
+  "oracle_generated": [
+    353
+  ],
+  "status": "pass",
+  "reason": null
+}

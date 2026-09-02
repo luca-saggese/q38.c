@@ -31,15 +31,40 @@ def load_reference():
 def tensor_evidence(value: torch.Tensor | None) -> dict:
     if value is None:
         return {"present": False}
-    raw = value.detach().float().contiguous().cpu().numpy().tobytes()
-    return {
+    detached = value.detach().contiguous()
+    float_value = detached.float()
+    flat = float_value.reshape(-1).cpu()
+    finite = torch.isfinite(flat)
+    finite_values = flat[finite]
+    raw = float_value.cpu().numpy().tobytes()
+    evidence = {
         "present": True,
-        "shape": list(value.shape),
-        "dtype": str(value.dtype),
-        "device": str(value.device),
+        "shape": list(detached.shape),
+        "dtype": str(detached.dtype),
+        "device": str(detached.device),
         "sha256": hashlib.sha256(raw).hexdigest(),
-        "finite": bool(torch.isfinite(value).all().item()),
+        "finite": bool(finite.all().item()),
+        "finite_count": int(finite.sum()),
+        "nan_count": int(torch.isnan(flat).sum()),
+        "inf_count": int(torch.isinf(flat).sum()),
+        "checksum": hashlib.sha256(raw).hexdigest(),
     }
+    if finite_values.numel():
+        evidence.update({
+            "min": float(finite_values.min()),
+            "max": float(finite_values.max()),
+            "mean": float(finite_values.mean()),
+            "rms": float(torch.sqrt(torch.mean(finite_values * finite_values))),
+            "max_abs": float(torch.max(torch.abs(finite_values))),
+        })
+    else:
+        evidence.update({
+            "min": None, "max": None, "mean": None, "rms": None,
+            "max_abs": None,
+        })
+    if flat.numel() <= 16:
+        evidence["values"] = [float(item) for item in flat.tolist()]
+    return evidence
 
 
 def cache_evidence(cache: DynamicCache) -> dict:

@@ -290,6 +290,7 @@ def main() -> None:
             hidden = hidden.repeat(1, 1, config.hc_count)
 
             forward_ms = 0.0
+            layer_stats = {}
             cache_before_ms = float(cache_meter["elapsed_ms"])
             cache_before_calls = int(cache_meter["calls"])
             with torch.no_grad():
@@ -306,6 +307,7 @@ def main() -> None:
                     )
                     synchronize(device)
                     forward_ms += (time.perf_counter() - forward_start) * 1000.0
+                    layer_stats[str(layer_index)] = stats(hidden)
                     sequence_length = cache.get_seq_length()
                     if sequence_length not in (position, position + 1):
                         raise RuntimeError(
@@ -356,6 +358,8 @@ def main() -> None:
                 "input_token": token,
                 "next_token": next_token,
                 "prefix_length": position + 1,
+                "committed_position": position,
+                "layers": layer_stats,
                 "final_norm": stats(final_norm),
                 "logits": stats(logits),
                 "top": top_k(logits),

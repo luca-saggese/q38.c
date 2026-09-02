@@ -1,7 +1,7 @@
 {
   "format": "q38-m6-c13-resume-v1",
   "gate": "M6-C13",
-  "base_commit": "b3046af8a",
+  "base_commit": "d25cc5565",
   "status": "blocked",
   "execution_order": [
     "one-token CUDA probe",
@@ -41,29 +41,34 @@
     "token_and_cache_structure": "exact"
   },
   "ladder": {
+    "1": {
+      "artifact": "artifacts/m6/decode_comparison_1.json",
+      "status": "pass"
+    },
+    "2": {
+      "artifact": "artifacts/m6/decode_comparison_2.json",
+      "status": "pass"
+    },
     "4": {
-      "artifact": "artifacts/m6/stateful_sequence_oracle_4.json",
+      "artifact": "artifacts/m6/decode_comparison_4.json",
       "status": "pass"
     },
     "8": {
-      "artifact": "artifacts/m6/stateful_sequence_oracle_8.json",
+      "artifact": "artifacts/m6/decode_comparison_8_fixed.json",
       "status": "pass"
     },
     "32": {
-      "artifact": "artifacts/m6/stateful_sequence_oracle_32.json",
+      "artifact": "artifacts/m6/decode_gpu_32_fixed.json",
       "status": "blocked",
-      "reason": "official-cache sequence run terminated without a report"
-    },
-    "native_comparison": {
-      "artifact": "artifacts/m6/m6_stateful_decode_ladder.json",
-      "status": "blocked",
-      "first_divergence": {
-        "step": 4,
-        "native_next_token": 47308,
-        "official_oracle_next_token": 1496
-      }
+      "reason": "native completed; corrected official 32-token oracle unavailable"
     }
   },
-  "q38_status": "unchanged/frozen for oracle validation",
-  "fabricated_pass": false
+  "q38_status": "QSA RMSNorm +1 fix validated; forward/top-k/router/quantization otherwise unchanged",
+  "fabricated_pass": false,
+  "state_localization": "artifacts/m6/state_localization_c13.json",
+  "native_comparison": {
+    "status": "pass",
+    "first_divergence": null
+  },
+  "reason": "Direct cache evidence localized the original step-4 blocker to QSA RMSNorm using weight instead of (1 + weight). Corrected q38 matches the corrected official oracle through 8 and native 32 completed; official 32 coverage remains fail-closed blocked."
 }
