@@ -17,6 +17,65 @@ LAYER7_MAX_ABS = 0.10
 LAYER7_RMS = 0.01
 LAYER7_RELATIVE_RMS = 0.15
 LAYER7_COSINE = 0.99
+LAYER9_BOUNDARIES = (
+    "layer_input",
+    "core_pre_norm",
+    "gr_core_read",
+    "gdn_qsa_input",
+    "gdn_qsa_output",
+    "core_residual_gr_write",
+    "mlp_pre_norm",
+    "mlp_gr_read",
+    "router_input",
+    "router_logits_pre_cast",
+    "router_logits_effective",
+    "selected_experts",
+    "routed_output",
+    "shared_expert",
+    "final_mlp_gr_write",
+    "layer_output",
+)
+PLE_BOUNDARIES = (
+    "ple_embedding",
+    "ple_key_projection",
+    "ple_value_projection",
+    "ple_key_normed",
+    "ple_query_normed",
+    "ple_gated_value",
+    "ple_gated_value_normed",
+    "ple_conv_output",
+    "ple_contribution",
+)
+LAYER1_BOUNDARIES = (
+    "layer_input", *PLE_BOUNDARIES, *LAYER9_BOUNDARIES[1:]
+)
+BOUNDARY_DTYPE_CONTRACTS = {
+    "layer_input": "float32 activation vector; BF16 source tensors decoded before scalar math",
+    "ple_embedding": "float32 decoded Q8_0 rows, concatenated in head order",
+    "ple_key_projection": "float32 scalar accumulation over Q8_0 weights",
+    "ple_value_projection": "float32 scalar accumulation over Q8_0 weights",
+    "ple_key_normed": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+    "ple_query_normed": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+    "ple_gated_value": "float32 sigmoid gate times float32 value projection",
+    "ple_gated_value_normed": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+    "ple_conv_output": "float32 depthwise causal convolution followed by SiLU",
+    "ple_contribution": "float32 gated value plus convolution output",
+    "core_pre_norm": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+    "gr_core_read": "float32 GR read output",
+    "gdn_qsa_input": "float32 core input",
+    "gdn_qsa_output": "float32 scalar GDN/QSA output",
+    "core_residual_gr_write": "float32 residual plus GR injection",
+    "mlp_pre_norm": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+    "mlp_gr_read": "float32 GR read output",
+    "router_input": "float32 router input",
+    "router_logits_pre_cast": "float32 scalar router dot products",
+    "router_logits_effective": "BF16-cast router logits",
+    "selected_experts": "exact uint16 expert IDs; stable semantic ordering",
+    "routed_output": "float32 weighted routed-expert sum",
+    "shared_expert": "float32 sigmoid-gated shared-expert contribution",
+    "final_mlp_gr_write": "float32 residual plus GR injection",
+    "layer_output": "float32 layer output",
+}
 
 
 def stage_map(report: dict) -> dict[str, dict]:
@@ -77,6 +136,46 @@ def vector_metrics(left: list[float], right: list[float]) -> dict:
             for i in extreme
         ],
     }
+
+
+def boundary_map(report: dict) -> dict[str, dict]:
+    return {
+        item.get("name", ""): item
+        for item in report.get("layer9_boundaries", [])
+    }
+
+
+def boundary_vector_check(name: str, native: dict, reference: dict) -> dict:
+    if name == "selected_experts":
+        left, right = native.get("ids"), reference.get("ids")
+        return {
+            "name": name,
+            "status": "pass" if left == right else "fail",
+            "native": left,
+            "reference": right,
+        }
+    left, right = native.get("values"), reference.get("values")
+    if not isinstance(left, list) or not isinstance(right, list):
+        return {
+            "name": name,
+            "status": "fail",
+            "reason": "missing full vector",
+        }
+    if len(left) != len(right):
+        return {
+            "name": name,
+            "status": "fail",
+            "reason": "length",
+            "native_length": len(left),
+            "reference_length": len(right),
+        }
+    metrics = vector_metrics(left, right)
+    metrics["name"] = name
+    metrics["status"] = (
+        "pass" if all(close(a, b) for a, b in zip(left, right))
+        else "fail"
+    )
+    return metrics
 
 
 def route_values(route: dict) -> tuple[list[int], list[float]]:
@@ -212,8 +311,8 @@ def main() -> None:
             check["status"] = "diagnostic"
         result["checks"].append(check)
 
-    native_top = native_stages.get("logits", {}).get("top")
-    ref_top = reference_stages.get("logits", {}).get("top")
+    native_top = native_stages.get("logits:0", {}).get("top")
+    ref_top = reference_stages.get("logits:0", {}).get("top")
     if native_top is None or ref_top is None or [
         item.get("id") for item in native_top
     ] != [item.get("id") for item in ref_top]:
@@ -436,33 +535,103 @@ def main() -> None:
                     "margin_rank10_rank11"]["close"]:
                 route_mismatch.append(f"layer:{layer}:rank_margin")
         route_checks.append(detail)
-    if route_mismatch or route_diagnostics:
-        if route_mismatch:
-            result["status"] = "fail"
-        if route_mismatch:
-            result.setdefault("first_divergence", "routing")
-        result["checks"].append(
-            {"stage": "routing",
-             "status": "fail" if route_mismatch else "pass",
-             "selected_set_exact": not any(
-                 item.endswith(":selected_set") for item in route_mismatch
-             ),
-             "selected_order_exact": not route_diagnostics,
-             "mismatches": route_mismatch,
-             "diagnostics": route_diagnostics,
-             "per_layer": route_checks,
-             "first_selected_set_divergence_layer":
-                 first_selected_set_divergence_layer}
+    if route_mismatch:
+        result["status"] = "fail"
+        result.setdefault("first_divergence", "routing")
+    result["checks"].append(
+        {"stage": "routing",
+         "status": "fail" if route_mismatch else "pass",
+         "selected_set_exact": not any(
+             item.endswith(":selected_set") for item in route_mismatch
+         ),
+         "selected_order_exact": not route_diagnostics,
+         "mismatches": route_mismatch,
+         "diagnostics": route_diagnostics,
+         "per_layer": route_checks,
+         "first_selected_set_divergence_layer":
+             first_selected_set_divergence_layer}
+    )
+    result["hard_gates"]["routing_selected_set"] = {
+        "status": "fail" if route_mismatch else "pass",
+        "selected_set_exact": not any(
+            item.endswith(":selected_set") for item in route_mismatch
+        ),
+        "weights_by_expert_checked": True,
+        "first_selected_set_divergence_layer":
+            first_selected_set_divergence_layer,
+    }
+    progressive_boundary_checks = []
+    first_progressive_divergence = None
+    for boundary_layer in (1, 9):
+        boundary_order = (
+            LAYER1_BOUNDARIES if boundary_layer == 1 else LAYER9_BOUNDARIES
         )
-        result["hard_gates"]["routing_selected_set"] = {
-            "status": "fail" if route_mismatch else "pass",
-            "selected_set_exact": not any(
-                item.endswith(":selected_set") for item in route_mismatch
-            ),
-            "weights_by_expert_checked": True,
-            "first_selected_set_divergence_layer":
-                first_selected_set_divergence_layer,
+        native_boundaries = {
+            item.get("name", ""): item
+            for item in native.get(f"layer{boundary_layer}_boundaries", [])
         }
+        reference_boundaries = {
+            item.get("name", ""): item
+            for item in reference.get(f"layer{boundary_layer}_boundaries", [])
+        }
+        boundary_checks = []
+        first_boundary_divergence = None
+        for name in boundary_order:
+            left = native_boundaries.get(name)
+            right = reference_boundaries.get(name)
+            if left is None or right is None:
+                check = {
+                    "name": name,
+                    "dtype_contract": BOUNDARY_DTYPE_CONTRACTS[name],
+                    "status": "fail",
+                    "reason": "missing boundary",
+                    "native_present": left is not None,
+                    "reference_present": right is not None,
+                }
+            else:
+                check = boundary_vector_check(name, left, right)
+                check["dtype_contract"] = BOUNDARY_DTYPE_CONTRACTS[name]
+            boundary_checks.append(check)
+            if (check["status"] == "fail" and
+                    first_boundary_divergence is None):
+                first_boundary_divergence = name
+        progressive_boundary_checks.append({
+            "layer": boundary_layer,
+            "status": "fail" if first_boundary_divergence else "pass",
+            "order": list(boundary_order),
+            "first_divergence": first_boundary_divergence,
+            "checks": boundary_checks,
+        })
+        if (first_boundary_divergence is not None and
+                first_progressive_divergence is None):
+            first_progressive_divergence = {
+                "layer": boundary_layer,
+                "boundary": first_boundary_divergence,
+            }
+    result["checks"].append({
+        "stage": "progressive_boundaries",
+        "status": "fail" if first_progressive_divergence else "pass",
+        "checks": progressive_boundary_checks,
+        "first_divergence": first_progressive_divergence,
+        "layer9_ple_contribution": (
+            native.get("layer9_ple_contribution",
+                       reference.get("layer9_ple_contribution",
+                                     {"status": "not_applicable"}))
+        ),
+    })
+    result["hard_gates"]["progressive_boundaries"] = {
+        "status": "fail" if first_progressive_divergence else "pass",
+        "first_divergence": first_progressive_divergence,
+    }
+    if first_progressive_divergence is not None:
+        result["status"] = "fail"
+        result.setdefault(
+            "first_divergence",
+            "layer%d_boundaries:%s" % (
+                first_progressive_divergence["layer"],
+                first_progressive_divergence["boundary"],
+            ),
+        )
     native_moe = native.get("layer2_moe_trace")
     ref_moe = reference.get("layer2_moe_trace")
     if native_moe is None or ref_moe is None:

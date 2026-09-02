@@ -11,6 +11,41 @@
 #include <string.h>
 
 static const size_t fixed_coordinates[] = {0, 1, 2, 3};
+static const char *const layer9_boundary_order[] = {
+    "layer_input",
+    "core_pre_norm",
+    "gr_core_read",
+    "gdn_qsa_input",
+    "gdn_qsa_output",
+    "core_residual_gr_write",
+    "mlp_pre_norm",
+    "mlp_gr_read",
+    "router_input",
+    "router_logits_pre_cast",
+    "router_logits_effective",
+    "routed_output",
+    "shared_expert",
+    "final_mlp_gr_write",
+    "layer_output",
+};
+static const char *const ple_boundary_order[] = {
+    "ple_embedding",
+    "ple_key_projection",
+    "ple_value_projection",
+    "ple_key_normed",
+    "ple_query_normed",
+    "ple_gated_value",
+    "ple_gated_value_normed",
+    "ple_conv_output",
+    "ple_contribution",
+};
+
+typedef struct {
+    char name[48];
+    float *values;
+    size_t count;
+    size_t width;
+} boundary_record;
 
 typedef struct {
     FILE *out;
@@ -44,6 +79,14 @@ typedef struct {
     q38_forward_dtype router_dtype;
     uint32_t qsa_selected[Q38_MODEL_LAYERS][2051];
     size_t qsa_count[Q38_MODEL_LAYERS];
+    boundary_record layer9_boundaries[
+        sizeof(layer9_boundary_order) / sizeof(layer9_boundary_order[0]) +
+        sizeof(ple_boundary_order) / sizeof(ple_boundary_order[0])];
+    size_t layer9_boundary_count;
+    boundary_record layer1_boundaries[
+        sizeof(layer9_boundary_order) / sizeof(layer9_boundary_order[0]) +
+        sizeof(ple_boundary_order) / sizeof(ple_boundary_order[0])];
+    size_t layer1_boundary_count;
 } trace_context;
 
 static void json_float(FILE *out, float value) {
@@ -145,6 +188,130 @@ static void write_vector_field(FILE *out, const char *name,
     fputc('}', out);
 }
 
+static void write_boundary_set(FILE *out, const trace_context *context,
+                               const boundary_record *records,
+                               size_t record_count, uint32_t layer,
+                               bool selected) {
+    fprintf(out, "\"layer%u_boundaries\":[", layer);
+    bool first = true;
+    for (size_t order = 0; order < sizeof(ple_boundary_order) /
+                                      sizeof(ple_boundary_order[0]);
+         ++order) {
+        const boundary_record *record = NULL;
+        for (size_t i = 0; i < record_count; ++i)
+            if (strcmp(records[i].name, ple_boundary_order[order]) == 0) {
+                record = &records[i];
+                break;
+            }
+        if (record) {
+            fprintf(out, "{\"name\":\"%s\",\"width\":%zu,\"elements\":%zu,"
+                        "\"values\":[",
+                    record->name, record->width, record->count);
+            for (size_t j = 0; j < record->count; ++j) {
+                if (j) fputc(',', out);
+                json_float(out, record->values[j]);
+            }
+            fputs("],\"stats\":{", out);
+            write_stats(out, record->values, record->count);
+            fputs("}}", out);
+            first = false;
+        }
+        if (record && order + 1 < sizeof(ple_boundary_order) /
+                                  sizeof(ple_boundary_order[0]))
+            fputc(',', out);
+    }
+    for (size_t order = 0; order < sizeof(layer9_boundary_order) /
+                                      sizeof(layer9_boundary_order[0]);
+         ++order) {
+        const boundary_record *record = NULL;
+        for (size_t i = 0; i < record_count; ++i)
+            if (strcmp(records[i].name, layer9_boundary_order[order]) == 0) {
+                record = &records[i];
+                break;
+            }
+        if (!record) continue;
+        if (!first) fputc(',', out);
+        first = false;
+        fprintf(out, "{\"name\":\"%s\",\"width\":%zu,\"elements\":%zu,"
+                    "\"values\":[",
+                record->name, record->width, record->count);
+        for (size_t i = 0; i < record->count; ++i) {
+            if (i) fputc(',', out);
+            json_float(out, record->values[i]);
+        }
+        fputs("],\"stats\":{", out);
+        write_stats(out, record->values, record->count);
+        fputs("}}", out);
+    }
+    if (selected && context->route_count[layer] == Q38_MOE_TOP_K) {
+        if (!first) fputc(',', out);
+        fputs("{\"name\":\"selected_experts\",\"width\":10,\"elements\":10,"
+              "\"ids\":[",
+              out);
+        for (size_t i = 0; i < Q38_MOE_TOP_K; ++i) {
+            if (i) fputc(',', out);
+            fprintf(out, "%u", context->routed[layer][i]);
+        }
+        fputs("]}", out);
+    }
+    fputc(']', out);
+}
+
+static bool store_boundary(boundary_record *records, size_t *record_count,
+                           uint32_t layer, const char *boundary,
+                           const float *values, size_t token_count,
+                           size_t width, char *error, size_t error_len) {
+    if (!records || !record_count || !boundary || !values || !token_count ||
+        !width || token_count > SIZE_MAX / width)
+        return false;
+    const size_t count = token_count * width;
+    size_t index = 0;
+    for (; index < *record_count; ++index)
+        if (strcmp(records[index].name, boundary) == 0)
+            break;
+    if (index == *record_count) {
+        if (index >= sizeof(layer9_boundary_order) /
+                         sizeof(layer9_boundary_order[0]) +
+                         sizeof(ple_boundary_order) /
+                         sizeof(ple_boundary_order[0])) {
+            if (error && error_len)
+                snprintf(error, error_len, "too many layer-%u boundaries",
+                         layer);
+            return false;
+        }
+        snprintf(records[index].name, sizeof(records[index].name), "%s",
+                 boundary);
+        (*record_count)++;
+    }
+    float *copy = realloc(records[index].values, count * sizeof(*copy));
+    if (!copy) {
+        if (error && error_len)
+            snprintf(error, error_len, "layer-%u boundary allocation failed",
+                     layer);
+        return false;
+    }
+    memcpy(copy, values, count * sizeof(*copy));
+    records[index].values = copy;
+    records[index].count = count;
+    records[index].width = width;
+    return true;
+}
+
+static bool boundary_trace(uint32_t layer, const char *boundary,
+                           const float *values, size_t token_count,
+                           size_t width, void *opaque, char *error,
+                           size_t error_len) {
+    trace_context *context = opaque;
+    if (!context || (layer != 1 && layer != 9))
+        return true;
+    boundary_record *records = layer == 9 ? context->layer9_boundaries
+                                          : context->layer1_boundaries;
+    size_t *record_count = layer == 9 ? &context->layer9_boundary_count
+                                      : &context->layer1_boundary_count;
+    return store_boundary(records, record_count, layer, boundary, values,
+                          token_count, width, error, error_len);
+}
+
 static bool trace(uint32_t layer, const float *hidden, size_t tokens,
                   size_t width, void *opaque, char *error, size_t error_len) {
     trace_context *context = opaque;
@@ -159,7 +326,7 @@ static bool trace(uint32_t layer, const float *hidden, size_t tokens,
     write_stats(out, hidden, width);
     fputs("},", out);
     write_fixed(out, hidden, width);
-    if (layer == 7) {
+    if (layer != UINT32_MAX) {
         fputs(",\"values\":[", out);
         for (size_t i = 0; i < width; ++i) {
             if (i) fputc(',', out);
@@ -366,6 +533,12 @@ static void write_decisions(FILE *out, const trace_context *context) {
         fputs("]}", out);
     }
     fputs("]", out);
+    fputs(",\n", out);
+    write_boundary_set(out, context, context->layer1_boundaries,
+                       context->layer1_boundary_count, 1, true);
+    fputs(",\n", out);
+    write_boundary_set(out, context, context->layer9_boundaries,
+                       context->layer9_boundary_count, 9, true);
     fputs(",\n\"router_logits\":[", out);
     first = true;
     for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
@@ -545,8 +718,25 @@ static bool trace_complete(const trace_context *context) {
             context->router_count[layer] != Q38_MOE_EXPERTS ||
             !context->moe_trace_by_layer[layer])
             return false;
-    return context->layer9_pre_router_valid &&
-           context->layer9_router_vectors_valid;
+    if (!context->layer9_pre_router_valid ||
+        !context->layer9_router_vectors_valid)
+        return false;
+    const boundary_record *sets[] = {
+        context->layer1_boundaries, context->layer9_boundaries,
+    };
+    const size_t counts[] = {
+        context->layer1_boundary_count, context->layer9_boundary_count,
+    };
+    for (size_t set = 0; set < sizeof(sets) / sizeof(sets[0]); ++set)
+        for (size_t i = 0; i < sizeof(layer9_boundary_order) /
+                                sizeof(layer9_boundary_order[0]); ++i) {
+            bool found = false;
+            for (size_t j = 0; j < counts[set]; ++j)
+                found |= strcmp(sets[set][j].name,
+                                layer9_boundary_order[i]) == 0;
+            if (!found) return false;
+        }
+    return true;
 }
 
 int main(int argc, char **argv) {
@@ -580,7 +770,7 @@ int main(int argc, char **argv) {
         q38_gguf_close(model);
         return 1;
     }
-    fputs("{\"format\":\"q38-m6-full-trace-v4\",\"tokens\":[9419],"
+    fputs("{\"format\":\"q38-m6-full-trace-v5\",\"tokens\":[9419],"
           "\"stages\":[\n",
           out);
     trace_context context = {.out = out, .first = true};
@@ -591,6 +781,7 @@ int main(int argc, char **argv) {
     diagnostics.router_trace = router_trace;
     diagnostics.moe_trace = moe_trace;
     diagnostics.pre_router_trace = pre_router_trace;
+    diagnostics.boundary_trace = boundary_trace;
     diagnostics.qsa_trace = qsa_trace;
     diagnostics.trace_user = &context;
     float *logits = calloc(248320, sizeof(float));
@@ -606,15 +797,25 @@ int main(int argc, char **argv) {
         remove(argv[2]);
         free(logits);
         fclose(out);
+        for (size_t i = 0; i < context.layer1_boundary_count; ++i)
+            free(context.layer1_boundaries[i].values);
+        for (size_t i = 0; i < context.layer9_boundary_count; ++i)
+            free(context.layer9_boundaries[i].values);
         q38_forward_state_destroy(&state);
         q38_gguf_close(model);
         return 1;
     }
     write_logits(out, logits, 248320);
     fputs("\n],", out);
+    fputs("\"layer9_ple_contribution\":{\"status\":\"not_applicable\","
+          "\"reason\":\"layer 9 has no PLE\"},", out);
     write_decisions(out, &context);
     fputs("\n}\n", out);
     fclose(out);
+    for (size_t i = 0; i < context.layer1_boundary_count; ++i)
+        free(context.layer1_boundaries[i].values);
+    for (size_t i = 0; i < context.layer9_boundary_count; ++i)
+        free(context.layer9_boundaries[i].values);
     free(logits);
     q38_forward_state_destroy(&state);
     q38_gguf_close(model);

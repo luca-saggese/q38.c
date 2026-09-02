@@ -107,6 +107,11 @@ typedef struct q38_pre_router_trace {
     const q38_tensor *router;
 } q38_pre_router_trace;
 
+typedef bool (*q38_forward_boundary_trace)(
+    uint32_t layer, const char *boundary, const float *values,
+    size_t token_count, size_t width, void *user, char *error,
+    size_t error_len);
+
 typedef struct {
     uint32_t first_divergence_layer;
     uint32_t first_divergence_token;
@@ -133,6 +138,12 @@ typedef struct {
     bool (*pre_router_trace)(uint32_t layer,
                              const q38_pre_router_trace *trace, void *user,
                              char *error, size_t error_len);
+    /*
+     * Optional full-vector checkpoints for progressive divergence
+     * localization.  The scalar forward remains authoritative; callbacks
+     * only observe activation buffers while they are live.
+     */
+    q38_forward_boundary_trace boundary_trace;
 } q38_forward_diagnostics;
 
 /*

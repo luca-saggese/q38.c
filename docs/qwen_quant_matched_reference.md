@@ -19,13 +19,17 @@ Routing hard gates begin at layer 3 so the known layer-2 boundary diagnostic
 does not mask the first post-boundary selected-set divergence. Each routed
 layer records the hidden input, all 512 effective router logits, rank 10/11
 scores and margin, selected experts, weights by expert, and routed output.
-Layer 9 additionally records the pre-router GR input, its RMSNorm output,
+Layer 1 and layer 9 additionally record progressive full-vector boundaries.
+Layer 1 includes the applicable PLE contribution and grouped-normalization
+substages. Layer 9 records the pre-router GR input, its RMSNorm output,
 the GR output feeding the router, BF16 source-byte checksums and values for
 ranking-relevant router rows, pre-cast matvecs, effective BF16 results, and
 row-by-row matvec self-checks. It also records FP32 reduction versus
 `F.linear` accumulation, BF16-input/BF16-weight matmul, the explicit
-FP32-to-BF16 cast, and the corresponding BF16 bit patterns; these rounding
-diagnostics do not alter routing or tolerance gates.
+FP32-to-BF16 cast, and the corresponding BF16 bit patterns. These boundary
+and rounding diagnostics do not alter routing or tolerance gates. The scalar
+native path uses grouped 2560-wide RMS normalization for PLE streams; a
+single 10240-wide norm is not equivalent.
 
 Example:
 

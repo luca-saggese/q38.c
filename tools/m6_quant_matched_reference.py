@@ -472,6 +472,23 @@ def vector_metrics(left: list[float] | None, right: list[float] | None) -> dict:
     }
 
 
+def first_output(output: object) -> torch.Tensor:
+    """Return the activation tensor from tensor-or-tuple module outputs."""
+    if isinstance(output, tuple):
+        return output[0]
+    return output
+
+
+def boundary_entry(name: str, tensor: torch.Tensor) -> dict:
+    return {
+        "name": name,
+        "width": tensor.shape[-1],
+        "elements": tensor.numel(),
+        "values": values(tensor),
+        "stats": stats(tensor),
+    }
+
+
 def native_router(native: dict, layer: int) -> list[float] | None:
     for item in native.get("router_logits", []):
         if item.get("layer") == layer:
@@ -505,6 +522,7 @@ def main() -> None:
     config = _qwen4.Qwen4ExpTextConfig(**raw_config["text_config"])
     reader = GGUF(args.gguf)
     stages, routing = [], []
+    boundary_sets = {}
     layer2_moe_trace = None
     qsa_selection = []
     hidden = reader.dense_rows(
@@ -526,24 +544,85 @@ def main() -> None:
             print(f"quant reference layer {layer_index}", flush=True)
             layer = materialize_layer(reader, config, layer_index, device)
             captured = {}
-            layer.mlp.gate.register_forward_hook(
-                lambda _m, _i, output: captured.__setitem__("router", output))
-            layer.mlp.register_forward_pre_hook(
+            hook_handles = []
+            hook_handles.append(layer.mlp.gate.register_forward_hook(
+                lambda _m, _i, output: captured.__setitem__("router", output)))
+            hook_handles.append(layer.mlp.register_forward_pre_hook(
                 lambda _m, inputs: captured.__setitem__(
-                    "moe_input", inputs[0].detach()))
-            if layer_index == 9:
-                layer.mlp_hyper_connection.register_forward_pre_hook(
+                    "moe_input", inputs[0].detach())))
+            if layer_index in (1, 9):
+                hook_handles.append(layer.register_forward_pre_hook(
                     lambda _m, inputs: captured.__setitem__(
-                        "router_chain_input", inputs[0].detach()))
-                layer.mlp_hyper_connection.hc_norm.register_forward_hook(
+                        "layer_input_pre_ple", inputs[0].detach())))
+                if layer.ple is not None:
+                    hook_handles.append(layer.ple.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "ple_contribution", output.detach())))
+                    hook_handles.append(layer.ple.ple_embedding.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "ple_embedding", output.detach())))
+                    hook_handles.append(layer.ple.key_proj.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "ple_key_projection", output.detach())))
+                    hook_handles.append(layer.ple.value_proj.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "ple_value_projection", output.detach())))
+                    hook_handles.append(layer.ple.norm_key.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "ple_key_normed", output.detach())))
+                    hook_handles.append(layer.ple.norm_query.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "ple_query_normed", output.detach())))
+                    hook_handles.append(layer.ple.norm_conv.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "ple_gated_value_normed", output.detach())))
+                    hook_handles.append(layer.ple.conv1d.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "ple_conv_raw", output.detach())))
+                hook_handles.append(
+                    layer.attn_hyper_connection.hc_norm.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "core_pre_norm", output.detach())))
+                hook_handles.append(layer.attn_hyper_connection.register_forward_hook(
                     lambda _m, _i, output: captured.__setitem__(
-                        "router_chain_rmsnorm", output.detach()))
-                layer.mlp_hyper_connection.register_forward_hook(
+                        "attn_hyper", output)))
+                hook_handles.append(
+                    layer.attn_hyper_connection.register_forward_pre_hook(
+                        lambda _m, inputs: captured.__setitem__(
+                            "layer_input", inputs[0].detach())))
+                core_module = (
+                    layer.linear_attn
+                    if layer.layer_type == "linear_attention"
+                    else layer.self_attn
+                )
+                hook_handles.append(core_module.register_forward_hook(
                     lambda _m, _i, output: captured.__setitem__(
-                        "router_chain_gr", output[0].detach()))
-            layer.mlp.experts.register_forward_hook(
+                        "core_output", first_output(output).detach())))
+                hook_handles.append(layer.mlp_hyper_connection.hc_norm.register_forward_hook(
+                    lambda _m, _i, output: captured.__setitem__(
+                        "mlp_pre_norm", output.detach()) or
+                    captured.__setitem__("router_chain_rmsnorm", output.detach())))
+                hook_handles.append(
+                    layer.mlp_hyper_connection.register_forward_hook(
+                        lambda _m, _i, output: captured.__setitem__(
+                            "mlp_hyper", output) or
+                        captured.__setitem__("router_chain_gr",
+                                             output[0].detach())))
+                hook_handles.append(layer.mlp.register_forward_hook(
+                    lambda _m, _i, output: captured.__setitem__(
+                        "mlp_output", output.detach())))
+                hook_handles.append(layer.mlp.shared_expert.register_forward_hook(
+                    lambda _m, _i, output: captured.__setitem__(
+                        "shared_raw", output.detach())))
+                hook_handles.append(layer.mlp.shared_expert_gate.register_forward_hook(
+                    lambda _m, _i, output: captured.__setitem__(
+                        "shared_gate", output.detach())))
+                hook_handles.append(layer.mlp_hyper_connection.register_forward_pre_hook(
+                    lambda _m, inputs: captured.__setitem__(
+                        "router_chain_input", inputs[0].detach())))
+            hook_handles.append(layer.mlp.experts.register_forward_hook(
                 lambda _m, _i, output: captured.__setitem__(
-                    "routed_output", output.detach()))
+                    "routed_output", output.detach())))
             qsa_hook = None
             if layer.layer_type != "linear_attention":
                 qsa_hook = layer.self_attn.indexer.register_forward_hook(
@@ -551,6 +630,10 @@ def main() -> None:
             hidden = layer(hidden, position_embeddings=position_embeddings,
                            attention_mask=full_mask, conv_mask=conv_mask,
                            past_key_values=None, ple_input_ids=input_ids)
+            for handle in hook_handles:
+                handle.remove()
+            if qsa_hook is not None:
+                qsa_hook.remove()
             router = captured["router"]
             logits = router[0].reshape(-1).float()
             order = torch.argsort(torch.softmax(logits, 0), descending=True,
@@ -657,6 +740,138 @@ def main() -> None:
                         values(layer.mlp.gate.last_bf16_matmul),
                         route["router_effective_bf16"]),
                 }
+                attn_hyper = captured["attn_hyper"]
+                mlp_hyper = captured["mlp_hyper"]
+                core_residual = (
+                        attn_hyper[1]
+                        + (
+                            captured["core_output"].unsqueeze(-2)
+                            * attn_hyper[2].unsqueeze(-1)
+                        ).flatten(-2)
+                )
+                final_mlp = (
+                        mlp_hyper[1]
+                        + (
+                            captured["mlp_output"].unsqueeze(-2)
+                            * mlp_hyper[2].unsqueeze(-1)
+                        ).flatten(-2)
+                )
+                shared = (
+                        torch.sigmoid(captured["shared_gate"])
+                        * captured["shared_raw"]
+                )
+                boundary_sets[layer_index] = [
+                        boundary_entry("layer_input", captured["layer_input"]),
+                ]
+                boundary_sets[layer_index].extend([
+                        boundary_entry("core_pre_norm", captured["core_pre_norm"]),
+                        boundary_entry("gr_core_read", attn_hyper[0]),
+                        boundary_entry("gdn_qsa_input", attn_hyper[0]),
+                        boundary_entry("gdn_qsa_output",
+                                       captured["core_output"]),
+                        boundary_entry("core_residual_gr_write", core_residual),
+                        boundary_entry("mlp_pre_norm", captured["mlp_pre_norm"]),
+                        boundary_entry("mlp_gr_read", mlp_hyper[0]),
+                        boundary_entry("router_input", captured["moe_input"]),
+                        boundary_entry("router_logits_pre_cast",
+                                       layer.mlp.gate.last_pre_cast),
+                        boundary_entry("router_logits_effective",
+                                       layer.mlp.gate.last_effective),
+                        boundary_entry("routed_output",
+                                       captured["routed_output"]),
+                        boundary_entry("shared_expert", shared),
+                        boundary_entry("final_mlp_gr_write", final_mlp),
+                        boundary_entry("layer_output", hidden),
+                ])
+                boundary_sets[layer_index].append({
+                        "name": "selected_experts",
+                        "width": len(route["experts"]),
+                        "elements": len(route["experts"]),
+                        "ids": route["experts"],
+                })
+            if layer_index == 1:
+                attn_hyper = captured["attn_hyper"]
+                mlp_hyper = captured["mlp_hyper"]
+                core_residual = (
+                    attn_hyper[1]
+                    + (
+                        captured["core_output"].unsqueeze(-2)
+                        * attn_hyper[2].unsqueeze(-1)
+                    ).flatten(-2)
+                )
+                final_mlp = (
+                    mlp_hyper[1]
+                    + (
+                        captured["mlp_output"].unsqueeze(-2)
+                        * mlp_hyper[2].unsqueeze(-1)
+                    ).flatten(-2)
+                )
+                shared = (
+                    torch.sigmoid(captured["shared_gate"])
+                    * captured["shared_raw"]
+                )
+                boundary_sets[layer_index] = [
+                    boundary_entry("layer_input", captured["layer_input"]),
+                ]
+                if "ple_contribution" in captured:
+                    key_normed = captured["ple_key_normed"].unflatten(
+                        -1, (config.hc_count, config.hidden_size))
+                    query_normed = captured["ple_query_normed"].unflatten(
+                        -1, (config.hc_count, config.hidden_size))
+                    value = captured["ple_value_projection"]
+                    gate = (key_normed * query_normed).sum(
+                        dim=-1, keepdim=True) / math.sqrt(config.hidden_size)
+                    gate = gate.abs().clamp_min(1e-6).sqrt() * gate.sign()
+                    gated = torch.sigmoid(gate) * value.unsqueeze(-2)
+                    conv_output = torch.nn.functional.silu(
+                        captured["ple_conv_raw"]).transpose(1, 2)
+                    boundary_sets[layer_index].extend([
+                        boundary_entry("ple_embedding",
+                                       captured["ple_embedding"]),
+                        boundary_entry("ple_key_projection",
+                                       captured["ple_key_projection"]),
+                        boundary_entry("ple_value_projection",
+                                       captured["ple_value_projection"]),
+                        boundary_entry("ple_key_normed",
+                                       captured["ple_key_normed"]),
+                        boundary_entry("ple_query_normed",
+                                       captured["ple_query_normed"]),
+                        boundary_entry("ple_gated_value",
+                                       gated.flatten(-2)),
+                        boundary_entry("ple_gated_value_normed",
+                                       captured["ple_gated_value_normed"]),
+                        boundary_entry("ple_conv_output", conv_output),
+                    ])
+                    boundary_sets[layer_index].append(
+                        boundary_entry("ple_contribution",
+                                       captured["ple_contribution"])
+                    )
+                boundary_sets[layer_index].extend([
+                    boundary_entry("core_pre_norm", captured["core_pre_norm"]),
+                    boundary_entry("gr_core_read", attn_hyper[0]),
+                    boundary_entry("gdn_qsa_input", attn_hyper[0]),
+                    boundary_entry("gdn_qsa_output",
+                                   captured["core_output"]),
+                    boundary_entry("core_residual_gr_write", core_residual),
+                    boundary_entry("mlp_pre_norm", captured["mlp_pre_norm"]),
+                    boundary_entry("mlp_gr_read", mlp_hyper[0]),
+                    boundary_entry("router_input", captured["moe_input"]),
+                    boundary_entry("router_logits_pre_cast",
+                                   layer.mlp.gate.last_pre_cast),
+                    boundary_entry("router_logits_effective",
+                                   layer.mlp.gate.last_effective),
+                    boundary_entry("routed_output",
+                                   captured["routed_output"]),
+                    boundary_entry("shared_expert", shared),
+                    boundary_entry("final_mlp_gr_write", final_mlp),
+                    boundary_entry("layer_output", hidden),
+                    {
+                        "name": "selected_experts",
+                        "width": len(route["experts"]),
+                        "elements": len(route["experts"]),
+                        "ids": route["experts"],
+                    },
+                ])
             routing.append(route)
             if layer_index == 2:
                 layer2_moe_trace = {
@@ -735,7 +950,7 @@ def main() -> None:
             stages.append({
                 "stage": "layer", "layer": layer_index, "width": hidden.shape[-1],
                 "stats": stats(hidden),
-                **({"values": values(hidden)} if layer_index == 7 else {}),
+                "values": values(hidden),
             })
             del layer
             if device.type == "cuda":
@@ -754,11 +969,17 @@ def main() -> None:
     stages.append({"stage": "logits", "layer": 0, "width": logits.numel(),
                    "stats": stats(logits), "top": top_k(logits)})
     report = {
-        "format": "q38-m6-quant-matched-reference-v2",
+        "format": "q38-m6-quant-matched-reference-v3",
         "reference": "independent GGUF reader/dequantizer + Qwen4Exp math",
         "gguf": str(args.gguf), "tokens": tokens, "q38_forward_called": False,
         "comparison_start_layer": args.start_layer,
         "stages": stages, "routing": routing, "qsa_selection": qsa_selection,
+        "layer1_boundaries": boundary_sets.get(1, []),
+        "layer9_boundaries": boundary_sets.get(9, []),
+        "layer9_ple_contribution": {
+            "status": "not_applicable",
+            "reason": "layer 9 has no PLE",
+        },
         "layer2_moe_trace": layer2_moe_trace,
         "first_selected_set_divergence_layer": first_divergence,
         "status": "pass" if all(s["stats"]["nan_count"] == 0 and
