@@ -558,6 +558,15 @@ static void full_rms(float *x, const float *weight, size_t n, bool one_plus) {
     }
 }
 
+static void full_grouped_rms(float *x, const float *weight, size_t tokens,
+                             size_t streams, size_t hidden, bool one_plus) {
+    const size_t width = streams * hidden;
+    for (size_t t = 0; t < tokens; ++t)
+        for (size_t stream = 0; stream < streams; ++stream)
+            full_rms(x + t * width + stream * hidden,
+                     weight + stream * hidden, hidden, one_plus);
+}
+
 static bool full_decode_vector(const q38_gguf *model, const q38_tensor *tensor,
                                float *out, size_t n, char *error,
                                size_t error_len) {
@@ -590,6 +599,19 @@ static q38_tensor *full_named_ple(const q38_layer_weights *layer,
             return tensor;
     }
     return NULL;
+}
+
+static bool full_boundary_trace(uint32_t layer, const char *boundary,
+                                const float *values, size_t token_count,
+                                size_t width,
+                                q38_forward_diagnostics *diagnostics,
+                                char *error, size_t error_len) {
+    if (!diagnostics || !diagnostics->boundary_trace ||
+        (layer != 1 && layer != 9))
+        return true;
+    return diagnostics->boundary_trace(
+        layer, boundary, values, token_count, width,
+        diagnostics->trace_user, error, error_len);
 }
 
 static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
@@ -864,6 +886,10 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                     error, error_len))
                 goto fail;
         }
+        if (!full_boundary_trace(layer_number, "router_input", x, 1,
+                                     Q38_GR_HIDDEN, diagnostics, error,
+                                     error_len))
+            goto fail;
         float logits_pre_cast[Q38_MOE_EXPERTS];
         float logits_effective[Q38_MOE_EXPERTS];
         float probs_pre_cast[Q38_MOE_EXPERTS];
@@ -881,6 +907,13 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
             if (logits_effective[e] > max_effective)
                 max_effective = logits_effective[e];
         }
+        if (!full_boundary_trace(layer_number, "router_logits_pre_cast",
+                                 logits_pre_cast, 1, Q38_MOE_EXPERTS,
+                                 diagnostics, error, error_len) ||
+            !full_boundary_trace(layer_number, "router_logits_effective",
+                                 logits_effective, 1, Q38_MOE_EXPERTS,
+                                 diagnostics, error, error_len))
+            goto fail;
         if (diagnostics && diagnostics->router_trace &&
             !diagnostics->router_trace(layer_number, logits_effective,
                                        Q38_MOE_EXPERTS,
@@ -975,6 +1008,11 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
             for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
                 output[t * Q38_GR_HIDDEN + d] += route.weight[k] * routed[d];
         }
+        if (!full_boundary_trace(layer_number, "routed_output",
+                                 output + t * Q38_GR_HIDDEN, 1,
+                                 Q38_GR_HIDDEN, diagnostics, error,
+                                 error_len))
+            goto fail;
         if (diagnostics && diagnostics->moe_trace) {
             const q38_moe_trace trace = {
                 .router_input = x,
@@ -1020,6 +1058,12 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         shared_gate = 1.0f / (1.0f + expf(-shared_gate));
         for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
             output[t * Q38_GR_HIDDEN + d] += shared_gate * shared[d];
+        for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
+            shared[d] *= shared_gate;
+        if (!full_boundary_trace(layer_number, "shared_expert", shared, 1,
+                                 Q38_GR_HIDDEN, diagnostics, error,
+                                 error_len))
+            goto fail;
     }
     free(intermediate); free(routed); free(shared); free(gate); free(up);
     return true;
@@ -1043,7 +1087,8 @@ static bool full_u64_vector(const q38_gguf *model, const q38_tensor *tensor,
 static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                      q38_forward_state *state, const uint32_t *tokens,
                      const float *hidden, size_t token_count, float *after,
-                     float *scratch, char *error, size_t error_len) {
+                     float *scratch, q38_forward_diagnostics *diagnostics,
+                     char *error, size_t error_len) {
     const size_t width = 4u * Q38_GR_HIDDEN;
     const size_t emb_width = 16u * 160u;
     q38_tensor *key_proj = full_named_ple(layer, ".ple.key_proj.weight");
@@ -1125,6 +1170,10 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                 goto fail;
             }
         }
+        if (!full_boundary_trace(1, "ple_embedding",
+                                 embedding + t * emb_width, 1, emb_width,
+                                 diagnostics, error, error_len))
+            goto fail;
         q38_ngram_history_append(&state->token_history, tokens[t],
                                  state->eos_token);
         if (!full_matvec(model, key_proj, embedding + t * emb_width,
@@ -1135,6 +1184,14 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                          value + t * Q38_GR_HIDDEN, scratch, error,
                          error_len))
             goto fail;
+        if (!full_boundary_trace(1, "ple_key_projection",
+                                 key + t * width, 1, width, diagnostics,
+                                 error, error_len) ||
+            !full_boundary_trace(1, "ple_value_projection",
+                                 value + t * Q38_GR_HIDDEN, 1,
+                                 Q38_GR_HIDDEN, diagnostics, error,
+                                 error_len))
+            goto fail;
         memcpy(query + t * width, hidden + t * width, width * sizeof(float));
     }
     {
@@ -1144,8 +1201,17 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
             !full_decode_vector(model, norm_conv, nc, width, error, error_len))
             goto fail;
         for (size_t t = 0; t < token_count; ++t) {
-            full_rms(key + t * width, nk, width, true);
-            full_rms(query + t * width, nq, width, true);
+            full_grouped_rms(key + t * width, nk, 1, 4, Q38_GR_HIDDEN,
+                             true);
+            full_grouped_rms(query + t * width, nq, 1, 4, Q38_GR_HIDDEN,
+                             true);
+            if (!full_boundary_trace(1, "ple_key_normed",
+                                     key + t * width, 1, width, diagnostics,
+                                     error, error_len) ||
+                !full_boundary_trace(1, "ple_query_normed",
+                                     query + t * width, 1, width, diagnostics,
+                                     error, error_len))
+                goto fail;
             for (size_t s = 0; s < 4; ++s) {
                 float score = 0.0f;
                 for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
@@ -1159,9 +1225,18 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                     gated[t * width + s * Q38_GR_HIDDEN + d] =
                         gate * value[t * Q38_GR_HIDDEN + d];
             }
+            if (!full_boundary_trace(1, "ple_gated_value",
+                                     gated + t * width, 1, width, diagnostics,
+                                     error, error_len))
+                goto fail;
             memcpy(normalized + t * width, gated + t * width,
                    width * sizeof(float));
-            full_rms(normalized + t * width, nc, width, true);
+            full_grouped_rms(normalized + t * width, nc, 1, 4,
+                             Q38_GR_HIDDEN, true);
+            if (!full_boundary_trace(1, "ple_gated_value_normed",
+                                     normalized + t * width, 1, width,
+                                     diagnostics, error, error_len))
+                goto fail;
         }
     }
     for (size_t t = 0; t < token_count; ++t)
@@ -1177,8 +1252,16 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
             }
             conv_out[t * width + c] = sum / (1.0f + expf(-sum));
         }
+    if (!full_boundary_trace(1, "ple_conv_output", conv_out, token_count,
+                             width, diagnostics, error, error_len))
+        goto fail;
     for (size_t i = 0; i < token_count * width; ++i)
-        after[i] = hidden[i] + gated[i] + conv_out[i];
+        after[i] = gated[i] + conv_out[i];
+    if (!full_boundary_trace(1, "ple_contribution", after, token_count,
+                             width, diagnostics, error, error_len))
+        goto fail;
+    for (size_t i = 0; i < token_count * width; ++i)
+        after[i] += hidden[i];
     for (size_t tail = 0; tail < 9; ++tail) {
         const size_t source = token_count + tail;
         if (source < 9) memmove(state->ple_history + tail * width,
@@ -1377,13 +1460,27 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         const q38_layer_weights *layer = &weights->layer[layer_number];
         if (layer_number == 1) {
             if (!full_ple(model, layer, state, tokens, streams, token_count,
-                          updated, scratch, error, error_len))
+                          updated, scratch, diagnostics, error, error_len))
                 goto fail;
             memcpy(streams, updated, token_count * width * sizeof(float));
         }
+        if (!full_boundary_trace(layer_number, "layer_input", streams,
+                                 token_count, width, diagnostics, error,
+                                 error_len))
+            goto fail;
         memset(mixed, 0, token_count * Q38_GR_HIDDEN * sizeof(float));
         if (!full_gr_read(model, &layer->attn_gr, streams, token_count,
                           mixed, normed, down, up, scratch, error, error_len))
+            goto fail;
+        if (!full_boundary_trace(layer_number, "core_pre_norm", normed,
+                                 token_count, width, diagnostics, error,
+                                 error_len) ||
+            !full_boundary_trace(layer_number, "gr_core_read", mixed,
+                                 token_count, Q38_GR_HIDDEN, diagnostics,
+                                 error, error_len) ||
+            !full_boundary_trace(layer_number, "gdn_qsa_input", mixed,
+                                 token_count, Q38_GR_HIDDEN, diagnostics,
+                                 error, error_len))
             goto fail;
         if (layer->kind == Q38_LAYER_LINEAR_ATTENTION) {
             if (!full_gdn(model, layer, state, mixed, token_count,
@@ -1393,8 +1490,16 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                              token_count, block, selected, counts,
                              layer_number, diagnostics, error, error_len))
             goto fail;
+        if (!full_boundary_trace(layer_number, "gdn_qsa_output", block,
+                                 token_count, Q38_GR_HIDDEN, diagnostics,
+                                 error, error_len))
+            goto fail;
         if (!full_gr_write(model, &layer->attn_gr, streams, block, token_count,
                            updated, normed, inject, scratch, error, error_len))
+            goto fail;
+        if (!full_boundary_trace(layer_number, "core_residual_gr_write",
+                                 updated, token_count, width, diagnostics,
+                                 error, error_len))
             goto fail;
         memset(mixed, 0, token_count * Q38_GR_HIDDEN * sizeof(float));
         if (!full_gr_read(model, &layer->mlp_gr, updated, token_count, mixed,
@@ -1404,6 +1509,19 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                       error_len) ||
             !full_gr_write(model, &layer->mlp_gr, updated, block, token_count,
                            streams, normed, inject, scratch, error, error_len))
+            goto fail;
+        if (!full_boundary_trace(layer_number, "mlp_pre_norm", normed,
+                                 token_count, width, diagnostics, error,
+                                 error_len) ||
+            !full_boundary_trace(layer_number, "mlp_gr_read", mixed,
+                                 token_count, Q38_GR_HIDDEN, diagnostics,
+                                 error, error_len) ||
+            !full_boundary_trace(layer_number, "final_mlp_gr_write", streams,
+                                 token_count, width, diagnostics, error,
+                                 error_len) ||
+            !full_boundary_trace(layer_number, "layer_output", streams,
+                                 token_count, width, diagnostics, error,
+                                 error_len))
             goto fail;
         if (diagnostics && diagnostics->trace &&
             !diagnostics->trace(layer_number, streams, token_count, width,

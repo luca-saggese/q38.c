@@ -1,0 +1,69 @@
+{
+  "format": "q38-m6-root-cause-v1",
+  "gate": "M6-C12",
+  "status": "fixed",
+  "responsible_stage": "layer 1 PLE grouped RMS normalization",
+  "first_divergence_before_fix": "layer1:ple_key_normed",
+  "dtype_contract": "float32 grouped RMS independently per 2560-wide hyper-connection stream, eps=1e-6, then (1+BF16 norm weight); no 10240-wide normalization",
+  "pre_fix": {
+    "ple_key_normed": {
+      "max_abs": 13.602821376269532,
+      "rms": 0.348563947394422,
+      "native_checksum": "853c21ce02f93e6fd55c1066a1103924cd056b113f808bb7b3872ed4ec1c718f",
+      "reference_checksum": "d4af0db7dcd528c52449c303b1b1cf1a1a54848068e113fa80b42b67bc7a0b40"
+    },
+    "ple_query_normed": {
+      "max_abs": 8.765122407287599,
+      "rms": 0.6994934118267981,
+      "native_checksum": "fe23e5f760a787158d3615d1039be21558f6911e5ea9678442318e1ae407615f",
+      "reference_checksum": "6bd1ce39bbaca10f32e388a36c43fd5b759f571c6377a8e4125705987d8ef1fa"
+    },
+    "ple_contribution": {
+      "max_abs": 0.08012230740204618,
+      "rms": 0.003141333149207373,
+      "native_checksum": "37fbda734b07aed4fa06f175b1612e794a9ddce25a1e61c64c3f24b37a40ae68",
+      "reference_checksum": "304ceb98f15c4e1376d1250c18955a96cbee9ab8996fe7d92fd3c6df3f1c5210"
+    }
+  },
+  "post_fix": {
+    "ple_key_normed": {
+      "max_abs": 1.3366040040097005e-05,
+      "rms": 6.822235249183839e-07,
+      "native_checksum": "aa5e9c8f171fb7a83821f8ac6aa9123aed8827f363b72de73b2efc5a571d3f43",
+      "reference_checksum": "d4af0db7dcd528c52449c303b1b1cf1a1a54848068e113fa80b42b67bc7a0b40"
+    },
+    "ple_query_normed": {
+      "max_abs": 2.52739965818094e-05,
+      "rms": 2.2792388747379274e-06,
+      "native_checksum": "fd580e9332f775c0e0e916fe49685c3069a412f9557f294b63c21234a1b3f431",
+      "reference_checksum": "6bd1ce39bbaca10f32e388a36c43fd5b759f571c6377a8e4125705987d8ef1fa"
+    },
+    "ple_gated_value_normed": {
+      "max_abs": 7.276660156207981e-06,
+      "rms": 5.886551956320488e-07,
+      "native_checksum": "eb482374fdd6ca7a76b17c94a2e5622158116378eaaa8c0fa21d86aa6da423fd",
+      "reference_checksum": "5cc6e3ad98b8afc7b9da6eac4bea9f5f9e68ec1f22595941e6f9a5f613363351"
+    },
+    "ple_contribution": {
+      "max_abs": 1.043234809927629e-07,
+      "rms": 7.3237542990380735e-09,
+      "native_checksum": "d763a08e391dd4820f349be6abde009384b72d1e84c54877e329fef49ef34029",
+      "reference_checksum": "304ceb98f15c4e1376d1250c18955a96cbee9ab8996fe7d92fd3c6df3f1c5210"
+    },
+    "layer_input": {
+      "max_abs": 8.339791107148109e-07,
+      "rms": 6.052366631491171e-08,
+      "native_checksum": "5a98bb6804e2495ddfea2d8fa749fceeb995fd1ed4639e08b0c3d2f774f0a7ec",
+      "reference_checksum": "5558f88e142e6f56cedc015b28bab769247954aa144fd01505e5ce029bfe60a0"
+    },
+    "core_pre_norm": {
+      "max_abs": 2.9089041137631e-05,
+      "rms": 2.2828801371324747e-06,
+      "native_checksum": "2d6d07b750787427163f9a281c33eaec9ca936a6864045c0a8275b0ddc153ad1",
+      "reference_checksum": "91c61eb050506a8173a05b836d60ce0bac838bb257616364576405654f2c1967"
+    }
+  },
+  "fix": "full_ple now applies grouped RMS to PLE key/query/gated-value normalization",
+  "regression": "layer1 and layer9 progressive boundaries, routes, and quant-matched full-vector metrics pass",
+  "top_k": "unchanged"
+}

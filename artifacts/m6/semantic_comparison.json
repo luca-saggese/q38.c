@@ -26,11 +26,8 @@
     },
     {
       "stage": "layer:2",
-      "status": "diagnostic",
-      "mismatches": [
-        "min",
-        "max_abs"
-      ],
+      "status": "pass",
+      "mismatches": [],
       "coordinate_mismatches": [],
       "checksum_equal": false
     },
@@ -53,6 +50,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
@@ -63,6 +61,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
@@ -70,45 +69,46 @@
     },
     {
       "stage": "layer:7",
-      "status": "pass",
+      "status": "fail",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
       "checksum_equal": false,
       "vector_metrics": {
         "status": "pass",
-        "max_abs": 0.08433445915,
-        "rms": 0.006615907454585719,
-        "relative_rms": 0.10866689713979769,
-        "cosine_similarity": 0.9942620192594979,
-        "native_checksum": "58f53faf65274f24ada29833dd95ca9f009a82e9f4b1816694bcf300d446133d",
+        "max_abs": 0.10727595999999995,
+        "rms": 0.005522859805694028,
+        "relative_rms": 0.09071348753630001,
+        "cosine_similarity": 0.9959075110215698,
+        "native_checksum": "45d1c8bd311ecd5ec987522dc7604aa83620f2cca0541df4becd031f9f422f99",
         "reference_checksum": "348c9caae78bd66263e225bf2ee97334204540937ef6405941dcc3a0579c053a",
         "extreme_coordinates": [
           {
-            "index": 6802,
-            "native": 0.0333413221,
-            "reference": 0.11767578125,
-            "delta": -0.08433445915
+            "index": 2311,
+            "native": -3.01352596,
+            "reference": -2.90625,
+            "delta": -0.10727595999999995
           },
           {
-            "index": 5699,
-            "native": -0.234387502,
-            "reference": -0.1689453125,
-            "delta": -0.0654421895
+            "index": 9556,
+            "native": -0.0395554751,
+            "reference": -0.00701904296875,
+            "delta": -0.03253643213125
           },
           {
-            "index": 5388,
-            "native": 0.147699773,
-            "reference": 0.2099609375,
-            "delta": -0.062261164499999994
+            "index": 10061,
+            "native": -0.0996480882,
+            "reference": -0.1298828125,
+            "delta": 0.0302347243
           },
           {
-            "index": 5156,
-            "native": 0.0501327291,
-            "reference": -0.00732421875,
-            "delta": 0.05745694785
+            "index": 1500,
+            "native": 0.860147178,
+            "reference": 0.83203125,
+            "delta": 0.028115927999999957
           }
         ]
       }
@@ -118,6 +118,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
@@ -128,6 +129,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
@@ -149,6 +151,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
@@ -159,6 +162,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
@@ -169,6 +173,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
@@ -190,6 +195,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
+        "max",
         "max_abs"
       ],
       "coordinate_mismatches": [],
@@ -200,7 +206,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[3]"
       ],
@@ -212,7 +217,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[3]"
       ],
@@ -224,7 +228,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[3]"
       ],
@@ -236,7 +239,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[3]"
       ],
@@ -248,7 +250,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[3]"
       ],
@@ -260,7 +261,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[3]"
       ],
@@ -272,7 +272,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[3]"
       ],
@@ -284,7 +283,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[3]"
       ],
@@ -296,7 +294,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[0]",
         "fixed[3]"
@@ -308,8 +305,8 @@
       "stage": "layer:25",
       "status": "diagnostic",
       "mismatches": [
-        "max",
-        "fixed[0]",
+        "min",
+        "max_abs",
         "fixed[3]"
       ],
       "coordinate_mismatches": [],
@@ -319,7 +316,8 @@
       "stage": "layer:26",
       "status": "diagnostic",
       "mismatches": [
-        "max",
+        "min",
+        "max_abs",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -330,7 +328,8 @@
       "stage": "layer:27",
       "status": "diagnostic",
       "mismatches": [
-        "max",
+        "min",
+        "max_abs",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -341,7 +340,8 @@
       "stage": "layer:28",
       "status": "diagnostic",
       "mismatches": [
-        "max",
+        "min",
+        "max_abs",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -352,10 +352,11 @@
       "stage": "layer:29",
       "status": "diagnostic",
       "mismatches": [
+        "min",
         "max",
+        "max_abs",
         "fixed[0]",
         "fixed[1]",
-        "fixed[2]",
         "fixed[3]"
       ],
       "coordinate_mismatches": [],
@@ -365,8 +366,8 @@
       "stage": "layer:30",
       "status": "diagnostic",
       "mismatches": [
-        "max",
-        "fixed[2]",
+        "min",
+        "max_abs",
         "fixed[3]"
       ],
       "coordinate_mismatches": [],
@@ -376,8 +377,8 @@
       "stage": "layer:31",
       "status": "diagnostic",
       "mismatches": [
-        "max",
-        "fixed[0]",
+        "min",
+        "max_abs",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -389,9 +390,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
-        "fixed[0]",
         "fixed[1]",
         "fixed[2]"
       ],
@@ -403,7 +402,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[1]",
         "fixed[2]"
@@ -416,7 +414,6 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
         "fixed[1]",
         "fixed[2]"
@@ -429,9 +426,7 @@
       "status": "diagnostic",
       "mismatches": [
         "min",
-        "max",
         "max_abs",
-        "fixed[1]",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -442,9 +437,6 @@
       "stage": "layer:36",
       "status": "diagnostic",
       "mismatches": [
-        "min",
-        "max",
-        "max_abs",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -467,9 +459,6 @@
       "stage": "layer:38",
       "status": "diagnostic",
       "mismatches": [
-        "min",
-        "max",
-        "max_abs",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -484,7 +473,6 @@
         "max",
         "max_abs",
         "fixed[0]",
-        "fixed[1]",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -499,7 +487,6 @@
         "max",
         "max_abs",
         "fixed[0]",
-        "fixed[1]",
         "fixed[2]",
         "fixed[3]"
       ],
@@ -541,8 +528,7 @@
         "max",
         "max_abs",
         "fixed[0]",
-        "fixed[2]",
-        "fixed[3]"
+        "fixed[2]"
       ],
       "coordinate_mismatches": [],
       "checksum_equal": false
@@ -582,8 +568,7 @@
         "max",
         "max_abs",
         "fixed[0]",
-        "fixed[2]",
-        "fixed[3]"
+        "fixed[2]"
       ],
       "coordinate_mismatches": [],
       "checksum_equal": false
@@ -631,8 +616,7 @@
         "max_abs",
         "fixed[0]",
         "fixed[1]",
-        "fixed[2]",
-        "fixed[3]"
+        "fixed[2]"
       ],
       "coordinate_mismatches": [],
       "checksum_equal": false
@@ -648,18 +632,29 @@
       "selected_set_exact": false,
       "selected_order_exact": false,
       "mismatches": [
+        "layer:1:selected_set",
+        "layer:1:weights_by_expert",
         "layer:3:selected_set",
         "layer:3:weights_by_expert",
         "layer:4:selected_set",
         "layer:4:weights_by_expert",
         "layer:9:selected_set",
         "layer:9:weights_by_expert",
+        "layer:10:selected_set",
+        "layer:10:weights_by_expert",
+        "layer:11:selected_set",
+        "layer:11:weights_by_expert",
+        "layer:13:selected_set",
         "layer:13:weights_by_expert",
-        "layer:17:weights_by_expert",
+        "layer:14:selected_set",
+        "layer:14:weights_by_expert",
         "layer:18:selected_set",
         "layer:18:weights_by_expert",
         "layer:19:selected_set",
         "layer:19:weights_by_expert",
+        "layer:20:selected_set",
+        "layer:20:weights_by_expert",
+        "layer:21:weights_by_expert",
         "layer:22:selected_set",
         "layer:22:weights_by_expert",
         "layer:23:selected_set",
@@ -670,7 +665,6 @@
         "layer:26:selected_set",
         "layer:26:weights_by_expert",
         "layer:27:weights_by_expert",
-        "layer:28:weights_by_expert",
         "layer:29:selected_set",
         "layer:29:weights_by_expert",
         "layer:30:selected_set",
@@ -681,10 +675,10 @@
         "layer:32:weights_by_expert",
         "layer:33:selected_set",
         "layer:33:weights_by_expert",
+        "layer:34:selected_set",
         "layer:34:weights_by_expert",
         "layer:35:selected_set",
         "layer:35:weights_by_expert",
-        "layer:36:selected_set",
         "layer:36:weights_by_expert",
         "layer:38:selected_set",
         "layer:38:weights_by_expert",
@@ -707,19 +701,14 @@
         "layer:2:selected_order",
         "layer:5:selected_order",
         "layer:6:selected_order",
-        "layer:8:selected_order",
-        "layer:11:selected_order",
         "layer:12:selected_order",
-        "layer:13:selected_order",
-        "layer:14:selected_order",
         "layer:15:selected_order",
         "layer:16:selected_order",
-        "layer:20:selected_order",
         "layer:21:selected_order",
         "layer:24:selected_order",
         "layer:27:selected_order",
         "layer:28:selected_order",
-        "layer:34:selected_order",
+        "layer:36:selected_order",
         "layer:37:selected_order",
         "layer:39:selected_order",
         "layer:42:selected_order",
@@ -751,7 +740,7 @@
         },
         {
           "layer": 1,
-          "selected_set_exact": true,
+          "selected_set_exact": false,
           "hidden_input": {
             "status": "diagnostic",
             "reason": "missing native/reference vector",
@@ -953,11 +942,11 @@
             },
             {
               "id": 506,
-              "value": -3.8125
+              "value": -3.828125
             },
             {
               "id": 40,
-              "value": -4.125
+              "value": -4.03125
             },
             {
               "id": 321,
@@ -965,7 +954,7 @@
             },
             {
               "id": 71,
-              "value": -4.25
+              "value": -4.28125
             },
             {
               "id": 96,
@@ -976,15 +965,11 @@
               "value": -4.375
             },
             {
-              "id": 73,
-              "value": -4.40625
-            },
-            {
-              "id": 141,
+              "id": 154,
               "value": -4.4375
             },
             {
-              "id": 154,
+              "id": 73,
               "value": -4.46875
             },
             {
@@ -996,11 +981,15 @@
               "value": -4.53125
             },
             {
-              "id": 218,
-              "value": -4.59375
+              "id": 502,
+              "value": -4.53125
             },
             {
-              "id": 502,
+              "id": 141,
+              "value": -4.5625
+            },
+            {
+              "id": 218,
               "value": -4.59375
             },
             {
@@ -1012,32 +1001,37 @@
               "value": -4.6875
             },
             {
-              "id": 452,
+              "id": 466,
               "value": -4.6875
             },
             {
-              "id": 466,
+              "id": 80,
               "value": -4.71875
             },
             {
-              "id": 462,
-              "value": -4.75
+              "id": 341,
+              "value": -4.71875
             },
             {
-              "id": 80,
-              "value": -4.78125
+              "id": 511,
+              "value": -4.71875
             }
           ],
           "reference_top20": null,
           "ordering_semantics": "descending effective logit; stable original expert index for ties",
           "native_tie_groups_top20": [
             [
-              218,
+              376,
               502
             ],
             [
               209,
-              452
+              466
+            ],
+            [
+              80,
+              341,
+              511
             ]
           ],
           "reference_tie_groups_top20": [],
@@ -1072,9 +1066,9 @@
                 71,
                 96,
                 368,
+                154,
                 73,
-                141,
-                154
+                442
               ]
             },
             "reference_experts": [],
@@ -1125,7 +1119,7 @@
         },
         {
           "layer": 10,
-          "selected_set_exact": true,
+          "selected_set_exact": false,
           "hidden_input": {
             "status": "diagnostic",
             "reason": "missing native/reference vector",
@@ -1147,7 +1141,7 @@
         },
         {
           "layer": 11,
-          "selected_set_exact": true,
+          "selected_set_exact": false,
           "hidden_input": {
             "status": "diagnostic",
             "reason": "missing native/reference vector",
@@ -1191,7 +1185,7 @@
         },
         {
           "layer": 13,
-          "selected_set_exact": true,
+          "selected_set_exact": false,
           "hidden_input": {
             "status": "diagnostic",
             "reason": "missing native/reference vector",
@@ -1213,7 +1207,7 @@
         },
         {
           "layer": 14,
-          "selected_set_exact": true,
+          "selected_set_exact": false,
           "hidden_input": {
             "status": "diagnostic",
             "reason": "missing native/reference vector",
@@ -1345,7 +1339,7 @@
         },
         {
           "layer": 20,
-          "selected_set_exact": true,
+          "selected_set_exact": false,
           "hidden_input": {
             "status": "diagnostic",
             "reason": "missing native/reference vector",
@@ -1653,7 +1647,7 @@
         },
         {
           "layer": 34,
-          "selected_set_exact": true,
+          "selected_set_exact": false,
           "hidden_input": {
             "status": "diagnostic",
             "reason": "missing native/reference vector",
@@ -1697,7 +1691,7 @@
         },
         {
           "layer": 36,
-          "selected_set_exact": false,
+          "selected_set_exact": true,
           "hidden_input": {
             "status": "diagnostic",
             "reason": "missing native/reference vector",
@@ -1960,7 +1954,408 @@
           }
         }
       ],
-      "first_selected_set_divergence_layer": 3
+      "first_selected_set_divergence_layer": 1
+    },
+    {
+      "stage": "progressive_boundaries",
+      "status": "fail",
+      "checks": [
+        {
+          "layer": 1,
+          "status": "fail",
+          "order": [
+            "layer_input",
+            "ple_embedding",
+            "ple_key_projection",
+            "ple_value_projection",
+            "ple_key_normed",
+            "ple_query_normed",
+            "ple_gated_value",
+            "ple_gated_value_normed",
+            "ple_conv_output",
+            "ple_contribution",
+            "core_pre_norm",
+            "gr_core_read",
+            "gdn_qsa_input",
+            "gdn_qsa_output",
+            "core_residual_gr_write",
+            "mlp_pre_norm",
+            "mlp_gr_read",
+            "router_input",
+            "router_logits_pre_cast",
+            "router_logits_effective",
+            "selected_experts",
+            "routed_output",
+            "shared_expert",
+            "final_mlp_gr_write",
+            "layer_output"
+          ],
+          "first_divergence": "layer_input",
+          "checks": [
+            {
+              "name": "layer_input",
+              "dtype_contract": "float32 activation vector; BF16 source tensors decoded before scalar math",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_embedding",
+              "dtype_contract": "float32 decoded Q8_0 rows, concatenated in head order",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_key_projection",
+              "dtype_contract": "float32 scalar accumulation over Q8_0 weights",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_value_projection",
+              "dtype_contract": "float32 scalar accumulation over Q8_0 weights",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_key_normed",
+              "dtype_contract": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_query_normed",
+              "dtype_contract": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_gated_value",
+              "dtype_contract": "float32 sigmoid gate times float32 value projection",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_gated_value_normed",
+              "dtype_contract": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_conv_output",
+              "dtype_contract": "float32 depthwise causal convolution followed by SiLU",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "ple_contribution",
+              "dtype_contract": "float32 gated value plus convolution output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "core_pre_norm",
+              "dtype_contract": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "gr_core_read",
+              "dtype_contract": "float32 GR read output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "gdn_qsa_input",
+              "dtype_contract": "float32 core input",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "gdn_qsa_output",
+              "dtype_contract": "float32 scalar GDN/QSA output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "core_residual_gr_write",
+              "dtype_contract": "float32 residual plus GR injection",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "mlp_pre_norm",
+              "dtype_contract": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "mlp_gr_read",
+              "dtype_contract": "float32 GR read output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "router_input",
+              "dtype_contract": "float32 router input",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "router_logits_pre_cast",
+              "dtype_contract": "float32 scalar router dot products",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "router_logits_effective",
+              "dtype_contract": "BF16-cast router logits",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "selected_experts",
+              "dtype_contract": "exact uint16 expert IDs; stable semantic ordering",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "routed_output",
+              "dtype_contract": "float32 weighted routed-expert sum",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "shared_expert",
+              "dtype_contract": "float32 sigmoid-gated shared-expert contribution",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "final_mlp_gr_write",
+              "dtype_contract": "float32 residual plus GR injection",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "layer_output",
+              "dtype_contract": "float32 layer output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            }
+          ]
+        },
+        {
+          "layer": 9,
+          "status": "fail",
+          "order": [
+            "layer_input",
+            "core_pre_norm",
+            "gr_core_read",
+            "gdn_qsa_input",
+            "gdn_qsa_output",
+            "core_residual_gr_write",
+            "mlp_pre_norm",
+            "mlp_gr_read",
+            "router_input",
+            "router_logits_pre_cast",
+            "router_logits_effective",
+            "selected_experts",
+            "routed_output",
+            "shared_expert",
+            "final_mlp_gr_write",
+            "layer_output"
+          ],
+          "first_divergence": "layer_input",
+          "checks": [
+            {
+              "name": "layer_input",
+              "dtype_contract": "float32 activation vector; BF16 source tensors decoded before scalar math",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "core_pre_norm",
+              "dtype_contract": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "gr_core_read",
+              "dtype_contract": "float32 GR read output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "gdn_qsa_input",
+              "dtype_contract": "float32 core input",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "gdn_qsa_output",
+              "dtype_contract": "float32 scalar GDN/QSA output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "core_residual_gr_write",
+              "dtype_contract": "float32 residual plus GR injection",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "mlp_pre_norm",
+              "dtype_contract": "float32 grouped RMS per 2560-wide stream, eps=1e-6, (1+BF16 weight)",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "mlp_gr_read",
+              "dtype_contract": "float32 GR read output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "router_input",
+              "dtype_contract": "float32 router input",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "router_logits_pre_cast",
+              "dtype_contract": "float32 scalar router dot products",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "router_logits_effective",
+              "dtype_contract": "BF16-cast router logits",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "selected_experts",
+              "dtype_contract": "exact uint16 expert IDs; stable semantic ordering",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "routed_output",
+              "dtype_contract": "float32 weighted routed-expert sum",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "shared_expert",
+              "dtype_contract": "float32 sigmoid-gated shared-expert contribution",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "final_mlp_gr_write",
+              "dtype_contract": "float32 residual plus GR injection",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            },
+            {
+              "name": "layer_output",
+              "dtype_contract": "float32 layer output",
+              "status": "fail",
+              "reason": "missing boundary",
+              "native_present": true,
+              "reference_present": false
+            }
+          ]
+        }
+      ],
+      "first_divergence": {
+        "layer": 1,
+        "boundary": "layer_input"
+      },
+      "layer9_ple_contribution": {
+        "status": "not_applicable",
+        "reason": "layer 9 has no PLE"
+      }
     },
     {
       "stage": "layer2_moe_trace",
@@ -1968,27 +2363,27 @@
       "vectors": {
         "router_input": {
           "status": "fail",
-          "max_abs": 0.8348429199999998
+          "max_abs": 0.16453650595
         },
         "router_logits_pre_cast": {
           "status": "fail",
-          "max_abs": 0.440107824470215
+          "max_abs": 0.224353314470215
         },
         "router_logits_effective": {
           "status": "fail",
-          "max_abs": 0.4375
+          "max_abs": 0.21875
         },
         "selected_weights_pre_cast": {
           "status": "pass",
-          "max_abs": 0.015010982660064676
+          "max_abs": 0.011072456660064678
         },
         "selected_weights_effective": {
           "status": "pass",
-          "max_abs": 0.013671875
+          "max_abs": 0.009765625
         },
         "routed_output": {
           "status": "pass",
-          "max_abs": 0.0113987894725
+          "max_abs": 0.008870136965625
         }
       },
       "top15_rank": {
@@ -2000,14 +2395,14 @@
           134,
           87,
           286,
-          222,
           280,
-          185,
+          222,
           257,
+          185,
           269,
           84,
-          338,
           370,
+          338,
           61
         ],
         "reference": [
@@ -2033,13 +2428,13 @@
       "weights_by_expert_exact": true,
       "routed_weighted_sum": {
         "status": "pass",
-        "max_abs": 0.0113987894725
+        "max_abs": 0.008870136965625
       }
     }
   ],
   "hard_gates": {
     "layer7_hidden": {
-      "status": "pass",
+      "status": "fail",
       "tolerance": {
         "max_abs": 0.1,
         "rms": 0.01,
@@ -2051,7 +2446,14 @@
       "status": "fail",
       "selected_set_exact": false,
       "weights_by_expert_checked": true,
-      "first_selected_set_divergence_layer": 3
+      "first_selected_set_divergence_layer": 1
+    },
+    "progressive_boundaries": {
+      "status": "fail",
+      "first_divergence": {
+        "layer": 1,
+        "boundary": "layer_input"
+      }
     },
     "layer2_selected_set": {
       "status": "pass",
@@ -2059,10 +2461,10 @@
       "weights_by_expert_exact": true,
       "routed_weighted_sum": {
         "status": "pass",
-        "max_abs": 0.0113987894725
+        "max_abs": 0.008870136965625
       }
     }
   },
   "status": "fail",
-  "first_divergence": "logits:top_k"
+  "first_divergence": "layer:7"
 }

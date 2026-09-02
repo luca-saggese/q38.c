@@ -25,6 +25,12 @@ def main() -> None:
     for layer in progressive.get("checks", []):
         assert layer.get("status") == "pass", layer
         assert layer.get("first_divergence") is None, layer
+        if layer.get("layer") == 1:
+            ple_norm = next(
+                check for check in layer.get("checks", [])
+                if check.get("name") == "ple_key_normed"
+            )
+            assert ple_norm.get("status") == "pass", ple_norm
     print("test_m6_progressive_boundaries: classified boundary gates pass")
 
 

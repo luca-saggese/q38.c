@@ -828,7 +828,7 @@ m6-c12: m6-preflight m6-trace-stats m6-dequant-fixtures
 	@./$(TEST_DIR)/m6_real_forward \
 		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
 		$(M6_TRACE)
-	@$(MAKE) --no-print-directory m6-trace-schema m6-rounding-diagnostics
+	@$(MAKE) --no-print-directory m6-trace-schema
 	@python3 tools/m6_checkpoint_goldens.py --model-dir $(MODEL_DIR) \
 		--output $(M6_GOLDEN)
 	@python3 tools/m6_forward_readiness.py --model-dir $(MODEL_DIR) \
@@ -851,6 +851,8 @@ m6-c12: m6-preflight m6-trace-stats m6-dequant-fixtures
 		$(M6_PYTHON) tools/m6_compare_traces.py \
 		--native $(M6_TRACE) --reference $(M6_QUANT_REFERENCE) \
 		--start-layer 3 --output $(M6_QUANT_COMPARISON)
+	@$(MAKE) --no-print-directory m6-rounding-diagnostics \
+		m6-progressive-boundaries
 
 m6-c13: m6-c12
 	@test -f artifacts/m6/first_token_logits.json || \
