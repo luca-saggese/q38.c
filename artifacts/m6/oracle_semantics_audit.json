@@ -1,0 +1,53 @@
+{
+  "format": "q38-m6-oracle-semantics-audit-v1",
+  "validated_commits": [
+    "b3046af8a",
+    "d25cc5565"
+  ],
+  "current_commit": "92cd63a92",
+  "status": "pass",
+  "diff_review": {
+    "tools/m6_stateful_gguf_oracle.py": {
+      "changed_function": "tensor_evidence only",
+      "purpose": "adds compact dtype-preserving shape/metric/finiteness/value evidence",
+      "semantic_paths_unchanged": [
+        "load_reference",
+        "cache_evidence traversal",
+        "stats/top_k/compare_stats",
+        "model materialization",
+        "forward/cache update calls",
+        "token handling/prediction"
+      ]
+    },
+    "tools/m6_stateful_sequence_oracle.py": {
+      "changed_function": "consume evidence collection only",
+      "purpose": "records per-layer stats and committed_position/cache metadata after each unchanged layer call",
+      "semantic_paths_unchanged": [
+        "embedding and position_ids",
+        "cache.position_ids",
+        "causal/recurrent masks",
+        "PLE ids",
+        "rotary",
+        "layer invocation order/arguments",
+        "DynamicCache sequencing",
+        "final norm/LM-head/argmax",
+        "expert cache"
+      ]
+    }
+  },
+  "oracle_semantics_changed": false,
+  "validated_regression": {
+    "baseline": "artifacts/m6/stateful_oracle_gpu_2.json",
+    "instrumented": "artifacts/m6/stateful_sequence_oracle_8_fixed.json",
+    "steps_checked": [
+      0,
+      1
+    ],
+    "tokens_identical": true,
+    "cache_lengths_identical": true,
+    "final_norm_checksums_identical": true,
+    "logits_checksums_identical": true,
+    "metrics_identical": true
+  },
+  "localization_artifact": "artifacts/m6/state_localization_c13.json"
+}
