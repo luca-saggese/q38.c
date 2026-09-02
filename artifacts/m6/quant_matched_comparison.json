@@ -2411,8 +2411,77 @@
           ],
           "router_chain": {
             "status": "diagnostic",
-            "reason": "native pre-router chain is not present in this trace",
-            "native_present": false,
+            "native_present": true,
+            "native_gr_output": {
+              "status": "pass",
+              "max_abs": 0.3185642366144104,
+              "rms": 0.052074695874800486,
+              "relative_rms": 0.10269435633087913,
+              "cosine_similarity": 0.9947227936431863,
+              "native_checksum": "716c923583b88adc6fb4af7326a5c62b487702d8e0842b32494e841e7dd2cf25",
+              "reference_checksum": "2136670b690e8dc4387b49a7d32ac10f3fe9f022f1524a48e6a59f3275053523",
+              "extreme_coordinates": [
+                {
+                  "index": 1682,
+                  "native": 0.294842958,
+                  "reference": 0.6134071946144104,
+                  "delta": -0.3185642366144104
+                },
+                {
+                  "index": 36,
+                  "native": 0.266566724,
+                  "reference": -0.035534560680389404,
+                  "delta": 0.3021012846803894
+                },
+                {
+                  "index": 188,
+                  "native": -0.177966177,
+                  "reference": 0.09089763462543488,
+                  "delta": -0.2688638116254349
+                },
+                {
+                  "index": 2091,
+                  "native": 1.11303186,
+                  "reference": 1.3377634286880493,
+                  "delta": -0.22473156868804933
+                }
+              ]
+            },
+            "native_router_input": {
+              "status": "pass",
+              "max_abs": 0.3185642366144104,
+              "rms": 0.052074695874800486,
+              "relative_rms": 0.10269435633087913,
+              "cosine_similarity": 0.9947227936431863,
+              "native_checksum": "716c923583b88adc6fb4af7326a5c62b487702d8e0842b32494e841e7dd2cf25",
+              "reference_checksum": "2136670b690e8dc4387b49a7d32ac10f3fe9f022f1524a48e6a59f3275053523",
+              "extreme_coordinates": [
+                {
+                  "index": 1682,
+                  "native": 0.294842958,
+                  "reference": 0.6134071946144104,
+                  "delta": -0.3185642366144104
+                },
+                {
+                  "index": 36,
+                  "native": 0.266566724,
+                  "reference": -0.035534560680389404,
+                  "delta": 0.3021012846803894
+                },
+                {
+                  "index": 188,
+                  "native": -0.177966177,
+                  "reference": 0.09089763462543488,
+                  "delta": -0.2688638116254349
+                },
+                {
+                  "index": 2091,
+                  "native": 1.11303186,
+                  "reference": 1.3377634286880493,
+                  "delta": -0.22473156868804933
+                }
+              ]
+            },
             "reference_stages": {
               "input_to_mlp_hyper_connection": {
                 "min": -3.01733660697937,
@@ -2568,7 +2637,27 @@
           },
           "router_weight_rows": {
             "status": "diagnostic",
-            "reason": "native effective router rows are not present in this trace",
+            "native_present": true,
+            "native": {
+              "tensor": "model.language_model.layers.9.mlp.gate.weight",
+              "type": 30,
+              "rows": 512,
+              "cols": 2560,
+              "abs_offset": 103875580896,
+              "row_bytes": 5120,
+              "used_rows": [
+                68,
+                506,
+                40,
+                321,
+                71,
+                96,
+                368,
+                73,
+                141,
+                154
+              ]
+            },
             "reference_experts": [
               40,
               68,
@@ -4414,6 +4503,41 @@
                 "cosine_similarity": 0.9999995122303988
               }
             },
+            "native_pre_cast_vs_reference": {
+              "status": "pass",
+              "max_abs": 0.13867044258789019,
+              "rms": 0.04746289594242578,
+              "relative_rms": 0.0075489161596070335,
+              "cosine_similarity": 0.9999834565730183,
+              "native_checksum": "e3337ca1135740eee504aa338349f7bfa8ce7ce577a1895f5bff164faf162bb3",
+              "reference_checksum": "55d35f29b99afe82f3765a0ffc6d021babcdc0e6bcfa7763e54cbc02b530a3d9",
+              "extreme_coordinates": [
+                {
+                  "index": 63,
+                  "native": -6.32242346,
+                  "reference": -6.461093902587891,
+                  "delta": 0.13867044258789019
+                },
+                {
+                  "index": 192,
+                  "native": -5.60175228,
+                  "reference": -5.739240646362305,
+                  "delta": 0.13748836636230433
+                },
+                {
+                  "index": 391,
+                  "native": -8.65477276,
+                  "reference": -8.786823272705078,
+                  "delta": 0.13205051270507795
+                },
+                {
+                  "index": 204,
+                  "native": -7.44253588,
+                  "reference": -7.563192367553711,
+                  "delta": 0.12065648755371061
+                }
+              ]
+            },
             "native_effective": {
               "status": "pass",
               "max_abs": 0.1875,
@@ -4484,6 +4608,42 @@
                 }
               ]
             },
+            "native_vs_fp32_cast": {
+              "status": "pass",
+              "max_abs": 0.1875,
+              "rms": 0.049991034657652145,
+              "relative_rms": 0.00795052149224562,
+              "cosine_similarity": 0.9999806442128479,
+              "native_checksum": "a973e7927f5248e4ec009f8fa6224de13d323f5505442875a8741f63dafe2c1c",
+              "reference_checksum": "8a388050e874c162d8d3b754aa04bc05cd61c05166c05ab976ccccc6a1109fbc",
+              "extreme_coordinates": [
+                {
+                  "index": 391,
+                  "native": -8.625,
+                  "reference": -8.8125,
+                  "delta": 0.1875
+                },
+                {
+                  "index": 63,
+                  "native": -6.3125,
+                  "reference": -6.46875,
+                  "delta": 0.15625
+                },
+                {
+                  "index": 192,
+                  "native": -5.59375,
+                  "reference": -5.75,
+                  "delta": 0.15625
+                },
+                {
+                  "index": 4,
+                  "native": -7.03125,
+                  "reference": -7.15625,
+                  "delta": 0.125
+                }
+              ]
+            },
+            "native_effective_bits_exact": false,
             "native_effective_bits": {
               "status": "diagnostic",
               "native_present": true,

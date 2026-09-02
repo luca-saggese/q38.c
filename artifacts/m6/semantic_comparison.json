@@ -1043,13 +1043,40 @@
           "reference_tie_groups_top20": [],
           "router_chain": {
             "status": "diagnostic",
-            "reason": "native pre-router chain is not present in this trace",
-            "native_present": false,
+            "native_present": true,
+            "native_gr_output": {
+              "status": "diagnostic",
+              "reason": "native GR boundary missing"
+            },
+            "native_router_input": {
+              "status": "diagnostic",
+              "reason": "native router input missing"
+            },
             "reference_stages": {}
           },
           "router_weight_rows": {
             "status": "diagnostic",
-            "reason": "native effective router rows are not present in this trace",
+            "native_present": true,
+            "native": {
+              "tensor": "model.language_model.layers.9.mlp.gate.weight",
+              "type": 30,
+              "rows": 512,
+              "cols": 2560,
+              "abs_offset": 103875580896,
+              "row_bytes": 5120,
+              "used_rows": [
+                68,
+                506,
+                40,
+                321,
+                71,
+                96,
+                368,
+                73,
+                141,
+                154
+              ]
+            },
             "reference_experts": [],
             "reference_checksums": {}
           },
@@ -1072,6 +1099,10 @@
           },
           "rounding_diagnostics": {
             "reference": {},
+            "native_pre_cast_vs_reference": {
+              "status": "diagnostic",
+              "reason": "pre-cast stage missing"
+            },
             "native_effective": {
               "status": "diagnostic",
               "reason": "native effective logits are not present"
@@ -1080,6 +1111,11 @@
               "status": "diagnostic",
               "reason": "native effective logits or BF16 matmul stage missing"
             },
+            "native_vs_fp32_cast": {
+              "status": "diagnostic",
+              "reason": "native effective logits or FP32 cast stage missing"
+            },
+            "native_effective_bits_exact": null,
             "native_effective_bits": {
               "status": "diagnostic",
               "native_present": true,

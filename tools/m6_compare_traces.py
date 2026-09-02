@@ -314,18 +314,32 @@ def main() -> None:
                 ][:20]
             chain = right.get("router_chain", {})
             chain_stats = right.get("router_chain_stats", {})
+            native_chain = native.get("layer9_pre_router", {})
+            native_input = native_chain.get("router_input", {}).get("values")
+            native_gr = native_chain.get("gr_output", {}).get("values")
             detail["router_chain"] = {
                 "status": "diagnostic",
-                "reason": "native pre-router chain is not present in this trace",
-                "native_present": False,
+                "native_present": bool(native_chain),
+                "native_gr_output": (
+                    vector_metrics(native_gr, chain["gr_output_to_router"])
+                    if native_gr is not None and "gr_output_to_router" in chain
+                    else {"status": "diagnostic", "reason": "native GR boundary missing"}
+                ),
+                "native_router_input": (
+                    vector_metrics(native_input, right.get("hidden_input", []))
+                    if native_input is not None and right.get("hidden_input")
+                    else {"status": "diagnostic", "reason": "native router input missing"}
+                ),
                 "reference_stages": {
                     name: chain_stats.get(name, {})
                     for name in chain
                 },
             }
+            native_rows = native_router_detail.get("router_weight_rows")
             detail["router_weight_rows"] = {
                 "status": "diagnostic",
-                "reason": "native effective router rows are not present in this trace",
+                "native_present": native_rows is not None,
+                "native": native_rows,
                 "reference_experts": [
                     row.get("expert")
                     for row in right.get("router_weight_rows", [])
@@ -355,6 +369,15 @@ def main() -> None:
             }
             rounding = right.get("rounding_diagnostics", {})
             native_effective = native_router_detail.get("logits")
+            native_pre_cast = native_router_detail.get("matvec_pre_cast")
+            native_effective_bf16 = native_router_detail.get("effective_bf16")
+            native_effective_bits = (
+                native_router_detail.get("effective_bf16_bits") or
+                native_router_detail.get("effective_bits")
+            )
+            ref_pre_cast = rounding.get("cuda_matmul_pre_cast")
+            ref_fp32_cast = rounding.get("fp32_cast_effective")
+            ref_bf16_matmul = rounding.get("bf16_matmul_effective")
             detail["rounding_diagnostics"] = {
                 "reference": {
                     name: value for name, value in rounding.items()
@@ -362,6 +385,11 @@ def main() -> None:
                     or name.endswith("_vs_fp32_cast")
                     or name.endswith("_bits")
                 },
+                "native_pre_cast_vs_reference": (
+                    vector_metrics(native_pre_cast, ref_pre_cast)
+                    if native_pre_cast is not None and ref_pre_cast is not None
+                    else {"status": "diagnostic", "reason": "pre-cast stage missing"}
+                ),
                 "native_effective": (
                     vector_metrics(native_effective,
                                    rounding["fp32_cast_effective"])
@@ -370,16 +398,27 @@ def main() -> None:
                     {"status": "diagnostic", "reason":
                      "native effective logits are not present"}),
                 "native_vs_bf16_matmul": (
-                    vector_metrics(native_effective,
-                                   rounding["bf16_matmul_effective"])
-                    if native_effective is not None and
-                    "bf16_matmul_effective" in rounding else
+                    vector_metrics(native_effective_bf16, ref_bf16_matmul)
+                    if native_effective_bf16 is not None and
+                    ref_bf16_matmul is not None else
                     {"status": "diagnostic", "reason":
                      "native effective logits or BF16 matmul stage missing"}),
+                "native_vs_fp32_cast": (
+                    vector_metrics(native_effective_bf16, ref_fp32_cast)
+                    if native_effective_bf16 is not None and
+                    ref_fp32_cast is not None else
+                    {"status": "diagnostic", "reason":
+                     "native effective logits or FP32 cast stage missing"}),
+                "native_effective_bits_exact": (
+                    native_effective_bits == rounding.get(
+                        "bf16_matmul_effective_bits")
+                    if native_effective_bits is not None and
+                    rounding.get("bf16_matmul_effective_bits") is not None
+                    else None
+                ),
                 "native_effective_bits": {
                     "status": "diagnostic",
-                    "native_present": native_router_detail.get(
-                        "effective_bits") is not None,
+                    "native_present": native_effective_bits is not None,
                     "reference_present":
                         rounding.get("fp32_cast_effective_bits") is not None,
                 },
