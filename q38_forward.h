@@ -112,6 +112,24 @@ typedef bool (*q38_forward_boundary_trace)(
     size_t token_count, size_t width, void *user, char *error,
     size_t error_len);
 
+/*
+ * Optional execution accounting for the full graph.  A stage record is
+ * emitted after each matrix operation and distinguishes device rows from
+ * scalar rows.  The callback is observational and never changes ordering.
+ */
+typedef struct {
+    const char *name;
+    uint64_t matrix_calls;
+    uint64_t backend_rows;
+    uint64_t scalar_rows;
+    uint64_t backend_declines;
+    double elapsed_ms;
+} q38_forward_stage_usage;
+
+typedef bool (*q38_forward_stage_trace)(
+    const q38_forward_stage_usage *usage, void *user, char *error,
+    size_t error_len);
+
 typedef struct {
     uint32_t first_divergence_layer;
     uint32_t first_divergence_token;
@@ -144,13 +162,11 @@ typedef struct {
      * only observe activation buffers while they are live.
      */
     q38_forward_boundary_trace boundary_trace;
+    q38_forward_stage_trace stage_trace;
 } q38_forward_diagnostics;
 
-/*
- * Optional diagnostic matvec backend.  The default q38_forward_full path
- * remains entirely scalar; callers may install this callback on the separate
- * CUDA diagnostic path to execute individual file-backed rows on a device.
- */
+/* Optional diagnostic row-matvec backend.  It is strict when installed via
+ * q38_forward_full_with_backend: a declined row is an execution error. */
 typedef bool (*q38_forward_matvec_backend)(
     const q38_gguf *model, const q38_tensor *tensor, size_t row,
     const float *input, size_t cols, float *output, void *user, char *error,
@@ -174,11 +190,29 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                       q38_forward_diagnostics *diagnostics, char *error,
                       size_t error_len);
 
+typedef bool (*q38_forward_matrix_backend)(
+    const q38_gguf *model, const q38_tensor *tensor, const float *input,
+    size_t rows, size_t cols, float *output, void *user, char *error,
+    size_t error_len);
+
+typedef bool (*q38_forward_expert_backend)(
+    const q38_gguf *model, const q38_tensor *gate_up,
+    const q38_tensor *down, size_t expert, const float *input, float *output,
+    void *user, char *error, size_t error_len);
+
+bool q38_forward_full_with_matrix_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend row_backend,
+    q38_forward_matrix_backend matrix_backend,
+    q38_forward_expert_backend expert_backend, void *backend_user,
+    char *error, size_t error_len);
+
 /*
- * Run the same graph with a diagnostic row-matvec backend.  This is
- * intentionally a wrapper around the scalar graph: all sequencing, state,
- * callbacks, and trace semantics are unchanged, while supported matrix rows
- * can be evaluated by CUDA.
+ * Run the same graph with a matvec backend.  Backend refusal is fatal: this
+ * entry point never silently re-enters the scalar implementation.  The
+ * scalar q38_forward_full entry point remains the reference/oracle path.
  */
 bool q38_forward_full_with_backend(
     const q38_gguf *model, const q38_weights *weights,

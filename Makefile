@@ -53,6 +53,10 @@ M6_QUANT_REFERENCE := artifacts/m6/quant_matched_reference.json
 M6_QUANT_COMPARISON := artifacts/m6/quant_matched_comparison.json
 M6_GPU_TRACE := artifacts/m6/gpu_real_forward_trace.json
 M6_GPU_PROGRESSIVE := artifacts/m6/gpu_progressive.json
+M6_AR_ORACLE := artifacts/m6/autoregressive_oracle.json
+M6_ORACLE_TOKENS ?= 1
+M6_ORACLE_DEVICE ?= cuda
+M6_ORACLE_TIMEOUT ?= 600
 M6_PYTHON ?= .venv-m6/bin/python
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
@@ -61,7 +65,7 @@ M6_PYTHON ?= .venv-m6/bin/python
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-dequant-fixtures m6-c12 m6-trace-schema m6-rounding-diagnostics m6-progressive-boundaries m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance m6-gpu-forward m6-gpu-progressive m6-gpu-phase7 \
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-dequant-fixtures m6-c12 m6-trace-schema m6-rounding-diagnostics m6-progressive-boundaries m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance m6-gpu-forward m6-gpu-progressive m6-gpu-phase7 m6-autoregressive-oracle \
 	post-m5-bis post-m5-ter post-m5-supplement
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
@@ -729,13 +733,13 @@ $(TEST_DIR)/m6_decode_gpu: $(TEST_DIR)/m6_decode.c \
 		q38_decode.o q38_forward_cuda.o q38_forward.o q38_moe.o \
 		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o \
 		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
-		q38_gr_ref.o q38_cuda_primitives.o q38_gdn.o
+		q38_gr_ref.o q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o
 	$(NVCC) $(NVCCFLAGS) -DQ38_DECODE_CUDA -I. -o $@ \
 		$(TEST_DIR)/m6_decode.c q38_decode.o q38_forward_cuda.o \
 		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_cuda_primitives.o \
-		q38_gdn.o $(CUDA_LDLIBS) -lm
+		q38_gdn.o q38_moe_cuda.o $(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_m6_gpu_forward: $(TEST_DIR)/test_m6_gpu_forward.cu \
 		q38_moe_cuda.o q38_cuda_primitives.o q38_gdn.o q38_quant.o \
@@ -752,12 +756,12 @@ $(TEST_DIR)/m6_real_forward_gpu: $(TEST_DIR)/m6_real_forward_gpu.o \
 		q38_forward_cuda.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
-		q38_cuda_primitives.o q38_gdn.o
+		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o
 	$(NVCC) $(NVCCFLAGS) -o $@ $(TEST_DIR)/m6_real_forward_gpu.o \
 		q38_forward_cuda.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
-		q38_cuda_primitives.o q38_gdn.o $(CUDA_LDLIBS) -lm
+		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o $(CUDA_LDLIBS) -lm
 
 m6-trace-stats:
 	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
@@ -822,6 +826,14 @@ m6-gpu-phase7: $(TEST_DIR)/test_m2_matvec \
 		./$(TEST_DIR)/test_m6_gpu_forward
 	@mkdir -p artifacts/m6
 	@printf '%s\n' '{"gate":"M6-GPU-PHASE7","status":"pass","validated":["BF16 matvec","Q8 matvec","Q2 matvec","Q2 expert","GR","GDN","PLE","QSA","MoE"],"layer_ladder":"not claimed; full model GPU trace is intentionally excluded when incomplete","math":"frozen"}' > artifacts/m6/gpu_phase7.json
+
+m6-autoregressive-oracle:
+	@mkdir -p artifacts/m6
+	@$(M6_PYTHON) tools/m6_autoregressive_oracle.py \
+		--gguf artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		--model-dir $(MODEL_DIR) --prompt 9419 --generated-count \
+		$(M6_ORACLE_TOKENS) --device $(M6_ORACLE_DEVICE) \
+		--timeout $(M6_ORACLE_TIMEOUT) --output $(M6_AR_ORACLE)
 
 m6-c07: m6-c06 $(TEST_DIR)/test_m6_dispatch
 	@./$(TEST_DIR)/test_m6_dispatch

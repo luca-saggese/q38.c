@@ -509,6 +509,8 @@ def main() -> None:
     parser.add_argument("--model-dir", type=Path, default=Path("/home/lvx/q38model"))
     parser.add_argument("--trace", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--tokens", type=str,
+                        help="comma-separated token IDs; overrides trace tokens")
     parser.add_argument("--start-layer", type=int, default=3)
     parser.add_argument("--max-layer", type=int)
     parser.add_argument("--device", default="cuda")
@@ -517,7 +519,10 @@ def main() -> None:
         raise SystemExit("CUDA is unavailable; pass --device cpu")
     device = torch.device(args.device)
     native = json.loads(args.trace.read_text())
-    tokens = native.get("tokens")
+    tokens = ([int(value) for value in args.tokens.split(",") if value.strip()]
+              if args.tokens is not None else native.get("tokens"))
+    if not tokens:
+        raise SystemExit("reference requires at least one token")
     raw_config = json.loads((args.model_dir / "config.json").read_text())
     config = _qwen4.Qwen4ExpTextConfig(**raw_config["text_config"])
     reader = GGUF(args.gguf)
@@ -525,9 +530,10 @@ def main() -> None:
     boundary_sets = {}
     layer2_moe_trace = None
     qsa_selection = []
+    embedding_tokens = tokens if args.tokens is not None else [tokens[0]]
     hidden = reader.dense_rows(
-        "model.language_model.embed_tokens.weight", [tokens[0]], device
-    ).reshape(1, 1, config.hidden_size)
+        "model.language_model.embed_tokens.weight", embedding_tokens, device
+    ).reshape(1, len(embedding_tokens), config.hidden_size)
     hidden = hidden.repeat(1, 1, config.hc_count)
     input_ids = torch.tensor([tokens], dtype=torch.long, device=device)
     rotary = Qwen4ExpTextRotaryEmbedding(config).to(device)

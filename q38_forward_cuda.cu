@@ -2,6 +2,7 @@
 
 #include "q38_cuda_primitives.h"
 #include "q38_gdn.h"
+#include "q38_moe_cuda.h"
 
 #include <cuda_runtime.h>
 
@@ -16,6 +17,8 @@ struct q38_forward_cuda_context {
     size_t device_input_elements;
     float *device_output;
     size_t device_output_bytes;
+    void *device_aux;
+    size_t device_aux_bytes;
     cudaStream_t stream;
 };
 
@@ -38,6 +41,63 @@ static bool tensor_shape(const q38_tensor *tensor, size_t *rows, size_t *cols) {
         return false;
     *rows = r;
     *cols = (size_t)tensor->dim[tensor->ndim - 1];
+    return true;
+}
+
+static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes);
+
+extern "C" bool q38_forward_cuda_expert_backend(
+    const q38_gguf *model, const q38_tensor *gate_up,
+    const q38_tensor *down, size_t expert, const float *input, float *output,
+    void *user, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    size_t gate_rows, gate_cols, down_rows, down_cols;
+    if (!context || !model || !gate_up || !down || !input || !output ||
+        !tensor_shape(gate_up, &gate_rows, &gate_cols) ||
+        !tensor_shape(down, &down_rows, &down_cols) ||
+        gate_up->type != 10 || down->type != 10 ||
+        gate_cols != 2560 || down_cols != 2560 ||
+        gate_rows % 1280 != 0 || down_rows % 640 != 0 ||
+        expert >= gate_rows / 1280 || expert >= down_rows / 640)
+        return fail(error, error_len, "unsupported CUDA routed expert geometry");
+    const size_t gate_row_bytes = (size_t)(gate_up->bytes / gate_rows);
+    const size_t down_row_bytes = (size_t)(down->bytes / down_rows);
+    const void *gate_data = q38_gguf_tensor_data(model, gate_up);
+    const void *down_data = q38_gguf_tensor_data(model, down);
+    const size_t gate_bytes = 1280u * gate_row_bytes;
+    const size_t down_bytes = 640u * down_row_bytes;
+    if (!gate_data || !down_data)
+        return fail(error, error_len, "invalid CUDA routed expert payload");
+    if (!ensure_buffer(&context->device_weights, &context->device_weights_bytes,
+                       gate_bytes) ||
+        !ensure_buffer(&context->device_aux, &context->device_aux_bytes,
+                       down_bytes) ||
+        !ensure_buffer((void **)&context->device_input,
+                       &context->device_input_elements, 2560u * sizeof(float)) ||
+        !ensure_buffer((void **)&context->device_output,
+                       &context->device_output_bytes, 2560u * sizeof(float)))
+        return fail(error, error_len, "CUDA routed expert allocation failed");
+    const unsigned char *gate_src =
+        (const unsigned char *)gate_data + expert * 1280u * gate_row_bytes;
+    const unsigned char *down_src =
+        (const unsigned char *)down_data + expert * 640u * down_row_bytes;
+    if (cudaMemcpyAsync(context->device_weights, gate_src, gate_bytes,
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(context->device_aux, down_src, down_bytes,
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(context->device_input, input, 2560u * sizeof(float),
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+        return fail(error, error_len, "CUDA routed expert upload failed");
+    if (!q38_moe_cuda_expert_q2(
+            context->device_weights, context->device_aux,
+            context->device_input, context->device_output, context->stream,
+            error, error_len) ||
+        cudaMemcpyAsync(output, context->device_output, 2560u * sizeof(float),
+                        cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "CUDA routed expert execution failed");
     return true;
 }
 
@@ -74,6 +134,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_weights);
     cudaFree(context->device_input);
     cudaFree(context->device_output);
+    cudaFree(context->device_aux);
     if (context->stream) cudaStreamDestroy(context->stream);
     free(context);
 }
@@ -90,14 +151,6 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         !tensor_shape(tensor, &rows, &actual_cols) || row >= rows ||
         actual_cols != cols || tensor->bytes % rows != 0)
         return fail(error, error_len, "invalid CUDA forward matvec geometry");
-    /*
-     * The vocabulary head has 248,320 rows.  Keeping that diagnostic-only
-     * matrix on the scalar path avoids turning a trace run into hundreds of
-     * thousands of tiny synchronizing launches; all graph and MoE rows still
-     * use CUDA.
-     */
-    if (rows > 8192) return false;
-
     const size_t row_bytes = (size_t)(tensor->bytes / rows);
     const void *data = q38_gguf_tensor_data(model, tensor);
     if (!data || !row_bytes || row > SIZE_MAX / row_bytes)
@@ -149,6 +202,67 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         cudaStreamSynchronize(context->stream) != cudaSuccess)
         return launched ? fail(error, error_len,
                                "CUDA forward matvec download failed")
+                        : false;
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_matrix_backend(
+    const q38_gguf *model, const q38_tensor *tensor, const float *input,
+    size_t rows, size_t cols, float *output, void *user, char *error,
+    size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    size_t actual_rows, actual_cols;
+    if (!context || !model || !tensor || !input || !output ||
+        !tensor_shape(tensor, &actual_rows, &actual_cols) ||
+        actual_rows != rows || actual_cols != cols)
+        return fail(error, error_len, "invalid CUDA forward matrix geometry");
+    const void *data = q38_gguf_tensor_data(model, tensor);
+    if (!data || !tensor->bytes || rows > SIZE_MAX / sizeof(float) ||
+        cols > SIZE_MAX / sizeof(float))
+        return fail(error, error_len, "invalid CUDA forward matrix payload");
+    if (!ensure_buffer(&context->device_weights, &context->device_weights_bytes,
+                       (size_t)tensor->bytes) ||
+        !ensure_buffer((void **)&context->device_input,
+                       &context->device_input_elements,
+                       cols * sizeof(float)) ||
+        !ensure_buffer((void **)&context->device_output,
+                       &context->device_output_bytes,
+                       rows * sizeof(float)))
+        return fail(error, error_len, "CUDA forward matrix allocation failed");
+    if (cudaMemcpyAsync(context->device_weights, data, (size_t)tensor->bytes,
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(context->device_input, input, cols * sizeof(float),
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+        return fail(error, error_len, "CUDA forward matrix upload failed");
+    bool launched = false;
+    if (tensor->type == 30) {
+        launched = q38_cuda_bf16_matvec(
+            (const uint16_t *)context->device_weights, rows, cols,
+            context->device_input, context->device_output, context->stream,
+            error, error_len);
+    } else if (tensor->type == 10) {
+        launched = q38_cuda_q2_matvec(
+            context->device_weights, rows, cols, context->device_input,
+            context->device_output, context->stream, error, error_len);
+    } else if (tensor->type == 0 || tensor->type == 8) {
+        const uint32_t type = tensor->type == 8 ? Q38_GDN_WEIGHT_Q8_0
+                                                : Q38_GDN_WEIGHT_F32;
+        launched = q38_cuda_gdn_project(
+            type, context->device_weights, rows, cols, context->device_input, 1,
+            context->device_output, context->stream, error, error_len);
+    } else {
+        return fail(error, error_len, "unsupported CUDA forward matrix type");
+    }
+
+    if (!launched ||
+        cudaMemcpyAsync(output, context->device_output, rows * sizeof(float),
+                        cudaMemcpyDeviceToHost, context->stream) !=
+            cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return launched ? fail(error, error_len,
+                               "CUDA forward matrix download failed")
                         : false;
     return true;
 }

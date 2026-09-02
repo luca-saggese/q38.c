@@ -4,6 +4,24 @@
 
 #include "../q38_forward_cuda.h"
 
+#include <inttypes.h>
+
+static q38_forward_stage_usage stage_records[512];
+static size_t stage_record_count;
+
+static bool stage_trace(const q38_forward_stage_usage *usage, void *opaque,
+                        char *error, size_t error_len) {
+    (void)opaque;
+    if (!usage || !usage->name || stage_record_count >=
+        sizeof(stage_records) / sizeof(stage_records[0])) {
+        if (error && error_len)
+            snprintf(error, error_len, "stage usage buffer is full");
+        return false;
+    }
+    stage_records[stage_record_count++] = *usage;
+    return true;
+}
+
 int main(int argc, char **argv) {
     if (argc != 3) {
         fprintf(stderr, "usage: %s model.gguf output.json\n", argv[0]);
@@ -56,14 +74,16 @@ int main(int argc, char **argv) {
     diagnostics.moe_trace = moe_trace;
     diagnostics.pre_router_trace = pre_router_trace;
     diagnostics.qsa_trace = qsa_trace;
+    diagnostics.stage_trace = stage_trace;
     diagnostics.trace_user = &context;
     float *logits = calloc(248320, sizeof(float));
     const uint32_t token = 9419;
     const bool ok =
         logits &&
-        q38_forward_full_with_backend(
+        q38_forward_full_with_matrix_backend(
             model, &weights, &state, &token, 1, logits, 248320, &diagnostics,
-            q38_forward_cuda_matvec_backend, cuda, error, sizeof(error)) &&
+            q38_forward_cuda_matvec_backend, q38_forward_cuda_matrix_backend,
+            q38_forward_cuda_expert_backend, cuda, error, sizeof(error)) &&
         trace_complete(&context);
     if (!ok) {
         if (!error[0])
@@ -79,7 +99,21 @@ int main(int argc, char **argv) {
         return 1;
     }
     write_logits(out, logits, 248320);
-    fputs("\n],", out);
+    fputs("\n],\"stage_usage\":[", out);
+    for (size_t i = 0; i < stage_record_count; ++i) {
+        const q38_forward_stage_usage *usage = &stage_records[i];
+        if (i) fputc(',', out);
+        fprintf(out,
+                "{\"name\":\"%s\",\"matrix_calls\":%" PRIu64
+                ",\"backend_rows\":%" PRIu64
+                ",\"scalar_rows\":%" PRIu64
+                ",\"backend_declines\":%" PRIu64
+                ",\"elapsed_ms\":%.9g}",
+                usage->name, usage->matrix_calls, usage->backend_rows,
+                usage->scalar_rows, usage->backend_declines,
+                usage->elapsed_ms);
+    }
+    fputs("],", out);
     write_decisions(out, &context);
     fputs("\n}\n", out);
     fclose(out);

@@ -3,9 +3,7 @@
 #include "q38_weights.h"
 #ifdef Q38_DECODE_CUDA
 #include "q38_forward_cuda.h"
-#define Q38_DECODE_CALL q38_decode_stream_with_backend
 #else
-#define Q38_DECODE_CALL q38_decode_stream
 #endif
 
 #include <inttypes.h>
@@ -119,11 +117,17 @@ int main(int argc, char **argv) {
 #endif
     fprintf(out, "{\"format\":\"q38-m6-decode-v1\",\"steps\":[\n");
     bool ok = generated && logits &&
-              Q38_DECODE_CALL
-              (model, &weights, &state, prompt, 1, generated, generated_count,
-               logits, Q38_DECODE_VOCAB_SIZE, NULL,
 #ifdef Q38_DECODE_CUDA
-               q38_forward_cuda_matvec_backend, cuda,
+              q38_decode_stream_with_matrix_backend(
+               model, &weights, &state, prompt, 1, generated, generated_count,
+               logits, Q38_DECODE_VOCAB_SIZE, NULL,
+               q38_forward_cuda_matvec_backend,
+               q38_forward_cuda_matrix_backend,
+               q38_forward_cuda_expert_backend, cuda,
+#else
+              q38_decode_stream(
+               model, &weights, &state, prompt, 1, generated, generated_count,
+               logits, Q38_DECODE_VOCAB_SIZE, NULL,
 #endif
                trace_step, &context, error, sizeof(error));
     if (!ok) {

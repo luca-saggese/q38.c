@@ -21,6 +21,16 @@ bool q38_forward_cuda_matvec_backend(
     const float *input, size_t cols, float *output, void *user, char *error,
     size_t error_len);
 
+bool q38_forward_cuda_matrix_backend(
+    const q38_gguf *model, const q38_tensor *tensor, const float *input,
+    size_t rows, size_t cols, float *output, void *user, char *error,
+    size_t error_len);
+
+bool q38_forward_cuda_expert_backend(
+    const q38_gguf *model, const q38_tensor *gate_up,
+    const q38_tensor *down, size_t expert, const float *input, float *output,
+    void *user, char *error, size_t error_len);
+
 #ifdef __cplusplus
 }
 #endif
