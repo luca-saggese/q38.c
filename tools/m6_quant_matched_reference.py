@@ -249,6 +249,11 @@ class GGUF:
                     at = out_base + half + j * 32
                     for l in range(16):
                         out[at + l] = dl * ((q[qbase + l] >> shift) & 3) - ml
+                    scale = scales[scale_index]
+                    scale_index += 1
+                    dl = d * (scale & 0xF)
+                    ml = dmin * (scale >> 4)
+                    for l in range(16):
                         out[at + 16 + l] = (
                             dl * ((q[qbase + 16 + l] >> shift) & 3) - ml)
         return out
@@ -348,6 +353,11 @@ class QuantRouter(nn.Module):
         probs_effective = torch.softmax(effective.float(), dim=-1)
         scores = probs_effective.gather(1, selected)
         scores = (scores / scores.sum(dim=-1, keepdim=True)).to(effective.dtype)
+        self.last_pre_cast = pre_cast.detach()
+        self.last_effective = effective.detach()
+        self.last_probs_pre = probs_pre.detach()
+        self.last_probs_effective = probs_effective.detach()
+        self.last_selected = selected.detach()
         return effective.reshape(*hidden_states.shape[:-1], -1), scores.reshape(
             *hidden_states.shape[:-1], -1), selected.reshape(
                 *hidden_states.shape[:-1], -1)
@@ -460,6 +470,7 @@ def main() -> None:
     config = _qwen4.Qwen4ExpTextConfig(**raw_config["text_config"])
     reader = GGUF(args.gguf)
     stages, routing = [], []
+    layer2_moe_trace = None
     qsa_selection = []
     hidden = reader.dense_rows(
         "model.language_model.embed_tokens.weight", [tokens[0]], device
@@ -516,6 +527,29 @@ def main() -> None:
                 "routed_output": values(captured["routed_output"]),
             }
             routing.append(route)
+            if layer_index == 2:
+                layer2_moe_trace = {
+                    "router_input": route["hidden_input"],
+                    "router_logits_pre_cast": values(
+                        layer.mlp.gate.last_pre_cast),
+                    "router_logits_effective": route["router_logits"],
+                    "top15_rank": [
+                        {"rank": i + 1, "expert": e,
+                         "value": float(layer.mlp.gate.last_probs_effective[0, e])}
+                        for i, e in enumerate(rank)
+                    ],
+                    "margin_rank10_rank11": float(
+                        layer.mlp.gate.last_probs_effective[0, rank[9]] -
+                        layer.mlp.gate.last_probs_effective[0, rank[10]]),
+                    "selected_experts": route["experts"],
+                    "selected_weights_pre_cast": values(
+                        (lambda selected: selected / selected.sum())(
+                            layer.mlp.gate.last_probs_pre[0].gather(
+                                0, layer.mlp.gate.last_selected[0]))),
+                    "selected_weights_effective": route["weights"],
+                    "routed_output": route["routed_output"],
+                    "router_dtype": "bf16",
+                }
             native_route = next((x for x in native.get("routing", [])
                                  if x.get("layer") == layer_index), None)
             native_logits = native_router(native, layer_index)
@@ -594,6 +628,7 @@ def main() -> None:
         "gguf": str(args.gguf), "tokens": tokens, "q38_forward_called": False,
         "comparison_start_layer": args.start_layer,
         "stages": stages, "routing": routing, "qsa_selection": qsa_selection,
+        "layer2_moe_trace": layer2_moe_trace,
         "first_selected_set_divergence_layer": first_divergence,
         "status": "pass" if all(s["stats"]["nan_count"] == 0 and
                                 s["stats"]["inf_count"] == 0 for s in stages)

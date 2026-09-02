@@ -13,13 +13,20 @@ def main() -> None:
     block = bytearray(84)
     struct.pack_into("<H", block, 80, 0x3C00)  # d = 1
     for i in range(16):
-        block[i] = 1
+        block[i] = i + 1
     for i in range(64):
         block[16 + i] = 0xE4
     decoded = GGUF._q2_row(memoryview(block), 256)
     assert len(decoded) == 256
-    for i, value in enumerate(decoded):
-        assert value == (i // 32) % 4, (i, value)
+    expected = []
+    for half in (0, 128):
+        scale_base = 0 if half == 0 else 8
+        for j in range(4):
+            for l in range(16):
+                expected.append(j * ((scale_base + 2 * j + 1) & 0xF))
+            for l in range(16):
+                expected.append(j * ((scale_base + 2 * j + 2) & 0xF))
+    assert decoded == expected, (decoded[:40], expected[:40])
     print("test_m6_quant_reference: Q2_K direct GGUF row decode passed")
 
 
