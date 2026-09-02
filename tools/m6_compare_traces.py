@@ -238,9 +238,18 @@ def main() -> None:
                 if layer >= args.start_layer:
                     route_mismatch.append(f"layer:{layer}:weights_by_expert")
         detail = {"layer": layer, "selected_set_exact": selected_set_exact}
+        native_router_detail = next(
+            (item for item in native.get("router_logits", [])
+             if item.get("layer") == layer), {})
+        native_vectors = {
+            "hidden_input": left.get("hidden_input"),
+            "router_logits": left.get("router_logits")
+                or native_router_detail.get("logits"),
+            "routed_output": left.get("routed_output"),
+        }
         for field in ("hidden_input", "router_logits", "routed_output"):
-            if field in left and field in right:
-                detail[field] = vector_metrics(left[field], right[field])
+            if native_vectors[field] is not None and field in right:
+                detail[field] = vector_metrics(native_vectors[field], right[field])
                 if (detail[field]["status"] == "fail" and
                         layer >= args.start_layer):
                     route_mismatch.append(f"layer:{layer}:{field}")
@@ -248,12 +257,9 @@ def main() -> None:
                 detail[field] = {
                     "status": "diagnostic",
                     "reason": "missing native/reference vector",
-                    "native_present": field in left,
+                    "native_present": native_vectors[field] is not None,
                     "reference_present": field in right,
                 }
-        native_router_detail = next(
-            (item for item in native.get("router_logits", [])
-             if item.get("layer") == layer), {})
         for field in ("rank10", "rank11"):
             left_rank = left.get(field) or native_router_detail.get(field)
             if left_rank and right.get(field):
