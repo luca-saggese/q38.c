@@ -62,9 +62,14 @@ int main(int argc, char **argv) {
         logits &&
         q38_forward_full_with_backend(
             model, &weights, &state, &token, 1, logits, 248320, &diagnostics,
-            q38_forward_cuda_matvec_backend, cuda, error, sizeof(error));
+            q38_forward_cuda_matvec_backend, cuda, error, sizeof(error)) &&
+        trace_complete(&context);
     if (!ok) {
+        if (!error[0])
+            snprintf(error, sizeof(error),
+                     "forward trace is incomplete; refusing partial output");
         fprintf(stderr, "forward: %s\n", error);
+        remove(argv[2]);
         free(logits);
         fclose(out);
         q38_forward_cuda_context_destroy(cuda);

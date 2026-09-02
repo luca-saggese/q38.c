@@ -153,7 +153,8 @@ static bool route_trace(uint32_t layer, const uint16_t *experts,
                         const float *weights, size_t count, void *opaque,
                         char *error, size_t error_len) {
     trace_context *context = opaque;
-    if (!context || layer >= Q38_MODEL_LAYERS || count > Q38_MOE_TOP_K)
+    if (!context || layer >= Q38_MODEL_LAYERS || count > Q38_MOE_TOP_K ||
+        (count && (!experts || !weights)))
         return false;
     context->route_count[layer] = count;
     memcpy(context->routed[layer], experts, count * sizeof(*experts));
@@ -166,7 +167,8 @@ static bool route_trace(uint32_t layer, const uint16_t *experts,
 static bool router_trace(uint32_t layer, const float *logits, size_t count,
                          void *opaque, char *error, size_t error_len) {
     trace_context *context = opaque;
-    if (!context || layer >= Q38_MODEL_LAYERS || count > Q38_MOE_EXPERTS)
+    if (!context || layer >= Q38_MODEL_LAYERS || count > Q38_MOE_EXPERTS ||
+        (count && !logits))
         return false;
     context->router_count[layer] = count;
     memcpy(context->router_logits[layer], logits, count * sizeof(*logits));
@@ -179,6 +181,12 @@ static bool moe_trace(uint32_t layer, const q38_moe_trace *trace,
                       void *opaque, char *error, size_t error_len) {
     trace_context *context = opaque;
     if (!context || !trace ||
+        layer >= Q38_MODEL_LAYERS ||
+        !trace->router_input || !trace->router_logits_pre_cast ||
+        !trace->router_logits_effective || !trace->top15_rank ||
+        !trace->top15_value || !trace->selected_experts ||
+        !trace->selected_weights_pre_cast ||
+        !trace->selected_weights_effective || !trace->routed_output ||
         trace->router_input_count != Q38_MOE_HIDDEN ||
         trace->router_logits_count != Q38_MOE_EXPERTS ||
         trace->top15_count != 15 ||
@@ -223,7 +231,8 @@ static bool moe_trace(uint32_t layer, const q38_moe_trace *trace,
 static bool qsa_trace(uint32_t layer, const uint32_t *selected, size_t count,
                       void *opaque, char *error, size_t error_len) {
     trace_context *context = opaque;
-    if (!context || layer >= Q38_MODEL_LAYERS || count > 2051)
+    if (!context || layer >= Q38_MODEL_LAYERS || count > 2051 ||
+        (count && !selected))
         return false;
     context->qsa_count[layer] = count;
     memcpy(context->qsa_selected[layer], selected, count * sizeof(*selected));
@@ -269,6 +278,7 @@ static void write_decisions(FILE *out, const trace_context *context) {
             if (i) fputc(',', out);
             fprintf(out, "%u", context->routed[layer][i]);
         }
+
         fputs("],\"weights\":[", out);
         for (size_t i = 0; i < context->route_count[layer]; ++i) {
             if (i) fputc(',', out);
@@ -412,6 +422,16 @@ static void write_decisions(FILE *out, const trace_context *context) {
     }
 }
 
+static bool trace_complete(const trace_context *context) {
+    if (!context) return false;
+    for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer)
+        if (context->route_count[layer] != Q38_MOE_TOP_K ||
+            context->router_count[layer] != Q38_MOE_EXPERTS ||
+            !context->moe_trace_by_layer[layer])
+            return false;
+    return true;
+}
+
 int main(int argc, char **argv) {
     if (argc != 3) {
         fprintf(stderr, "usage: %s model.gguf output.json\n", argv[0]);
@@ -459,8 +479,13 @@ int main(int argc, char **argv) {
     const uint32_t token = 9419;
     if (!logits || !q38_forward_full(model, &weights, &state, &token, 1,
                                      logits, 248320, &diagnostics, error,
-                                     sizeof(error))) {
+                                     sizeof(error)) ||
+        !trace_complete(&context)) {
+        if (!error[0])
+            snprintf(error, sizeof(error),
+                     "forward trace is incomplete; refusing partial output");
         fprintf(stderr, "forward: %s\n", error);
+        remove(argv[2]);
         free(logits);
         fclose(out);
         q38_forward_state_destroy(&state);
