@@ -61,7 +61,7 @@ M6_PYTHON ?= .venv-m6/bin/python
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-dequant-fixtures m6-c12 m6-trace-schema m6-rounding-diagnostics m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance m6-gpu-forward m6-gpu-progressive \
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-dequant-fixtures m6-c12 m6-trace-schema m6-rounding-diagnostics m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance m6-gpu-forward m6-gpu-progressive m6-gpu-phase7 \
 	post-m5-bis post-m5-ter post-m5-supplement
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
@@ -767,6 +767,21 @@ m6-gpu-progressive: m6-gpu-forward
 	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
 		$(M6_PYTHON) tools/m6_gpu_progressive.py \
 		--cpu $(M6_TRACE) --gpu $(M6_GPU_TRACE) --output $(M6_GPU_PROGRESSIVE)
+
+m6-gpu-phase7: $(TEST_DIR)/test_m2_matvec \
+		$(TEST_DIR)/test_m3_gr_cuda $(TEST_DIR)/test_m3_gdn_cuda \
+		$(TEST_DIR)/test_m4_ple_cuda $(TEST_DIR)/test_m5_qsa_cuda \
+		$(TEST_DIR)/test_m6_moe_cuda $(TEST_DIR)/test_m6_gpu_forward
+	@set -e; \
+		./$(TEST_DIR)/test_m2_matvec; \
+		./$(TEST_DIR)/test_m3_gr_cuda; \
+		./$(TEST_DIR)/test_m3_gdn_cuda; \
+		./$(TEST_DIR)/test_m4_ple_cuda; \
+		./$(TEST_DIR)/test_m5_qsa_cuda; \
+		./$(TEST_DIR)/test_m6_moe_cuda; \
+		./$(TEST_DIR)/test_m6_gpu_forward
+	@mkdir -p artifacts/m6
+	@printf '%s\n' '{"gate":"M6-GPU-PHASE7","status":"pass","validated":["BF16 matvec","Q8 matvec","Q2 matvec","Q2 expert","GR","GDN","PLE","QSA","MoE"],"layer_ladder":"not claimed; full model GPU trace is intentionally excluded when incomplete","math":"frozen"}' > artifacts/m6/gpu_phase7.json
 
 m6-c07: m6-c06 $(TEST_DIR)/test_m6_dispatch
 	@./$(TEST_DIR)/test_m6_dispatch

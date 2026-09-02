@@ -16,6 +16,18 @@ Build and run the primitive gates with:
 make m6-gpu-forward
 ```
 
+The phase-7 GPU-only validation ladder (BF16/Q8/Q2, GR, GDN, PLE, QSA, and
+MoE) is available as:
+
+```sh
+make m6-gpu-phase7
+```
+
+The 1/4/48-layer full-model comparison is not reported by this target: the
+diagnostic row-synchronization path is substantially slower than the scalar
+oracle on the current hardware, and incomplete traces are rejected rather
+than recorded as evidence.
+
 On a machine with the runtime GGUF and scalar trace, `make m6-gpu-progressive`
 also writes `artifacts/m6/gpu_real_forward_trace.json` and checks the
 1-layer, 4-layer, and 48-layer checkpoints (layers 0, 3, and 47).

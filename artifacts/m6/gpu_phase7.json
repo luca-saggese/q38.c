@@ -1,0 +1,1 @@
+{"gate":"M6-GPU-PHASE7","status":"pass","validated":["BF16 matvec","Q8 matvec","Q2 matvec","Q2 expert","GR","GDN","PLE","QSA","MoE"],"layer_ladder":"not claimed; full model GPU trace is intentionally excluded when incomplete","math":"frozen"}
