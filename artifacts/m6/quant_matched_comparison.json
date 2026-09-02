@@ -2619,16 +2619,74 @@
             }
           },
           "router_matvec_pre_cast": {
-            "status": "diagnostic",
-            "reason": "native matvec stage is not present in this trace",
-            "native_present": false,
-            "reference_present": true
+            "status": "pass",
+            "max_abs": 0.13867044258789019,
+            "rms": 0.04746289594242578,
+            "relative_rms": 0.0075489161596070335,
+            "cosine_similarity": 0.9999834565730183,
+            "native_checksum": "e3337ca1135740eee504aa338349f7bfa8ce7ce577a1895f5bff164faf162bb3",
+            "reference_checksum": "55d35f29b99afe82f3765a0ffc6d021babcdc0e6bcfa7763e54cbc02b530a3d9",
+            "extreme_coordinates": [
+              {
+                "index": 63,
+                "native": -6.32242346,
+                "reference": -6.461093902587891,
+                "delta": 0.13867044258789019
+              },
+              {
+                "index": 192,
+                "native": -5.60175228,
+                "reference": -5.739240646362305,
+                "delta": 0.13748836636230433
+              },
+              {
+                "index": 391,
+                "native": -8.65477276,
+                "reference": -8.786823272705078,
+                "delta": 0.13205051270507795
+              },
+              {
+                "index": 204,
+                "native": -7.44253588,
+                "reference": -7.563192367553711,
+                "delta": 0.12065648755371061
+              }
+            ]
           },
           "router_effective_bf16": {
-            "status": "diagnostic",
-            "reason": "native matvec stage is not present in this trace",
-            "native_present": false,
-            "reference_present": true
+            "status": "pass",
+            "max_abs": 0.1875,
+            "rms": 0.049991034657652145,
+            "relative_rms": 0.00795052149224562,
+            "cosine_similarity": 0.9999806442128479,
+            "native_checksum": "a973e7927f5248e4ec009f8fa6224de13d323f5505442875a8741f63dafe2c1c",
+            "reference_checksum": "8a388050e874c162d8d3b754aa04bc05cd61c05166c05ab976ccccc6a1109fbc",
+            "extreme_coordinates": [
+              {
+                "index": 391,
+                "native": -8.625,
+                "reference": -8.8125,
+                "delta": 0.1875
+              },
+              {
+                "index": 63,
+                "native": -6.3125,
+                "reference": -6.46875,
+                "delta": 0.15625
+              },
+              {
+                "index": 192,
+                "native": -5.59375,
+                "reference": -5.75,
+                "delta": 0.15625
+              },
+              {
+                "index": 4,
+                "native": -7.03125,
+                "reference": -7.15625,
+                "delta": 0.125
+              }
+            ]
           },
           "router_matvec_checks": {
             "status": "diagnostic",
