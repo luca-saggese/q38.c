@@ -725,6 +725,18 @@ $(TEST_DIR)/m6_decode_trace: $(TEST_DIR)/m6_decode_trace.c \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
+$(TEST_DIR)/m6_decode_gpu: $(TEST_DIR)/m6_decode.c \
+		q38_decode.o q38_forward_cuda.o q38_forward.o q38_moe.o \
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o \
+		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
+		q38_gr_ref.o q38_cuda_primitives.o q38_gdn.o
+	$(NVCC) $(NVCCFLAGS) -DQ38_DECODE_CUDA -I. -o $@ \
+		$(TEST_DIR)/m6_decode.c q38_decode.o q38_forward_cuda.o \
+		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_cuda_primitives.o \
+		q38_gdn.o $(CUDA_LDLIBS) -lm
+
 $(TEST_DIR)/test_m6_gpu_forward: $(TEST_DIR)/test_m6_gpu_forward.cu \
 		q38_moe_cuda.o q38_cuda_primitives.o q38_gdn.o q38_quant.o \
 		q38_moe_ref.o

@@ -84,6 +84,14 @@ bool q38_decode_stream(
     q38_forward_state *state, const uint32_t *prompt, size_t prompt_count,
     uint32_t *generated, size_t generated_count, float *logits,
     size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_decode_trace trace,     void *trace_user, char *error, size_t error_len);
+
+bool q38_decode_stream_with_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *prompt, size_t prompt_count,
+    uint32_t *generated, size_t generated_count, float *logits,
+    size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend backend, void *backend_user,
     q38_decode_trace trace, void *trace_user, char *error, size_t error_len);
 
 #ifdef __cplusplus

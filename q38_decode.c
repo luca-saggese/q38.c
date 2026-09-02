@@ -148,16 +148,23 @@ static bool snapshot_state(const q38_forward_state *state,
     return true;
 }
 
-bool q38_decode(const q38_gguf *model, const q38_weights *weights,
+static bool q38_decode_backend(const q38_gguf *model,
+                const q38_weights *weights,
                 q38_forward_state *state, uint32_t token, float *logits,
                 size_t logits_stride, uint32_t *next_token,
                 q38_forward_diagnostics *diagnostics, char *error,
-                size_t error_len) {
+                size_t error_len, q38_forward_matvec_backend backend,
+                void *backend_user) {
     if (error && error_len) error[0] = '\0';
     if (!next_token)
         return fail(error, error_len, "decode output token is null");
-    if (!q38_forward_full(model, weights, state, &token, 1, logits,
-                          logits_stride, diagnostics, error, error_len))
+    const bool ok = backend
+        ? q38_forward_full_with_backend(model, weights, state, &token, 1,
+                                        logits, logits_stride, diagnostics,
+                                        backend, backend_user, error, error_len)
+        : q38_forward_full(model, weights, state, &token, 1, logits,
+                           logits_stride, diagnostics, error, error_len);
+    if (!ok)
         return false;
     size_t best = 0;
     float best_value = logits[0];
@@ -175,11 +182,12 @@ bool q38_decode(const q38_gguf *model, const q38_weights *weights,
     return true;
 }
 
-bool q38_decode_stream(
+bool q38_decode_stream_with_backend(
     const q38_gguf *model, const q38_weights *weights,
     q38_forward_state *state, const uint32_t *prompt, size_t prompt_count,
     uint32_t *generated, size_t generated_count, float *logits,
     size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend backend, void *backend_user,
     q38_decode_trace trace, void *trace_user, char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
     if (!prompt_count || !prompt ||
@@ -191,8 +199,9 @@ bool q38_decode_stream(
     size_t step_index = 0;
     for (size_t i = 0; i < prompt_count; ++i) {
         uint32_t next = 0;
-        if (!q38_decode(model, weights, state, prompt[i], logits,
-                        logits_stride, &next, diagnostics, error, error_len))
+        if (!q38_decode_backend(model, weights, state, prompt[i], logits,
+                                logits_stride, &next, diagnostics, error,
+                                error_len, backend, backend_user))
             return false;
         current = next;
         if (trace) {
@@ -224,8 +233,9 @@ bool q38_decode_stream(
     for (size_t i = 0; i < generated_count; ++i) {
         const uint32_t input = current;
         uint32_t next = 0;
-        if (!q38_decode(model, weights, state, input, logits, logits_stride,
-                        &next, diagnostics, error, error_len))
+        if (!q38_decode_backend(model, weights, state, input, logits,
+                                logits_stride, &next, diagnostics, error,
+                                error_len, backend, backend_user))
             return false;
         generated[i] = next;
         current = next;
@@ -256,4 +266,26 @@ bool q38_decode_stream(
         }
     }
     return true;
+}
+
+bool q38_decode(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, uint32_t token, float *logits,
+    size_t logits_stride, uint32_t *next_token,
+    q38_forward_diagnostics *diagnostics, char *error, size_t error_len) {
+    return q38_decode_backend(model, weights, state, token, logits,
+                              logits_stride, next_token, diagnostics, error,
+                              error_len, NULL, NULL);
+}
+
+bool q38_decode_stream(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *prompt, size_t prompt_count,
+    uint32_t *generated, size_t generated_count, float *logits,
+    size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_decode_trace trace, void *trace_user, char *error, size_t error_len) {
+    return q38_decode_stream_with_backend(
+        model, weights, state, prompt, prompt_count, generated,
+        generated_count, logits, logits_stride, diagnostics, NULL, NULL, trace,
+        trace_user, error, error_len);
 }

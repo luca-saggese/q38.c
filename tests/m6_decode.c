@@ -1,6 +1,12 @@
 #include "q38_decode.h"
 #include "q38_gguf.h"
 #include "q38_weights.h"
+#ifdef Q38_DECODE_CUDA
+#include "q38_forward_cuda.h"
+#define Q38_DECODE_CALL q38_decode_stream_with_backend
+#else
+#define Q38_DECODE_CALL q38_decode_stream
+#endif
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -100,17 +106,34 @@ int main(int argc, char **argv) {
     uint32_t *generated = calloc(generated_count, sizeof(*generated));
     float *logits = calloc(Q38_DECODE_VOCAB_SIZE, sizeof(*logits));
     trace_context context = {.out = out, .first = true};
+#ifdef Q38_DECODE_CUDA
+    q38_forward_cuda_context *cuda =
+        q38_forward_cuda_context_create(error, sizeof(error));
+    if (!cuda) {
+        fprintf(stderr, "cuda: %s\n", error);
+        fclose(out);
+        q38_forward_state_destroy(&state);
+        q38_gguf_close(model);
+        return 1;
+    }
+#endif
     fprintf(out, "{\"format\":\"q38-m6-decode-v1\",\"steps\":[\n");
     bool ok = generated && logits &&
-              q38_decode_stream(model, &weights, &state, prompt, 1, generated,
-                                 generated_count, logits,
-                                 Q38_DECODE_VOCAB_SIZE, NULL, trace_step,
-                                 &context, error, sizeof(error));
+              Q38_DECODE_CALL
+              (model, &weights, &state, prompt, 1, generated, generated_count,
+               logits, Q38_DECODE_VOCAB_SIZE, NULL,
+#ifdef Q38_DECODE_CUDA
+               q38_forward_cuda_matvec_backend, cuda,
+#endif
+               trace_step, &context, error, sizeof(error));
     if (!ok) {
         fprintf(stderr, "decode: %s\n", error);
         free(generated);
         free(logits);
         fclose(out);
+#ifdef Q38_DECODE_CUDA
+        q38_forward_cuda_context_destroy(cuda);
+#endif
         remove(argv[2]);
         q38_forward_state_destroy(&state);
         q38_gguf_close(model);
@@ -125,6 +148,9 @@ int main(int argc, char **argv) {
     fclose(out);
     free(generated);
     free(logits);
+#ifdef Q38_DECODE_CUDA
+    q38_forward_cuda_context_destroy(cuda);
+#endif
     q38_forward_state_destroy(&state);
     q38_gguf_close(model);
     return 0;
