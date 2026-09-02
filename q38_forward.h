@@ -99,6 +99,14 @@ typedef struct q38_moe_trace {
     q38_forward_dtype router_dtype;
 } q38_moe_trace;
 
+typedef struct q38_pre_router_trace {
+    const float *router_input;
+    size_t router_input_count;
+    const float *gr_output;
+    size_t gr_output_count;
+    const q38_tensor *router;
+} q38_pre_router_trace;
+
 typedef struct {
     uint32_t first_divergence_layer;
     uint32_t first_divergence_token;
@@ -122,6 +130,9 @@ typedef struct {
                       void *user, char *error, size_t error_len);
     bool (*router_trace)(uint32_t layer, const float *logits, size_t count,
                          void *user, char *error, size_t error_len);
+    bool (*pre_router_trace)(uint32_t layer,
+                             const q38_pre_router_trace *trace, void *user,
+                             char *error, size_t error_len);
 } q38_forward_diagnostics;
 
 /*

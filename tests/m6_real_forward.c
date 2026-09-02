@@ -23,6 +23,13 @@ typedef struct {
     float router_input_by_layer[Q38_MODEL_LAYERS][Q38_MOE_HIDDEN];
     float routed_output_by_layer[Q38_MODEL_LAYERS][Q38_MOE_HIDDEN];
     bool moe_trace_by_layer[Q38_MODEL_LAYERS];
+    float layer9_router_input[Q38_MOE_HIDDEN];
+    float layer9_gr_output[Q38_MOE_HIDDEN];
+    float layer9_router_pre_cast[Q38_MOE_EXPERTS];
+    float layer9_router_effective[Q38_MOE_EXPERTS];
+    const q38_tensor *layer9_router;
+    bool layer9_pre_router_valid;
+    bool layer9_router_vectors_valid;
     bool moe_trace_valid;
     float router_input[Q38_MOE_HIDDEN];
     float router_logits_pre_cast[Q38_MOE_EXPERTS];
@@ -126,6 +133,18 @@ static void write_fixed(FILE *out, const float *values, size_t count) {
     fputc(']', out);
 }
 
+static void write_vector_field(FILE *out, const char *name,
+                               const float *values, size_t count) {
+    fprintf(out, "\"%s\":[", name);
+    for (size_t i = 0; i < count; ++i) {
+        if (i) fputc(',', out);
+        json_float(out, values[i]);
+    }
+    fprintf(out, "],\"%s_stats\":{", name);
+    write_stats(out, values, count);
+    fputc('}', out);
+}
+
 static bool trace(uint32_t layer, const float *hidden, size_t tokens,
                   size_t width, void *opaque, char *error, size_t error_len) {
     trace_context *context = opaque;
@@ -223,12 +242,43 @@ static bool moe_trace(uint32_t layer, const q38_moe_trace *trace,
         context->margin_rank10_rank11 = trace->margin_rank10_rank11;
         context->router_dtype = trace->router_dtype;
     }
+    if (layer == 9) {
+        memcpy(context->layer9_router_pre_cast,
+               trace->router_logits_pre_cast,
+               sizeof(context->layer9_router_pre_cast));
+        memcpy(context->layer9_router_effective,
+               trace->router_logits_effective,
+               sizeof(context->layer9_router_effective));
+        context->layer9_router_vectors_valid = true;
+    }
     memcpy(context->router_input_by_layer[layer], trace->router_input,
            sizeof(context->router_input_by_layer[layer]));
     memcpy(context->routed_output_by_layer[layer], trace->routed_output,
            sizeof(context->routed_output_by_layer[layer]));
     context->moe_trace_by_layer[layer] = true;
     context->moe_trace_valid = true;
+    (void)error;
+    (void)error_len;
+    return true;
+}
+
+static bool pre_router_trace(uint32_t layer,
+                             const q38_pre_router_trace *trace,
+                             void *opaque, char *error, size_t error_len) {
+    trace_context *context = opaque;
+    if (!context || !trace || layer != 9 || !trace->router ||
+        !trace->router_input || !trace->gr_output ||
+        trace->router_input_count != Q38_MOE_HIDDEN ||
+        trace->gr_output_count != Q38_MOE_HIDDEN ||
+        trace->router->ndim != 2 || trace->router->dim[0] != Q38_MOE_EXPERTS ||
+        trace->router->dim[1] != Q38_MOE_HIDDEN)
+        return false;
+    memcpy(context->layer9_router_input, trace->router_input,
+           sizeof(context->layer9_router_input));
+    memcpy(context->layer9_gr_output, trace->gr_output,
+           sizeof(context->layer9_gr_output));
+    context->layer9_router = trace->router;
+    context->layer9_pre_router_valid = true;
     (void)error;
     (void)error_len;
     return true;
@@ -361,7 +411,34 @@ static void write_decisions(FILE *out, const trace_context *context) {
             json_float(out, context->router_logits[layer][order[i]]);
             fputc('}', out);
         }
-        fputs("],\"rank10\":", out);
+        if (layer == 9 && context->layer9_router_vectors_valid) {
+            fputs("],\"matvec_pre_cast\":[", out);
+            for (size_t i = 0; i < Q38_MOE_EXPERTS; ++i) {
+                if (i) fputc(',', out);
+                json_float(out, context->layer9_router_pre_cast[i]);
+            }
+            fputs("],\"matvec_pre_cast_stats\":{", out);
+            write_stats(out, context->layer9_router_pre_cast,
+                        Q38_MOE_EXPERTS);
+            fputs("},\"effective_bf16\":[", out);
+            for (size_t i = 0; i < Q38_MOE_EXPERTS; ++i) {
+                if (i) fputc(',', out);
+                json_float(out, context->layer9_router_effective[i]);
+            }
+            fputs("],\"effective_bf16_stats\":{", out);
+            write_stats(out, context->layer9_router_effective,
+                        Q38_MOE_EXPERTS);
+            fputs("},\"effective_bf16_bits\":[", out);
+            for (size_t i = 0; i < Q38_MOE_EXPERTS; ++i) {
+                if (i) fputc(',', out);
+                fprintf(out, "%u",
+                        bf16_bits(context->layer9_router_effective[i]));
+            }
+            fputs("]", out);
+        } else {
+            fputs("]", out);
+        }
+        fputs(",\"rank10\":", out);
         if (top_count > 9) {
             fprintf(out, "{\"expert\":%zu,\"score\":", order[9]);
             json_float(out, context->router_logits[layer][order[9]]);
@@ -378,9 +455,36 @@ static void write_decisions(FILE *out, const trace_context *context) {
             json_float(out, context->router_logits[layer][order[9]] -
                        context->router_logits[layer][order[10]]);
         else fputs("null", out);
+        if (layer == 9 && context->layer9_pre_router_valid &&
+            context->layer9_router) {
+            const q38_tensor *router = context->layer9_router;
+            const uint64_t row_bytes = router->bytes / Q38_MOE_EXPERTS;
+            fputs(",\"router_weight_rows\":{\"tensor\":\"", out);
+            fprintf(out, "%.*s", (int)router->name.len, router->name.ptr);
+            fprintf(out, "\",\"type\":%u,\"rows\":%" PRIu64
+                        ",\"cols\":%" PRIu64 ",\"abs_offset\":%" PRIu64
+                        ",\"row_bytes\":%" PRIu64 ",\"used_rows\":[",
+                    router->type, router->dim[0], router->dim[1],
+                    router->abs_offset, row_bytes);
+            for (size_t i = 0; i < context->route_count[9]; ++i) {
+                if (i) fputc(',', out);
+                fprintf(out, "%u", context->routed[9][i]);
+            }
+            fputs("]}", out);
+        }
         fputs("}", out);
     }
     fputs("]", out);
+    if (context->layer9_pre_router_valid) {
+        fputs(",\n\"layer9_pre_router\":{\"layer\":9,\"router_input\":{",
+              out);
+        write_vector_field(out, "values", context->layer9_router_input,
+                           Q38_MOE_HIDDEN);
+        fputs("},\"gr_output\":{", out);
+        write_vector_field(out, "values", context->layer9_gr_output,
+                           Q38_MOE_HIDDEN);
+        fputs("}}", out);
+    }
     if (context->moe_trace_valid) {
         fputs(",\n\"layer2_moe_trace\":{\"router_dtype\":\"", out);
         fputs(context->router_dtype == Q38_FORWARD_BF16 ? "bf16" : "f32",
@@ -441,7 +545,8 @@ static bool trace_complete(const trace_context *context) {
             context->router_count[layer] != Q38_MOE_EXPERTS ||
             !context->moe_trace_by_layer[layer])
             return false;
-    return true;
+    return context->layer9_pre_router_valid &&
+           context->layer9_router_vectors_valid;
 }
 
 int main(int argc, char **argv) {
@@ -485,6 +590,7 @@ int main(int argc, char **argv) {
     diagnostics.route_trace = route_trace;
     diagnostics.router_trace = router_trace;
     diagnostics.moe_trace = moe_trace;
+    diagnostics.pre_router_trace = pre_router_trace;
     diagnostics.qsa_trace = qsa_trace;
     diagnostics.trace_user = &context;
     float *logits = calloc(248320, sizeof(float));

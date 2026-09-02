@@ -54,6 +54,7 @@ int main(int argc, char **argv) {
     diagnostics.route_trace = route_trace;
     diagnostics.router_trace = router_trace;
     diagnostics.moe_trace = moe_trace;
+    diagnostics.pre_router_trace = pre_router_trace;
     diagnostics.qsa_trace = qsa_trace;
     diagnostics.trace_user = &context;
     float *logits = calloc(248320, sizeof(float));

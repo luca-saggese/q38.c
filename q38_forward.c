@@ -850,6 +850,20 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         const q38_forward_dtype router_dtype =
             weights.router->type == 30 ? Q38_FORWARD_BF16
                                         : Q38_FORWARD_F32;
+        if (layer_number == 9 && diagnostics &&
+            diagnostics->pre_router_trace) {
+            const q38_pre_router_trace pre_router = {
+                .router_input = x,
+                .router_input_count = Q38_MOE_HIDDEN,
+                .gr_output = x,
+                .gr_output_count = Q38_MOE_HIDDEN,
+                .router = weights.router,
+            };
+            if (!diagnostics->pre_router_trace(
+                    layer_number, &pre_router, diagnostics->trace_user,
+                    error, error_len))
+                goto fail;
+        }
         float logits_pre_cast[Q38_MOE_EXPERTS];
         float logits_effective[Q38_MOE_EXPERTS];
         float probs_pre_cast[Q38_MOE_EXPERTS];
