@@ -2034,6 +2034,319 @@
             "expert_exact": false,
             "score_close": false
           },
+          "native_top20": [
+            {
+              "id": 68,
+              "value": -3.5
+            },
+            {
+              "id": 506,
+              "value": -3.8125
+            },
+            {
+              "id": 40,
+              "value": -4.125
+            },
+            {
+              "id": 321,
+              "value": -4.1875
+            },
+            {
+              "id": 71,
+              "value": -4.25
+            },
+            {
+              "id": 96,
+              "value": -4.3125
+            },
+            {
+              "id": 368,
+              "value": -4.375
+            },
+            {
+              "id": 73,
+              "value": -4.40625
+            },
+            {
+              "id": 141,
+              "value": -4.4375
+            },
+            {
+              "id": 154,
+              "value": -4.46875
+            },
+            {
+              "id": 442,
+              "value": -4.5
+            },
+            {
+              "id": 376,
+              "value": -4.53125
+            },
+            {
+              "id": 218,
+              "value": -4.59375
+            },
+            {
+              "id": 502,
+              "value": -4.59375
+            },
+            {
+              "id": 325,
+              "value": -4.65625
+            },
+            {
+              "id": 209,
+              "value": -4.6875
+            },
+            {
+              "id": 452,
+              "value": -4.6875
+            },
+            {
+              "id": 466,
+              "value": -4.71875
+            },
+            {
+              "id": 462,
+              "value": -4.75
+            },
+            {
+              "id": 80,
+              "value": -4.78125
+            }
+          ],
+          "reference_top20": [
+            {
+              "rank": 1,
+              "expert": 68,
+              "value": -3.5
+            },
+            {
+              "rank": 2,
+              "expert": 506,
+              "value": -3.828125
+            },
+            {
+              "rank": 3,
+              "expert": 40,
+              "value": -4.03125
+            },
+            {
+              "rank": 4,
+              "expert": 321,
+              "value": -4.1875
+            },
+            {
+              "rank": 5,
+              "expert": 71,
+              "value": -4.28125
+            },
+            {
+              "rank": 6,
+              "expert": 96,
+              "value": -4.3125
+            },
+            {
+              "rank": 7,
+              "expert": 368,
+              "value": -4.375
+            },
+            {
+              "rank": 8,
+              "expert": 154,
+              "value": -4.4375
+            },
+            {
+              "rank": 9,
+              "expert": 73,
+              "value": -4.46875
+            },
+            {
+              "rank": 10,
+              "expert": 442,
+              "value": -4.5
+            },
+            {
+              "rank": 11,
+              "expert": 376,
+              "value": -4.53125
+            },
+            {
+              "rank": 12,
+              "expert": 502,
+              "value": -4.53125
+            },
+            {
+              "rank": 13,
+              "expert": 141,
+              "value": -4.5625
+            },
+            {
+              "rank": 14,
+              "expert": 218,
+              "value": -4.59375
+            },
+            {
+              "rank": 15,
+              "expert": 325,
+              "value": -4.65625
+            },
+            {
+              "rank": 16,
+              "expert": 209,
+              "value": -4.6875
+            },
+            {
+              "rank": 17,
+              "expert": 466,
+              "value": -4.6875
+            },
+            {
+              "rank": 18,
+              "expert": 80,
+              "value": -4.71875
+            },
+            {
+              "rank": 19,
+              "expert": 341,
+              "value": -4.71875
+            },
+            {
+              "rank": 20,
+              "expert": 511,
+              "value": -4.71875
+            }
+          ],
+          "ordering_semantics": "descending effective logit; stable original expert index for ties",
+          "native_tie_groups_top20": [
+            [
+              218,
+              502
+            ],
+            [
+              209,
+              452
+            ]
+          ],
+          "reference_tie_groups_top20": [
+            [
+              376,
+              502
+            ],
+            [
+              209,
+              466
+            ],
+            [
+              80,
+              341,
+              511
+            ]
+          ],
+          "effective_bits_exact": false,
+          "effective_bit_mismatches": [
+            {
+              "expert": 0,
+              "native": 49360,
+              "reference": 49362
+            },
+            {
+              "expert": 1,
+              "native": 49360,
+              "reference": 49361
+            },
+            {
+              "expert": 2,
+              "native": 49404,
+              "reference": 49405
+            },
+            {
+              "expert": 4,
+              "native": 49377,
+              "reference": 49381
+            },
+            {
+              "expert": 5,
+              "native": 49371,
+              "reference": 49372
+            },
+            {
+              "expert": 6,
+              "native": 49366,
+              "reference": 49367
+            },
+            {
+              "expert": 7,
+              "native": 49338,
+              "reference": 49341
+            },
+            {
+              "expert": 8,
+              "native": 49376,
+              "reference": 49377
+            },
+            {
+              "expert": 9,
+              "native": 49378,
+              "reference": 49379
+            },
+            {
+              "expert": 10,
+              "native": 49362,
+              "reference": 49363
+            },
+            {
+              "expert": 11,
+              "native": 49341,
+              "reference": 49343
+            },
+            {
+              "expert": 13,
+              "native": 49376,
+              "reference": 49377
+            },
+            {
+              "expert": 14,
+              "native": 49331,
+              "reference": 49333
+            },
+            {
+              "expert": 15,
+              "native": 49365,
+              "reference": 49366
+            },
+            {
+              "expert": 16,
+              "native": 49385,
+              "reference": 49386
+            },
+            {
+              "expert": 19,
+              "native": 49390,
+              "reference": 49391
+            },
+            {
+              "expert": 20,
+              "native": 49360,
+              "reference": 49359
+            },
+            {
+              "expert": 22,
+              "native": 49327,
+              "reference": 49329
+            },
+            {
+              "expert": 26,
+              "native": 49332,
+              "reference": 49331
+            },
+            {
+              "expert": 27,
+              "native": 49328,
+              "reference": 49330
+            }
+          ],
           "margin_rank10_rank11": {
             "native": 0.03125,
             "reference": 0.03125,

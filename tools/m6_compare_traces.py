@@ -82,6 +82,17 @@ def route_values(route: dict) -> tuple[list[int], list[float]]:
     return experts, weights
 
 
+def tie_groups(top: list[dict]) -> list[list[int]]:
+    groups = []
+    for item in top:
+        if not groups or item.get("value") != groups[-1][1]:
+            groups.append(([item.get("id", item.get("expert"))],
+                           item.get("value")))
+        else:
+            groups[-1][0].append(item.get("id", item.get("expert")))
+    return [ids for ids, _value in groups if len(ids) > 1]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--native", type=Path, required=True)
@@ -273,6 +284,27 @@ def main() -> None:
                     not detail[field]["expert_exact"] or
                     not detail[field]["score_close"]):
                     route_mismatch.append(f"layer:{layer}:{field}")
+        if layer == 9:
+            detail["native_top20"] = native_router_detail.get("top")
+            detail["reference_top20"] = right.get("top20_rank")
+            detail["ordering_semantics"] = (
+                "descending effective logit; stable original expert index for ties"
+            )
+            detail["native_tie_groups_top20"] = tie_groups(
+                native_router_detail.get("top", [])
+            )
+            detail["reference_tie_groups_top20"] = tie_groups(
+                right.get("top20_rank", [])
+            )
+            native_bits = native_router_detail.get("effective_bits")
+            reference_bits = right.get("effective_bits")
+            if native_bits is not None and reference_bits is not None:
+                detail["effective_bits_exact"] = native_bits == reference_bits
+                detail["effective_bit_mismatches"] = [
+                    {"expert": i, "native": a, "reference": b}
+                    for i, (a, b) in enumerate(zip(native_bits, reference_bits))
+                    if a != b
+                ][:20]
         left_margin = left.get("margin_rank10_rank11",
                                native_router_detail.get("margin_rank10_rank11"))
         if left_margin is not None and "margin_rank10_rank11" in right:

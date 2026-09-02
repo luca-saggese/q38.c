@@ -57,6 +57,12 @@ static uint64_t checksum(const float *values, size_t count) {
     return hash;
 }
 
+static uint16_t bf16_bits(float value) {
+    uint32_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    return (uint16_t)(bits >> 16);
+}
+
 static void write_stats(FILE *out, const float *values, size_t count) {
     double sum = 0.0, squares = 0.0;
     float minimum = INFINITY, maximum = -INFINITY, maximum_abs = 0.0f;
@@ -321,6 +327,12 @@ static void write_decisions(FILE *out, const trace_context *context) {
             if (i) fputc(',', out);
             json_float(out, context->router_logits[layer][i]);
         }
+        fputs("],\"effective_bits\":[", out);
+        for (size_t i = 0; i < context->router_count[layer]; ++i) {
+            if (i) fputc(',', out);
+            fprintf(out, "%u",
+                    bf16_bits(context->router_logits[layer][i]));
+        }
         fputs("],\"top\":[", out);
         size_t order[Q38_MOE_EXPERTS];
         for (size_t i = 0; i < context->router_count[layer]; ++i)
@@ -341,8 +353,8 @@ static void write_decisions(FILE *out, const trace_context *context) {
             }
             order[at] = candidate;
         }
-        const size_t top_count = context->router_count[layer] < 15
-            ? context->router_count[layer] : 15;
+        const size_t top_count = context->router_count[layer] < 20
+            ? context->router_count[layer] : 20;
         for (size_t i = 0; i < top_count; ++i) {
             if (i) fputc(',', out);
             fprintf(out, "{\"id\":%zu,\"value\":", order[i]);

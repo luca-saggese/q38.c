@@ -78,6 +78,11 @@ def values(tensor: torch.Tensor) -> list[float]:
     return tensor.detach().float().reshape(-1).cpu().tolist()
 
 
+def bf16_bits(tensor: torch.Tensor) -> list[int]:
+    raw = tensor.detach().float().reshape(-1).cpu().view(torch.int32)
+    return ((raw.to(torch.int64) & 0xffffffff) >> 16).tolist()
+
+
 class GGUF:
     """Small read-only GGUF v3 reader; payloads remain mmap-backed."""
 
@@ -516,12 +521,16 @@ def main() -> None:
                 "layer": layer_index,
                 "hidden_input": values(captured["moe_input"]),
                 "router_logits": values(logits),
+                "effective_bits": bf16_bits(logits),
                 "rank10": {"expert": rank[9], "score": float(logits[rank[9]])},
                 "rank11": {"expert": rank[10], "score": float(logits[rank[10]])},
                 "margin_rank10_rank11": float(logits[rank[9]] - logits[rank[10]]),
                 "top15_rank": [{"rank": i + 1, "expert": e,
                                 "value": float(logits[e])}
                                for i, e in enumerate(rank)],
+                "top20_rank": [{"rank": i + 1, "expert": e,
+                                "value": float(logits[e])}
+                               for i, e in enumerate(order[:20].cpu().tolist())],
                 "experts": router[2].reshape(-1).cpu().tolist(),
                 "weights": router[1].reshape(-1).float().cpu().tolist(),
                 "routed_output": values(captured["routed_output"]),
