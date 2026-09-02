@@ -4,50 +4,45 @@
     "b3046af8a",
     "d25cc5565"
   ],
-  "current_commit": "92cd63a92",
+  "current_commit": "4b903f0c3",
   "status": "pass",
   "diff_review": {
     "tools/m6_stateful_gguf_oracle.py": {
-      "changed_function": "tensor_evidence only",
-      "purpose": "adds compact dtype-preserving shape/metric/finiteness/value evidence",
+      "changed_function": "tensor_evidence plus read-only device_check/state_trace instrumentation",
+      "purpose": "adds compact state metrics/finiteness and device assertions without changing forward/cache/prediction operations",
       "semantic_paths_unchanged": [
         "load_reference",
         "cache_evidence traversal",
         "stats/top_k/compare_stats",
         "model materialization",
-        "forward/cache update calls",
-        "token handling/prediction"
+        "embedding/position/masks",
+        "PLE/GDN/QSA layer calls",
+        "DynamicCache updates",
+        "final norm/LM-head/argmax",
+        "expert cache"
       ]
     },
     "tools/m6_stateful_sequence_oracle.py": {
-      "changed_function": "consume evidence collection only",
-      "purpose": "records per-layer stats and committed_position/cache metadata after each unchanged layer call",
+      "changed_function": "none (restored byte-identical to d25cc5565)",
+      "purpose": "CPU cross-check only",
       "semantic_paths_unchanged": [
-        "embedding and position_ids",
-        "cache.position_ids",
-        "causal/recurrent masks",
-        "PLE ids",
-        "rotary",
-        "layer invocation order/arguments",
-        "DynamicCache sequencing",
-        "final norm/LM-head/argmax",
-        "expert cache"
+        "entire validated script"
       ]
     }
   },
   "oracle_semantics_changed": false,
   "validated_regression": {
-    "baseline": "artifacts/m6/stateful_oracle_gpu_2.json",
-    "instrumented": "artifacts/m6/stateful_sequence_oracle_8_fixed.json",
+    "baseline": "artifacts/m6/stateful_gguf_oracle_probe.json",
+    "instrumented": "artifacts/m6/stateful_gguf_oracle_instrumented_2.json",
     "steps_checked": [
-      0,
-      1
+      "prompt 9419 -> 11",
+      "generated 11 -> 353"
     ],
     "tokens_identical": true,
     "cache_lengths_identical": true,
     "final_norm_checksums_identical": true,
     "logits_checksums_identical": true,
-    "metrics_identical": true
+    "cache_shape_checksum_evidence_identical": true
   },
-  "localization_artifact": "artifacts/m6/state_localization_c13.json"
+  "localization_artifact": "artifacts/m6/state_localization_gpu_c13.json"
 }

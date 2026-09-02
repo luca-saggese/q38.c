@@ -98,6 +98,62 @@ def cache_evidence(cache: DynamicCache) -> dict:
     return result
 
 
+def device_check(
+    device: torch.device,
+    mixer: torch.nn.Module,
+    lm_head: torch.Tensor,
+    rotary: torch.nn.Module,
+    cache: DynamicCache,
+    hidden: torch.Tensor,
+    layer: torch.nn.Module | None = None,
+) -> dict:
+    expected = (
+        f"cuda:{torch.cuda.current_device()}"
+        if device.type == "cuda" and device.index is None
+        else str(device)
+    )
+
+    def module_devices(module: torch.nn.Module) -> list[str]:
+        return sorted({
+            str(value.device)
+            for value in list(module.parameters()) + list(module.buffers())
+        })
+
+    layer_devices = module_devices(layer) if layer is not None else []
+    cache_devices = sorted({
+        str(value.device)
+        for cached_layer in cache.layers
+        for group in (
+            "conv_states", "recurrent_states", "keys", "values",
+            "indexer_keys",
+        )
+        for value in (
+            getattr(cached_layer, group, {}).values()
+            if isinstance(getattr(cached_layer, group, None), dict)
+            else [getattr(cached_layer, group, None)]
+        )
+        if value is not None
+    })
+    result = {
+        "requested": expected,
+        "layer_devices": layer_devices,
+        "mixer_devices": module_devices(mixer),
+        "lm_head_device": str(lm_head.device),
+        "rotary_devices": module_devices(rotary),
+        "cache_devices": cache_devices,
+        "hidden_device": str(hidden.device),
+    }
+    result["status"] = "pass" if (
+        (not layer_devices or layer_devices == [expected])
+        and result["mixer_devices"] == [expected]
+        and result["lm_head_device"] == expected
+        and result["rotary_devices"] in ([], [expected])
+        and (not cache_devices or cache_devices == [expected])
+        and result["hidden_device"] == expected
+    ) else "fail"
+    return result
+
+
 def stats(value: torch.Tensor) -> dict:
     flat = value.detach().float().reshape(-1).cpu()
     finite = torch.isfinite(flat)
@@ -300,6 +356,14 @@ def main() -> None:
                         reader, config, layer_index, device
                     )
                     try:
+                        layer_device_check = device_check(
+                            device, mixer, lm_head, rotary, cache, hidden, layer
+                        )
+                        if layer_device_check["status"] != "pass":
+                            raise RuntimeError(
+                                f"layer {layer_index} device check failed: "
+                                f"{layer_device_check}"
+                            )
                         hidden = layer(
                             hidden,
                             position_embeddings=position_embeddings,
@@ -335,7 +399,20 @@ def main() -> None:
                 "logits": stats(logits),
                 "top": top_k(logits),
                 "cache": cache_evidence(cache),
+                "state_trace": {
+                    "committed_position": position,
+                    "input_token": token,
+                    "cache_seq_length": cache.get_seq_length(),
+                    "device_check": device_check(
+                        device, mixer, lm_head, rotary, cache, hidden
+                    ),
+                },
             }
+            if evidence["state_trace"]["device_check"]["status"] != "pass":
+                raise RuntimeError(
+                    f"state trace device check failed: "
+                    f"{evidence['state_trace']['device_check']}"
+                )
             return next_token, evidence
 
         current = None

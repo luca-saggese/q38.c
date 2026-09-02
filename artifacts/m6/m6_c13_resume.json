@@ -1,74 +1,57 @@
 {
   "format": "q38-m6-c13-resume-v1",
   "gate": "M6-C13",
-  "base_commit": "d25cc5565",
+  "base_commit": "b3046af8a",
   "status": "blocked",
   "execution_order": [
-    "one-token CUDA probe",
-    "CPU/GPU oracle equality for one token",
-    "CPU/GPU oracle equality for two tokens",
-    "existing 4/8/32-token ladder evidence"
+    "validated GPU oracle 1-token regression",
+    "validated GPU oracle 2-token regression",
+    "forced sequence [9419,11,353,2688,264] vs q38 CUDA state localization"
   ],
   "probe": {
-    "artifact": "artifacts/m6/stateful_sequence_oracle_resume_probe.json",
+    "artifact": "artifacts/m6/stateful_gguf_oracle_c13_forced.json",
     "status": "pass",
+    "oracle": "validated GPU m6_stateful_gguf_oracle.py",
     "cuda_device": "NVIDIA GB10",
     "requested_device": "cuda:0",
-    "next_token": 11,
-    "profiling_fields": [
-      "gguf_read_ms",
-      "dequant_ms",
-      "h2d_ms",
-      "official_forward_ms",
-      "cache_update_ms"
-    ],
-    "official_cache_device": "cuda:0",
-    "bounded_expert_cache": {
-      "capacity": 64,
-      "device": "cuda:0"
-    }
+    "device_assertions": "pass"
   },
   "cpu_gpu_equality": {
-    "one_token": {
-      "artifact": "artifacts/m6/oracle_cpu_gpu_comparison_1.json",
+    "one_generated": {
+      "artifact": "artifacts/m6/stateful_gguf_oracle_instrumented_2.json",
       "status": "pass"
     },
-    "two_tokens": {
-      "artifact": "artifacts/m6/oracle_cpu_gpu_comparison_2.json",
+    "two_generated": {
+      "artifact": "artifacts/m6/stateful_gguf_oracle_instrumented_3.json",
       "status": "pass"
     },
-    "numeric_tolerance": 0.0001,
-    "token_and_cache_structure": "exact"
+    "requirement": "instrumented GPU oracle preserves validated shared tokens, final/logit checksums, and cache evidence"
   },
   "ladder": {
-    "1": {
-      "artifact": "artifacts/m6/decode_comparison_1.json",
+    "gpu_oracle_1_generated": {
+      "artifact": "artifacts/m6/stateful_gguf_oracle_instrumented_2.json",
       "status": "pass"
     },
-    "2": {
-      "artifact": "artifacts/m6/decode_comparison_2.json",
+    "gpu_oracle_2_generated": {
+      "artifact": "artifacts/m6/stateful_gguf_oracle_instrumented_3.json",
       "status": "pass"
     },
-    "4": {
-      "artifact": "artifacts/m6/decode_comparison_4.json",
-      "status": "pass"
-    },
-    "8": {
-      "artifact": "artifacts/m6/decode_comparison_8_fixed.json",
+    "forced_prefix_5": {
+      "artifact": "artifacts/m6/state_localization_gpu_c13.json",
       "status": "pass"
     },
     "32": {
       "artifact": "artifacts/m6/decode_gpu_32_fixed.json",
       "status": "blocked",
-      "reason": "native completed; corrected official 32-token oracle unavailable"
+      "reason": "corrected official GPU oracle 32-token report not run"
     }
   },
-  "q38_status": "QSA RMSNorm +1 fix validated; forward/top-k/router/quantization otherwise unchanged",
+  "q38_status": "QSA RMSNorm +1 fix validated; runtime q38/C12 frozen otherwise",
   "fabricated_pass": false,
-  "state_localization": "artifacts/m6/state_localization_c13.json",
+  "state_localization": "artifacts/m6/state_localization_gpu_c13.json",
   "native_comparison": {
     "status": "pass",
     "first_divergence": null
   },
-  "reason": "Direct cache evidence localized the original step-4 blocker to QSA RMSNorm using weight instead of (1 + weight). Corrected q38 matches the corrected official oracle through 8 and native 32 completed; official 32 coverage remains fail-closed blocked."
+  "reason": "Validated GPU oracle semantics were preserved. Forced five-token sequence matches q38 CUDA through step 4 and consumes oracle continuation 1496 -> 2812; per-layer/cache/device localization is recorded. Longer 32-token official coverage remains fail-closed blocked."
 }
