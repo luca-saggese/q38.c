@@ -61,7 +61,7 @@ M6_PYTHON ?= .venv-m6/bin/python
 	m2-c11 m2-acceptance m3-c00 m3-c01 m3-c02 m3-c03 m3-c04 m3-c05 \
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
-	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-c12 m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance m6-gpu-forward m6-gpu-progressive \
+	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-dequant-fixtures m6-c12 m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance m6-gpu-forward m6-gpu-progressive \
 	post-m5-bis post-m5-ter post-m5-supplement
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
@@ -730,6 +730,21 @@ m6-trace-stats:
 	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
 		$(M6_PYTHON) tests/test_m6_quant_reference.py
 
+$(TEST_DIR)/test_m6_gguf_dequant: $(TEST_DIR)/test_m6_gguf_dequant.c \
+		q38_gguf.o q38_quant.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_gguf_dequant.c \
+		q38_gguf.o q38_quant.o -lm
+
+m6-dequant-fixtures: $(TEST_DIR)/test_m6_gguf_dequant
+	@mkdir -p artifacts/m6
+	@./$(TEST_DIR)/test_m6_gguf_dequant \
+		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		artifacts/m6/gguf_dequant_fixtures.json
+	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
+		$(M6_PYTHON) tests/test_m6_gguf_dequant.py \
+		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		artifacts/m6/gguf_dequant_fixtures.json
+
 m6-gpu-forward: $(TEST_DIR)/test_m6_gpu_forward \
 		$(TEST_DIR)/m6_real_forward_gpu
 	@mkdir -p artifacts/m6
@@ -778,7 +793,7 @@ m6-preflight: m6-c11
 		--summary $(M6_PREFLIGHT_SUMMARY)
 	@cat $(M6_PREFLIGHT_SUMMARY)
 
-m6-c12: m6-preflight m6-trace-stats
+m6-c12: m6-preflight m6-trace-stats m6-dequant-fixtures
 	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api \
 		$(TEST_DIR)/m6_real_forward
 	@./$(TEST_DIR)/test_m6_forward_api

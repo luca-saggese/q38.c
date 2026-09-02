@@ -9,6 +9,12 @@ experts.
 M6-C12 keeps the original-checkpoint Transformers comparison as a diagnostic
 artifact (`semantic_comparison.json`). The definitive numeric gate compares the
 native trace with this GGUF reference in `quant_matched_comparison.json`.
+Before the model-level comparison, `m6-dequant-fixtures` reads three real GGUF
+rows (BF16 embedding, Q8_0 PLE projection, and Q2_K routed expert) through the
+q38 decoder and an independent oracle. It fails closed on type, shape, endian,
+row-stride, scale/min packing, decoded values, and raw-byte checksum mismatch;
+the resulting checksums are recorded in
+`artifacts/m6/gguf_dequant_fixtures.json`.
 Routing hard gates begin at layer 3 so the known layer-2 boundary diagnostic
 does not mask the first post-boundary selected-set divergence. Each routed
 layer records the hidden input, all 512 effective router logits, rank 10/11
