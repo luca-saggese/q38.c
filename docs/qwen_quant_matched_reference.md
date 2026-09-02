@@ -60,3 +60,12 @@ initial and final cache state, checkpoint evidence for layers 0, 3, 7, 15, 31,
 and 47, final norm/logit statistics, and the greedy argmax. A missing
 Transformers Qwen4Exp module, cache-shape error, non-finite result, or
 one-shot mismatch is `blocked`/failure rather than a fabricated pass.
+
+`tools/m6_stateful_sequence_oracle.py` is the profiled sequence variant used
+for M6-C13. Invoke it with `python -u` so startup and per-token
+`token_profile` records are unbuffered. Each token reports GGUF read,
+dequantization, host-to-device, official decoder forward, and timed official
+`DynamicCache` mutation milliseconds. `tools/m6_compare_oracles.py` compares
+CPU and CUDA reports for identical token sequences, including logits/final
+norm tolerances and cache shape/state structure; it fails closed if either
+report is incomplete.

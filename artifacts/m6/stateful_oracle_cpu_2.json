@@ -1,0 +1,5284 @@
+{
+  "format": "q38-m6-stateful-sequence-oracle-v2",
+  "reference": "official Transformers Qwen4Exp decoder + official DynamicCache; independent CPU GGUF reader/dequantizer",
+  "native": null,
+  "tokens": [
+    9419,
+    11
+  ],
+  "generated": [
+    353
+  ],
+  "steps": [
+    {
+      "kind": "prompt",
+      "position": 0,
+      "input_token": 9419,
+      "next_token": 11,
+      "prefix_length": 1,
+      "final_norm": {
+        "min": -36.454986572265625,
+        "max": 97.13085174560547,
+        "mean": -0.013009781017899513,
+        "rms": 3.9530649185180664,
+        "max_abs": 97.13085174560547,
+        "finite_count": 2560,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "88de6de26deea1fb9c2c6e00401c520d6c09a622d5552d48f2a1cc65699f3f90",
+        "fixed": [
+          {
+            "index": 0,
+            "value": -0.38497495651245117
+          },
+          {
+            "index": 1,
+            "value": 1.7678169012069702
+          },
+          {
+            "index": 2,
+            "value": 2.330408811569214
+          },
+          {
+            "index": 3,
+            "value": -2.824047565460205
+          }
+        ]
+      },
+      "logits": {
+        "min": -10.74246883392334,
+        "max": 14.423595428466797,
+        "mean": -2.542407751083374,
+        "rms": 3.2237415313720703,
+        "max_abs": 14.423595428466797,
+        "finite_count": 248320,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "de70e18facd7dfffd6a42cff2d31db09242c912a943c98542f3b3b63a21fb859",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 13.389880180358887
+          },
+          {
+            "index": 1,
+            "value": 3.3154640197753906
+          },
+          {
+            "index": 2,
+            "value": 2.409681797027588
+          },
+          {
+            "index": 3,
+            "value": -1.8886080980300903
+          }
+        ]
+      },
+      "top": [
+        {
+          "id": 11,
+          "value": 14.423595428466797
+        },
+        {
+          "id": 0,
+          "value": 13.389880180358887
+        },
+        {
+          "id": 13,
+          "value": 12.681575775146484
+        },
+        {
+          "id": 4858,
+          "value": 12.152276039123535
+        },
+        {
+          "id": 1017,
+          "value": 11.75334358215332
+        },
+        {
+          "id": 1167,
+          "value": 11.282550811767578
+        },
+        {
+          "id": 660,
+          "value": 10.822534561157227
+        },
+        {
+          "id": 321,
+          "value": 10.239566802978516
+        },
+        {
+          "id": 310,
+          "value": 9.84068775177002
+        },
+        {
+          "id": 494,
+          "value": 9.817432403564453
+        }
+      ],
+      "cache_seq_length": 1,
+      "timing_ms": {
+        "gguf_read_ms": 146.96,
+        "dequant_ms": 199518.398,
+        "h2d_ms": 0.0,
+        "official_forward_ms": 318477.758,
+        "cache_update_ms": 52.821,
+        "cache_update_calls": 98,
+        "wall_ms": 318678.938,
+        "cache_update_scope": "timed official DynamicCache update/update_conv_state/update_recurrent_state/update_indexer calls"
+      },
+      "device_check": {
+        "requested": "cpu",
+        "cuda_available": true,
+        "cuda_device": null,
+        "layer_parameter_devices": [
+          "cpu"
+        ],
+        "mixer_devices": [
+          "cpu"
+        ],
+        "lm_head_device": "cpu",
+        "rotary_devices": [
+          "cpu"
+        ],
+        "cache_devices": [
+          "cpu"
+        ],
+        "hidden_device": "cpu",
+        "status": "pass"
+      },
+      "step": 0
+    },
+    {
+      "kind": "generated",
+      "position": 1,
+      "input_token": 11,
+      "next_token": 353,
+      "prefix_length": 2,
+      "final_norm": {
+        "min": -36.54261016845703,
+        "max": 144.19345092773438,
+        "mean": 0.020248841494321823,
+        "rms": 4.440581798553467,
+        "max_abs": 144.19345092773438,
+        "finite_count": 2560,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "f184c63b2e255f9614db753f44b866fd66883625be3cc549bed1a671e536de05",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 0.503536581993103
+          },
+          {
+            "index": 1,
+            "value": 3.0432920455932617
+          },
+          {
+            "index": 2,
+            "value": 2.6167173385620117
+          },
+          {
+            "index": 3,
+            "value": -2.9225828647613525
+          }
+        ]
+      },
+      "logits": {
+        "min": -10.430848121643066,
+        "max": 14.614591598510742,
+        "mean": -1.527084469795227,
+        "rms": 2.6167550086975098,
+        "max_abs": 14.614591598510742,
+        "finite_count": 248320,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "4f0d729ac3ed18b8ce564a526b12b9fe28d8bc0ead122ad3ea235fb73bd27c85",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 7.253066539764404
+          },
+          {
+            "index": 1,
+            "value": 0.9641990661621094
+          },
+          {
+            "index": 2,
+            "value": 1.6466540098190308
+          },
+          {
+            "index": 3,
+            "value": -4.738302230834961
+          }
+        ]
+      },
+      "top": [
+        {
+          "id": 353,
+          "value": 14.614591598510742
+        },
+        {
+          "id": 4858,
+          "value": 14.147971153259277
+        },
+        {
+          "id": 271,
+          "value": 13.942055702209473
+        },
+        {
+          "id": 198,
+          "value": 12.885985374450684
+        },
+        {
+          "id": 1092,
+          "value": 12.66054630279541
+        },
+        {
+          "id": 6040,
+          "value": 12.534682273864746
+        },
+        {
+          "id": 628,
+          "value": 12.501447677612305
+        },
+        {
+          "id": 4338,
+          "value": 12.378114700317383
+        },
+        {
+          "id": 821,
+          "value": 12.301806449890137
+        },
+        {
+          "id": 12004,
+          "value": 12.264838218688965
+        }
+      ],
+      "cache_seq_length": 2,
+      "timing_ms": {
+        "gguf_read_ms": 147.123,
+        "dequant_ms": 195045.439,
+        "h2d_ms": 0.0,
+        "official_forward_ms": 312429.19,
+        "cache_update_ms": 4.484,
+        "cache_update_calls": 62,
+        "wall_ms": 312542.969,
+        "cache_update_scope": "timed official DynamicCache update/update_conv_state/update_recurrent_state/update_indexer calls"
+      },
+      "device_check": {
+        "requested": "cpu",
+        "cuda_available": true,
+        "cuda_device": null,
+        "layer_parameter_devices": [
+          "cpu"
+        ],
+        "mixer_devices": [
+          "cpu"
+        ],
+        "lm_head_device": "cpu",
+        "rotary_devices": [
+          "cpu"
+        ],
+        "cache_devices": [
+          "cpu"
+        ],
+        "hidden_device": "cpu",
+        "status": "pass"
+      },
+      "step": 1
+    }
+  ],
+  "checkpoints": [
+    {
+      "kind": "prompt",
+      "layer": 0,
+      "position": 0,
+      "input_token": 9419,
+      "stats": {
+        "min": -0.3679865598678589,
+        "max": 0.4769669473171234,
+        "mean": 0.000244514289079234,
+        "rms": 0.02656465955078602,
+        "max_abs": 0.4769669473171234,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "8b81024a3b051ccd5deb1c502744fe0a4ffd7dead677545303209a6dfe4d90b6",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 0.005289937369525433
+          },
+          {
+            "index": 1,
+            "value": 0.005480626132339239
+          },
+          {
+            "index": 2,
+            "value": -0.0060340119525790215
+          },
+          {
+            "index": 3,
+            "value": 0.008947978727519512
+          }
+        ]
+      }
+    },
+    {
+      "kind": "prompt",
+      "layer": 3,
+      "position": 0,
+      "input_token": 9419,
+      "stats": {
+        "min": -0.522652804851532,
+        "max": 0.40117812156677246,
+        "mean": 0.000301456602755934,
+        "rms": 0.031449250876903534,
+        "max_abs": 0.522652804851532,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "f5dc9fddfab9335795b477184cd2b19b931b4dcff03260f59a0ea2587b97cf08",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 0.006232741288840771
+          },
+          {
+            "index": 1,
+            "value": 0.007407377474009991
+          },
+          {
+            "index": 2,
+            "value": -0.005180369131267071
+          },
+          {
+            "index": 3,
+            "value": 0.005660784896463156
+          }
+        ]
+      }
+    },
+    {
+      "kind": "prompt",
+      "layer": 7,
+      "position": 0,
+      "input_token": 9419,
+      "stats": {
+        "min": -3.0135343074798584,
+        "max": 0.8601494431495667,
+        "mean": -0.000918614852707833,
+        "rms": 0.06110774725675583,
+        "max_abs": 3.0135343074798584,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "e8be0f07ecab0f735b4fc003b1cf9e7b83c5e3d2eee82f25bdaa2979a8c7bf97",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 0.043339576572179794
+          },
+          {
+            "index": 1,
+            "value": -0.0332656055688858
+          },
+          {
+            "index": 2,
+            "value": 0.0055769868195056915
+          },
+          {
+            "index": 3,
+            "value": 0.032930850982666016
+          }
+        ]
+      }
+    },
+    {
+      "kind": "prompt",
+      "layer": 15,
+      "position": 0,
+      "input_token": 9419,
+      "stats": {
+        "min": -2.9738543033599854,
+        "max": 1.012352705001831,
+        "mean": -0.0017653923714533448,
+        "rms": 0.07428063452243805,
+        "max_abs": 2.9738543033599854,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "194e392473dae393b014bd0f7151212d6455a8c9ec0d3a7fe23687b7ab56240f",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 0.06553792953491211
+          },
+          {
+            "index": 1,
+            "value": -0.04548138380050659
+          },
+          {
+            "index": 2,
+            "value": -0.0029118573293089867
+          },
+          {
+            "index": 3,
+            "value": 0.06016312539577484
+          }
+        ]
+      }
+    },
+    {
+      "kind": "prompt",
+      "layer": 31,
+      "position": 0,
+      "input_token": 9419,
+      "stats": {
+        "min": -4.131943225860596,
+        "max": 1.4060996770858765,
+        "mean": -0.002173983259126544,
+        "rms": 0.11268145591020584,
+        "max_abs": 4.131943225860596,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "d4c1a202cf7e1c7140c550f7f2e029cb245bd023bd6221465af729f8906ff392",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 0.07924576103687286
+          },
+          {
+            "index": 1,
+            "value": -0.16215652227401733
+          },
+          {
+            "index": 2,
+            "value": 0.024550238624215126
+          },
+          {
+            "index": 3,
+            "value": 0.08108584582805634
+          }
+        ]
+      }
+    },
+    {
+      "kind": "prompt",
+      "layer": 47,
+      "position": 0,
+      "input_token": 9419,
+      "stats": {
+        "min": -9.25745964050293,
+        "max": 10.596251487731934,
+        "mean": 0.002103786449879408,
+        "rms": 0.3797515332698822,
+        "max_abs": 10.596251487731934,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "f06cfa4d478d19c9467b01e9cad83237380126d61ec920577757cf4b90578f78",
+        "fixed": [
+          {
+            "index": 0,
+            "value": -0.0022370070219039917
+          },
+          {
+            "index": 1,
+            "value": 0.16345205903053284
+          },
+          {
+            "index": 2,
+            "value": 0.29187583923339844
+          },
+          {
+            "index": 3,
+            "value": -0.3336416780948639
+          }
+        ]
+      }
+    },
+    {
+      "kind": "generated",
+      "layer": 0,
+      "position": 1,
+      "input_token": 11,
+      "stats": {
+        "min": -0.09886301308870316,
+        "max": 0.18044322729110718,
+        "mean": 0.00026615988463163376,
+        "rms": 0.0115822060033679,
+        "max_abs": 0.18044322729110718,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "068a33494d8edc7de21a9c3da1ebfcc52cdb77727d7c2e203c521f359336c356",
+        "fixed": [
+          {
+            "index": 0,
+            "value": -0.00037342283758334816
+          },
+          {
+            "index": 1,
+            "value": 0.0009241038933396339
+          },
+          {
+            "index": 2,
+            "value": -0.002871067961677909
+          },
+          {
+            "index": 3,
+            "value": -0.0008682814659550786
+          }
+        ]
+      }
+    },
+    {
+      "kind": "generated",
+      "layer": 3,
+      "position": 1,
+      "input_token": 11,
+      "stats": {
+        "min": -0.28391891717910767,
+        "max": 0.17850132286548615,
+        "mean": 0.0002873479970730841,
+        "rms": 0.015517538413405418,
+        "max_abs": 0.28391891717910767,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "a5194ebe5db91b6cc289a2f27bcfc37c84873de74420b677ace504f08cac62ed",
+        "fixed": [
+          {
+            "index": 0,
+            "value": -0.0010027546668425202
+          },
+          {
+            "index": 1,
+            "value": 0.0029342162888497114
+          },
+          {
+            "index": 2,
+            "value": -0.003032886190339923
+          },
+          {
+            "index": 3,
+            "value": -0.0034343735314905643
+          }
+        ]
+      }
+    },
+    {
+      "kind": "generated",
+      "layer": 7,
+      "position": 1,
+      "input_token": 11,
+      "stats": {
+        "min": -0.2850582003593445,
+        "max": 0.21944841742515564,
+        "mean": 0.00040106699452735484,
+        "rms": 0.02321864850819111,
+        "max_abs": 0.2850582003593445,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "c68388a14ad0189a7361925993f86e87029bc40429064ab55d5a5f772a446400",
+        "fixed": [
+          {
+            "index": 0,
+            "value": -0.0032185204327106476
+          },
+          {
+            "index": 1,
+            "value": 0.0010370078962296247
+          },
+          {
+            "index": 2,
+            "value": 0.0007767057977616787
+          },
+          {
+            "index": 3,
+            "value": -0.0007376659195870161
+          }
+        ]
+      }
+    },
+    {
+      "kind": "generated",
+      "layer": 15,
+      "position": 1,
+      "input_token": 11,
+      "stats": {
+        "min": -0.2840486466884613,
+        "max": 0.2479935884475708,
+        "mean": 0.0001760285085765645,
+        "rms": 0.026171350851655006,
+        "max_abs": 0.2840486466884613,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "2485e015a91dfa243d7393ffc74f2097dc5df00af0107a6d8d0f5ee065ed2ba9",
+        "fixed": [
+          {
+            "index": 0,
+            "value": -0.004439102951437235
+          },
+          {
+            "index": 1,
+            "value": 0.006478818599134684
+          },
+          {
+            "index": 2,
+            "value": -0.036698851734399796
+          },
+          {
+            "index": 3,
+            "value": 0.0024675556924194098
+          }
+        ]
+      }
+    },
+    {
+      "kind": "generated",
+      "layer": 31,
+      "position": 1,
+      "input_token": 11,
+      "stats": {
+        "min": -0.6253060102462769,
+        "max": 0.3345433473587036,
+        "mean": 0.0007609816966578364,
+        "rms": 0.044541262090206146,
+        "max_abs": 0.6253060102462769,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "158aea322ab0ea7bd78a04c2bb5edde8daf6c281f21501d18f253a7bdfd941cd",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 0.0026088356971740723
+          },
+          {
+            "index": 1,
+            "value": -0.01603788509964943
+          },
+          {
+            "index": 2,
+            "value": -0.04916773736476898
+          },
+          {
+            "index": 3,
+            "value": -0.010068949311971664
+          }
+        ]
+      }
+    },
+    {
+      "kind": "generated",
+      "layer": 47,
+      "position": 1,
+      "input_token": 11,
+      "stats": {
+        "min": -3.9924426078796387,
+        "max": 11.633644104003906,
+        "mean": 0.0032539006788283587,
+        "rms": 0.4153912365436554,
+        "max_abs": 11.633644104003906,
+        "finite_count": 10240,
+        "nan_count": 0,
+        "inf_count": 0,
+        "checksum": "b04c856d15a80dad2667ff0965d20a9c1ecbac6916f63b7098b52069a7f704e3",
+        "fixed": [
+          {
+            "index": 0,
+            "value": 0.22389954328536987
+          },
+          {
+            "index": 1,
+            "value": 0.38780832290649414
+          },
+          {
+            "index": 2,
+            "value": 0.4924929738044739
+          },
+          {
+            "index": 3,
+            "value": -0.274305522441864
+          }
+        ]
+      }
+    }
+  ],
+  "fresh_comparison": {
+    "status": "missing",
+    "reason": "one-shot artifact absent"
+  },
+  "initial_cache": {
+    "position_ids": {
+      "present": false
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 1,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 2,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 3,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 4,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 5,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 6,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 7,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 8,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 9,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 10,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 11,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 12,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 13,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 14,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 15,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 16,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 17,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 18,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 19,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 20,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 21,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 22,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 23,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 24,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 25,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 26,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 27,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 28,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 29,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 30,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 31,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 32,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 33,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 34,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 35,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 36,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 37,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 38,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 39,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 40,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 41,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 42,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 43,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 44,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 45,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 46,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": false,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": false
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 47,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": false,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      }
+    ]
+  },
+  "final_cache": {
+    "position_ids": {
+      "present": true,
+      "shape": [
+        3,
+        1,
+        2
+      ],
+      "dtype": "torch.int64",
+      "device": "cpu",
+      "sha256": "e69c98fe8340a371108a1e671dbb88d247f4057fdbc3f0811504a3d3f67ac8ea",
+      "finite": true
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "a9388d8ebf4ef0162daa046fba916b5d81a6f66be46076959d0d36e36bd3ffa2",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "f3d22b8c209d0b4373f29baf31c40f3591e477f01304ce4847b70457831ab6a6",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 1,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": true,
+          "2": true
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "76d86e2ba9abea15ab31080b8b7ef4e8ebee1ad6854e8a07776a701bf1be9544",
+            "finite": true
+          },
+          "1": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              9
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "6eb1234007e0fb337a38ed7f9ed7a9e21041992e5b27934d035d052aacf09d0e",
+            "finite": true
+          },
+          "2": {
+            "present": true,
+            "shape": [
+              1,
+              2
+            ],
+            "dtype": "torch.int64",
+            "device": "cpu",
+            "sha256": "4dd413e311ac12010c52e604d5d6c4247dcae589440ae46b1a8724368b5ea6a2",
+            "finite": true
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "215fa6fecc320bfa6e8858fffae5bee77b6bb61c2dbebfb656edad8f4cddfdab",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 2,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "47d6ae8ff5d5e3f444267caa126677b0540eca2915edcaac67d229a6b24407e2",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "2093de7ccb6083c3e052beaef9258b826ee6a9a53b2c1803309f19b3f8e7c123",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 3,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "80c889081a24d53a43b670de0eeed167b41e79e47e3a1e865ecd27dce291b22c",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "e1f62fa300ad86dc2e6cdbf0ab135760407d981b2db8fc94e711c6c64ea2de36",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "37ef92b402c6127fc9b45e62dfec50e85927a1db2a670ee75a5add955fcc1b72",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 4,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "dc1ab3899f8e6778455b328c792596085be4bb3712030351e54777a022a65be4",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "e9c4c28136b8561bdbc55e38e7b469dbaaf511416f2b0981cc67eac9be466135",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 5,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "425791fe973b4811a2b086e4e2a8bf97fa0699c7908c9acdabaf2f8fd2437eea",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "ea8772662caeac3a2eafd7982bf762de35f9cd7393bffacfae58c021731f6411",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 6,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "06dbe51f048ddb86910c36d5118a0d16a693d80924ab1c3b3489c08706f5ff58",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "02d7951385f3a5a6cc3d2657969ffecee9e9fa3cf7dc8a81084e962336df555e",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 7,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "bb004f1bcd87f4a114d65a81434103906cba3f6dcb288d64386b25608dd230d0",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "5a85cc441d1bbb6464e213ddcbc126d445e2a6cacf05b8f94282796bbf6efa05",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "5bdc72e2b6e2bdc69332fcda6a8ee1748c6dc2a290a2946a47d1f06da826b9be",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 8,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "38c9a176e536d4e40bc96054cccfee87c94a5328fdf026e112db62394fdcda67",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "2ad10285e669719f5bba50875eda784e00b3f1dd77a51362b3c9e45a0649a572",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 9,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "5aaf4f4371517a53e5de3cea16ba6b69cba4266c10b80b239603ceec40e1a819",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "89f9eddf9dd54cc6452ae68021a0b3aa0759869d7adaa6d2429fd2a0125b7449",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 10,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "1e3f750a968c892f546a419cd32240b83ec3d98b42fd6aef3355b507cd106755",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "e1cd61cdda557b09bd459cb7f6e85a762d33057052013c8ae293283c63e192a6",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 11,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "2b098076f06078f0ae76aa1986dac8d3c7a9c96a54649869e3ac690051715de9",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "26043a0e632dd4cd6f8a93b3b3cfd9754567880efa1135e53370ce066166105f",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "e7e4035ca01280ae3fc175f6f17cd996b30b046de6b70771fe55fc53de9406bf",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 12,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "672b4bb098962117f72f2767000627af02a6ebab8d649435fc9dae36fe93b765",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "6e8d77add638a7b25951d9b9db6ab79a1635820e9b9e062d8c72bd4b2ec7d011",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 13,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "c65ac846e15dfcbb71ab77c080ba2be1c6f36020b0aaa0a72d31420c8d8ac27b",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "9b0abb574c10058180db4183a4476751c99a87f8b78eeee156df9bc23e33ac64",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 14,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "73070e7bf8d021d4a595da73528a3327cfdac78170113be41e9fd7731e9df755",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "7dd33ed7ed0953f4403bf7e128ac6c58ae383cba0f9f8e07ca2a0ccb33377b34",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 15,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "551e177ab23366dbcd51d576e08fd6d391f56e76f6da828bdd1899f15b29187f",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "8afc4f5d4c4a0cf161bc6419f1b8e36fa328cc1658d77822a329720bbd21a674",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "8799de6a174ed1fc3e7112cfe1d4faf888cef8e323a6ff89e072ea86612afe61",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 16,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "62e41de5cca0395b690a9d833466b24086a5f4cde1bf78d31820c213f8f50b73",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "bcd1eb95f9350032f44d16e6b6652b3bb9d11e22ad70de49dae159eed3a86f2b",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 17,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "1096238c56583f66da8c2fea66ca4728eb41a43e4e8821737c11f1fbc2b144c6",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "540c79aed8f24c83fedc5e4341d928d2b5fdc2a161d914f3d7af473ca9c6a9fc",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 18,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "129d021b8b086ad8e721d4269162c511bc7d3f28432472a472b52b6b17be5523",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "0068d4927fc274cb8975d805c02b6d71a9aaa4ee4c4b4137345947391704498e",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 19,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "10bf39122e2058bd8d059279e8183f5a0f00621ba90f266c6907704ff5e0f100",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "9cc1b813921651a355c86a785343aae326b75f725ab02b3c74007fdd37ba92a0",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "f93f0590a4e22a786fc62bb060830186c3f60238186ad6d75cb78bf9c7770c2e",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 20,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "6b6e0eba4f84cef0fd6f81fd37a07bf03444a8aa3fd0f6168f44f0fd650097a0",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "25e2c5f92578f596559c3c0aefae21fc715f0089025ab10a00ba8be1ed031e1e",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 21,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "d9967725bc8fb805bd7de63f0c3af640708fb1a816a5b9ac7dbec0d7ac38a47b",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "c5a365413a3decc696f55df23954d7613e033eb9f7631248842b2f4f57c34878",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 22,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "04e0382fa93e36dcf0915b96e7467336180efcda8119b65b5b854a01c39d03ab",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "2a9dc94d06f6fada7d879b44e34e2df47e84fe5d7b2c3e31c3672aa2d6403a78",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 23,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "32bb64f6ef0aba4082448df0930d65db06eedb81fd6d46069e53c312f976e6f7",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "fc8297bc75711d8cda4cc898df1866bdec0653691dd8c6419aa39f8d49bc1795",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "084bd3fb606cc590762c130c4d180d55be5c3d67baba21020b1f540a8ff989eb",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 24,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "0a9d8b4d289f4e9a0e7531caa99775cf95f2c942e93fd2d5cde2c273d9fe6ce9",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "0a29fb38a5f4c41b6e72b0b3fe7e8681cda0d9d75d9525a864d785ed760ad6d9",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 25,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "8ca6ae8957a71d129fb1e9ee70af187d1408aa2a7007217fffc52d1865d0fc6a",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "292ff1626070028bdb21145a011b5c52d1d19313d15b8c1edfc67a59581f29f3",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 26,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "1c36d7a5a83ab7c2fd45421e1490292f50f393b632e2f4d76b3da3b260d851dc",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "cd1e1ce63c458326bbe72b077997cdbf1e9634615f34a1d0e7e4ae43d0831570",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 27,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "ce1997173aec02c02ced59a32954ac3bf96703bdc4094dacf8ef76efe1beb700",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "9c67e8133353507c6ccd1e994352fd1d6f2be44d64fff94454b9eebf0112a280",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "d716ff784246348ad2549f0bc5649797a4ccb7d9740baee4fe562e57702b646b",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 28,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "4a086c6a88074666a74cc64ffc92a49db2a5828876a5493a04c84b007c9c4ccd",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "0814e1f0a9cc5eb6b63e2fe47e4ab92da81a3a7b0bf63be48365bab1112fe69f",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 29,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "c4afd97af4fcf2d6046b3266002f77af4ee93235a83e14b713f0c0439b80d60a",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "435d084aa3bf2ed535fbfc996108e598fe0b15ae7b6e409735d8cded02b23801",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 30,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "984e179aec14cacffb9ebf44320a2ef3f68054db201a507b3a6e999f145681ed",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "5b1b95e2136df30e0495f53ea9d52e050c9a4a9d4d91eba93e7cb9e4ec583b8d",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 31,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "6f20207843c23939bf6e8effc327e2f808ad860d1b7223d9c617168854229c83",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "8e184085f90ae68d8e90db38d547af2a744b94e8dde82cc75d5cfa5c4cd3350f",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "a16e791dfa9a128e395031b18b87f9fb6b93b0d59526231a3b2310399d83af42",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 32,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "563324b1d0a0c5800b4c4478892a11be3b44c4ce48e5e3d0efac0b81a8fda65a",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "cf923ce3b9124d39022c98f58a6f40e5a107e9fe1dccf9100d2e6944930b5ef1",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 33,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "0d841e7c6e0f549dcf40b39635d82b37a1f31262fafe23474638c75aaff2f775",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "6b58d1334630e9eb2ae190832f1ae988d6ddac9f93cef8db83f7a8829ec915c1",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 34,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "5feff67541b2ab9dd9e129d5b52afa92d403e84af9c7f4e969b40450f35b23dc",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "0b2b78be99f26856665017d9e33e1b225f4498a782bf07db6e544d4b1ebff7c9",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 35,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "238213d2057bcd4645b7c5f4dd47d6f2082e92d8291de241d3195607a3acc31d",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "6731aeafad3c66bebf4377e2a831ebe1f8d2d30dcca633e07281b83a01cbcab7",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "ec8913bc8001494ee9b1874c35e3afdbc604467d7b6141883ac2a35fb600775a",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 36,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "2c398a68c8060b5ad9d4d5048a57da90bae5d6b314c45244df3307e714d6bd8f",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "1f2ff3919636e2975e4885c570d1c22e1c311ebfea07120be96bbacec439da6b",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 37,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "e77ae7a6061ba859b1e9c12c5628ccdacf489561beb5784c45396505f2638b9f",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "04ddc44bbe1e0f2aebe2b0e5a812bd621d7ab7ecfefc410dc63acc0b685667af",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 38,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "a3208941a5f42ffcd5418d4e55897a5c25a8116e3ac37371d7e78a79c8884020",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "cc509d862439314285e2f6b18a309d9895fa9e01a28abda4cc66d2e8c32e632d",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 39,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "eb04f2cb124297438a84f623f950241a868c52cb70570bd5c7364e95eb672cda",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "ae02a3f115b260ab43d4e669d165ac638a055fa4e81895331eeacb842b9f5e19",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "1db8b7d33072996cd2c5023e9fa6e7b0aa00e599b48765bfb7c055da0c573adf",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 40,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "4ff681b977ccdf339779141957b160fcc2ad0d8e12fb5f3a2d270a2da2a55bf6",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "8b6f0da5a4c56ddc3fa353c5ea13fdf7efd193d34f24eea0f02fe697d80dd05c",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 41,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "da14045985e1be8c66182da96a829645ab2976616f44c77b1b6f859d242a583e",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "0519e1b9c87bc6a2e77b51f9ebfe39cc47b5875b2be31325ff22fb6ef3566b86",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 42,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "503c2c05209ec6c02ac6b324ce294545cabe930107e09ccecb76c9c106dcb173",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "49cc678e12725494f9cb7020b8c51eb2a0007a5bbe022e16d5825d04bc8d1121",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 43,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "d232c4a16fad18fb86485a504da3639db00a993440c8198d4822b3a23d1deb26",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "937a018470d91f09cc5fa667242706b77498ed047d3f57c1ac2fdaa50982192a",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "f97ed3a96879be687b0558ef89ae2b644890cc01d50ba4f5402f2b8525c05a48",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      },
+      {
+        "layer": 44,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "869d6da2ca4e3845f5a9e518aa1b4b91d39e7afac4e3bbde803164b08dee64a2",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "8c076a2c9a4eaebfdf72ac314cabcc70490527ffce19d464ced76632289df54b",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 45,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "7dda20a451f4dea6f12f39b25dff461d1a01d0a5591baf694672ee6018e894d7",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "f343286e019d8d21f8de109d82d5dcdad03b8c74b1c3c0286c773521afc4553c",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 46,
+        "type": "LinearAttentionLayer",
+        "is_initialized": false,
+        "has_previous_state": {
+          "0": true,
+          "1": false,
+          "2": false
+        },
+        "conv_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              10240,
+              4
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "8c2700c5cc5c0695340e283c21b034a7ac915fed21b3d10889dab2d78011fade",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "recurrent_states": {
+          "0": {
+            "present": true,
+            "shape": [
+              1,
+              48,
+              128,
+              128
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+            "sha256": "c81b205611ef7560a15ce9297b4c9a17139a4e701d6989c51a33773b88d7714c",
+            "finite": true
+          },
+          "1": {
+            "present": false
+          },
+          "2": {
+            "present": false
+          }
+        },
+        "keys": {
+          "present": false
+        },
+        "values": {
+          "present": false
+        },
+        "indexer_keys": {
+          "present": false
+        },
+        "is_indexer_initialized": false
+      },
+      {
+        "layer": 47,
+        "type": "DynamicIndexedLayer",
+        "is_initialized": true,
+        "has_previous_state": {},
+        "conv_states": {},
+        "recurrent_states": {},
+        "keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "abc75db90d32692a648e8fa4cd4a382ca040ece88e8080eb817bc80a7d73ff45",
+          "finite": true
+        },
+        "values": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            2,
+            256
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "570982aee0940e305d2f837c7129e238cf8ed17532ed1096b35b301e11304c41",
+          "finite": true
+        },
+        "indexer_keys": {
+          "present": true,
+          "shape": [
+            1,
+            2,
+            128
+          ],
+          "dtype": "torch.float32",
+          "device": "cpu",
+          "sha256": "2fb9ab9d461c786c91b811bc9a82df057fba17c8633c12234f789f307fced6e2",
+          "finite": true
+        },
+        "is_indexer_initialized": true
+      }
+    ]
+  },
+  "expert_cache": {
+    "capacity": 64,
+    "entries": 64,
+    "hits": 0,
+    "misses": 1920,
+    "evictions": 1856,
+    "devices": [
+      "cpu"
+    ]
+  },
+  "setup_profile_ms": {
+    "gguf_read_ms": 1372.6075006707106,
+    "dequant_ms": 3730.436124285916,
+    "h2d_ms": 0.0
+  },
+  "device_check": {
+    "requested": "cpu",
+    "cuda_available": true,
+    "cuda_device": null,
+    "layer_parameter_devices": [
+      "cpu"
+    ],
+    "mixer_devices": [
+      "cpu"
+    ],
+    "lm_head_device": "cpu",
+    "rotary_devices": [
+      "cpu"
+    ],
+    "cache_devices": [
+      "cpu"
+    ],
+    "hidden_device": "cpu",
+    "status": "pass"
+  },
+  "state_model": "official DynamicCache; all non-expert layer weights and shared/router/norm/GDN/QSA/LM-head tensors resident on the requested device; bounded routed-expert CUDA LRU",
+  "status": "pass",
+  "reason": null
+}

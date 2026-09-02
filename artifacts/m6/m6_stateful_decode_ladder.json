@@ -1,0 +1,38 @@
+{
+  "format": "q38-m6-stateful-decode-ladder-v1",
+  "gate": "M6-C13",
+  "status": "blocked",
+  "native_reports": {
+    "2": "artifacts/m6/decode_gpu_2.json",
+    "4": "artifacts/m6/decode_gpu_4.json",
+    "8": "artifacts/m6/decode_gpu_8.json",
+    "32": "artifacts/m6/decode_gpu_32.json"
+  },
+  "official_oracle_reports": {
+    "2": "artifacts/m6/stateful_sequence_oracle_2.json",
+    "4": "artifacts/m6/stateful_sequence_oracle_4.json",
+    "8": "artifacts/m6/stateful_sequence_oracle_8.json",
+    "32": "artifacts/m6/stateful_sequence_oracle_32.json"
+  },
+  "comparisons": {
+    "2": "artifacts/m6/decode_comparison_2.json",
+    "4": "artifacts/m6/decode_comparison_4.json",
+    "8": "artifacts/m6/decode_comparison_8.json",
+    "32": "artifacts/m6/decode_comparison_32.json"
+  },
+  "seed_state": "artifacts/m6/m6_decode_seed_state.json",
+  "results": {
+    "2": "pass",
+    "4": "fail",
+    "8": "fail",
+    "32": "blocked"
+  },
+  "first_divergence": {
+    "count": 4,
+    "step": 4,
+    "native_next_token": 47308,
+    "oracle_next_token": 1496,
+    "reason": "step 4 token mismatch: native 47308 vs oracle 1496"
+  },
+  "reason": "Official cache oracle agrees through native steps 0-3; first concrete divergence is at step 4 (native 47308 vs official oracle 1496). The 32-token official prefill terminated without a report and is fail-closed blocked."
+}

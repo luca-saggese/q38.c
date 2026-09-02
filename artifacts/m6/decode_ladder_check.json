@@ -1,0 +1,43 @@
+{
+  "format": "q38-m6-decode-ladder-check-v1",
+  "reports": [
+    "artifacts/m6/decode_gpu_1.json",
+    "artifacts/m6/decode_gpu_2.json",
+    "artifacts/m6/decode_gpu_4.json",
+    "artifacts/m6/decode_gpu_8.json"
+  ],
+  "checks": [
+    {
+      "report": "artifacts/m6/decode_gpu_2.json",
+      "step": 0,
+      "status": "pass"
+    },
+    {
+      "report": "artifacts/m6/decode_gpu_2.json",
+      "step": 1,
+      "status": "pass"
+    },
+    {
+      "report": "artifacts/m6/decode_gpu_4.json",
+      "step": 0,
+      "status": "pass"
+    },
+    {
+      "report": "artifacts/m6/decode_gpu_4.json",
+      "step": 1,
+      "status": "pass"
+    },
+    {
+      "report": "artifacts/m6/decode_gpu_8.json",
+      "step": 0,
+      "status": "pass"
+    },
+    {
+      "report": "artifacts/m6/decode_gpu_8.json",
+      "step": 1,
+      "status": "pass"
+    }
+  ],
+  "status": "pass",
+  "reason": null
+}

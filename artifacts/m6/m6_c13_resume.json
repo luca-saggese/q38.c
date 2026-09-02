@@ -1,0 +1,69 @@
+{
+  "format": "q38-m6-c13-resume-v1",
+  "gate": "M6-C13",
+  "base_commit": "b3046af8a",
+  "status": "blocked",
+  "execution_order": [
+    "one-token CUDA probe",
+    "CPU/GPU oracle equality for one token",
+    "CPU/GPU oracle equality for two tokens",
+    "existing 4/8/32-token ladder evidence"
+  ],
+  "probe": {
+    "artifact": "artifacts/m6/stateful_sequence_oracle_resume_probe.json",
+    "status": "pass",
+    "cuda_device": "NVIDIA GB10",
+    "requested_device": "cuda:0",
+    "next_token": 11,
+    "profiling_fields": [
+      "gguf_read_ms",
+      "dequant_ms",
+      "h2d_ms",
+      "official_forward_ms",
+      "cache_update_ms"
+    ],
+    "official_cache_device": "cuda:0",
+    "bounded_expert_cache": {
+      "capacity": 64,
+      "device": "cuda:0"
+    }
+  },
+  "cpu_gpu_equality": {
+    "one_token": {
+      "artifact": "artifacts/m6/oracle_cpu_gpu_comparison_1.json",
+      "status": "pass"
+    },
+    "two_tokens": {
+      "artifact": "artifacts/m6/oracle_cpu_gpu_comparison_2.json",
+      "status": "pass"
+    },
+    "numeric_tolerance": 0.0001,
+    "token_and_cache_structure": "exact"
+  },
+  "ladder": {
+    "4": {
+      "artifact": "artifacts/m6/stateful_sequence_oracle_4.json",
+      "status": "pass"
+    },
+    "8": {
+      "artifact": "artifacts/m6/stateful_sequence_oracle_8.json",
+      "status": "pass"
+    },
+    "32": {
+      "artifact": "artifacts/m6/stateful_sequence_oracle_32.json",
+      "status": "blocked",
+      "reason": "official-cache sequence run terminated without a report"
+    },
+    "native_comparison": {
+      "artifact": "artifacts/m6/m6_stateful_decode_ladder.json",
+      "status": "blocked",
+      "first_divergence": {
+        "step": 4,
+        "native_next_token": 47308,
+        "official_oracle_next_token": 1496
+      }
+    }
+  },
+  "q38_status": "unchanged/frozen for oracle validation",
+  "fabricated_pass": false
+}

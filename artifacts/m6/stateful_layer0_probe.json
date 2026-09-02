@@ -1,0 +1,20 @@
+{
+  "format": "q38-m6-stateful-gguf-oracle-v1",
+  "reference": "independent GGUF reader/dequantizer + Transformers DynamicCache",
+  "prompt": [
+    9419
+  ],
+  "generated": [
+    248540
+  ],
+  "steps": [
+    {
+      "step": 0,
+      "input_token": 111888,
+      "next_token": 248540,
+      "position": 1
+    }
+  ],
+  "status": "pass",
+  "reason": null
+}

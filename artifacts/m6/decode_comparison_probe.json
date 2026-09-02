@@ -1,0 +1,15 @@
+{
+  "format": "q38-m6-decode-comparison-v1",
+  "native": "artifacts/m6/decode_gpu_1.json",
+  "oracle": "artifacts/m6/autoregressive_oracle_probe.json",
+  "checks": [
+    {
+      "step": 0,
+      "native_next_token": 353,
+      "oracle_next_token": 11,
+      "status": "fail"
+    }
+  ],
+  "status": "fail",
+  "reason": null
+}

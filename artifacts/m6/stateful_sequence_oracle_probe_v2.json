@@ -1,0 +1,8 @@
+{
+  "format": "q38-m6-stateful-sequence-oracle-v2",
+  "tokens": [
+    9419
+  ],
+  "status": "blocked",
+  "reason": "Traceback (most recent call last):\n  File \"/home/lvx/q38.c/tools/m6_stateful_sequence_oracle.py\", line 431, in main\n    device, layers, mixer, lm_head, rotary, cache, hidden\n                                                   ^^^^^^\nNameError: name 'hidden' is not defined\n"
+}

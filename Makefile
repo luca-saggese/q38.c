@@ -54,10 +54,13 @@ M6_QUANT_COMPARISON := artifacts/m6/quant_matched_comparison.json
 M6_GPU_TRACE := artifacts/m6/gpu_real_forward_trace.json
 M6_GPU_PROGRESSIVE := artifacts/m6/gpu_progressive.json
 M6_AR_ORACLE := artifacts/m6/autoregressive_oracle.json
+M6_STATEFUL_ORACLE := artifacts/m6/stateful_gguf_oracle.json
 M6_ORACLE_TOKENS ?= 1
 M6_ORACLE_DEVICE ?= cuda
 M6_ORACLE_TIMEOUT ?= 600
 M6_PYTHON ?= .venv-m6/bin/python
+M6_ORACLE_CPU ?= artifacts/m6/stateful_oracle_cpu_1_noc12.json
+M6_ORACLE_GPU ?= artifacts/m6/stateful_sequence_oracle_resume_probe.json
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -66,6 +69,9 @@ M6_PYTHON ?= .venv-m6/bin/python
 	m3-c06 m3-c07 m3-c08 m3-c09 m3-c10 m3-c11 m3-c12 m3-c13 m3-audit \
 	m3-acceptance m4-c00 m4-c01 m4-c02 m4-c03 m4-c04 m4-c05 m4-c06 m4-c07 \
 	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-dequant-fixtures m6-c12 m6-trace-schema m6-rounding-diagnostics m6-progressive-boundaries m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance m6-gpu-forward m6-gpu-progressive m6-gpu-phase7 m6-autoregressive-oracle \
+	m6-stateful-oracle \
+	m6-stateful-sequence-oracle \
+	m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
 	post-m5-bis post-m5-ter post-m5-supplement
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
@@ -834,6 +840,39 @@ m6-autoregressive-oracle:
 		--model-dir $(MODEL_DIR) --prompt 9419 --generated-count \
 		$(M6_ORACLE_TOKENS) --device $(M6_ORACLE_DEVICE) \
 		--timeout $(M6_ORACLE_TIMEOUT) --output $(M6_AR_ORACLE)
+
+m6-stateful-oracle:
+	@mkdir -p artifacts/m6
+	@$(M6_PYTHON) tools/m6_stateful_gguf_oracle.py \
+		--gguf artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		--model-dir $(MODEL_DIR) --prompt 9419 --generated-count \
+		$(M6_ORACLE_TOKENS) --device $(M6_ORACLE_DEVICE) \
+		--output $(M6_STATEFUL_ORACLE)
+
+m6-stateful-sequence-oracle:
+	@mkdir -p artifacts/m6
+	@PYTHONUNBUFFERED=1 $(M6_PYTHON) -u tools/m6_stateful_sequence_oracle.py \
+		--gguf artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		--model-dir $(MODEL_DIR) --tokens $${M6_SEQUENCE_TOKENS:-9419,11} \
+		--device $(M6_ORACLE_DEVICE) \
+		--output $${M6_SEQUENCE_OUTPUT:-artifacts/m6/stateful_sequence_oracle.json}
+
+m6-decode-ladder-check:
+	@$(M6_PYTHON) tools/m6_decode_ladder_check.py \
+		--output artifacts/m6/decode_ladder_check.json \
+		artifacts/m6/decode_gpu_1.json artifacts/m6/decode_gpu_2.json \
+		artifacts/m6/decode_gpu_4.json artifacts/m6/decode_gpu_8.json
+
+m6-decode-compare:
+	@$(M6_PYTHON) tools/m6_compare_decode.py \
+		--native artifacts/m6/decode_gpu_1.json \
+		--oracle $(M6_AR_ORACLE) \
+		--output artifacts/m6/decode_comparison.json
+
+m6-oracle-compare:
+	@$(M6_PYTHON) tools/m6_compare_oracles.py \
+		--cpu $(M6_ORACLE_CPU) --gpu $(M6_ORACLE_GPU) \
+		--output artifacts/m6/oracle_cpu_gpu_comparison.json
 
 m6-c07: m6-c06 $(TEST_DIR)/test_m6_dispatch
 	@./$(TEST_DIR)/test_m6_dispatch

@@ -1,0 +1,12 @@
+{
+  "format": "q38-m6-stateful-sequence-oracle-v1",
+  "native": "artifacts/m6/decode_gpu_32.json",
+  "tokens": [9419, 11, 353, 2688, 264, 47308, 46194, 852, 579, 978, 4313, 310, 3827, 15019, 364, 264, 2342, 3818, 1381, 13, 353, 2908, 978, 3133, 383, 264, 4145, 12654, 1957, 421, 4829, 1156, 1879],
+  "status": "blocked",
+  "reason": "Three bounded official-cache sequence-prefill attempts terminated with exit code 1 before writing a report and emitted no Python traceback. The 2/4/8 sequence runs completed; the 32-token run remains unavailable and is not treated as pass.",
+  "attempts": [
+    {"mode": "official-cache sequence prefill", "sequence_length": 33, "result": "terminated", "exit_code": 1, "traceback": false},
+    {"mode": "official-cache sequence prefill with BF16 vocabulary projection", "sequence_length": 33, "result": "terminated", "exit_code": 1, "traceback": false},
+    {"mode": "official-cache sequence prefill with bounded FP32 vocabulary blocks", "sequence_length": 33, "result": "terminated", "exit_code": 1, "traceback": false}
+  ]
+}

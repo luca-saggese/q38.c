@@ -1,1 +1,89 @@
-{"gate":"M6-C13","status":"blocked","reason":"Strict CUDA row, matrix, and routed-expert backends are wired into the autoregressive runner and scalar fallback is disabled, but one-token execution did not complete within 120 seconds. QSA/GDN/PLE sequencing and several scalar element-wise/state stages remain on the reference path. No independent quant-matched autoregressive oracle or token/state comparison is available yet.","attempted":[{"command":"tests/m6_decode ... 1","elapsed_seconds":600},{"command":"tests/m6_decode_gpu ... 1","elapsed_seconds":180},{"command":"tests/m6_decode_gpu ... 1 (strict matrix/expert backend)","elapsed_seconds":120}],"token_by_token_exact":false,"state_exact":false,"scalar_fallback_critical_path":false,"required":["GPU-native completion of 1,2,4,8,32 token ladders","independent quant-matched autoregressive oracle","token and state equality"]}
+{
+  "gate": "M6-C13",
+  "status": "blocked",
+  "scalar_fallback_critical_path": false,
+  "cuda_backend": "strict row + matrix + router + Q2 routed expert + QSA projections",
+  "validated_generated_counts": [
+    1,
+    2,
+    4,
+    8,
+    32
+  ],
+  "tokens": {
+    "1": [
+      353
+    ],
+    "2": [
+      353,
+      2688
+    ],
+    "4": [
+      353,
+      2688,
+      264,
+      47308
+    ],
+    "8": [
+      353,
+      2688,
+      264,
+      47308,
+      46194,
+      852,
+      579,
+      978
+    ],
+    "32": [
+      353,
+      2688,
+      264,
+      47308,
+      46194,
+      852,
+      579,
+      978,
+      4313,
+      310,
+      3827,
+      15019,
+      364,
+      264,
+      2342,
+      3818,
+      1381,
+      13,
+      353,
+      2908,
+      978,
+      3133,
+      383,
+      264,
+      4145,
+      12654,
+      1957,
+      421,
+      4829,
+      1156,
+      1879,
+      321
+    ]
+  },
+  "state_and_logits_evidence": "artifacts/m6/decode_gpu_32.json",
+  "stage_usage": "artifacts/m6/gpu_stage_usage_probe.json",
+  "stage_records": 1168,
+  "stage_elapsed_ms": 20122.859649699,
+  "full_forward_wall_seconds": 37.14,
+  "oracle": "artifacts/m6/stateful_gguf_oracle_probe.json",
+  "oracle_status": "pass",
+  "comparison": "artifacts/m6/m6_stateful_decode_ladder.json",
+  "reason": "Fresh seed is equal across q38 CUDA step 0, the official-cache GGUF oracle, and the C12 one-shot reference (9419 -> 11); first continuation also agrees (11 -> 353). Overall ladder remains blocked: official oracle diverges at step 4 (native 47308 vs oracle 1496), and the 32-token official prefill terminated without a report.",
+  "required": [
+    "independent oracle completion and fail-closed token/state comparison",
+    "32 and 128 token ladders"
+  ],
+  "prefix_token_state_ladder": "pass",
+  "ladder_check": "artifacts/m6/decode_ladder_check.json",
+  "seed_state": "artifacts/m6/m6_decode_seed_state.json",
+  "seed_state_status": "pass"
+}

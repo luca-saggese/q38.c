@@ -15,6 +15,8 @@ import json
 import math
 import mmap
 import struct
+import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Iterable
 
@@ -101,6 +103,7 @@ class GGUF:
         self.mm = mmap.mmap(self.file.fileno(), 0, access=mmap.ACCESS_READ)
         self.tensors: dict[str, dict] = {}
         self.metadata: dict[str, object] = {}
+        self.profile = None
         magic, version, tensor_count, kv_count = struct.unpack_from(
             "<IIQQ", self.mm, 0)
         if magic != 0x46554747 or version != 3:
@@ -172,6 +175,28 @@ class GGUF:
         self.mm.close()
         self.file.close()
 
+    def set_profile(self, profile: object | None) -> None:
+        """Attach a timing sink used by the stateful oracle."""
+        self.profile = profile
+
+    def _record(self, field: str, elapsed: float) -> None:
+        if self.profile is not None:
+            setattr(
+                self.profile,
+                field,
+                getattr(self.profile, field, 0.0) + elapsed * 1000.0,
+            )
+
+    def _to_device(self, value: torch.Tensor, device: torch.device) -> torch.Tensor:
+        if value.device == device:
+            return value
+        start = time.perf_counter()
+        moved = value.to(device=device)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        self._record("h2d_ms", time.perf_counter() - start)
+        return moved
+
     def descriptor(self, name: str) -> dict:
         try:
             return self.tensors[name]
@@ -193,16 +218,21 @@ class GGUF:
     def dense(self, name: str, device: torch.device) -> torch.Tensor:
         d = self.descriptor(name)
         if d["type"] == GGUF_BF16:
+            start = time.perf_counter()
             count = math.prod(d["shape"])
             raw = memoryview(self.mm)[d["offset"]:d["offset"] + d["bytes"]]
-            return torch.frombuffer(raw, dtype=torch.uint16, count=count).view(
-                torch.bfloat16).reshape(d["shape"]).to(device=device,
-                                                        dtype=torch.float32)
+            value = torch.frombuffer(raw, dtype=torch.uint16, count=count).view(
+                torch.bfloat16).reshape(d["shape"]).float().clone()
+            self._record("gguf_read_ms", time.perf_counter() - start)
+            return self._to_device(value, device)
         if d["type"] == GGUF_I64:
+            start = time.perf_counter()
             raw = memoryview(self.mm)[d["offset"]:d["offset"] + d["bytes"]]
-            return torch.frombuffer(raw, dtype=torch.int64,
-                                    count=math.prod(d["shape"])).reshape(
-                                        d["shape"]).to(device)
+            value = torch.frombuffer(raw, dtype=torch.int64,
+                                     count=math.prod(d["shape"])).reshape(
+                                         d["shape"]).clone()
+            self._record("gguf_read_ms", time.perf_counter() - start)
+            return self._to_device(value, device)
         if d["type"] == GGUF_Q8_0:
             rows, cols = math.prod(d["shape"][:-1]), d["shape"][-1]
             return self.quant_rows(name, range(rows), device).reshape(
@@ -218,12 +248,14 @@ class GGUF:
             cols = d["shape"][1]
             result = []
             for row in rows:
-                start = d["offset"] + row * cols * 2
-                raw = memoryview(self.mm)[start:start + cols * 2]
+                read_start = time.perf_counter()
+                offset = d["offset"] + row * cols * 2
+                raw = memoryview(self.mm)[offset:offset + cols * 2]
                 result.append(torch.frombuffer(raw, dtype=torch.uint16,
                                                count=cols).view(
                                                    torch.bfloat16).float())
-            return torch.stack(result).to(device)
+                self._record("gguf_read_ms", time.perf_counter() - read_start)
+            return self._to_device(torch.stack(result), device)
         return self.quant_rows(name, rows, device)
 
     def quant_rows(self, name: str, row_indices: Iterable[int],
@@ -242,16 +274,20 @@ class GGUF:
         for row in row_indices:
             if row < 0 or row >= rows:
                 raise IndexError(f"{name}: row {row} outside tensor")
+            read_start = time.perf_counter()
             start = d["offset"] + row * row_bytes
             row_data = raw[start:start + row_bytes]
+            self._record("gguf_read_ms", time.perf_counter() - read_start)
+            dequant_start = time.perf_counter()
             if d["type"] == GGUF_Q2_K:
                 decoded.append(self._q2_row(row_data, cols))
             elif d["type"] == GGUF_Q8_0:
                 decoded.append(self._q8_row(row_data, cols))
             else:
                 raise ValueError(f"{name}: unsupported quantized type {d['type']}")
-        result = torch.tensor(decoded, dtype=torch.float32, device=device)
-        return result
+            self._record("dequant_ms", time.perf_counter() - dequant_start)
+        result = torch.tensor(decoded, dtype=torch.float32)
+        return self._to_device(result, device)
 
     @staticmethod
     def _q2_row(raw: memoryview, cols: int) -> list[float]:
@@ -322,15 +358,60 @@ class GGUFEmbedding(nn.Module):
         return torch.stack(output).reshape(*ids.shape, 160)
 
 
+class RoutedExpertCache:
+    """Bounded CUDA cache for dequantized routed expert matrices."""
+
+    def __init__(self, reader: GGUF, device: torch.device, capacity: int):
+        if capacity < 1:
+            raise ValueError("expert cache capacity must be positive")
+        self.reader = reader
+        self.device = device
+        self.capacity = capacity
+        self.entries: OrderedDict[tuple[str, int], torch.Tensor] = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+        self.evictions = 0
+
+    def get(self, name: str, expert: int, rows: int) -> torch.Tensor:
+        key = (name, expert)
+        value = self.entries.pop(key, None)
+        if value is not None:
+            self.hits += 1
+            self.entries[key] = value
+            return value
+        self.misses += 1
+        value = self.reader.quant_rows(
+            name, range(expert * rows, (expert + 1) * rows), self.device
+        ).reshape(rows, -1)
+        self.entries[key] = value
+        while len(self.entries) > self.capacity:
+            _, evicted = self.entries.popitem(last=False)
+            del evicted
+            self.evictions += 1
+        return value
+
+    def evidence(self) -> dict:
+        return {
+            "capacity": self.capacity,
+            "entries": len(self.entries),
+            "hits": self.hits,
+            "misses": self.misses,
+            "evictions": self.evictions,
+            "devices": sorted({str(value.device) for value in self.entries.values()}),
+        }
+
+
 class QuantExperts(nn.Module):
     def __init__(self, reader: GGUF, gate_up: str, down: str,
-                 intermediate: int, device: torch.device):
+                 intermediate: int, device: torch.device,
+                 expert_cache: RoutedExpertCache | None = None):
         super().__init__()
         self.reader = reader
         self.gate_up_name, self.down_name = gate_up, down
         self.intermediate_dim, self.device = intermediate, device
         self.num_experts = reader.descriptor(gate_up)["shape"][0]
         self.act_fn = nn.SiLU()
+        self.expert_cache = expert_cache
 
     def forward(self, hidden_states: torch.Tensor, top_k_index: torch.Tensor,
                 top_k_weights: torch.Tensor) -> torch.Tensor:
@@ -343,17 +424,27 @@ class QuantExperts(nn.Module):
             token_rows, slots = positions
             current = hidden[token_rows].float()
             gate_rows = self.reader.descriptor(self.gate_up_name)["shape"][1]
-            gate_up = self.reader.quant_rows(
-                self.gate_up_name,
-                range(expert * gate_rows, (expert + 1) * gate_rows),
-                self.device).reshape(gate_rows, -1)
+            if self.expert_cache is None:
+                gate_up = self.reader.quant_rows(
+                    self.gate_up_name,
+                    range(expert * gate_rows, (expert + 1) * gate_rows),
+                    self.device).reshape(gate_rows, -1)
+            else:
+                gate_up = self.expert_cache.get(
+                    self.gate_up_name, int(expert), gate_rows
+                )
             gate, up = F.linear(current, gate_up).chunk(2, dim=-1)
             current = self.act_fn(gate) * up
             down_rows = self.reader.descriptor(self.down_name)["shape"][1]
-            down = self.reader.quant_rows(
-                self.down_name,
-                range(expert * down_rows, (expert + 1) * down_rows),
-                self.device).reshape(down_rows, -1).transpose(0, 1)
+            if self.expert_cache is None:
+                down = self.reader.quant_rows(
+                    self.down_name,
+                    range(expert * down_rows, (expert + 1) * down_rows),
+                    self.device).reshape(down_rows, -1).transpose(0, 1)
+            else:
+                down = self.expert_cache.get(
+                    self.down_name, int(expert), down_rows
+                ).transpose(0, 1)
             current = F.linear(current, down)
             current = current * weights[token_rows, slots, None]
             result.index_add_(0, token_rows, current.to(result.dtype))
@@ -414,7 +505,8 @@ def replace_buffer(module: nn.Module, name: str, value: torch.Tensor) -> None:
 
 
 def materialize_layer(reader: GGUF, config, index: int,
-                      device: torch.device) -> nn.Module:
+                      device: torch.device,
+                      expert_cache: RoutedExpertCache | None = None) -> nn.Module:
     with torch.device("meta"):
         layer = Qwen4ExpTextDecoderLayer(config, index)
     prefix = f"model.language_model.layers.{index}."
@@ -434,7 +526,8 @@ def materialize_layer(reader: GGUF, config, index: int,
         diagnostics=index == 9)
     layer.mlp.experts = QuantExperts(
         reader, prefix + "mlp.experts.gate_up_proj",
-        prefix + "mlp.experts.down_proj", config.moe_intermediate_size, device)
+        prefix + "mlp.experts.down_proj", config.moe_intermediate_size, device,
+        expert_cache)
     if layer.ple is not None:
         names = sorted(
             [name for name in reader.tensors
@@ -537,7 +630,12 @@ def main() -> None:
     hidden = hidden.repeat(1, 1, config.hc_count)
     input_ids = torch.tensor([tokens], dtype=torch.long, device=device)
     rotary = Qwen4ExpTextRotaryEmbedding(config).to(device)
-    position_ids = torch.zeros((3, 1, len(tokens)), dtype=torch.long, device=device)
+    if args.tokens is not None:
+        positions = torch.arange(len(tokens), dtype=torch.long, device=device)
+        position_ids = positions.view(1, 1, -1).expand(3, -1, -1)
+    else:
+        position_ids = torch.zeros((3, 1, len(tokens)), dtype=torch.long,
+                                   device=device)
     position_embeddings = rotary(hidden, position_ids)
     full_mask = torch.ones((1, 1, len(tokens), len(tokens)), dtype=torch.bool,
                            device=device)
@@ -641,7 +739,11 @@ def main() -> None:
             if qsa_hook is not None:
                 qsa_hook.remove()
             router = captured["router"]
-            logits = router[0].reshape(-1).float()
+            router_last = tuple(
+                value[:, -1] if value.ndim >= 3 else value[-1:]
+                for value in router
+            )
+            logits = router_last[0].reshape(-1).float()
             order = torch.argsort(torch.softmax(logits, 0), descending=True,
                                   stable=True)
             rank = order[:15].cpu().tolist()
@@ -660,9 +762,9 @@ def main() -> None:
                 "top20_rank": [{"rank": i + 1, "expert": e,
                                 "value": float(logits[e])}
                                for i, e in enumerate(order[:20].cpu().tolist())],
-                "experts": router[2].reshape(-1).cpu().tolist(),
-                "weights": router[1].reshape(-1).float().cpu().tolist(),
-                "routed_output": values(captured["routed_output"]),
+                "experts": router_last[2].reshape(-1).cpu().tolist(),
+                "weights": router_last[1].reshape(-1).float().cpu().tolist(),
+                "routed_output": values(captured["routed_output"][-1:]),
             }
             if layer_index == 9:
                 native_router_item = next(
@@ -715,7 +817,7 @@ def main() -> None:
                 for expert in used_rows:
                     weight_row = layer.mlp.gate.weight[expert].float()
                     dot = torch.dot(input_row, weight_row)
-                    expected = layer.mlp.gate.last_pre_cast[0, expert]
+                    expected = layer.mlp.gate.last_pre_cast[-1, expert]
                     route["router_matvec_checks"].append({
                         "expert": expert,
                         "dot": float(dot),
@@ -887,12 +989,12 @@ def main() -> None:
                     "router_logits_effective": route["router_logits"],
                     "top15_rank": [
                         {"rank": i + 1, "expert": e,
-                         "value": float(layer.mlp.gate.last_probs_effective[0, e])}
+                         "value": float(layer.mlp.gate.last_probs_effective[-1, e])}
                         for i, e in enumerate(rank)
                     ],
                     "margin_rank10_rank11": float(
-                        layer.mlp.gate.last_probs_effective[0, rank[9]] -
-                        layer.mlp.gate.last_probs_effective[0, rank[10]]),
+                        layer.mlp.gate.last_probs_effective[-1, rank[9]] -
+                        layer.mlp.gate.last_probs_effective[-1, rank[10]]),
                     "selected_experts": route["experts"],
                     "selected_weights_pre_cast": values(
                         (lambda selected: selected / selected.sum())(
@@ -915,7 +1017,8 @@ def main() -> None:
                     and first_divergence is None):
                 first_divergence = layer_index
             native_weight_map = dict(zip(
-                native_experts or [], native_route.get("weights", [])
+                native_experts or [],
+                native_route.get("weights", []) if native_route else []
             ))
             ref_weight_map = dict(zip(ref_experts, route["weights"]))
             common_experts = sorted(set(native_weight_map) & set(ref_weight_map))
@@ -950,7 +1053,7 @@ def main() -> None:
             if "qsa" in captured:
                 qsa_selection.append({
                     "layer": layer_index,
-                    "selected": torch.where(captured["qsa"][0, 0, 0].bool())[0]
+                    "selected": torch.where(captured["qsa"][0, -1, 0].bool())[0]
                     .cpu().tolist(),
                 })
             stages.append({
