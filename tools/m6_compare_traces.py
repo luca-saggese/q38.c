@@ -244,20 +244,34 @@ def main() -> None:
                 if (detail[field]["status"] == "fail" and
                         layer >= args.start_layer):
                     route_mismatch.append(f"layer:{layer}:{field}")
+        native_router_detail = next(
+            (item for item in native.get("router_logits", [])
+             if item.get("layer") == layer), {})
         for field in ("rank10", "rank11"):
-            if left.get(field) and right.get(field):
+            left_rank = left.get(field) or native_router_detail.get(field)
+            if left_rank and right.get(field):
                 detail[field] = {
-                    "native": left[field], "reference": right[field],
-                    "score_close": close(left[field].get("score"),
+                    "native": left_rank, "reference": right[field],
+                    "expert_exact": left_rank.get("expert") == right[field].get("expert"),
+                    "score_close": close(left_rank.get("score"),
                                          right[field].get("score")),
                 }
-        if "margin_rank10_rank11" in left and "margin_rank10_rank11" in right:
+                if layer >= args.start_layer and (
+                    not detail[field]["expert_exact"] or
+                    not detail[field]["score_close"]):
+                    route_mismatch.append(f"layer:{layer}:{field}")
+        left_margin = left.get("margin_rank10_rank11",
+                               native_router_detail.get("margin_rank10_rank11"))
+        if left_margin is not None and "margin_rank10_rank11" in right:
             detail["margin_rank10_rank11"] = {
-                "native": left["margin_rank10_rank11"],
+                "native": left_margin,
                 "reference": right["margin_rank10_rank11"],
-                "close": close(left["margin_rank10_rank11"],
+                "close": close(left_margin,
                                 right["margin_rank10_rank11"]),
             }
+            if layer >= args.start_layer and not detail[
+                    "margin_rank10_rank11"]["close"]:
+                route_mismatch.append(f"layer:{layer}:rank_margin")
         route_checks.append(detail)
     if route_mismatch or route_diagnostics:
         if route_mismatch:
