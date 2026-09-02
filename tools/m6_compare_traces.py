@@ -244,6 +244,13 @@ def main() -> None:
                 if (detail[field]["status"] == "fail" and
                         layer >= args.start_layer):
                     route_mismatch.append(f"layer:{layer}:{field}")
+            else:
+                detail[field] = {
+                    "status": "diagnostic",
+                    "reason": "missing native/reference vector",
+                    "native_present": field in left,
+                    "reference_present": field in right,
+                }
         native_router_detail = next(
             (item for item in native.get("router_logits", [])
              if item.get("layer") == layer), {})

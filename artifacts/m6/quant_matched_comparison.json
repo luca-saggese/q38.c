@@ -628,195 +628,1059 @@
       "per_layer": [
         {
           "layer": 0,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 1,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 2,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 3,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 4,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 5,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 6,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 7,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 8,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 9,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 10,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 11,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 12,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 13,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 14,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 15,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 16,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 17,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 18,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 19,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 20,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 21,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 22,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 23,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 24,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 25,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 26,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 27,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 28,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 29,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 30,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 31,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 32,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 33,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 34,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 35,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 36,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 37,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 38,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 39,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 40,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 41,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 42,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 43,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 44,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 45,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 46,
-          "selected_set_exact": true
+          "selected_set_exact": true,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         },
         {
           "layer": 47,
-          "selected_set_exact": false
+          "selected_set_exact": false,
+          "hidden_input": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_logits": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          },
+          "routed_output": {
+            "status": "diagnostic",
+            "reason": "missing native/reference vector",
+            "native_present": false,
+            "reference_present": true
+          }
         }
       ],
       "first_selected_set_divergence_layer": 9
