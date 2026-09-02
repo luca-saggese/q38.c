@@ -43,3 +43,20 @@ PYTHONPATH=.venv-m6/lib/python3.12/site-packages \
 
 The reader requires only GGUF v3 and the q38 tensor types used by this
 artifact; no GGUF regeneration or llama.cpp ABI is involved.
+
+## Stateful cache oracle
+
+`tools/m6_stateful_gguf_oracle.py` uses the official
+`DynamicCache`, causal/recurrent mask builders, and
+`Qwen4ExpTextDecoderLayer` directly. It constructs a meta-only text model,
+materializes one GGUF-backed decoder layer at a time, and releases that layer
+after its activation has been passed onward. GDN, QSA, and PLE state therefore
+comes only from the official cache implementation; no cache equations are
+duplicated in the oracle.
+
+The first prompt token is a fresh-session step and is compared to the C12
+one-shot artifact before continuation is allowed. The report records the
+initial and final cache state, checkpoint evidence for layers 0, 3, 7, 15, 31,
+and 47, final norm/logit statistics, and the greedy argmax. A missing
+Transformers Qwen4Exp module, cache-shape error, non-finite result, or
+one-shot mismatch is `blocked`/failure rather than a fabricated pass.
