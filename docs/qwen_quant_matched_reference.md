@@ -19,6 +19,10 @@ Routing hard gates begin at layer 3 so the known layer-2 boundary diagnostic
 does not mask the first post-boundary selected-set divergence. Each routed
 layer records the hidden input, all 512 effective router logits, rank 10/11
 scores and margin, selected experts, weights by expert, and routed output.
+Layer 9 additionally records the pre-router GR input, its RMSNorm output,
+the GR output feeding the router, BF16 source-byte checksums and values for
+ranking-relevant router rows, pre-cast matvecs, effective BF16 results, and
+row-by-row matvec self-checks.
 
 Example:
 

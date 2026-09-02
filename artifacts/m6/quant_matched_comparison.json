@@ -83,6 +83,8 @@
         "rms": 0.00444181693107873,
         "relative_rms": 0.07268825163032941,
         "cosine_similarity": 0.9976974134379426,
+        "native_checksum": "58f53faf65274f24ada29833dd95ca9f009a82e9f4b1816694bcf300d446133d",
+        "reference_checksum": "b641f3dfed9ab9a5690009d30390e13594b9bbf75a058f345bf2be9d4f4e0606",
         "extreme_coordinates": [
           {
             "index": 2311,
@@ -729,6 +731,8 @@
             "rms": 1.0379469460270808e-06,
             "relative_rms": 2.5984652821914454e-06,
             "cosine_similarity": 0.9999999999966241,
+            "native_checksum": "a81a7716ccf6a703856b9a0ab6b1dd0345a00a6f61e91ebf223f96a150b78f9a",
+            "reference_checksum": "2aa493ab85c4da45918a1f36382f033464a5a312e6f2aad7297a5e6f4bab94f7",
             "extreme_coordinates": [
               {
                 "index": 2354,
@@ -762,6 +766,8 @@
             "rms": 0.0,
             "relative_rms": 0.0,
             "cosine_similarity": 1.0000000000000002,
+            "native_checksum": "ad461231bb6da21864958993298d43e8a7a32b7a0f471b225084b67a4061a935",
+            "reference_checksum": "ad461231bb6da21864958993298d43e8a7a32b7a0f471b225084b67a4061a935",
             "extreme_coordinates": [
               {
                 "index": 0,
@@ -795,6 +801,8 @@
             "rms": 3.7733873326495554e-08,
             "relative_rms": 1.3984336140451396e-06,
             "cosine_similarity": 0.9999999999993003,
+            "native_checksum": "248998bda268c7ea80a5f549b8997ea149336643545a12adb62e34bfdc39e330",
+            "reference_checksum": "c218854223b8b557e29d1bca4bca7f088ad6076e9d73c34582956edfb9c57491",
             "extreme_coordinates": [
               {
                 "index": 722,
@@ -861,6 +869,8 @@
             "rms": 0.03713673574358536,
             "relative_rms": 0.11013284316076838,
             "cosine_similarity": 0.9939280276245844,
+            "native_checksum": "c32d50e196729ad1573341f7f9f043dc71d74ad966f55fd2b7fca803f4322ec0",
+            "reference_checksum": "a9e16dccc9a83d2e3ebfef1ed2d03d2dc5ad4ab1ad96b3d28b1cdb997cb78016",
             "extreme_coordinates": [
               {
                 "index": 2242,
@@ -894,6 +904,8 @@
             "rms": 0.04543902392239001,
             "relative_rms": 0.007552510791084822,
             "cosine_similarity": 0.9999818542617671,
+            "native_checksum": "b23201d510c07a053601da37d4854ff1c3d6cc045f1862208c190ce8397f42de",
+            "reference_checksum": "cbc555a8534507cf6c94fb82b1ae2df61cb927215409acaf73aaa24917e277c7",
             "extreme_coordinates": [
               {
                 "index": 10,
@@ -927,6 +939,8 @@
             "rms": 0.0013237091647865474,
             "relative_rms": 0.13857288460022563,
             "cosine_similarity": 0.9908967044504949,
+            "native_checksum": "a40461d1648b0469634ca2278ceb8c879801ff2a0673c155cac4af1f6c5afb62",
+            "reference_checksum": "ad356f8941187d4753c1c7fb7d2bfb80147db37c9e6cce3627a73311149115cb",
             "extreme_coordinates": [
               {
                 "index": 21,
@@ -993,6 +1007,8 @@
             "rms": 0.0409391501198048,
             "relative_rms": 0.11708023786670171,
             "cosine_similarity": 0.9931322662485657,
+            "native_checksum": "d3c8e11f14d6e61173eb01a92f470b048757877f6b182b70a68395271deba0c6",
+            "reference_checksum": "16c3e6a6a4ea59465557fdf9709bc6136f718d8559c715687bbd3dff20b90503",
             "extreme_coordinates": [
               {
                 "index": 951,
@@ -1026,6 +1042,8 @@
             "rms": 0.09760496700342783,
             "relative_rms": 0.01568954486428796,
             "cosine_similarity": 0.99989037430096,
+            "native_checksum": "ceffa9aa5777843228f87e96955da8772b7f8252f3006b380ebe01508b1134be",
+            "reference_checksum": "93c3a156ff925e8fedd88bb21cf500150bf0a92b0a4d9cb354ee8c64308a3263",
             "extreme_coordinates": [
               {
                 "index": 28,
@@ -1059,6 +1077,8 @@
             "rms": 0.001088085227607186,
             "relative_rms": 0.1706609337043262,
             "cosine_similarity": 0.985543271463447,
+            "native_checksum": "fd82eb339f20239a387734c91f95867080503ca962499160c4c873b93ca36905",
+            "reference_checksum": "b0593d6fe284c15436a7d5e2d522b717be353edb6671f9af6f5c93817519dca1",
             "extreme_coordinates": [
               {
                 "index": 2242,
@@ -1125,6 +1145,8 @@
             "rms": 0.05057951252685541,
             "relative_rms": 0.11088639771740268,
             "cosine_similarity": 0.9939197425739333,
+            "native_checksum": "09763d8c32d9fe84c1da57067d82db3eeb6aa762cb469a05637d540d4329b9f3",
+            "reference_checksum": "f81e45003fe58a7c8552c3c0ef4904c216175e62f3df0134db9c0958343e5df4",
             "extreme_coordinates": [
               {
                 "index": 2242,
@@ -1158,6 +1180,8 @@
             "rms": 0.04299093887315457,
             "relative_rms": 0.007181372320017773,
             "cosine_similarity": 0.9999743482614314,
+            "native_checksum": "3356972cb8bca707ed5292f1b2dde4f6056b82383225d8bfa37446529985514c",
+            "reference_checksum": "957437650585de9f0e36bc37999068cdfa5534b1148b72b5e80b1b183f7d311a",
             "extreme_coordinates": [
               {
                 "index": 249,
@@ -1191,6 +1215,8 @@
             "rms": 0.0010555381789162073,
             "relative_rms": 0.157171463737199,
             "cosine_similarity": 0.9876356770770804,
+            "native_checksum": "e80ef8e2f1d77ec94a43025ec84edce2d9e55de580802079cd05c3d74c93949b",
+            "reference_checksum": "073833ec8b9bac6c63f2e7d630a57cd784653ab4f66d0bce5b73921df9da2c13",
             "extreme_coordinates": [
               {
                 "index": 603,
@@ -1257,6 +1283,8 @@
             "rms": 0.052878559219686164,
             "relative_rms": 0.10585800460485982,
             "cosine_similarity": 0.994402978223731,
+            "native_checksum": "423bae67810f3d403ac5032b728504cee3d0871e450df6e7a3d04d1619663868",
+            "reference_checksum": "cca60981143a50e7acbdd9dacc6f46eb04fa2420ae632e623bb3105a10a55768",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -1290,6 +1318,8 @@
             "rms": 0.05702656765881419,
             "relative_rms": 0.009426988975361258,
             "cosine_similarity": 0.9999659148339415,
+            "native_checksum": "eb4b9367fc9753e7079a9e50a4bd8ff32ba066003cfcc62f0ce5d179fce6abaf",
+            "reference_checksum": "6a807d9a65d50f8a4fff7eaa5091b65f0e4850f55faa297e2132e33391daab72",
             "extreme_coordinates": [
               {
                 "index": 65,
@@ -1323,6 +1353,8 @@
             "rms": 0.0014009686320558313,
             "relative_rms": 0.10060406273386766,
             "cosine_similarity": 0.996207569348791,
+            "native_checksum": "4dfb31d5afcaeea7022d926d43e5a5a43b1cba737178d389f22df964baf8ddb0",
+            "reference_checksum": "959eb4cac40da698fd5bbcaceb7c2fe56e86f27cfa9dca1e71bfa4ed392ed400",
             "extreme_coordinates": [
               {
                 "index": 2117,
@@ -1389,6 +1421,8 @@
             "rms": 0.04929547674037428,
             "relative_rms": 0.10551322320257404,
             "cosine_similarity": 0.9945226917891952,
+            "native_checksum": "44de8afd8e4b48bb3471f5595794ff784efa5fad98e592fff347dadb1cd88582",
+            "reference_checksum": "be3059832121d1fec4189e21f904807bf1d0657f5e6e77b6f03f61f367b158d9",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -1422,6 +1456,8 @@
             "rms": 0.05791435548118257,
             "relative_rms": 0.009265751150270788,
             "cosine_similarity": 0.999968213984425,
+            "native_checksum": "39ac2e9b8e6aece65fd1fdccb95d552ff1ffbb9e7d4b30da867616e8fc77300a",
+            "reference_checksum": "06a2b2dbe8394d0bb4034c63aa93349b080b62ab927dd1dfe5c6521ec03c2fdf",
             "extreme_coordinates": [
               {
                 "index": 460,
@@ -1455,6 +1491,8 @@
             "rms": 0.0009700604970064849,
             "relative_rms": 0.12420030513489277,
             "cosine_similarity": 0.9923416517152752,
+            "native_checksum": "2b10c50a887b02297280ebf5ba902c634af28a5ae4ad7ae5531e14f552eaa656",
+            "reference_checksum": "bd70d1b8eb29f4ede6f4626b65933f8193a2b7c09aa757f1f17750ef914782a7",
             "extreme_coordinates": [
               {
                 "index": 309,
@@ -1521,6 +1559,8 @@
             "rms": 0.04862957319681998,
             "relative_rms": 0.09236866541877904,
             "cosine_similarity": 0.9957524096697677,
+            "native_checksum": "2198404de63b4b0e50d34a2d097dcf76f419045b0824c06f0f12411272a0320f",
+            "reference_checksum": "1654b62b3410fccf54a8229688862b91d20db8e3e8b2e9e5ba5c0f6c155a94a1",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -1554,6 +1594,8 @@
             "rms": 0.07695039850817152,
             "relative_rms": 0.01182059157477316,
             "cosine_similarity": 0.9999793130276383,
+            "native_checksum": "71167de58cb1c65f245b157f3e33b386c177b0822145c50075109c8ad80f020a",
+            "reference_checksum": "85f295e18f473b94234a5fad65348f73552e2567bb7e8a5e590c4ca8450a53b9",
             "extreme_coordinates": [
               {
                 "index": 118,
@@ -1587,6 +1629,8 @@
             "rms": 0.001220425532557482,
             "relative_rms": 0.10056928149600715,
             "cosine_similarity": 0.9951556684164958,
+            "native_checksum": "b1ecc35c4ba88cfa68ff355c3b430ff75aaf73e3b185e466d335b1c400261c4d",
+            "reference_checksum": "3e6aa631f081f1eb852333e8c5d552607b421951ce7822731ed704b0bd67a3b3",
             "extreme_coordinates": [
               {
                 "index": 568,
@@ -1653,6 +1697,8 @@
             "rms": 0.04847492675940903,
             "relative_rms": 0.10034929195768941,
             "cosine_similarity": 0.9949560377184772,
+            "native_checksum": "0686bbdfd518260572636796011552ad842d2d038e325ca3b1b7628305f90660",
+            "reference_checksum": "6e99bbbe17d34da842c32c8da270c78a25764c74224a98d2e5a4c97d0ab1ce33",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -1686,6 +1732,8 @@
             "rms": 0.054368313783868374,
             "relative_rms": 0.008582476998243504,
             "cosine_similarity": 0.9999809114749132,
+            "native_checksum": "55a73b8e811f21a8195ffb53955ba2f521627b849ad42ddd1cb2d3e7d1a9e7e4",
+            "reference_checksum": "8c3597617d0f310647d72f714f7acf6fea5b6b74bbdadb4c45087349df5e7d77",
             "extreme_coordinates": [
               {
                 "index": 95,
@@ -1719,6 +1767,8 @@
             "rms": 0.0013012739547233483,
             "relative_rms": 0.12515715212412712,
             "cosine_similarity": 0.9946664324123685,
+            "native_checksum": "1c438f03e13206e30cef1b3e30291f94b2baf987a6420035151ed10fd00627fe",
+            "reference_checksum": "2a272463d7a19a00a290ad12031b1583c4b05a8559eb44a65a288d39af5ad89c",
             "extreme_coordinates": [
               {
                 "index": 2401,
@@ -1785,6 +1835,8 @@
             "rms": 0.044666597875798755,
             "relative_rms": 0.0881148793231964,
             "cosine_similarity": 0.9961105573232447,
+            "native_checksum": "7d86543a98d2155df9e2899c307335601b3703a3ab582913dd00408bed1e21d9",
+            "reference_checksum": "ea29e35f0deabbf25420fc4266064011785ecd6ea94840d8599f7cc5c9c97605",
             "extreme_coordinates": [
               {
                 "index": 579,
@@ -1818,6 +1870,8 @@
             "rms": 0.03719921280222834,
             "relative_rms": 0.005838536093639192,
             "cosine_similarity": 0.9999846525538271,
+            "native_checksum": "71eb6388cff77e5898ae8f1c1cf5c8d715c3a65e6d6799242d3eae9b078e6ddc",
+            "reference_checksum": "51510ce5218d1bf6f431aace60422a23a82c2c30236ff12a3b2e406888176cd0",
             "extreme_coordinates": [
               {
                 "index": 295,
@@ -1851,6 +1905,8 @@
             "rms": 0.0010467191575296347,
             "relative_rms": 0.059349470567075256,
             "cosine_similarity": 0.9983151664732887,
+            "native_checksum": "2ae8bf36364b5a81aaed16e1395b6db70a5379662520cb961cf792aceae06054",
+            "reference_checksum": "f390596853d84ba746435c628cf048c9ef5be426af492acf3a7f74c00afb69c7",
             "extreme_coordinates": [
               {
                 "index": 2538,
@@ -1917,6 +1973,8 @@
             "rms": 0.052074695874800486,
             "relative_rms": 0.10269435633087913,
             "cosine_similarity": 0.9947227936431863,
+            "native_checksum": "716c923583b88adc6fb4af7326a5c62b487702d8e0842b32494e841e7dd2cf25",
+            "reference_checksum": "2136670b690e8dc4387b49a7d32ac10f3fe9f022f1524a48e6a59f3275053523",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -1950,6 +2008,8 @@
             "rms": 0.049991034657652145,
             "relative_rms": 0.00795052149224562,
             "cosine_similarity": 0.9999806442128479,
+            "native_checksum": "a973e7927f5248e4ec009f8fa6224de13d323f5505442875a8741f63dafe2c1c",
+            "reference_checksum": "8a388050e874c162d8d3b754aa04bc05cd61c05166c05ab976ccccc6a1109fbc",
             "extreme_coordinates": [
               {
                 "index": 391,
@@ -1983,6 +2043,8 @@
             "rms": 0.002231365141714908,
             "relative_rms": 0.304970990520874,
             "cosine_similarity": 0.9523878573811059,
+            "native_checksum": "4303c0e2aa55ffd74ad1bcd9922fd2750af56f534feea692913d59b5074a8102",
+            "reference_checksum": "088557a7e1dca25712189b8fc71463007d3eab5806b696e11e3ad5f8317a7ef0",
             "extreme_coordinates": [
               {
                 "index": 312,
@@ -2347,6 +2409,387 @@
               "reference": 49330
             }
           ],
+          "router_chain": {
+            "status": "diagnostic",
+            "reason": "native pre-router chain is not present in this trace",
+            "native_present": false,
+            "reference_stages": {
+              "input_to_mlp_hyper_connection": {
+                "min": -3.01733660697937,
+                "max": 0.9245851635932922,
+                "mean": -0.0010315555846318603,
+                "rms": 0.06320194900035858,
+                "max_abs": 3.01733660697937,
+                "finite_count": 10240,
+                "min_index": 2311,
+                "max_index": 1500,
+                "max_abs_index": 2311,
+                "nan_count": 0,
+                "inf_count": 0,
+                "checksum": "7de674de0de19741c3e22bd3b613fafdb56fd32aaab2953eca0c32acf781944e",
+                "extreme_coordinates": [
+                  {
+                    "index": 2311,
+                    "value": -3.01733660697937
+                  },
+                  {
+                    "index": 1500,
+                    "value": 0.9245851635932922
+                  },
+                  {
+                    "index": 9991,
+                    "value": -0.8858890533447266
+                  },
+                  {
+                    "index": 403,
+                    "value": -0.6628780961036682
+                  }
+                ],
+                "fixed": [
+                  {
+                    "index": 0,
+                    "value": 0.04280494898557663
+                  },
+                  {
+                    "index": 1,
+                    "value": -0.03171662613749504
+                  },
+                  {
+                    "index": 2,
+                    "value": -0.0011977809481322765
+                  },
+                  {
+                    "index": 3,
+                    "value": 0.036141667515039444
+                  }
+                ]
+              },
+              "rmsnorm_output": {
+                "min": -36.89078903198242,
+                "max": 11.157066345214844,
+                "mean": -0.0013992413878440857,
+                "rms": 1.1463121175765991,
+                "max_abs": 36.89078903198242,
+                "finite_count": 10240,
+                "min_index": 2311,
+                "max_index": 1500,
+                "max_abs_index": 2311,
+                "nan_count": 0,
+                "inf_count": 0,
+                "checksum": "c8fb9a11839e667cd6ae577b350e4305168976dfdaca38fc76c30ed99a235834",
+                "extreme_coordinates": [
+                  {
+                    "index": 2311,
+                    "value": -36.89078903198242
+                  },
+                  {
+                    "index": 9991,
+                    "value": -17.74947738647461
+                  },
+                  {
+                    "index": 403,
+                    "value": -13.558107376098633
+                  },
+                  {
+                    "index": 1500,
+                    "value": 11.157066345214844
+                  }
+                ],
+                "fixed": [
+                  {
+                    "index": 0,
+                    "value": 0.7307243347167969
+                  },
+                  {
+                    "index": 1,
+                    "value": -0.42595434188842773
+                  },
+                  {
+                    "index": 2,
+                    "value": -0.01982773095369339
+                  },
+                  {
+                    "index": 3,
+                    "value": 0.6227279305458069
+                  }
+                ]
+              },
+              "gr_output_to_router": {
+                "min": -1.969660758972168,
+                "max": 4.284966468811035,
+                "mean": 0.004178609699010849,
+                "rms": 0.507084310054779,
+                "max_abs": 4.284966468811035,
+                "finite_count": 2560,
+                "min_index": 204,
+                "max_index": 1500,
+                "max_abs_index": 1500,
+                "nan_count": 0,
+                "inf_count": 0,
+                "checksum": "2136670b690e8dc4387b49a7d32ac10f3fe9f022f1524a48e6a59f3275053523",
+                "extreme_coordinates": [
+                  {
+                    "index": 1500,
+                    "value": 4.284966468811035
+                  },
+                  {
+                    "index": 728,
+                    "value": 2.116100549697876
+                  },
+                  {
+                    "index": 681,
+                    "value": 1.9755014181137085
+                  },
+                  {
+                    "index": 204,
+                    "value": -1.969660758972168
+                  }
+                ],
+                "fixed": [
+                  {
+                    "index": 0,
+                    "value": 0.3546505272388458
+                  },
+                  {
+                    "index": 1,
+                    "value": 0.375629723072052
+                  },
+                  {
+                    "index": 2,
+                    "value": -0.36458855867385864
+                  },
+                  {
+                    "index": 3,
+                    "value": 0.3748735785484314
+                  }
+                ]
+              }
+            }
+          },
+          "router_weight_rows": {
+            "status": "diagnostic",
+            "reason": "native effective router rows are not present in this trace",
+            "reference_experts": [
+              40,
+              68,
+              71,
+              73,
+              80,
+              96,
+              141,
+              154,
+              209,
+              218,
+              321,
+              325,
+              341,
+              368,
+              376,
+              442,
+              452,
+              462,
+              466,
+              502,
+              506,
+              511
+            ],
+            "reference_checksums": {
+              "40": "c57a77bd8dd0703b66aa654534e3642eb52c89b22501b851cdab3bcd976e4465",
+              "68": "c94b591c241dbfa105db434bb0e49f3b577a14bae08f62eb285267abc18e0f32",
+              "71": "515528f8ea841ff6674b1947782ed1189833c415c3834e532a9e71b3ef771e4b",
+              "73": "e29fd20b3fa54bbd92cbb3dd14d4b3c17cf59bc197a757e74d0abae576a45a9a",
+              "80": "ff3fa272057c9e6ede85c171b7f1ecfe7577ddc7cafc9f45055922a10e4632e2",
+              "96": "f46a9aab8a935adfe24d7b3727361c638c60070f1a0f8a6ddc1ae0e8576ef768",
+              "141": "5196e4dc166d165b13c552c4101cc473319833e3e99376ec7b17a172b9f8ed0c",
+              "154": "e42eca13b58fdd0f63770feb5c8a8b0ae507611b441e74f751c017b835aeffdf",
+              "209": "4ef195c4412558ea942c758069e45c1720e791af774674fd50e3de4e601e26ef",
+              "218": "0e33183d1b095e69a49e63c3f51a4a44b86dda915b895126807df4c64e403d84",
+              "321": "c58fbf623809343249579a28da2f1e74727b4ce6e1721bff8a56efc6fb8824c9",
+              "325": "6841697734fcdcbe180356991a767b7834aae0544d5fd8a2efdfb248d3bb0d04",
+              "341": "9ea0478a81ecb7834893fdbd3f9ca13fdab6647ad17948ecdd7d480782640dc9",
+              "368": "9f93417603fd34492ea550014576d2eb3481cc153e6f809818417b912a8d3655",
+              "376": "7305fd4b4b680885781e8d707078579a992167c595eec893e6a86b0c85aa0940",
+              "442": "a2ac4107eda1334531ac47a34e892fd01584123a372627de444977c06269af50",
+              "452": "e6b34e496d77edcedb494bc95b4e887e6905619e9e415f4c727eb7be95e545f6",
+              "462": "560a42b2cfe361954c817d8030be1e600a528482afdd3bfbf6761e65e1b093b7",
+              "466": "6999057b7d83af60d866efd2a637343425e9a8c1f9df53c61636158f348d9850",
+              "502": "ebed5a173fbf7a70be23e3ebe7a133037166908b0ce4741c1dac7aac7dd4727d",
+              "506": "c8a1839af1884b1322e028c5596747f230359830373827f58e2a1c1b7569ad0c",
+              "511": "88cff133e408697f07d80b1f68b8c6ce0e025dc1272f9a1b4ea7039d73ddfc90"
+            }
+          },
+          "router_matvec_pre_cast": {
+            "status": "diagnostic",
+            "reason": "native matvec stage is not present in this trace",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_effective_bf16": {
+            "status": "diagnostic",
+            "reason": "native matvec stage is not present in this trace",
+            "native_present": false,
+            "reference_present": true
+          },
+          "router_matvec_checks": {
+            "status": "diagnostic",
+            "reason": "independent row-by-row GGUF BF16 matvec checks",
+            "reference": [
+              {
+                "expert": 40,
+                "dot": -4.032888412475586,
+                "router_pre_cast": -4.032887935638428,
+                "delta": -4.76837158203125e-07,
+                "close": true
+              },
+              {
+                "expert": 68,
+                "dot": -3.4999794960021973,
+                "router_pre_cast": -3.4999794960021973,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 71,
+                "dot": -4.270985126495361,
+                "router_pre_cast": -4.270985126495361,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 73,
+                "dot": -4.47159481048584,
+                "router_pre_cast": -4.47159481048584,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 80,
+                "dot": -4.710768699645996,
+                "router_pre_cast": -4.710768699645996,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 96,
+                "dot": -4.3010573387146,
+                "router_pre_cast": -4.301057815551758,
+                "delta": 4.76837158203125e-07,
+                "close": true
+              },
+              {
+                "expert": 141,
+                "dot": -4.551180362701416,
+                "router_pre_cast": -4.551180362701416,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 154,
+                "dot": -4.43576717376709,
+                "router_pre_cast": -4.435766696929932,
+                "delta": -4.76837158203125e-07,
+                "close": true
+              },
+              {
+                "expert": 209,
+                "dot": -4.6859846115112305,
+                "router_pre_cast": -4.6859846115112305,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 218,
+                "dot": -4.595659255981445,
+                "router_pre_cast": -4.595659255981445,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 321,
+                "dot": -4.188149452209473,
+                "router_pre_cast": -4.188149452209473,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 325,
+                "dot": -4.652431011199951,
+                "router_pre_cast": -4.652431488037109,
+                "delta": 4.76837158203125e-07,
+                "close": true
+              },
+              {
+                "expert": 341,
+                "dot": -4.726847171783447,
+                "router_pre_cast": -4.726846694946289,
+                "delta": -4.76837158203125e-07,
+                "close": true
+              },
+              {
+                "expert": 368,
+                "dot": -4.377849578857422,
+                "router_pre_cast": -4.377849578857422,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 376,
+                "dot": -4.544881820678711,
+                "router_pre_cast": -4.544881343841553,
+                "delta": -4.76837158203125e-07,
+                "close": true
+              },
+              {
+                "expert": 442,
+                "dot": -4.488085746765137,
+                "router_pre_cast": -4.488085746765137,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 452,
+                "dot": -4.740399360656738,
+                "router_pre_cast": -4.740399360656738,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 462,
+                "dot": -4.747594833374023,
+                "router_pre_cast": -4.747594833374023,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 466,
+                "dot": -4.702099800109863,
+                "router_pre_cast": -4.702099800109863,
+                "delta": 0.0,
+                "close": true
+              },
+              {
+                "expert": 502,
+                "dot": -4.539071559906006,
+                "router_pre_cast": -4.539071083068848,
+                "delta": -4.76837158203125e-07,
+                "close": true
+              },
+              {
+                "expert": 506,
+                "dot": -3.829047203063965,
+                "router_pre_cast": -3.8290469646453857,
+                "delta": -2.384185791015625e-07,
+                "close": true
+              },
+              {
+                "expert": 511,
+                "dot": -4.7329020500183105,
+                "router_pre_cast": -4.732901573181152,
+                "delta": -4.76837158203125e-07,
+                "close": true
+              }
+            ]
+          },
           "margin_rank10_rank11": {
             "native": 0.03125,
             "reference": 0.03125,
@@ -2362,6 +2805,8 @@
             "rms": 0.03750882264270619,
             "relative_rms": 0.0812703488754956,
             "cosine_similarity": 0.9966926096134175,
+            "native_checksum": "6e6268283eb079bda3747f06e64f2820452682d8efd67db9f7532bd0e027badb",
+            "reference_checksum": "157fc0a730e201a119fdd79d6bd60d0124f2247e00efa031a8433f6bf0ce42c9",
             "extreme_coordinates": [
               {
                 "index": 36,
@@ -2395,6 +2840,8 @@
             "rms": 0.04554515174497879,
             "relative_rms": 0.006819827787926604,
             "cosine_similarity": 0.9999829066531725,
+            "native_checksum": "e6568bbd1beba5ec28dfabf7266aa51d823ea12f551a8a874c18a7f6fbce0645",
+            "reference_checksum": "9ca18972775fb7424c7b7ee734dc628b1d55fd258a477dfd7a36d06d6fbcbc40",
             "extreme_coordinates": [
               {
                 "index": 2,
@@ -2428,6 +2875,8 @@
             "rms": 0.0010441989539568142,
             "relative_rms": 0.06587441489424085,
             "cosine_similarity": 0.9978279308991398,
+            "native_checksum": "0ee7e73e39704b058d1517b0ca6eb63b76f3d792cb6c9ce62f80adf070675a79",
+            "reference_checksum": "67ded014215134b8d79325a3231bef077a45a4628372d7b9eaf4753378606659",
             "extreme_coordinates": [
               {
                 "index": 2499,
@@ -2494,6 +2943,8 @@
             "rms": 0.03765702971686604,
             "relative_rms": 0.08582807977775664,
             "cosine_similarity": 0.9963165667264726,
+            "native_checksum": "65c9c571d6d8229e639eb31f9f1c6a0de83da93209f5e92347bcb125b7932d5b",
+            "reference_checksum": "3a182b7349615d5c35050e6e1becde28cd12f7e9ae87ceba0548d5a2ee74c72f",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -2527,6 +2978,8 @@
             "rms": 0.03201874279444336,
             "relative_rms": 0.004906050727636874,
             "cosine_similarity": 0.999989714041332,
+            "native_checksum": "956392b6c6d7e9b72189095b1e4918b3c8f2eb439864fe34a65c92cf6bdccfb2",
+            "reference_checksum": "1181e288db1b80016e3cff6df096ffc9859fc242a13552fce77366bb4a7c7aec",
             "extreme_coordinates": [
               {
                 "index": 242,
@@ -2560,6 +3013,8 @@
             "rms": 0.001730206547129032,
             "relative_rms": 0.32663207479395256,
             "cosine_similarity": 0.9458544383395531,
+            "native_checksum": "ac82057a20dd2d6a13e4022d851c7ec6df93be0d1608612ca756e3751377214e",
+            "reference_checksum": "584e4e7d010ea337ac9d638e29189522d2c7a0788cedc9fd26bda1a5b858cf2b",
             "extreme_coordinates": [
               {
                 "index": 1498,
@@ -2626,6 +3081,8 @@
             "rms": 0.038962053396907115,
             "relative_rms": 0.08994564788633158,
             "cosine_similarity": 0.9959471157146706,
+            "native_checksum": "053d75404d4644e740dbcb5892539f79e576c627eed909aa69f9eb7f70b36475",
+            "reference_checksum": "a3606958b14c1209942e99f89a9917727160a44a15c1505e2bf583b1c77a924f",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -2659,6 +3116,8 @@
             "rms": 0.044452369831019696,
             "relative_rms": 0.007025858082701806,
             "cosine_similarity": 0.9999840292010354,
+            "native_checksum": "cb76cce4af74694bd190d7867777f110ecedb1746c0703478688b1f6c63cf61f",
+            "reference_checksum": "2eac8604d5af8b80ebf5ac14eeb4d3729f5e9aed300f32dc9f708bfcecbe1a8f",
             "extreme_coordinates": [
               {
                 "index": 9,
@@ -2692,6 +3151,8 @@
             "rms": 0.0007604253659274969,
             "relative_rms": 0.14615575598453354,
             "cosine_similarity": 0.9893267194942676,
+            "native_checksum": "e4ca0c42bdeb32b09c250310aea055211fff75b4747a4a1d7ef381d84d42a13f",
+            "reference_checksum": "4c07d2c6d1b2c2736928f9b1e6cc20539e077a89ad787dde29367b5fe49908ee",
             "extreme_coordinates": [
               {
                 "index": 1134,
@@ -2758,6 +3219,8 @@
             "rms": 0.03900754545862768,
             "relative_rms": 0.08626573266381762,
             "cosine_similarity": 0.9962728369702554,
+            "native_checksum": "2ab7cf132ab24c20229382f37610ab2d5fc6abc9af8fcb7484547c8d2b2c786e",
+            "reference_checksum": "734e92c0ce2ac37cc6616d13bc07e9fe5e0f923a6e663f65872b62fc35033d01",
             "extreme_coordinates": [
               {
                 "index": 36,
@@ -2791,6 +3254,8 @@
             "rms": 0.06169371278159018,
             "relative_rms": 0.009080233068263976,
             "cosine_similarity": 0.9999806593996937,
+            "native_checksum": "8271e16fab32b4229c3f2a527d72ad3df5dbc396a5fb08df907bfa55fcba12fa",
+            "reference_checksum": "a49fe5fad03c1db4f6d636cd6a3c890af604785410375e7b2a0b88834887692c",
             "extreme_coordinates": [
               {
                 "index": 84,
@@ -2824,6 +3289,8 @@
             "rms": 0.001546638825707684,
             "relative_rms": 0.10934918296721077,
             "cosine_similarity": 0.9940511534137615,
+            "native_checksum": "945dcc2f375977017c7d2fe2ea69a48a29cd6279102a9596780bc8f13ac7ae61",
+            "reference_checksum": "78ce72b9dc4a37c19e599c70010a65a8031732856e4ab5814b97fdee8937881a",
             "extreme_coordinates": [
               {
                 "index": 2311,
@@ -2890,6 +3357,8 @@
             "rms": 0.03813552127082952,
             "relative_rms": 0.07063896875194223,
             "cosine_similarity": 0.997512874216785,
+            "native_checksum": "386f6cd68896756556582bbfa94936206a34e4467c33acbefc1754e2350a8266",
+            "reference_checksum": "90ea78db5d39eefa25cdee888745cc59a25312c451da86c6e27f1eff6abc836b",
             "extreme_coordinates": [
               {
                 "index": 36,
@@ -2923,6 +3392,8 @@
             "rms": 0.05816903363998215,
             "relative_rms": 0.008507164993410416,
             "cosine_similarity": 0.9999864289236348,
+            "native_checksum": "c5527c4b0d6448540179b6b3b18d297805a9308282aa1d624f7ace26660994a7",
+            "reference_checksum": "c0658d46d144eca9109095a2253d064184afd8d5dc5f173db4a1899d86287ba0",
             "extreme_coordinates": [
               {
                 "index": 256,
@@ -2956,6 +3427,8 @@
             "rms": 0.0019811670979202984,
             "relative_rms": 0.15884715857308862,
             "cosine_similarity": 0.9873041108974246,
+            "native_checksum": "5f6b92178fbe7022b080ae055abc871ee7265bb7908a723f0b7ac604f1bbf7fc",
+            "reference_checksum": "3a8ce73ccefd523e08a45c94ee6a1bdfc0dec7b989855e0fc0cd1eb1b38a6763",
             "extreme_coordinates": [
               {
                 "index": 1406,
@@ -3022,6 +3495,8 @@
             "rms": 0.040443161401864366,
             "relative_rms": 0.07338539051369809,
             "cosine_similarity": 0.9973116368904703,
+            "native_checksum": "1000ddd784212f46c643d3134786730f785169fe03b41504e07b0068e0b6a2b3",
+            "reference_checksum": "25b5a878154f8f24445b5e42ee8af2393490031c725f2d275e976f64ee63da88",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -3055,6 +3530,8 @@
             "rms": 0.031219467506144103,
             "relative_rms": 0.004741147469804478,
             "cosine_similarity": 0.9999917658137292,
+            "native_checksum": "aa9bcd56fc7d624b2c654e40b7fa6a2da2fe47769c5f282e19d3510b6470757f",
+            "reference_checksum": "b7396c611b095558cb66a7d6dff03aa10742e52708e213abe8752375a205dd88",
             "extreme_coordinates": [
               {
                 "index": 70,
@@ -3088,6 +3565,8 @@
             "rms": 0.0013691739871258077,
             "relative_rms": 0.048017358846308256,
             "cosine_similarity": 0.9990014280327201,
+            "native_checksum": "bb650c9b53920a55206498d3d4701a8382690d8f3cc56bc12acc18f588a3be33",
+            "reference_checksum": "4e1392290cc80a37db57081d04f3266b0138834ccdcd601e86d97108163c6bef",
             "extreme_coordinates": [
               {
                 "index": 2238,
@@ -3154,6 +3633,8 @@
             "rms": 0.03773735784378445,
             "relative_rms": 0.07208051841941054,
             "cosine_similarity": 0.997404184710029,
+            "native_checksum": "a8f34663c4a90feac675c59635c35ed34bf835920a06a8fee211e2a2204815b4",
+            "reference_checksum": "2e82a91ab5c96d5ca0a3bd4bb6d629c36fe2153572206aaca00c7fbf5f3e9a4b",
             "extreme_coordinates": [
               {
                 "index": 579,
@@ -3187,6 +3668,8 @@
             "rms": 0.0334624096076551,
             "relative_rms": 0.005129418550804416,
             "cosine_similarity": 0.999986932890249,
+            "native_checksum": "ccc7eb2320899e85ba135f94e5480b434a132aad20e08847dbfa46054b5ff264",
+            "reference_checksum": "0b31e3791bfaea3493b36f64f4c8d6563d932840b4b737c018f4ba6a81b46cae",
             "extreme_coordinates": [
               {
                 "index": 31,
@@ -3220,6 +3703,8 @@
             "rms": 0.0019081792917110673,
             "relative_rms": 0.046036721234533264,
             "cosine_similarity": 0.9989397727838153,
+            "native_checksum": "ed7427580d994425d6b0ad19f441d279a706d93ce17d0c70fb1686825aab3139",
+            "reference_checksum": "e28543274d9e5dc7647d626381dcafc999ffcb368bd7d95a031a4e97ae04adda",
             "extreme_coordinates": [
               {
                 "index": 2047,
@@ -3286,6 +3771,8 @@
             "rms": 0.04432012041795682,
             "relative_rms": 0.08704296474543419,
             "cosine_similarity": 0.9962088131292511,
+            "native_checksum": "10a107d6c8e9854a576bc4ac4feb0078c5fbe74e882691588ad1001cf175bf23",
+            "reference_checksum": "1a18f54ddef0e4d98dbdd0b3494bdd89aac8bdd3725dbbea9ea06139a221ea8a",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -3319,6 +3806,8 @@
             "rms": 0.03699354868139807,
             "relative_rms": 0.005440730297509524,
             "cosine_similarity": 0.9999852198134984,
+            "native_checksum": "1dd4a1157435bc1c01f5c74739c87aaff69f5fa7deccc11938e191cc989acb4c",
+            "reference_checksum": "a5fb98d6eb65061424177d15392ef99f7eb4c847080d9d2e6febbe661a1ac1e1",
             "extreme_coordinates": [
               {
                 "index": 74,
@@ -3352,6 +3841,8 @@
             "rms": 0.0008496576482684664,
             "relative_rms": 0.08952821581532641,
             "cosine_similarity": 0.9960240933458148,
+            "native_checksum": "74a0d3a03c86cf1497387ef1abd50798c038d73e0e72ec1255159e05a84f25b4",
+            "reference_checksum": "72ef505ac134e8b447528fdb1972fb62fe185439cc528dba1d8997715d1a730b",
             "extreme_coordinates": [
               {
                 "index": 1462,
@@ -3418,6 +3909,8 @@
             "rms": 0.04791385146804332,
             "relative_rms": 0.09498915559193902,
             "cosine_similarity": 0.9954818873151674,
+            "native_checksum": "5421f85e219eab3e18c2b38d731464d3c734631e40c95b0387e3d8e3125093f6",
+            "reference_checksum": "c1585c3dabf27c9187ff1c7dc183bc0ec65afd79a6d76e1285ef177768ef16c2",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -3451,6 +3944,8 @@
             "rms": 0.0463532979933821,
             "relative_rms": 0.006886721180083471,
             "cosine_similarity": 0.9999832083192721,
+            "native_checksum": "02ae1626ae1475838da381ec2a3849798db40fdba0fbe37b8ac124b7b46f6e51",
+            "reference_checksum": "8293d167ecb701488cc64670fe8658d00ebd21abec64409158115f0fe57b1f0b",
             "extreme_coordinates": [
               {
                 "index": 76,
@@ -3484,6 +3979,8 @@
             "rms": 0.0017782013747906068,
             "relative_rms": 0.19508921870035237,
             "cosine_similarity": 0.9807855292408126,
+            "native_checksum": "483ac771af1f6f0b5f10fcc0b4f5e6653323ace3c85334de5abf963a4bd2ef37",
+            "reference_checksum": "bc8eb98e568b2c0e5f43552283a50933a34267742226a1e05ece86eb693ab172",
             "extreme_coordinates": [
               {
                 "index": 1012,
@@ -3550,6 +4047,8 @@
             "rms": 0.049346892233063024,
             "relative_rms": 0.09474732268125466,
             "cosine_similarity": 0.9955164886384851,
+            "native_checksum": "dce6a8e8e4c5ce00b1997ce02a43458eb930da92595ad09fd93e5c324ca92e10",
+            "reference_checksum": "8cbc9b166dc110323d25ffed77c9395da957690b06cc979c3c13ed6a52218777",
             "extreme_coordinates": [
               {
                 "index": 579,
@@ -3583,6 +4082,8 @@
             "rms": 0.04307958007834527,
             "relative_rms": 0.0064130087544186426,
             "cosine_similarity": 0.9999812577277782,
+            "native_checksum": "1a0464a03aebb8b3a60caa5aeb6e757298215bd058c5e87b36d0af6695ab57b7",
+            "reference_checksum": "a7e0e00fed0f624fb76919fd46d221e42d2ebc825b72390921a0e5df9f63c92a",
             "extreme_coordinates": [
               {
                 "index": 229,
@@ -3616,6 +4117,8 @@
             "rms": 0.0008129845054180901,
             "relative_rms": 0.1199500211072662,
             "cosine_similarity": 0.9927800104666575,
+            "native_checksum": "e6eac67be5ef487a1e2af2bccf70a1b88712437b9ee2815e199548fab06780a8",
+            "reference_checksum": "89f5fa2d59782123cd07fc6eae2ec82fb1454f2e28c4aa68bb20b6efd30e5763",
             "extreme_coordinates": [
               {
                 "index": 479,
@@ -3682,6 +4185,8 @@
             "rms": 0.05839140946074826,
             "relative_rms": 0.0900162055840392,
             "cosine_similarity": 0.9959450850744817,
+            "native_checksum": "342d751e4a0eba9ce5264a65c34bd2995d935ad5858f377048308a8cb61ec0c9",
+            "reference_checksum": "49b95bdc0c7de52468d7702421017d93740fc2c46cd6d1bc8c649871108da4cb",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -3715,6 +4220,8 @@
             "rms": 0.03802328580846052,
             "relative_rms": 0.005737193753721137,
             "cosine_similarity": 0.9999837200163781,
+            "native_checksum": "ad94b77a4d7fcd443627ed672b0d485518f6c4f0e43b96a541db0603b2fbdb25",
+            "reference_checksum": "316d5432578c67ead95330df19544c6872093890b73014fb8b2eed54246b586f",
             "extreme_coordinates": [
               {
                 "index": 327,
@@ -3748,6 +4255,8 @@
             "rms": 0.0024660721604565236,
             "relative_rms": 0.23624739124891062,
             "cosine_similarity": 0.971693519106406,
+            "native_checksum": "2cb22c0053c06e1f3d9f761bee8c218910aa3340fccf6fc2cabcde7966be9656",
+            "reference_checksum": "dbb2b022d3c091f6f7136f1192b67ba9bddbae973e62a4dc8ec5f89b0ce70225",
             "extreme_coordinates": [
               {
                 "index": 1994,
@@ -3814,6 +4323,8 @@
             "rms": 0.06770083845562229,
             "relative_rms": 0.10347498594201418,
             "cosine_similarity": 0.9946980219754991,
+            "native_checksum": "be6e9ebc82e5db31438564131670757516bcd60adfc8fd39c7079edeb7f9ad96",
+            "reference_checksum": "89c36f2a117b32a05624adc90baf0f9dbdf01609a19c260f77793df38dbbd682",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -3847,6 +4358,8 @@
             "rms": 0.05369761908738875,
             "relative_rms": 0.008038283408934548,
             "cosine_similarity": 0.9999733549605597,
+            "native_checksum": "8363505b036b6319374ace47299a47719e103c6e53f72d924ac4284cc95c3df5",
+            "reference_checksum": "8f1c720b3d0140116a458dc8c02e16da0978efc1cd516634b8191d13bc777737",
             "extreme_coordinates": [
               {
                 "index": 288,
@@ -3880,6 +4393,8 @@
             "rms": 0.0014699830692474394,
             "relative_rms": 0.13924405676765503,
             "cosine_similarity": 0.9905005577585999,
+            "native_checksum": "0798e617c864a4947ccc6ada219131ae7ec3e4dd3289be73fc0f4b971e9edd89",
+            "reference_checksum": "53ac62542d81c016921bbf55c83d68c36a840f7045ca41617a69244fb7ce9d66",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -3946,6 +4461,8 @@
             "rms": 0.05145691194135435,
             "relative_rms": 0.0916112297992394,
             "cosine_similarity": 0.9957967402937054,
+            "native_checksum": "1e3d05d1f133da70952cbb4b36fb73fd738c155f5062570a6031b578388c8900",
+            "reference_checksum": "b3c7b4b154e00e8d7b912b4cd3a39fb1ab65021c7a73f54f804388e15766261f",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -3979,6 +4496,8 @@
             "rms": 0.04273507126375208,
             "relative_rms": 0.006605706477402402,
             "cosine_similarity": 0.9999790895391863,
+            "native_checksum": "4106a53b39f06b00a468f7bb87adc244a9a3988db43c6d3e6bc365fb604633a4",
+            "reference_checksum": "3fc7414e2623449f5ed9dc5fd7e8925e7892c865b2741cb1a135b3c62741ca4a",
             "extreme_coordinates": [
               {
                 "index": 510,
@@ -4012,6 +4531,8 @@
             "rms": 0.0014782768923411245,
             "relative_rms": 0.09806370825542667,
             "cosine_similarity": 0.9951821251927313,
+            "native_checksum": "9254c691b177a8056f4d8a8bf4e95e9f628f44885b49baf11432ad4eefe33e85",
+            "reference_checksum": "5a93dafdf0be6e2405d84ed13dbb90fee88d1c272f748653199870b0e7e020ae",
             "extreme_coordinates": [
               {
                 "index": 396,
@@ -4078,6 +4599,8 @@
             "rms": 0.04420130497124808,
             "relative_rms": 0.0651636291138337,
             "cosine_similarity": 0.9978775439553497,
+            "native_checksum": "ded45b1d712e76cd41315858e6f69eea6276d4c4cab99c1e071e41da3efe32ac",
+            "reference_checksum": "9f31362cf005f6eaffeb089b2c37e49777ce40eb0e8e447169a0b8f65b903b15",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -4111,6 +4634,8 @@
             "rms": 0.0343605704799984,
             "relative_rms": 0.005395159212992149,
             "cosine_similarity": 0.999987771627659,
+            "native_checksum": "0378e1377d9f7e6a977a773b6548372e2de156d99e9e6a2f8c85ca7ccd847c8f",
+            "reference_checksum": "5a3f0d3bc626f9a74848388df498fd9dc588af44dadd876e93991f1f5b78621b",
             "extreme_coordinates": [
               {
                 "index": 25,
@@ -4144,6 +4669,8 @@
             "rms": 0.0022174948415748935,
             "relative_rms": 0.1418543744013658,
             "cosine_similarity": 0.9899347634409614,
+            "native_checksum": "88815bf75791daf3351d3cbdfbcf392405853a43c981225aa7c0adf1ebdb0958",
+            "reference_checksum": "0de3a9c99ed80fd25a5ca488a0b2b52b0fcc69dbecfeb97adfe0d301e0ca41bc",
             "extreme_coordinates": [
               {
                 "index": 2298,
@@ -4210,6 +4737,8 @@
             "rms": 0.03783032110708464,
             "relative_rms": 0.06805081192543602,
             "cosine_similarity": 0.9976818857213485,
+            "native_checksum": "b2616885e88c7f5c8d4de0d03df1881068fd6fbdd6f84bb3b742ecd0140a1205",
+            "reference_checksum": "2fd476f07d96288ebc65a3a74d9a26bbcbd9423167c45f6135203cba8ade2ebe",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -4243,6 +4772,8 @@
             "rms": 0.04017726956634969,
             "relative_rms": 0.005971116767085813,
             "cosine_similarity": 0.9999857953941771,
+            "native_checksum": "bd00217f5a50bf95dc54b0cb6aa6a0be1b016bc1957dbfc4170a7cd53f891f31",
+            "reference_checksum": "68dbaa32939805ff613bad49014520d51e6b5f675e1b97cae25b4cade8753445",
             "extreme_coordinates": [
               {
                 "index": 88,
@@ -4276,6 +4807,8 @@
             "rms": 0.0008582669580466726,
             "relative_rms": 0.030738369904206014,
             "cosine_similarity": 0.9995359470603179,
+            "native_checksum": "34cbbb4ab14a1ecb2a28c4fc93dacbbb0be24376f7f5bdd3315c923bb6b93ded",
+            "reference_checksum": "26b7754ff2fd3168fcbb3f5458c9c90746e7a7813f58b0b5ac54fc3fcbc7963c",
             "extreme_coordinates": [
               {
                 "index": 579,
@@ -4342,6 +4875,8 @@
             "rms": 0.04032295624366097,
             "relative_rms": 0.0759401937431716,
             "cosine_similarity": 0.9971139529460682,
+            "native_checksum": "58c6973a9de96c1cecff8693460bdc145125f2814bb6f96b484c695d2c83b8db",
+            "reference_checksum": "13d9b60ead656e0d07ab534ea9b283eae27cf63838c8fb45bc3b1a313575fa8c",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -4375,6 +4910,8 @@
             "rms": 0.03381501893199372,
             "relative_rms": 0.005194550284236527,
             "cosine_similarity": 0.9999865408356143,
+            "native_checksum": "9850106b859895f66e30d58611973ae84e8412f46eb8049b4a02081a43e3fa0c",
+            "reference_checksum": "6f36ed05e6c2b7f44e39b0921b7872edbf45671e2c0a090ddd8966cc1bd224b3",
             "extreme_coordinates": [
               {
                 "index": 126,
@@ -4408,6 +4945,8 @@
             "rms": 0.0018761663045873756,
             "relative_rms": 0.30039790639176184,
             "cosine_similarity": 0.9544516331104196,
+            "native_checksum": "a068115c8d8d3e43a4743c0d7dd64fb18f645ba0667f43e7951ce6e96ae9dde9",
+            "reference_checksum": "61323b84021bb6846b0af26e4371f6b7b25c13454ad2433ab662500dfb77f840",
             "extreme_coordinates": [
               {
                 "index": 2546,
@@ -4474,6 +5013,8 @@
             "rms": 0.03081657784849307,
             "relative_rms": 0.06193108315537812,
             "cosine_similarity": 0.9980861479195742,
+            "native_checksum": "1d5279231b6d95cacb3b39135218eaed23e4440525a1dbe84e036f6aaf7480cd",
+            "reference_checksum": "e4980abff547a7d77c89b3da8719f702f0ccb8f845c965ed51174652d958f72e",
             "extreme_coordinates": [
               {
                 "index": 36,
@@ -4507,6 +5048,8 @@
             "rms": 0.03880069738724829,
             "relative_rms": 0.005563272760825467,
             "cosine_similarity": 0.9999855551598974,
+            "native_checksum": "ead3e7e5bc2dad07617066c425e57213d761eaa012429830b4dbccc28a895999",
+            "reference_checksum": "0849a011a2f0fe879d41fdaf8351e6337426708ccb25d87e2859aa23853e6a3a",
             "extreme_coordinates": [
               {
                 "index": 2,
@@ -4540,6 +5083,8 @@
             "rms": 0.0006444159826722098,
             "relative_rms": 0.029568780946111005,
             "cosine_similarity": 0.9996129173936367,
+            "native_checksum": "5d8b953711095d7be07d148932e63977dbb01a986d6022ae28806be6db3a3dca",
+            "reference_checksum": "2230b5c7d7bc60bcc77c39db7fc8b7094228b067445745573022d964bef2ae31",
             "extreme_coordinates": [
               {
                 "index": 2311,
@@ -4606,6 +5151,8 @@
             "rms": 0.027675243229457396,
             "relative_rms": 0.06241102771020059,
             "cosine_similarity": 0.9980553581121127,
+            "native_checksum": "778e24d72069f8b098edca2831314b6c95b298a09c96a4c3fade1af0fe979dd5",
+            "reference_checksum": "81badf1293b9bccc5be35dac1e59d0a44ef768d9d4f2616a0f0c4910f3562385",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -4639,6 +5186,8 @@
             "rms": 0.030850720701037723,
             "relative_rms": 0.004758072785971821,
             "cosine_similarity": 0.999989686890464,
+            "native_checksum": "18cf7a2e50c8d3cd104d04338c3abec7daab59951ffbae9f612bd9c157b93ddd",
+            "reference_checksum": "fcf7e9311b7e51e6d0404e09e926a750fc9e760ee9bee83544fbb2ca119d520a",
             "extreme_coordinates": [
               {
                 "index": 5,
@@ -4672,6 +5221,8 @@
             "rms": 0.00041628907112227585,
             "relative_rms": 0.08137914226876662,
             "cosine_similarity": 0.9966836202539213,
+            "native_checksum": "29ad705687e9077e0b547f17c38f9568d5ccbf1754040e9d644f39bf414ca9e1",
+            "reference_checksum": "3037402f7f59b0e1b9601f7547da974b5c89e35b4138718f6bf3c1190e948d19",
             "extreme_coordinates": [
               {
                 "index": 1540,
@@ -4738,6 +5289,8 @@
             "rms": 0.032103653324337254,
             "relative_rms": 0.06810134259704245,
             "cosine_similarity": 0.9976789025490485,
+            "native_checksum": "7f4d14c7bb3f7686f61abfeb5155be8bf72d33fbdefe07b79a6d04b808f66a11",
+            "reference_checksum": "318ba4a7fa378033a15a1d92b799da3a0fa962b35f84a2c9e1da08b50f386fb7",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -4771,6 +5324,8 @@
             "rms": 0.03719921280222834,
             "relative_rms": 0.005638262424730438,
             "cosine_similarity": 0.9999856058490577,
+            "native_checksum": "05c6096beed13b626b70ee71e88c14fa6a0979db240f2dc68f5fd0952cfa37bf",
+            "reference_checksum": "b00dbf4e701512d485dd4f56d482c570d2219f92ae21bda8b53f8af14359456e",
             "extreme_coordinates": [
               {
                 "index": 468,
@@ -4804,6 +5359,8 @@
             "rms": 0.0006154311272487905,
             "relative_rms": 0.094003457596338,
             "cosine_similarity": 0.9956300375159888,
+            "native_checksum": "b2c6a28b1ccbcf9d1872a250f51a7aa3f61fcd1679b2b134eafbe24a0277cb59",
+            "reference_checksum": "c75a426e8a82d7d5a89591b1424b187036486a0d94e43ed014d609235ad9faed",
             "extreme_coordinates": [
               {
                 "index": 600,
@@ -4870,6 +5427,8 @@
             "rms": 0.030623413700087088,
             "relative_rms": 0.06345991712169673,
             "cosine_similarity": 0.9979950998712234,
+            "native_checksum": "b6a7852ae14a8c189a4f39a5422912de79da51471616948b1a499a6c0596656e",
+            "reference_checksum": "02c3fbf84d541cb3dd4de602acf5bb79cfda8647d9b9c95a8b50c6fbe6e80ede",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -4903,6 +5462,8 @@
             "rms": 0.033332125323976586,
             "relative_rms": 0.004714646476090557,
             "cosine_similarity": 0.99998915250452,
+            "native_checksum": "5351cb4492fcbf7db747f427ffcf1829b11ac2bf5e5ef9b6d50c7264d0ac68dc",
+            "reference_checksum": "f92dabf726e91a8c916f1dda0baefc2290d547afbd667499c95f19e5ebc0f8c7",
             "extreme_coordinates": [
               {
                 "index": 329,
@@ -4936,6 +5497,8 @@
             "rms": 0.0011959509209711,
             "relative_rms": 0.09790836087518884,
             "cosine_similarity": 0.9952487673622019,
+            "native_checksum": "6ea2462d7c29f538e141ad8abb1eb78f8cc460219ed8517702517d5d31649a66",
+            "reference_checksum": "4976cf33792358abe1a6aba9e7230176b2ec1f99cdbe617df36ac9e67b2f64fe",
             "extreme_coordinates": [
               {
                 "index": 2311,
@@ -5002,6 +5565,8 @@
             "rms": 0.04009271463555809,
             "relative_rms": 0.06424729510344648,
             "cosine_similarity": 0.997936811352638,
+            "native_checksum": "3e869e2bff0b9071eb465cd97cad9af6e78e495f4e59f7f10fe306c80515accf",
+            "reference_checksum": "002dd81d0d87e51cf9fe0bf70d60ecbe650cb86d2c571b106f20eb9835cfeff4",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -5035,6 +5600,8 @@
             "rms": 0.03797936813013683,
             "relative_rms": 0.005438427648536076,
             "cosine_similarity": 0.9999886975031342,
+            "native_checksum": "0135abd9c56e508ac8b537acea3478504918e73274624006401d0dab43f4a79f",
+            "reference_checksum": "98cea8e87b4e72cb22a5d1316b7a14de2360cc8e46f510ca555e58c9784afdd4",
             "extreme_coordinates": [
               {
                 "index": 5,
@@ -5068,6 +5635,8 @@
             "rms": 0.002403682160521356,
             "relative_rms": 0.2737273369485821,
             "cosine_similarity": 0.9623432297847945,
+            "native_checksum": "5a6df8ddd50458630f51601e2270f98b0d8505a878fd42ca43a8550524b82578",
+            "reference_checksum": "1ddbb28f15f6a7830e84d7b3b6a2d1f71a76ead04c8220a691f74b8069e82be5",
             "extreme_coordinates": [
               {
                 "index": 2277,
@@ -5134,6 +5703,8 @@
             "rms": 0.048631018054989254,
             "relative_rms": 0.07106707629523021,
             "cosine_similarity": 0.9974749780697354,
+            "native_checksum": "3fd09a9de5a45122f48b3f0807488822b18adc378b6596c530eee601661d188e",
+            "reference_checksum": "9f6504a3a0440ea3b84534010c4ffb48e8c952ba0edadf3bc41f43f3f0dea8a2",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -5167,6 +5738,8 @@
             "rms": 0.0347881115831189,
             "relative_rms": 0.00535871382598908,
             "cosine_similarity": 0.999987765166002,
+            "native_checksum": "9be105b95185702126284244076d8aab793a06669d3e81931947c17d42aff88a",
+            "reference_checksum": "807cd95bd312230aec6dd369c21138c0701c28a15dfcee918393d00524df2cf5",
             "extreme_coordinates": [
               {
                 "index": 70,
@@ -5200,6 +5773,8 @@
             "rms": 0.002976157052917068,
             "relative_rms": 0.23277208617596776,
             "cosine_similarity": 0.9731890527717848,
+            "native_checksum": "dc83c0be0bd45bb1fce8b78449a9497691d5e853d591c159f301ffc099d2a833",
+            "reference_checksum": "8433628bfb1525e2c8a34152009e101e238ea0d1cc711baf84d99856c088210b",
             "extreme_coordinates": [
               {
                 "index": 1925,
@@ -5266,6 +5841,8 @@
             "rms": 0.04251442290795637,
             "relative_rms": 0.06733729567185395,
             "cosine_similarity": 0.9977505292000113,
+            "native_checksum": "be1dee68685e5fff08214ceba04048ebb8389e753f51db9a2a4fdb6ef9af9cbe",
+            "reference_checksum": "9dd359db3bc947e7a945efbf4e9caa3933ccee1f7d3abde71d53883790ce5c76",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -5299,6 +5876,8 @@
             "rms": 0.032754902014157074,
             "relative_rms": 0.0049015122072131,
             "cosine_similarity": 0.9999880472287169,
+            "native_checksum": "9a8cd14dddfd608e90136d680d06503be6d3e4755aa6f33ff6716a60690865e6",
+            "reference_checksum": "d6a3e2e399b4a97a307fea8a52cc4907926ad79cc460a3fc4323da08e9f8557a",
             "extreme_coordinates": [
               {
                 "index": 23,
@@ -5332,6 +5911,8 @@
             "rms": 0.0021980109602435047,
             "relative_rms": 0.06466180094825938,
             "cosine_similarity": 0.9983519223196063,
+            "native_checksum": "12c39cd4265ad6ae0f6afc3879697f8441bd3c8b56ceb9b5ceb813c5e6fb36f6",
+            "reference_checksum": "29ae0388cd9b438ff8dea4fc1fdfb68404f294e142579ab48e91fe69abc5a52a",
             "extreme_coordinates": [
               {
                 "index": 2238,
@@ -5398,6 +5979,8 @@
             "rms": 0.04733170486524716,
             "relative_rms": 0.07657921403984384,
             "cosine_similarity": 0.9970668334095694,
+            "native_checksum": "5ff3c61366d84b50f98e2d2ea29fbde5ad66036869d317c4d665ff9de5960c3c",
+            "reference_checksum": "07c4a3bf8fa1a96188216b3ba80718dfca14d48cd93696f1111bb67a05ea4e26",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -5431,6 +6014,8 @@
             "rms": 0.04263453115809194,
             "relative_rms": 0.006120813778720097,
             "cosine_similarity": 0.9999829374296269,
+            "native_checksum": "3e0d4a0fddeb852d0af1ad144929a2705f98aa9bdbc9d96ddd473858b2b6d676",
+            "reference_checksum": "6ff97da7a4e3d98f58bbb6ab89c43300373d3aa2a115aec94be1d024ab9e9330",
             "extreme_coordinates": [
               {
                 "index": 191,
@@ -5464,6 +6049,8 @@
             "rms": 0.0009200049542321042,
             "relative_rms": 0.09979158100196392,
             "cosine_similarity": 0.9950443171235048,
+            "native_checksum": "13b889057afca0e764f1c6ba788586496e3ef423fac5e8bb0e28dc70cb24682a",
+            "reference_checksum": "507682a3de4622348e6805ed0d2eb75bd215c472740242353bd6e0b28bf27bcd",
             "extreme_coordinates": [
               {
                 "index": 441,
@@ -5530,6 +6117,8 @@
             "rms": 0.049674769508887766,
             "relative_rms": 0.08294261003298463,
             "cosine_similarity": 0.9965570470164076,
+            "native_checksum": "3a00f8c2eec6ef7fb218019883fb5498dfaa5ef0e4619a24a7cc8c070fc46829",
+            "reference_checksum": "5eb8673473f6e804e8d7ac4337ae7e58b8a3224b8ee68c0ba2fdd266542dc7f0",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -5563,6 +6152,8 @@
             "rms": 0.043776803661509586,
             "relative_rms": 0.0063758361662261814,
             "cosine_similarity": 0.9999841880609419,
+            "native_checksum": "efcc342ffd1d73d05a4e68cfe8ffac3cf1e271807a3d12eb68117cd8b9d60791",
+            "reference_checksum": "9cbce16cd5c44d3d09d4ad0df3ec74038bd167092a97a69dcb42e2c7f5ac404e",
             "extreme_coordinates": [
               {
                 "index": 162,
@@ -5596,6 +6187,8 @@
             "rms": 0.0019261844100084266,
             "relative_rms": 0.12963897720308926,
             "cosine_similarity": 0.9915699080373179,
+            "native_checksum": "51264798e1fbb916baaded60fbb44ee53e924902745ddc6332e61d72fbb59b50",
+            "reference_checksum": "97b6d6f935fdb36a98d0c2e9e40a02ff634c824b2341bb733947743b833da1dc",
             "extreme_coordinates": [
               {
                 "index": 2155,
@@ -5662,6 +6255,8 @@
             "rms": 0.055888291172794216,
             "relative_rms": 0.08280574360722738,
             "cosine_similarity": 0.996568854527842,
+            "native_checksum": "fd079fc06fe6eb5a3a52d4cdd878d8851a4f13eccae6e3b9a8502c4f817167f1",
+            "reference_checksum": "2698a2a4baf85559961b725c2d98a2f7cae66e870f19211cbebfe750b57016ec",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -5695,6 +6290,8 @@
             "rms": 0.042494497503973785,
             "relative_rms": 0.006163319037772472,
             "cosine_similarity": 0.9999845870895581,
+            "native_checksum": "ffafc4714031b9bdcc4406955c22ae8b7c9c55278e360c9e66db61c4d65c1b89",
+            "reference_checksum": "83a5fd5fc9bc542cf010ac03a8da106e1d1d7189dcb19e22d32be278ffff991e",
             "extreme_coordinates": [
               {
                 "index": 279,
@@ -5728,6 +6325,8 @@
             "rms": 0.001441513010736739,
             "relative_rms": 0.11675020705636274,
             "cosine_similarity": 0.9932527977926201,
+            "native_checksum": "89f65950dc3dc7b5bf7fd9dabb30e10d6fd7a32e54a05f1d21c484fbd376fa99",
+            "reference_checksum": "658c09f354c26d8c1d8078e0c636304e449e1f22cb609460378c073b5d9e94fc",
             "extreme_coordinates": [
               {
                 "index": 892,
@@ -5794,6 +6393,8 @@
             "rms": 0.06858448014940575,
             "relative_rms": 0.08784000223009689,
             "cosine_similarity": 0.9961351517689405,
+            "native_checksum": "44651adee421b66b0b527deb5b3b5df6c5cf7563860d1b814ee8628991bd7bb6",
+            "reference_checksum": "2aca99b2b52c493fb2b540b4909d400adf8667bf4cc7e9ae8b3e686ec835ca8c",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -5827,6 +6428,8 @@
             "rms": 0.03561441900158295,
             "relative_rms": 0.0054994121618305416,
             "cosine_similarity": 0.9999858994471739,
+            "native_checksum": "d9ffa2baa7d1d0d78f2ce4a272fa783db493fdc1f2f3ea44e4ea3b1d67c03269",
+            "reference_checksum": "8278817262fa3d4aa47650db11d8bd5bf0d91bc12c722bb663b40637800be8d9",
             "extreme_coordinates": [
               {
                 "index": 74,
@@ -5860,6 +6463,8 @@
             "rms": 0.004991024292140883,
             "relative_rms": 0.24766605736985065,
             "cosine_similarity": 0.9690377253043836,
+            "native_checksum": "7e112697cf0478fb8d56c92b3370b319c46d39511cc178252e58b0b0c3ff0ac5",
+            "reference_checksum": "a14fd3cc4805b4fe81c8d11b0fffc0da1009cc8c3d11895352a83f480811e8c7",
             "extreme_coordinates": [
               {
                 "index": 1886,
@@ -5926,6 +6531,8 @@
             "rms": 0.0629995439192032,
             "relative_rms": 0.0863215760300165,
             "cosine_similarity": 0.9962998533885565,
+            "native_checksum": "f3cd91036d853e9ee41bae53cbe7f2d9b4eb996816c8bb5f3fdbaf81954946f0",
+            "reference_checksum": "6077a160ad693d2073b06d1ddc1fad10be452812d95d73729e62e9083ed60f5e",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -5959,6 +6566,8 @@
             "rms": 0.04640984209845489,
             "relative_rms": 0.007042489432515093,
             "cosine_similarity": 0.9999830736851509,
+            "native_checksum": "ef1b9b627659c280f8f932ad3ffc4be9431d191db8c6475601901223639a60a9",
+            "reference_checksum": "33aa1af63b4bf7c8c411bcc8b56187e89ba609318fea4dc38596f46aa1f5a2f0",
             "extreme_coordinates": [
               {
                 "index": 106,
@@ -5992,6 +6601,8 @@
             "rms": 0.0018327732043539346,
             "relative_rms": 0.11196817350989982,
             "cosine_similarity": 0.9937119459906162,
+            "native_checksum": "cccfa0aeb9195ef5cd2ed98cfa20f078e04f53524b4f0d20f899589e81471543",
+            "reference_checksum": "a8269846bfe0f3a585b273a8af6b07417921dbb76192cb08659a9888b769ca60",
             "extreme_coordinates": [
               {
                 "index": 2343,
@@ -6058,6 +6669,8 @@
             "rms": 0.06551345319760819,
             "relative_rms": 0.08602055585906322,
             "cosine_similarity": 0.9963037636404437,
+            "native_checksum": "21d5eadc578e4a5fb11806c49031c85aca9a23d657fc72dbd1efecf0958a5560",
+            "reference_checksum": "8f1738d57706df024b58e07753066b36ee0056d1185084f80fb229652e200acb",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -6091,6 +6704,8 @@
             "rms": 0.05380407407856,
             "relative_rms": 0.008186313793781319,
             "cosine_similarity": 0.9999784138678561,
+            "native_checksum": "90d34c780733c15ed6419296503292b2465b0409f21139a0efb4bf39224fdef7",
+            "reference_checksum": "a6d3756743a41c0e289ebeb992434e98830b6f4e353ff5128a6d9d86990c9766",
             "extreme_coordinates": [
               {
                 "index": 510,
@@ -6124,6 +6739,8 @@
             "rms": 0.00365349613505233,
             "relative_rms": 0.11393714494495279,
             "cosine_similarity": 0.9936892156982879,
+            "native_checksum": "2388b1adf6a05f707adaba6db55f6679cd815ff822292e34045f2ddff2cbf249",
+            "reference_checksum": "5b33fe2505980f8ee925759788ae5f73de1be7bf5fa2561f5c1c4214eecfa7e2",
             "extreme_coordinates": [
               {
                 "index": 1463,
@@ -6190,6 +6807,8 @@
             "rms": 0.06745464480463202,
             "relative_rms": 0.07928427874749795,
             "cosine_similarity": 0.9968627785019343,
+            "native_checksum": "b68ff640dde44c892b306025b9d0b56955cf2d44ae6aefdab766cbe2bcc5cc34",
+            "reference_checksum": "db648882a31f6d202b462394afe91c847bb95a173448967a627d1f5cd1dfd1de",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -6223,6 +6842,8 @@
             "rms": 0.03549371454177001,
             "relative_rms": 0.005579456148732046,
             "cosine_similarity": 0.9999872914108451,
+            "native_checksum": "e7bf580207b8bd571eaf1d1380f8636330bfdcfeed3d7a066cf4bc51feb82603",
+            "reference_checksum": "83457137f242d8c43d791109ed21f613b0af5bd06dbfbe9be7cb006b171da16d",
             "extreme_coordinates": [
               {
                 "index": 493,
@@ -6256,6 +6877,8 @@
             "rms": 0.0040529615558226855,
             "relative_rms": 0.08957175450152617,
             "cosine_similarity": 0.9960268611236154,
+            "native_checksum": "54809dd4b9b42a1d019fd78720d8496b1a0dc04deddc1e0c14cb4c7cac2074ab",
+            "reference_checksum": "f0dfe595dff9f999ae6bd44945309401587ec3b4b374426c9425443b7824549a",
             "extreme_coordinates": [
               {
                 "index": 2137,
@@ -6322,6 +6945,8 @@
             "rms": 0.07872546542826363,
             "relative_rms": 0.08456939370548454,
             "cosine_similarity": 0.9964307018037241,
+            "native_checksum": "862194afe85f2ce37de9f5d99d27c289e3e2ee114b50ba0e126d6905971e3d17",
+            "reference_checksum": "9f71a1cfaab2c9660d38e713cad8b07772c1ebf6e9f93706252d793d28855671",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -6355,6 +6980,8 @@
             "rms": 0.03777795143336855,
             "relative_rms": 0.006086822821218075,
             "cosine_similarity": 0.9999815111482925,
+            "native_checksum": "ce47eadd62f557dd1d975e0003a4a4a811fc04bdfc69535ad33f0921db87a80f",
+            "reference_checksum": "e02fd0cf230833b5fe7ee18a9dbb3a4f62b4056bdee42e4c63eba4c4fa8273b5",
             "extreme_coordinates": [
               {
                 "index": 92,
@@ -6388,6 +7015,8 @@
             "rms": 0.002478350146757898,
             "relative_rms": 0.10261808180305157,
             "cosine_similarity": 0.994720829948306,
+            "native_checksum": "966cc1550a93e6ea1ca22b8d9a03744c539604a3a86ba1bb942ea2307c22d540",
+            "reference_checksum": "db92c93c664886ae8c016bda16488cafbf5e086b9c686b942790290fff169f27",
             "extreme_coordinates": [
               {
                 "index": 1376,
@@ -6454,6 +7083,8 @@
             "rms": 0.07489963547093625,
             "relative_rms": 0.0777298385514049,
             "cosine_similarity": 0.9969797270478996,
+            "native_checksum": "7c837d581d3cb7cbbc0d236e3006bc7e015db2b4c4f777a2d153d7117f9ee777",
+            "reference_checksum": "0705d3fd3ab97a8e2259fc43db6d905894b8f6f373db75a95849647e26ca0f2a",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -6487,6 +7118,8 @@
             "rms": 0.03670887915861817,
             "relative_rms": 0.0056941337915225685,
             "cosine_similarity": 0.9999838029455144,
+            "native_checksum": "9f820b3844bf9d162891c1226e9eca34fe2a36e84002089513a81be5f44eaaf3",
+            "reference_checksum": "30b1ef652512c71ede2d3d25dd11d374aa12641db9ccbc07cb460f29b6616dbe",
             "extreme_coordinates": [
               {
                 "index": 63,
@@ -6520,6 +7153,8 @@
             "rms": 0.0026544624388111005,
             "relative_rms": 0.1042172491937578,
             "cosine_similarity": 0.994555962936601,
+            "native_checksum": "82cbeb0320831799ded301a2b598f2b47cbbb7a58ff0a5e8d126910e1d256e06",
+            "reference_checksum": "855e380253df9783f54a40c3d2183ecd99f69299bb0ed319415256c3a123cd0c",
             "extreme_coordinates": [
               {
                 "index": 141,
@@ -6586,6 +7221,8 @@
             "rms": 0.08186269860815576,
             "relative_rms": 0.08189118011747054,
             "cosine_similarity": 0.9966695008186556,
+            "native_checksum": "fcafccf70ed472fa54cbf8b0ccafa39a6cfd349e9e2f325e784d2e62debc5474",
+            "reference_checksum": "919f48aa6f3c891c2aa61110c7c153a3264d8b98625966c4fa628d35c989a219",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -6619,6 +7256,8 @@
             "rms": 0.050205191148542785,
             "relative_rms": 0.007687757402296653,
             "cosine_similarity": 0.9999836239647465,
+            "native_checksum": "afee2a60700d4dbe26c9bf1716712d21ee58cd53c2bb4904bfd49be20b845561",
+            "reference_checksum": "6b45c775e10e69330ca4fa57c3776b1b118bca8f793421be522683baf4dccc8c",
             "extreme_coordinates": [
               {
                 "index": 225,
@@ -6652,6 +7291,8 @@
             "rms": 0.00409878107147572,
             "relative_rms": 0.09638078010252196,
             "cosine_similarity": 0.9954452717071546,
+            "native_checksum": "eaf1fbe4a81af23165028341841efeff472842efbb3be7b4fda0e7edeeec27f6",
+            "reference_checksum": "a1ea2496521242df318492c2ccb29ee5475bbeab94d08964ec7c40871f167fe6",
             "extreme_coordinates": [
               {
                 "index": 2101,
@@ -6718,6 +7359,8 @@
             "rms": 0.06569780378514395,
             "relative_rms": 0.0772778406382035,
             "cosine_similarity": 0.9970252567588759,
+            "native_checksum": "2ad64ad88d04330f0f1339d0c3d3eea894eb3eb2c76934db2cb7ef371daedbb8",
+            "reference_checksum": "dbda6c9913654f245831ea6fb5c7e9f684cf963e437db1b0a2a4c2c0a78a9766",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -6751,6 +7394,8 @@
             "rms": 0.04219608925872715,
             "relative_rms": 0.006698560326845221,
             "cosine_similarity": 0.9999859512671883,
+            "native_checksum": "067a326c2b70abb0ef22b10a1706e82faa595d6545a37749fb816d79829ba190",
+            "reference_checksum": "7188d20d0743b98918c7ce393255a21f2f3d5efdf82ec4bf5aa1f11ca0a5a764",
             "extreme_coordinates": [
               {
                 "index": 5,
@@ -6784,6 +7429,8 @@
             "rms": 0.004080338006572275,
             "relative_rms": 0.10929288892186323,
             "cosine_similarity": 0.9942191257080027,
+            "native_checksum": "04b56a80764f8557ffeba8d656f9692ed3badc49baec592b11f647b139c940f1",
+            "reference_checksum": "e92b8bea16ed67468d9777347067424b1b4f8b7cc4a421f7ed6ebad26f6c6290",
             "extreme_coordinates": [
               {
                 "index": 1305,
@@ -6850,6 +7497,8 @@
             "rms": 0.07920577670930695,
             "relative_rms": 0.07968208623134321,
             "cosine_similarity": 0.9968601448046932,
+            "native_checksum": "420585b6a090fce3f9a9e828d6550361e8a49a5e1cc3a87c792f57757cce9bbf",
+            "reference_checksum": "a18eb4d6f6ab15099da893fc25cb7153a4a17cce986dccfd143c3ffd98150771",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -6883,6 +7532,8 @@
             "rms": 0.039360436062141804,
             "relative_rms": 0.006488400694039061,
             "cosine_similarity": 0.9999854292636327,
+            "native_checksum": "e23c8db8a7a452c0ff4730999404deae6fa560575fe10c38545251628eaad952",
+            "reference_checksum": "0e560507a12893b40121ab2e70aad61c64d8be01cf0d7ec242302f3ab703f284",
             "extreme_coordinates": [
               {
                 "index": 325,
@@ -6916,6 +7567,8 @@
             "rms": 0.0029875806826641085,
             "relative_rms": 0.09928691724977595,
             "cosine_similarity": 0.9951778367841386,
+            "native_checksum": "7ec6c4759f3db79b3b5efd6838030200e4afabf2ec063ea55e126ff49b23c2aa",
+            "reference_checksum": "86b44eca898d45f5b9ae2be6f386c7dafb23e154b7257e10296c0b52f6a1744c",
             "extreme_coordinates": [
               {
                 "index": 2332,
@@ -6982,6 +7635,8 @@
             "rms": 0.08241949712163203,
             "relative_rms": 0.07653779266050317,
             "cosine_similarity": 0.9970787913409866,
+            "native_checksum": "2378354fc5cc4d0f7f1ffeacede9acabd3f9f25c6dbf00844fdfd2d78aa03608",
+            "reference_checksum": "4094e63b9075cc2c11e8d581cb1e240f6294d6b8e4398d15599de163ddb0cb02",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -7015,6 +7670,8 @@
             "rms": 0.03472637575526279,
             "relative_rms": 0.005585316535636428,
             "cosine_similarity": 0.9999865215186634,
+            "native_checksum": "17c1375ddd156ce156037c8d1f18a014bb7cf326dbb1c43997e1299e7e9a8139",
+            "reference_checksum": "e436d88ed1694683820856be59b7c931b8ea2de6668f9e33a809b8b883eb7505",
             "extreme_coordinates": [
               {
                 "index": 51,
@@ -7048,6 +7705,8 @@
             "rms": 0.004891873955976238,
             "relative_rms": 0.08957288198510374,
             "cosine_similarity": 0.9965185840699315,
+            "native_checksum": "57e201c1f8766fb0c0162ae75d25c6bf67918029b3185c528c1a463f59e1097a",
+            "reference_checksum": "232b8212bea4210561291b7200c0b88e2491c7c5c570e2d6dc9ac4dce2fc4dfa",
             "extreme_coordinates": [
               {
                 "index": 2359,
@@ -7114,6 +7773,8 @@
             "rms": 0.07985676983179413,
             "relative_rms": 0.06866370059328582,
             "cosine_similarity": 0.9976664343680329,
+            "native_checksum": "3f9d807a68f2a56574949c7912039ab317da15a6706685bd6421b6f87f39fd77",
+            "reference_checksum": "c718b9cf76d7b8b45f9ec95585ad141a645ec0352cc787eec656816315937e2f",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -7147,6 +7808,8 @@
             "rms": 0.0457788085286493,
             "relative_rms": 0.007363281997544937,
             "cosine_similarity": 0.9999810216101468,
+            "native_checksum": "fc35186f4af2a9aad0386a6ffd20e2e6986abe71cdae49f310af111a6b652d99",
+            "reference_checksum": "e8c0f90a956f4f71c45543db6d70eaa132af6504d16d5b50c13bbeb0091d8f0d",
             "extreme_coordinates": [
               {
                 "index": 60,
@@ -7180,6 +7843,8 @@
             "rms": 0.004333355462758031,
             "relative_rms": 0.0993253198592936,
             "cosine_similarity": 0.9951517206719371,
+            "native_checksum": "0d744997e8800fe8273a69d24fde7cc90bc38d9972be193b28bf6b91a5cc86ef",
+            "reference_checksum": "4ede4833877358c466c4e72e04860659bcae203c26f5ea8f34f78517d917a13e",
             "extreme_coordinates": [
               {
                 "index": 279,
@@ -7246,6 +7911,8 @@
             "rms": 0.07171279668600511,
             "relative_rms": 0.06736585853815392,
             "cosine_similarity": 0.9977377649484095,
+            "native_checksum": "eec7417247e2636b9b30fd78623ea7b1bbf4bc9dde9564bb5544c8c3a070abfe",
+            "reference_checksum": "a1f9195ffeb639e504b105bc1ffe137817cb77741f71f473bd84550d59dd6041",
             "extreme_coordinates": [
               {
                 "index": 1682,
@@ -7279,6 +7946,8 @@
             "rms": 0.05465261163919227,
             "relative_rms": 0.008274273296852956,
             "cosine_similarity": 0.999980003603077,
+            "native_checksum": "ea37d160ee7b428235342edc56790ee34f8b951ae4b22a4d6366c94efb8c0da1",
+            "reference_checksum": "84d810ae1aff816b0765de03ff069323607f49f2dc3eef9bb03accbc6d222c55",
             "extreme_coordinates": [
               {
                 "index": 182,
@@ -7312,6 +7981,8 @@
             "rms": 0.007446342077946916,
             "relative_rms": 0.20914390444717093,
             "cosine_similarity": 0.9781997430451359,
+            "native_checksum": "7d0e13054620884fb1184e489704eb3b56b316a9022aded2ce88dfd116a7db35",
+            "reference_checksum": "700ff007fa2cc1356ddcf2a955123343d13bf24f7311b2bf7b333e915a8bc861",
             "extreme_coordinates": [
               {
                 "index": 1981,

@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import struct
 from pathlib import Path
 
 
@@ -58,12 +60,17 @@ def vector_metrics(left: list[float], right: list[float]) -> dict:
     extreme = sorted(
         range(len(errors)), key=lambda i: abs(errors[i]), reverse=True
     )[:4]
+    checksum = lambda vector: hashlib.sha256(
+        b"".join(struct.pack("<f", float(value)) for value in vector)
+    ).hexdigest()
     return {
         "status": "pass",
         "max_abs": max((abs(e) for e in errors), default=0.0),
         "rms": error_rms,
         "relative_rms": error_rms / right_rms if right_rms else None,
         "cosine_similarity": cosine,
+        "native_checksum": checksum(left),
+        "reference_checksum": checksum(right),
         "extreme_coordinates": [
             {"index": i, "native": left[i], "reference": right[i],
              "delta": errors[i]}
@@ -305,6 +312,47 @@ def main() -> None:
                     for i, (a, b) in enumerate(zip(native_bits, reference_bits))
                     if a != b
                 ][:20]
+            chain = right.get("router_chain", {})
+            chain_stats = right.get("router_chain_stats", {})
+            detail["router_chain"] = {
+                "status": "diagnostic",
+                "reason": "native pre-router chain is not present in this trace",
+                "native_present": False,
+                "reference_stages": {
+                    name: chain_stats.get(name, {})
+                    for name in chain
+                },
+            }
+            detail["router_weight_rows"] = {
+                "status": "diagnostic",
+                "reason": "native effective router rows are not present in this trace",
+                "reference_experts": [
+                    row.get("expert")
+                    for row in right.get("router_weight_rows", [])
+                ],
+                "reference_checksums": {
+                    str(row.get("expert")): row.get("bf16_bytes_sha256")
+                    for row in right.get("router_weight_rows", [])
+                },
+            }
+            for field in ("router_matvec_pre_cast", "router_effective_bf16"):
+                native_value = native_router_detail.get(
+                    "matvec_pre_cast" if field == "router_matvec_pre_cast"
+                    else "effective_bf16")
+                if native_value is not None and field in right:
+                    detail[field] = vector_metrics(native_value, right[field])
+                else:
+                    detail[field] = {
+                        "status": "diagnostic",
+                        "reason": "native matvec stage is not present in this trace",
+                        "native_present": native_value is not None,
+                        "reference_present": field in right,
+                    }
+            detail["router_matvec_checks"] = {
+                "status": "diagnostic",
+                "reason": "independent row-by-row GGUF BF16 matvec checks",
+                "reference": right.get("router_matvec_checks", []),
+            }
         left_margin = left.get("margin_rank10_rank11",
                                native_router_detail.get("margin_rank10_rank11"))
         if left_margin is not None and "margin_rank10_rank11" in right:

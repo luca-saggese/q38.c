@@ -59,9 +59,17 @@ def stats(values: torch.Tensor) -> dict:
         min_index = int(indices[torch.argmin(finite_values)])
         max_index = int(indices[torch.argmax(finite_values)])
         max_abs_index = int(indices[torch.argmax(torch.abs(finite_values))])
+        extreme_indices = sorted(
+            range(flat.numel()), key=lambda i: abs(float(flat[i])),
+            reverse=True
+        )[:4]
+        extreme_coordinates = [
+            {"index": i, "value": float(flat[i])} for i in extreme_indices
+        ]
     else:
         minimum = maximum = mean = rms = max_abs = None
         min_index = max_index = max_abs_index = None
+        extreme_coordinates = []
     return {
         "min": minimum, "max": maximum, "mean": mean, "rms": rms,
         "max_abs": max_abs, "finite_count": int(finite.sum()),
@@ -69,6 +77,7 @@ def stats(values: torch.Tensor) -> dict:
         "max_abs_index": max_abs_index, "nan_count": int(torch.isnan(flat).sum()),
         "inf_count": int(torch.isinf(flat).sum()),
         "checksum": hashlib.sha256(raw).hexdigest(),
+        "extreme_coordinates": extreme_coordinates,
         "fixed": [{"index": i, "value": float(flat[i]) if i < flat.numel()
                    else None} for i in FIXED],
     }
@@ -168,6 +177,18 @@ class GGUF:
             return self.tensors[name]
         except KeyError as exc:
             raise KeyError(f"missing GGUF tensor {name}") from exc
+
+    def raw_rows(self, name: str, row_indices: Iterable[int]) -> list[bytes]:
+        d = self.descriptor(name)
+        rows = math.prod(d["shape"][:-1])
+        row_bytes = d["bytes"] // rows
+        result = []
+        for row in row_indices:
+            if row < 0 or row >= rows:
+                raise IndexError(f"{name}: row {row} outside tensor")
+            start = d["offset"] + row * row_bytes
+            result.append(bytes(self.mm[start:start + row_bytes]))
+        return result
 
     def dense(self, name: str, device: torch.device) -> torch.Tensor:
         d = self.descriptor(name)
@@ -501,6 +522,16 @@ def main() -> None:
             layer.mlp.register_forward_pre_hook(
                 lambda _m, inputs: captured.__setitem__(
                     "moe_input", inputs[0].detach()))
+            if layer_index == 9:
+                layer.mlp_hyper_connection.register_forward_pre_hook(
+                    lambda _m, inputs: captured.__setitem__(
+                        "router_chain_input", inputs[0].detach()))
+                layer.mlp_hyper_connection.hc_norm.register_forward_hook(
+                    lambda _m, _i, output: captured.__setitem__(
+                        "router_chain_rmsnorm", output.detach()))
+                layer.mlp_hyper_connection.register_forward_hook(
+                    lambda _m, _i, output: captured.__setitem__(
+                        "router_chain_gr", output[0].detach()))
             layer.mlp.experts.register_forward_hook(
                 lambda _m, _i, output: captured.__setitem__(
                     "routed_output", output.detach()))
@@ -535,6 +566,66 @@ def main() -> None:
                 "weights": router[1].reshape(-1).float().cpu().tolist(),
                 "routed_output": values(captured["routed_output"]),
             }
+            if layer_index == 9:
+                native_router_item = next(
+                    (x for x in native.get("router_logits", [])
+                     if x.get("layer") == layer_index), {})
+                native_top = {
+                    item.get("id") for item in native_router_item.get("top", [])
+                }
+                ref_top = set(order[:20].cpu().tolist())
+                used_rows = sorted(
+                    native_top | ref_top | set(route["experts"])
+                )
+                gate_name = f"model.language_model.layers.{layer_index}.mlp.gate.weight"
+                raw_rows = reader.raw_rows(gate_name, used_rows)
+                route["router_chain"] = {
+                    "input_to_mlp_hyper_connection":
+                        values(captured["router_chain_input"]),
+                    "rmsnorm_output": values(captured["router_chain_rmsnorm"]),
+                    "gr_output_to_router": values(captured["router_chain_gr"]),
+                }
+                route["router_chain_stats"] = {
+                    name: stats(tensor)
+                    for name, tensor in (
+                        ("input_to_mlp_hyper_connection",
+                         captured["router_chain_input"]),
+                        ("rmsnorm_output", captured["router_chain_rmsnorm"]),
+                        ("gr_output_to_router", captured["router_chain_gr"]),
+                        ("router_matvec_pre_cast",
+                         layer.mlp.gate.last_pre_cast),
+                        ("router_effective_bf16",
+                         layer.mlp.gate.last_effective),
+                    )
+                }
+                route["router_weight_rows"] = [
+                    {
+                        "expert": expert,
+                        "bf16_bytes_sha256": hashlib.sha256(
+                            raw_rows[pos]).hexdigest(),
+                        "values": values(layer.mlp.gate.weight[expert]),
+                        "stats": stats(layer.mlp.gate.weight[expert]),
+                    }
+                    for pos, expert in enumerate(used_rows)
+                ]
+                route["router_matvec_pre_cast"] = values(
+                    layer.mlp.gate.last_pre_cast)
+                route["router_effective_bf16"] = route["router_logits"]
+                input_row = captured["moe_input"].reshape(
+                    -1, config.hidden_size)[0].float()
+                route["router_matvec_checks"] = []
+                for expert in used_rows:
+                    weight_row = layer.mlp.gate.weight[expert].float()
+                    dot = torch.dot(input_row, weight_row)
+                    expected = layer.mlp.gate.last_pre_cast[0, expert]
+                    route["router_matvec_checks"].append({
+                        "expert": expert,
+                        "dot": float(dot),
+                        "router_pre_cast": float(expected),
+                        "delta": float(dot - expected),
+                        "close": math.isclose(float(dot), float(expected),
+                                              rel_tol=1e-6, abs_tol=1e-6),
+                    })
             routing.append(route)
             if layer_index == 2:
                 layer2_moe_trace = {
