@@ -131,6 +131,11 @@ typedef bool (*q38_forward_stage_trace)(
     size_t error_len);
 
 typedef struct {
+    /*
+     * Diagnostic mode: compute and commit PLE history normally, but omit its
+     * activation from the residual stream consumed by the remaining graph.
+     */
+    bool disable_ple;
     uint32_t first_divergence_layer;
     uint32_t first_divergence_token;
     float max_abs_error;

@@ -40,16 +40,28 @@ typedef struct {
     q38_decode_stats index_k_stats;
 } q38_decode_qsa_snapshot;
 
+typedef enum {
+    Q38_DECODE_TRACE_PROMPT_PREDICTION = 0,
+    Q38_DECODE_TRACE_GENERATED_EMIT = 1,
+    Q38_DECODE_TRACE_GENERATED_CONSUME = 2,
+} q38_decode_trace_kind;
+
 /*
- * State captured immediately after one input token has been committed. Hashes
- * cover the complete F32 regions, so a caller can persist compact state
- * evidence without copying the model state.
+ * Trace evidence for either a prediction or a generated-token protocol event.
+ * For GENERATED_EMIT, no forward pass occurs: the emitted token is the
+ * prompt prediction and state_committed is false. GENERATED_CONSUME records
+ * the forward pass which consumes the previously emitted token and predicts
+ * the next one.
  */
 typedef struct {
     size_t step;
+    q38_decode_trace_kind kind;
     bool generated;
+    bool state_committed;
     uint32_t input_token;
     uint32_t next_token;
+    uint32_t emitted_token;
+    uint32_t consumed_token;
     uint64_t committed_tokens;
     uint64_t gdn_state_hash;
     uint64_t conv_history_hash;
@@ -73,8 +85,8 @@ typedef struct {
     float logits_mean;
     float logits_rms;
     float logits_max_abs;
-    uint32_t top_ids[10];
-    float top_values[10];
+    uint32_t top_ids[20];
+    float top_values[20];
     bool logits_finite;
     bool finite;
     q38_decode_qsa_snapshot qsa[Q38_MODEL_LAYERS];
@@ -95,9 +107,12 @@ bool q38_decode(const q38_gguf *model, const q38_weights *weights,
 
 /*
  * Consume a prompt token stream one token at a time, then emit exactly
- * generated_count greedy temperature-zero tokens. The callback observes every
- * committed prompt and generated input token, including complete state
- * hashes and QSA cache metadata. `prompt_count` must be nonzero.
+ * generated_count greedy temperature-zero tokens. The first generated token
+ * is the final prompt argmax and is emitted without another forward pass.
+ * Subsequent generated tokens consume the previously emitted token. The
+ * callback observes prompt predictions, generated emissions, and generated
+ * consuming forward passes explicitly, including complete state hashes and
+ * QSA cache metadata. `prompt_count` must be nonzero.
  */
 bool q38_decode_stream(
     const q38_gguf *model, const q38_weights *weights,

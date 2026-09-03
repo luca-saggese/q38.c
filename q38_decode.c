@@ -73,8 +73,8 @@ static uint64_t hash_logits(const float *logits) {
     return hash_bytes(logits, Q38_DECODE_VOCAB_SIZE * sizeof(*logits));
 }
 
-static void snapshot_top10(const float *logits, q38_decode_step *snapshot) {
-    for (size_t rank = 0; rank < 10; ++rank) {
+static void snapshot_top20(const float *logits, q38_decode_step *snapshot) {
+    for (size_t rank = 0; rank < 20; ++rank) {
         size_t top = Q38_DECODE_VOCAB_SIZE;
         float best = -INFINITY;
         for (size_t j = 0; j < Q38_DECODE_VOCAB_SIZE; ++j) {
@@ -246,6 +246,44 @@ static bool q38_decode_backend(const q38_gguf *model,
     return true;
 }
 
+static bool q38_decode_trace_step(
+    const q38_forward_state *state, const float *logits, size_t step_index,
+    q38_decode_trace_kind kind, uint32_t input_token, uint32_t next_token,
+    uint32_t emitted_token, uint32_t consumed_token, bool state_committed,
+    q38_decode_trace trace, void *trace_user, char *error, size_t error_len) {
+    if (!trace)
+        return true;
+    q38_decode_step snapshot;
+    if (!snapshot_state(state, &snapshot))
+        return fail(error, error_len, "decode state snapshot failed");
+    snapshot.step = step_index;
+    snapshot.kind = kind;
+    snapshot.generated = kind != Q38_DECODE_TRACE_PROMPT_PREDICTION;
+    snapshot.state_committed = state_committed;
+    snapshot.input_token = input_token;
+    snapshot.next_token = next_token;
+    snapshot.emitted_token = emitted_token;
+    snapshot.consumed_token = consumed_token;
+    snapshot.committed_tokens = 0;
+    for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer)
+        if (state->qsa[layer].committed_tokens > snapshot.committed_tokens)
+            snapshot.committed_tokens = state->qsa[layer].committed_tokens;
+    snapshot.argmax = next_token;
+    snapshot.argmax_value = logits[next_token];
+    snapshot_logits_metrics(logits, &snapshot);
+    snapshot_top20(logits, &snapshot);
+    snapshot.logits_hash = hash_logits(logits);
+    snapshot.logits_finite =
+        finite_floats(logits, Q38_DECODE_VOCAB_SIZE);
+    if (!snapshot.finite)
+        return fail(error, error_len,
+                    "decode state contains a non-finite value");
+    if (!snapshot.logits_finite)
+        return fail(error, error_len,
+                    "decode logits contain a non-finite value");
+    return trace(&snapshot, trace_user, error, error_len);
+}
+
 bool q38_decode_stream_with_matrix_backend(
     const q38_gguf *model, const q38_weights *weights,
     q38_forward_state *state, const uint32_t *prompt, size_t prompt_count,
@@ -270,33 +308,23 @@ bool q38_decode_stream_with_matrix_backend(
                                 backend_user))
             return false;
         current = next;
-        if (trace) {
-            q38_decode_step snapshot;
-            if (!snapshot_state(state, &snapshot))
-                return fail(error, error_len, "decode state snapshot failed");
-            snapshot.step = step_index++;
-            snapshot.generated = false;
-            snapshot.input_token = prompt[i];
-            snapshot.next_token = next;
-            snapshot.committed_tokens = snapshot.step + 1;
-            snapshot.argmax = next;
-            snapshot.argmax_value = logits[next];
-            snapshot_logits_metrics(logits, &snapshot);
-            snapshot_top10(logits, &snapshot);
-            snapshot.logits_hash = hash_logits(logits);
-            snapshot.logits_finite =
-                finite_floats(logits, Q38_DECODE_VOCAB_SIZE);
-            if (!snapshot.finite)
-                return fail(error, error_len,
-                            "decode state contains a non-finite value");
-            if (!snapshot.logits_finite)
-                return fail(error, error_len,
-                            "decode logits contain a non-finite value");
-            if (!trace(&snapshot, trace_user, error, error_len))
-                return false;
-        }
+        if (!q38_decode_trace_step(
+                state, logits, step_index++,
+                Q38_DECODE_TRACE_PROMPT_PREDICTION, prompt[i], next,
+                UINT32_MAX, prompt[i], true, trace, trace_user, error,
+                error_len))
+            return false;
     }
-    for (size_t i = 0; i < generated_count; ++i) {
+    if (generated_count) {
+        generated[0] = current;
+        if (!q38_decode_trace_step(
+                state, logits, step_index++,
+                Q38_DECODE_TRACE_GENERATED_EMIT, UINT32_MAX, current,
+                current, UINT32_MAX, false, trace, trace_user, error,
+                error_len))
+            return false;
+    }
+    for (size_t i = 1; i < generated_count; ++i) {
         const uint32_t input = current;
         uint32_t next = 0;
         if (!q38_decode_backend(model, weights, state, input, logits,
@@ -306,31 +334,11 @@ bool q38_decode_stream_with_matrix_backend(
             return false;
         generated[i] = next;
         current = next;
-        if (trace) {
-            q38_decode_step snapshot;
-            if (!snapshot_state(state, &snapshot))
-                return fail(error, error_len, "decode state snapshot failed");
-            snapshot.step = step_index++;
-            snapshot.generated = true;
-            snapshot.input_token = input;
-            snapshot.next_token = next;
-            snapshot.committed_tokens = snapshot.step + 1;
-            snapshot.argmax = next;
-            snapshot.argmax_value = logits[next];
-            snapshot_logits_metrics(logits, &snapshot);
-            snapshot_top10(logits, &snapshot);
-            snapshot.logits_hash = hash_logits(logits);
-            snapshot.logits_finite =
-                finite_floats(logits, Q38_DECODE_VOCAB_SIZE);
-            if (!snapshot.finite)
-                return fail(error, error_len,
-                            "decode state contains a non-finite value");
-            if (!snapshot.logits_finite)
-                return fail(error, error_len,
-                            "decode logits contain a non-finite value");
-            if (!trace(&snapshot, trace_user, error, error_len))
-                return false;
-        }
+        if (!q38_decode_trace_step(
+                state, logits, step_index++,
+                Q38_DECODE_TRACE_GENERATED_CONSUME, input, next, next, input,
+                true, trace, trace_user, error, error_len))
+            return false;
     }
     return true;
 }

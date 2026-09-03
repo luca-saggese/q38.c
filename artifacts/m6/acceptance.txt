@@ -1,1 +1,37 @@
-{"gate":"M6-C12","status":"pass","c12_can_pass":true,"reference":"official Transformers Qwen4Exp streaming original-checkpoint run (diagnostic)","quant_matched_reference":"independent GGUF reader/dequantizer + Qwen4Exp math","dequant_fixture_gate":"pass","dequant_fixture_checksum":"9a8e0dc8ffef39d7e7ff3121f02f4a055c2166235e9f4ad786964f933470fc11","native_trace":"artifacts/m6/real_forward_trace.json","native_trace_checksum":"bfecb450648fd7ee7cb5f7e32444a884609555fe050aacddcebfeb9ac1bc07f6","quant_matched_reference_artifact":"artifacts/m6/quant_matched_reference.json","quant_matched_reference_artifact_checksum":"9bcf85eb68e9191986600c3e60e28bc49dde0caa834af63dbe9de0e8d34b886c","quant_matched_comparison":"artifacts/m6/quant_matched_comparison.json","quant_matched_comparison_checksum":"7cf9014da4ba40deead251a50330e4a7abed65c1246b04f5ff5a87b5beefd119","progressive_boundaries":"pass","progressive_layers":[1,9],"first_divergence_after_fix":null,"first_divergence_before_fix":"layer1:ple_key_normed","responsible_stage":"layer 1 PLE grouped RMS normalization","dtype_contract":"float32 grouped RMS independently per 2560-wide stream, eps=1e-6, then (1+BF16 norm weight); no 10240-wide normalization","layer9_boundaries":"all requested full vectors, metrics, and checksums within existing tolerances","layer2_selected_set":"pass","qsa_decisions":"exact for all 12 one-token QSA layers","router":"selected IDs, weights, logits, routed output, and shared expert pass quant-matched comparison","top_k":"unchanged; existing scalar/CUDA top-k tests pass","m7_started":false,"c13_started":false,"reason":"C12 quant-matched comparison is green after the isolated PLE grouped-normalization fix; no top-k, GGUF, dequantizer, frozen layer-2, router-byte, or downstream compensation changes were made."}
+{
+  "gate": "M6-C16",
+  "status": "blocked",
+  "checks": {
+    "48_layer_real_forward": true,
+    "final_norm_lm_head": true,
+    "autoregressive_decode": true,
+    "deterministic_greedy": true,
+    "reference_comparison": true,
+    "ple_on_canonical_reference": true,
+    "off_by_one_protocol": true,
+    "nan_inf_zero": true,
+    "fallback_none": true,
+    "all_tensors_qtypes_supported": true
+  },
+  "raw_completion": {
+    "prompt": "2 + 2 =",
+    "native_text": " 5",
+    "reference_confirmed": true,
+    "runtime_bug": false
+  },
+  "artifacts": {
+    "native_canonical": "artifacts/m6/canonical_protocol_on.json",
+    "reference_canonical": "artifacts/m6/canonical_reference_consume220.json",
+    "decode_protocol": "artifacts/m6/decode_protocol_comparison.json",
+    "quant_matched": "artifacts/m6/quant_matched_comparison.json"
+  },
+  "complete_m0_m6_regression": {
+    "status": "blocked",
+    "command": "make m6-acceptance",
+    "gate": "M5-C12",
+    "error": "native/reference mismatch at 2560: -0.0039879242 -0.0011472413",
+    "fixture_regenerated": true,
+    "m6_gates_not_claimed_as_chain_complete": true
+  },
+  "m7_started": false
+}

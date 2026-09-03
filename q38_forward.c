@@ -673,7 +673,7 @@ static bool full_boundary_trace(uint32_t layer, const char *boundary,
                                 q38_forward_diagnostics *diagnostics,
                                 char *error, size_t error_len) {
     if (!diagnostics || !diagnostics->boundary_trace ||
-        (layer != 1 && layer != 9))
+        (layer != 1 && layer != 9 && layer != UINT32_MAX))
         return true;
     return diagnostics->boundary_trace(
         layer, boundary, values, token_count, width,
@@ -1209,6 +1209,9 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
         !conv || !multipliers || !offsets || !vocab_sizes ||
         !layer->ple_store.model)
         return full_fail(error, error_len, "PLE tensor set is incomplete");
+    if (!full_boundary_trace(1, "hidden_before_ple", hidden, token_count,
+                             width, diagnostics, error, error_len))
+        return false;
     uint64_t mult[3], offs[16], sizes[16];
     if (!full_u64_vector(model, multipliers, mult, 3, error, error_len) ||
         !full_u64_vector(model, offsets, offs, 16, error, error_len) ||
@@ -1365,8 +1368,13 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
     if (!full_boundary_trace(1, "ple_contribution", after, token_count,
                              width, diagnostics, error, error_len))
         goto fail;
+    if (diagnostics && diagnostics->disable_ple)
+        memset(after, 0, token_count * width * sizeof(*after));
     for (size_t i = 0; i < token_count * width; ++i)
         after[i] += hidden[i];
+    if (!full_boundary_trace(1, "hidden_after_ple", after, token_count,
+                             width, diagnostics, error, error_len))
+        goto fail;
     for (size_t tail = 0; tail < 9; ++tail) {
         const size_t source = token_count + tail;
         if (source < 9) memmove(state->ple_history + tail * width,
@@ -1657,6 +1665,10 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             !diagnostics->trace(UINT32_MAX, mixed, token_count,
                                 Q38_GR_HIDDEN, diagnostics->trace_user,
                                 error, error_len))
+            goto fail;
+        if (!full_boundary_trace(UINT32_MAX, "final_hidden", mixed,
+                                 token_count, Q38_GR_HIDDEN, diagnostics,
+                                 error, error_len))
             goto fail;
         for (size_t t = 0; t < token_count; ++t)
             for (size_t v = 0; v < 248320; ++v)

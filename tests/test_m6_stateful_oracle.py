@@ -50,11 +50,25 @@ def main() -> None:
         raise SystemExit("stateful oracle evidence is incomplete")
     if report.get("steps"):
         first = report["steps"][0]
-        if first.get("input_token") != comparison.get("actual_token"):
-            raise SystemExit("continuation does not consume the fresh argmax")
-        if report.get("generated", [None])[0] != first.get("next_token"):
-            raise SystemExit("generated token list disagrees with continuation trace")
-    print("test_m6_stateful_oracle: fresh token, checkpoints, and cache state passed")
+        if (
+            first.get("kind") != "generated_emit"
+            or first.get("emitted_token") != comparison.get("actual_token")
+            or first.get("consumed_token") is not None
+            or first.get("state_committed") is not False
+        ):
+            raise SystemExit("first generated token is not an emit-only prompt argmax")
+        if report.get("generated", [None])[0] != first.get("emitted_token"):
+            raise SystemExit("generated token list disagrees with emit trace")
+        if len(report["steps"]) > 1:
+            second = report["steps"][1]
+            if (
+                second.get("kind") != "generated_consume"
+                or second.get("consumed_token") != first.get("emitted_token")
+                or second.get("emitted_token") != report["generated"][1]
+                or second.get("state_committed") is not True
+            ):
+                raise SystemExit("generated continuation does not consume emitted token")
+    print("test_m6_stateful_oracle: prompt prediction, generated protocol, and cache state passed")
 
 
 if __name__ == "__main__":

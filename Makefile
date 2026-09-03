@@ -75,7 +75,7 @@ M6_ORACLE_GPU ?= artifacts/m6/stateful_sequence_oracle_resume_probe.json
 	m4-c08 m4-c09 m4-c10 m4-c11 m4-c12 m4-c13 m4-acceptance m4-integration-audit m5-c00 m5-c01 m5-c02 m5-c03 m5-c04 m5-c05 m5-c06 m5-c07 m5-c08 m5-c09 m5-c10 m5-c11 m5-c12 m5-c13 m5-c14 m5-c15 m5-acceptance m6-c00 m6-c01 m6-c02 m6-c03 m6-c04 m6-c05 m6-c06 m6-c07 m6-c08 m6-c09 m6-c10 m6-c11 m6-preflight m6-dequant-fixtures m6-c12 m6-trace-schema m6-rounding-diagnostics m6-progressive-boundaries m6-c13 m6-c14 m6-c15 m6-c16 m6-acceptance m6-gpu-forward m6-gpu-progressive m6-gpu-phase7 m6-autoregressive-oracle \
 	m6-stateful-oracle \
 	m6-stateful-sequence-oracle \
-	m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
+	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
 	post-m5-bis post-m5-ter post-m5-supplement
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
@@ -752,6 +752,17 @@ $(TEST_DIR)/m6_decode_gpu: $(TEST_DIR)/m6_decode.c \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_cuda_primitives.o \
 		q38_gdn.o q38_moe_cuda.o $(CUDA_LDLIBS) -lm
 
+m6-decode-protocol: $(TEST_DIR)/m6_decode_gpu
+	@mkdir -p artifacts/m6
+	@./$(TEST_DIR)/m6_decode_gpu \
+		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		artifacts/m6/decode_protocol_1.json 1
+	@./$(TEST_DIR)/m6_decode_gpu \
+		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+		artifacts/m6/decode_protocol_2.json 2
+	@$(M6_PYTHON) tests/test_m6_decode_protocol.py \
+		artifacts/m6/decode_protocol_1.json artifacts/m6/decode_protocol_2.json
+
 $(TEST_DIR)/test_m6_gpu_forward: $(TEST_DIR)/test_m6_gpu_forward.cu \
 		q38_moe_cuda.o q38_cuda_primitives.o q38_gdn.o q38_quant.o \
 		q38_moe_ref.o
@@ -947,7 +958,7 @@ m6-c12: m6-preflight m6-trace-stats m6-dequant-fixtures \
 	@$(MAKE) --no-print-directory m6-rounding-diagnostics \
 		m6-progressive-boundaries
 
-m6-c13: m6-c12
+m6-c13: m6-c12 m6-decode-protocol
 	@test -f artifacts/m6/decode_loop.json || \
 		{ echo "M6-C13 gated: real decode evidence is required" >&2; exit 1; }
 	@python3 -c 'import json; p=json.load(open("artifacts/m6/decode_loop.json")); assert p.get("status") == "pass" and p.get("token_by_token_exact") is True and p.get("state_exact") is True, "M6-C13 real decode gate is not passing"'
@@ -974,7 +985,7 @@ m6-c15: m6-c14 $(TEST_DIR)/test_m6_memory_baseline \
 	@printf '%s\n' '{"gate":"M6-C15","memory":"verified state layout baseline","cuda":"verified device health","full_model_benchmark":"not claimed without executing the 48-layer graph","status":"pass"}' > artifacts/m6/baseline.json
 
 m6-c16: m6-c15
-	@printf '%s\n' '{"gate":"M6-C16","gates":"M6-C00..M6-C15","apis":"full forward/decode present","runtime_logits":"not claimed; requires live 48-layer execution","status":"blocked"}' > artifacts/m6/acceptance.txt
+	@python3 -c 'import json,pathlib; p=pathlib.Path("artifacts/m6"); load=lambda n: json.loads((p/n).read_text()); f=load("forward_48_layer.json"); c=load("canonical_protocol_on.json"); r=load("canonical_reference_consume220.json"); d=load("decode_loop.json"); dc=load("decode_protocol_comparison.json"); q=load("quant_matched_comparison.json"); pf=load("preflight.json"); checks={"48_layer_real_forward":len(f.get("layers",[]))==48 and f.get("full_forward_api") is True and f.get("decode_api") is True and f.get("preflight_pass") is True and c.get("generated_ids")==[220,20],"final_norm_lm_head":bool((c.get("first_step_evidence") or {}).get("final_hidden")) and r.get("status")=="pass" and r.get("generated")==[220,20],"autoregressive_decode":d.get("status")=="pass" and d.get("token_by_token_exact") is True and d.get("state_exact") is True,	"deterministic_greedy":c.get("generated_ids")==[220,20] and (c.get("protocol_assertions") or {}).get("generated0_forward") is False and d.get("comparison_status")=="pass","reference_comparison":dc.get("status")=="pass" and dc.get("generated_equal") is True and q.get("status")=="pass","ple_on_canonical_reference":c.get("disable_ple") is False and c.get("generated_ids")==r.get("generated"),"off_by_one_protocol":(c.get("protocol_assertions") or {}).get("generated0_forward") is False and (c.get("protocol_assertions") or {}).get("committed_after")==6 and (c.get("protocol_assertions") or {}).get("prefix4_logits_hash") != (c.get("protocol_assertions") or {}).get("prompt_final_logits_hash"),"nan_inf_zero":(c.get("nan_inf") or {}).get("nan_count")==0 and (c.get("nan_inf") or {}).get("inf_count")==0,"fallback_none":(c.get("fallback") or {}).get("used") is False and (c.get("fallback") or {}).get("scalar_rows")==0 and (c.get("fallback") or {}).get("backend_declines")==0,"all_tensors_qtypes_supported":pf.get("status")=="pass" and pf.get("missing_count")==0 and not pf.get("failures")}; bad=[k for k,v in checks.items() if not v]; assert not bad,"M6-C16 failed: "+",".join(bad); (p/"acceptance.txt").write_text(json.dumps({"gate":"M6-C16","status":"pass","checks":checks,"raw_completion":{"prompt":"2 + 2 =","native_text":" 5","reference_confirmed":True,"runtime_bug":False},"artifacts":{"native_canonical":"artifacts/m6/canonical_protocol_on.json","reference_canonical":"artifacts/m6/canonical_reference_consume220.json","decode_protocol":"artifacts/m6/decode_protocol_comparison.json","quant_matched":"artifacts/m6/quant_matched_comparison.json"}},indent=2)+"\n")'
 
 m6-acceptance: m6-c16
 

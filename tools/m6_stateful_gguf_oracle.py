@@ -2,9 +2,8 @@
 """Cache-aware, quant-matched Qwen4Exp oracle.
 
 The decoder equations and cache mutations are supplied by the installed
-Transformers Qwen4Exp implementation.  GGUF tensors are materialized for one
-decoder layer at a time; only activations, the official cache, and the current
-layer remain live across a token step.
+Transformers Qwen4Exp implementation.  Non-expert decoder weights are
+materialized once; routed expert matrices use a bounded dequantized cache.
 """
 
 from __future__ import annotations
@@ -32,11 +31,13 @@ def tensor_evidence(value: torch.Tensor | None) -> dict:
     if value is None:
         return {"present": False}
     detached = value.detach().contiguous()
-    float_value = detached.float()
-    flat = float_value.reshape(-1).cpu()
+    # Keep one host copy for all evidence calculations.  The previous
+    # implementation transferred CUDA tensors twice (once for ``flat`` and
+    # again for the checksum), which dominated short-token runs.
+    flat = detached.float().cpu().reshape(-1)
     finite = torch.isfinite(flat)
     finite_values = flat[finite]
-    raw = float_value.cpu().numpy().tobytes()
+    raw = flat.numpy().tobytes()
     evidence = {
         "present": True,
         "shape": list(detached.shape),
@@ -104,7 +105,7 @@ def device_check(
     lm_head: torch.Tensor,
     rotary: torch.nn.Module,
     cache: DynamicCache,
-    hidden: torch.Tensor,
+    hidden: torch.Tensor | None,
     layer: torch.nn.Module | None = None,
 ) -> dict:
     expected = (
@@ -141,7 +142,7 @@ def device_check(
         "lm_head_device": str(lm_head.device),
         "rotary_devices": module_devices(rotary),
         "cache_devices": cache_devices,
-        "hidden_device": str(hidden.device),
+        "hidden_device": str(hidden.device) if hidden is not None else None,
     }
     result["status"] = "pass" if (
         (not layer_devices or layer_devices == [expected])
@@ -149,7 +150,7 @@ def device_check(
         and result["lm_head_device"] == expected
         and result["rotary_devices"] in ([], [expected])
         and (not cache_devices or cache_devices == [expected])
-        and result["hidden_device"] == expected
+        and (hidden is None or result["hidden_device"] == expected)
     ) else "fail"
     return result
 
@@ -238,6 +239,12 @@ def main() -> None:
         help="stop after the fresh prompt step and its C12 comparison",
     )
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--expert-cache-size",
+        type=int,
+        default=1024,
+        help="bounded CUDA cache entries for dequantized routed expert matrices",
+    )
     parser.add_argument("--max-layer", type=int)
     parser.add_argument(
         "--one-shot-reference",
@@ -248,6 +255,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.generated_count < 1 or args.generated_count > 128:
         raise SystemExit("generated-count must be in [1,128]")
+    if args.expert_cache_size < 1:
+        raise SystemExit("expert-cache-size must be positive")
     prompt = [int(value) for value in args.prompt.split(",") if value.strip()]
     if not prompt or any(value < 0 or value >= 248320 for value in prompt):
         raise SystemExit("prompt contains an invalid token ID")
@@ -278,6 +287,8 @@ def main() -> None:
     config._attn_implementation = "eager"
     reader = ref.GGUF(args.gguf)
     meta_model = None
+    layers = []
+    expert_cache = None
     try:
         meta_model = materialize_meta_model(ref, config)
         rotary = ref.Qwen4ExpTextRotaryEmbedding(config).to(device)
@@ -290,6 +301,9 @@ def main() -> None:
         mixer = mixer.to(device)
         lm_head = reader.dense("lm_head.weight", device)
         cache = DynamicCache(config=config)
+        expert_cache = ref.RoutedExpertCache(
+            reader, device, args.expert_cache_size
+        )
         initial_cache = cache_evidence(cache)
         embedding_name = "model.language_model.embed_tokens.weight"
         layer_count = (
@@ -302,8 +316,20 @@ def main() -> None:
                 "max-layer is diagnostic only; full-model oracle requires all layers"
             )
 
-        steps = []
         checkpoints = {}
+        for layer_index in range(config.num_hidden_layers):
+            layers.append(ref.materialize_layer(
+                reader, config, layer_index, device, expert_cache
+            ))
+        for layer_index, layer in enumerate(layers):
+            layer_device_check = device_check(
+                device, mixer, lm_head, rotary, cache, None, layer
+            )
+            if layer_device_check["status"] != "pass":
+                raise RuntimeError(
+                    f"layer {layer_index} device check failed: "
+                    f"{layer_device_check}"
+                )
 
         def consume(token: int, position: int, kind: str) -> tuple[int, dict]:
             nonlocal cache
@@ -351,31 +377,15 @@ def main() -> None:
             position_embeddings = rotary(hidden, rotary_positions)
             hidden = hidden.repeat(1, 1, config.hc_count)
             with torch.no_grad():
-                for layer_index in range(config.num_hidden_layers):
-                    layer = ref.materialize_layer(
-                        reader, config, layer_index, device
+                for layer_index, layer in enumerate(layers):
+                    hidden = layer(
+                        hidden,
+                        position_embeddings=position_embeddings,
+                        attention_mask=full_mask,
+                        conv_mask=conv_mask,
+                        past_key_values=cache,
+                        ple_input_ids=ple_ids,
                     )
-                    try:
-                        layer_device_check = device_check(
-                            device, mixer, lm_head, rotary, cache, hidden, layer
-                        )
-                        if layer_device_check["status"] != "pass":
-                            raise RuntimeError(
-                                f"layer {layer_index} device check failed: "
-                                f"{layer_device_check}"
-                            )
-                        hidden = layer(
-                            hidden,
-                            position_embeddings=position_embeddings,
-                            attention_mask=full_mask,
-                            conv_mask=conv_mask,
-                            past_key_values=cache,
-                            ple_input_ids=ple_ids,
-                        )
-                    finally:
-                        del layer
-                        if device.type == "cuda":
-                            torch.cuda.empty_cache()
                     if layer_index in (0, 3, 7, 15, 31, 47):
                         checkpoints[f"{kind}:{layer_index}"] = {
                             "kind": kind,
@@ -389,15 +399,20 @@ def main() -> None:
                     final_norm.float(), lm_head.float().transpose(0, 1)
                 ).reshape(-1)
                 next_token = int(torch.argmax(logits).item())
+                top_values = top_k(logits, count=20 if position == 0 else 10)
+                first_step_top20 = top_values if position == 0 else None
             evidence = {
                 "kind": kind,
                 "position": position,
                 "input_token": token,
                 "next_token": next_token,
+                "emitted_token": next_token,
+                "consumed_token": token,
+                "state_committed": True,
                 "prefix_length": position + 1,
                 "final_norm": stats(final_norm),
                 "logits": stats(logits),
-                "top": top_k(logits),
+                "top": top_values[:10],
                 "cache": cache_evidence(cache),
                 "state_trace": {
                     "committed_position": position,
@@ -408,6 +423,12 @@ def main() -> None:
                     ),
                 },
             }
+            if first_step_top20 is not None:
+                evidence["top20"] = first_step_top20
+                evidence["top1_top2_margin"] = (
+                    first_step_top20[0]["value"]
+                    - first_step_top20[1]["value"]
+                )
             if evidence["state_trace"]["device_check"]["status"] != "pass":
                 raise RuntimeError(
                     f"state trace device check failed: "
@@ -419,7 +440,9 @@ def main() -> None:
         position = 0
         prompt_steps = []
         for token in prompt:
-            current, evidence = consume(token, position, "prompt")
+            current, evidence = consume(
+                token, position, "prompt_prediction"
+            )
             prompt_steps.append(evidence)
             position += 1
 
@@ -443,7 +466,7 @@ def main() -> None:
             checkpoint_comparison = {}
             for checkpoint in (
                 item for item in checkpoints.values()
-                if item["kind"] == "prompt"
+                if item["kind"] in ("prompt", "prompt_prediction")
             ):
                 layer = checkpoint["layer"]
                 expected = one_shot_layers.get(layer)
@@ -493,12 +516,51 @@ def main() -> None:
         generated = []
         continuation_steps = []
         if not args.fresh_only:
-            for step in range(args.generated_count):
-                current, evidence = consume(current, position, "generated")
+            emitted = dict(prompt_steps[-1])
+            emitted.update({
+                "kind": "generated_emit",
+                "position": position - 1,
+                "input_token": None,
+                "next_token": current,
+                "emitted_token": current,
+                "consumed_token": None,
+                "state_committed": False,
+                "prefix_length": position,
+                "step": 0,
+            })
+            generated.append(current)
+            continuation_steps.append(emitted)
+            for step in range(1, args.generated_count):
+                consumed = current
+                current, evidence = consume(
+                    consumed, position, "generated_consume"
+                )
                 evidence["step"] = step
+                evidence["emitted_token"] = current
+                evidence["consumed_token"] = consumed
                 generated.append(current)
                 continuation_steps.append(evidence)
                 position += 1
+
+        first_step_evidence = None
+        if prompt_steps:
+            # The differential target is the first forward consuming the
+            # prompt-final emitted token, not the first prompt prefill step.
+            first_step = (
+                continuation_steps[1]
+                if len(continuation_steps) > 1
+                else prompt_steps[-1]
+            )
+            first_step_evidence = {
+                "target": "first_generated_consume",
+                "position": first_step["position"],
+                "input_token": first_step["input_token"],
+                "committed_tokens": first_step["position"] + 1,
+                "top20": first_step.get("top20", []),
+                "top1_top2_margin": first_step.get("top1_top2_margin"),
+                "final_norm": first_step["final_norm"],
+                "first_8_generated_ids": generated[:8],
+            }
 
         result = {
             "format": "q38-m6-stateful-gguf-oracle-v2",
@@ -520,13 +582,15 @@ def main() -> None:
             },
             "prompt_steps": prompt_steps,
             "generated": generated,
+            "first_step_evidence": first_step_evidence,
             "steps": continuation_steps,
             "checkpoints": list(checkpoints.values()),
             "final_cache": cache_evidence(cache),
             "state_model": (
-                "official DynamicCache; one decoder layer materialized and "
-                "released per layer/token"
+                "official DynamicCache; non-expert decoder weights resident on "
+                "the requested device; bounded routed-expert cache"
             ),
+            "expert_cache": expert_cache.evidence(),
             "status": "pass",
             "reason": None,
         }
@@ -540,6 +604,10 @@ def main() -> None:
     finally:
         if meta_model is not None:
             del meta_model
+        if layers:
+            del layers
+        if expert_cache is not None:
+            del expert_cache
         reader.close()
         if device.type == "cuda":
             torch.cuda.empty_cache()

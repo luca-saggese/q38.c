@@ -28,9 +28,15 @@ static void write_qsa(FILE *out, const q38_decode_qsa_snapshot *qsa) {
 static void write_step(FILE *out, const q38_decode_step *step,
                        bool first) {
     if (!first) fputs(",\n", out);
+    const char *kind = step->kind == Q38_DECODE_TRACE_PROMPT_PREDICTION
+        ? "prompt_prediction"
+        : step->kind == Q38_DECODE_TRACE_GENERATED_EMIT
+            ? "generated_emit" : "generated_consume";
     fprintf(out,
-            "{\"step\":%zu,\"generated\":%s,\"input_token\":%u"
-            ",\"next_token\":%u,\"argmax\":%u,\"argmax_value\":%.9g"
+            "{\"step\":%zu,\"kind\":\"%s\",\"generated\":%s"
+            ",\"state_committed\":%s,\"input_token\":%u"
+            ",\"next_token\":%u,\"emitted_token\":%u,\"consumed_token\":%u"
+            ",\"argmax\":%u,\"argmax_value\":%.9g"
             ",\"logits_hash\":\"%016" PRIx64
             "\",\"logits_stats\":{\"min\":%.9g,\"max\":%.9g"
             ",\"mean\":%.17g,\"rms\":%.17g,\"max_abs\":%.9g}"
@@ -40,8 +46,10 @@ static void write_step(FILE *out, const q38_decode_step *step,
             ",\"have_prev_1\":%s,\"have_prev_2\":%s}"
             ",\"gdn_state_hash\":\"%016" PRIx64
             "\",\"conv_history_hash\":\"%016" PRIx64 "\",\"gdn_layers\":[",
-            step->step, step->generated ? "true" : "false",
-            step->input_token, step->next_token, step->argmax,
+            step->step, kind, step->generated ? "true" : "false",
+            step->state_committed ? "true" : "false", step->input_token,
+            step->next_token, step->emitted_token, step->consumed_token,
+            step->argmax,
             step->argmax_value, step->logits_hash, step->logits_min,
             step->logits_max, step->logits_mean, step->logits_rms,
             step->logits_max_abs, step->committed_tokens,
@@ -58,7 +66,7 @@ static void write_step(FILE *out, const q38_decode_step *step,
                 step->conv_layer_hash[layer]);
     }
     fputs("],\"top\":[", out);
-    for (size_t rank = 0; rank < 10; ++rank) {
+    for (size_t rank = 0; rank < 20; ++rank) {
         if (rank) fputc(',', out);
         fprintf(out, "{\"id\":%u,\"value\":%.9g}", step->top_ids[rank],
                 step->top_values[rank]);
@@ -132,7 +140,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     trace_context context = {.out = stdout, .first = true};
-    fputs("{\"format\":\"q38-m6-decode-trace-v1\",\"prompt\":[9419],"
+    fputs("{\"format\":\"q38-m6-decode-trace-v2\",\"prompt\":[9419],"
           "\"generated_count\":",
           stdout);
     fprintf(stdout, "%lu,\"steps\":[\n", requested);

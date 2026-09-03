@@ -16,6 +16,7 @@
 #include "q38_weights.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,7 @@ static void usage(FILE *fp) {
         "  --tokenizer <model-dir>    Native tokenizer assets (for --generate)\n"
         "  --prompt <text>            Prompt (for --generate)\n"
         "  --max-tokens <n>           Generated tokens, 1..32 (default: 16)\n"
+        "  --disable-ple              Omit PLE output while retaining PLE state\n"
         "  --json                     Machine-readable output\n"
         "  --verbose                  Extra diagnostics\n");
 }
@@ -259,8 +261,101 @@ typedef struct {
     uint64_t cuda_total;
     uint64_t peak_rss;
     uint64_t model_bytes;
+    size_t prompt_count;
+    size_t forward_index;
+    size_t target_forward_index;
+    uint32_t target_input_token;
+    uint64_t target_position;
+    uint64_t target_committed_tokens;
+    uint32_t prompt_final_argmax;
+    size_t generated_emit_seen;
+    size_t generated_consume_seen;
+    uint32_t first_consume_input;
+    uint32_t first_consume_argmax;
+    uint64_t first_consume_committed_tokens;
+    uint64_t prefix4_logits_hash;
+    uint64_t prompt_final_logits_hash;
+    uint32_t prompt_top_ids[20];
+    float prompt_top_values[20];
+    bool prompt_top_valid;
+    uint32_t first_prompt_top_ids[20];
+    float first_prompt_top_values[20];
+    bool first_prompt_top_valid;
+    q38_decode_stats first_hidden_before_ple;
+    q38_decode_stats first_ple_contribution;
+    q38_decode_stats first_hidden_after_ple;
+    q38_decode_stats first_final_hidden;
+    bool first_hidden_before_ple_valid;
+    bool first_ple_contribution_valid;
+    bool first_hidden_after_ple_valid;
+    bool first_final_hidden_valid;
+    uint64_t first_ple_history_hash;
+    bool first_ple_history_valid;
+    bool target_trace_captured;
+    q38_decode_stats latest_hidden_before_ple;
+    q38_decode_stats latest_ple_contribution;
+    q38_decode_stats latest_hidden_after_ple;
+    q38_decode_stats latest_final_hidden;
+    bool latest_hidden_before_ple_valid;
+    bool latest_ple_contribution_valid;
+    bool latest_hidden_after_ple_valid;
+    bool latest_final_hidden_valid;
     q38_memory_tracker memory;
 } q38_generate_evidence;
+
+static uint64_t cli_hash_bytes(const void *data, size_t bytes) {
+    const unsigned char *p = (const unsigned char *)data;
+    uint64_t hash = 1469598103934665603ULL;
+    for (size_t i = 0; i < bytes; ++i) {
+        hash ^= p[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static q38_decode_stats cli_stats_floats(const float *values, size_t count) {
+    q38_decode_stats result;
+    memset(&result, 0, sizeof(result));
+    result.min = INFINITY;
+    result.max = -INFINITY;
+    result.checksum = cli_hash_bytes(values, count * sizeof(*values));
+    for (size_t i = 0; i < count; ++i) {
+        const float value = values[i];
+        if (isnan(value)) {
+            result.nan_count++;
+            continue;
+        }
+        if (isinf(value)) {
+            result.inf_count++;
+            continue;
+        }
+        result.finite_count++;
+        result.min = fminf(result.min, value);
+        result.max = fmaxf(result.max, value);
+        result.max_abs = fmaxf(result.max_abs, fabsf(value));
+        result.mean += value;
+        result.rms += (double)value * value;
+    }
+    if (result.finite_count) {
+        result.mean /= (float)result.finite_count;
+        result.rms = (float)sqrt(result.rms / (double)result.finite_count);
+    } else {
+        result.min = 0.0f;
+        result.max = 0.0f;
+        result.mean = 0.0f;
+        result.rms = 0.0f;
+    }
+    return result;
+}
+
+static void print_decode_stats_json(const q38_decode_stats *stats) {
+    printf("{\"min\":%.9g,\"max\":%.9g,\"mean\":%.9g,\"rms\":%.9g,"
+           "\"max_abs\":%.9g,\"finite_count\":%zu,\"nan_count\":%zu,"
+           "\"inf_count\":%zu,\"checksum\":\"%016" PRIx64 "\"}",
+           stats->min, stats->max, stats->mean, stats->rms, stats->max_abs,
+           stats->finite_count, stats->nan_count, stats->inf_count,
+           stats->checksum);
+}
 
 static double monotonic_ms(void) {
     struct timespec ts;
@@ -313,8 +408,30 @@ static bool generate_trace(const q38_decode_step *step, void *opaque,
                                          "invalid generate trace evidence");
         return false;
     }
-    evidence->prompt_seen += step->generated ? 0 : 1;
-    if (step->generated) {
+    evidence->prompt_seen +=
+        step->kind == Q38_DECODE_TRACE_PROMPT_PREDICTION ? 1 : 0;
+    if (step->kind == Q38_DECODE_TRACE_PROMPT_PREDICTION) {
+        if (evidence->prompt_seen + 2 == evidence->prompt_count)
+            evidence->prefix4_logits_hash = step->logits_hash;
+        if (evidence->prompt_seen + 1 == evidence->prompt_count)
+            evidence->prompt_final_logits_hash = step->logits_hash;
+        if (!evidence->first_prompt_top_valid) {
+            memcpy(evidence->first_prompt_top_ids, step->top_ids,
+                   sizeof(evidence->first_prompt_top_ids));
+            memcpy(evidence->first_prompt_top_values, step->top_values,
+                   sizeof(evidence->first_prompt_top_values));
+            evidence->first_prompt_top_valid = true;
+            evidence->first_ple_history_hash = step->ple_history_hash;
+            evidence->first_ple_history_valid = true;
+        }
+        memcpy(evidence->prompt_top_ids, step->top_ids,
+               sizeof(evidence->prompt_top_ids));
+        memcpy(evidence->prompt_top_values, step->top_values,
+               sizeof(evidence->prompt_top_values));
+        evidence->prompt_top_valid = true;
+    }
+    if (step->kind == Q38_DECODE_TRACE_GENERATED_EMIT ||
+        step->kind == Q38_DECODE_TRACE_GENERATED_CONSUME) {
         const double now = monotonic_ms();
         const double elapsed = now - evidence->started_ms;
         if (!evidence->generated_seen) evidence->first_token_ms = elapsed;
@@ -325,6 +442,39 @@ static bool generate_trace(const q38_decode_step *step, void *opaque,
         evidence->last_generated_ms = now;
         evidence->generated_seen++;
     }
+    if (step->kind == Q38_DECODE_TRACE_GENERATED_CONSUME &&
+        !evidence->target_trace_captured) {
+        memcpy(evidence->first_prompt_top_ids, step->top_ids,
+               sizeof(evidence->first_prompt_top_ids));
+        memcpy(evidence->first_prompt_top_values, step->top_values,
+               sizeof(evidence->first_prompt_top_values));
+        evidence->first_ple_history_hash = step->ple_history_hash;
+        evidence->target_input_token = step->consumed_token;
+        evidence->target_position = evidence->prompt_count;
+        evidence->target_committed_tokens = step->committed_tokens;
+        evidence->first_consume_input = step->consumed_token;
+        evidence->first_consume_argmax = step->next_token;
+        evidence->first_consume_committed_tokens = step->committed_tokens;
+        evidence->first_hidden_before_ple = evidence->latest_hidden_before_ple;
+        evidence->first_ple_contribution = evidence->latest_ple_contribution;
+        evidence->first_hidden_after_ple = evidence->latest_hidden_after_ple;
+        evidence->first_final_hidden = evidence->latest_final_hidden;
+        evidence->first_hidden_before_ple_valid =
+            evidence->latest_hidden_before_ple_valid;
+        evidence->first_ple_contribution_valid =
+            evidence->latest_ple_contribution_valid;
+        evidence->first_hidden_after_ple_valid =
+            evidence->latest_hidden_after_ple_valid;
+        evidence->first_final_hidden_valid =
+            evidence->latest_final_hidden_valid;
+        evidence->target_trace_captured = true;
+    }
+    if (step->kind == Q38_DECODE_TRACE_GENERATED_EMIT)
+        evidence->generated_emit_seen++;
+    else if (step->kind == Q38_DECODE_TRACE_GENERATED_CONSUME)
+        evidence->generated_consume_seen++;
+    if (step->kind == Q38_DECODE_TRACE_PROMPT_PREDICTION)
+        evidence->prompt_final_argmax = step->next_token;
     if (!step->logits_finite) evidence->inf_count++;
     evidence->nan_count += step->gdn_state_stats.nan_count +
                            step->conv_history_stats.nan_count +
@@ -334,6 +484,43 @@ static bool generate_trace(const q38_decode_step *step, void *opaque,
                            step->ple_history_stats.inf_count;
     sample_generate_memory(evidence, evidence->model_bytes);
     return step->finite && step->logits_finite;
+}
+
+static bool generate_boundary_trace(uint32_t layer, const char *boundary,
+                                    const float *values, size_t token_count,
+                                    size_t width, void *opaque, char *error,
+                                    size_t error_len) {
+    q38_generate_evidence *evidence = opaque;
+    if (!evidence || !boundary || !values) {
+        if (error && error_len)
+            snprintf(error, error_len, "invalid generate boundary evidence");
+        return false;
+    }
+    /*
+     * Boundary callbacks run before generate_trace. Select the forward that
+     * consumes the first emitted token, after all prompt tokens have run.
+     */
+    if (token_count != 1) return true;
+    q38_decode_stats stats = cli_stats_floats(values, token_count * width);
+    if (layer == 1 && strcmp(boundary, "hidden_before_ple") == 0) {
+        evidence->latest_hidden_before_ple = stats;
+        evidence->latest_hidden_before_ple_valid = true;
+    } else if (layer == 1 && strcmp(boundary, "ple_contribution") == 0) {
+        evidence->latest_ple_contribution = stats;
+        evidence->latest_ple_contribution_valid = true;
+    } else if (layer == 1 && strcmp(boundary, "hidden_after_ple") == 0) {
+        evidence->latest_hidden_after_ple = stats;
+        evidence->latest_hidden_after_ple_valid = true;
+    } else if (layer == UINT32_MAX &&
+               strcmp(boundary, "final_hidden") == 0) {
+        evidence->latest_final_hidden = stats;
+        evidence->latest_final_hidden_valid = true;
+        if (evidence->target_trace_captured) {
+            evidence->first_final_hidden = stats;
+            evidence->first_final_hidden_valid = true;
+        }
+    }
+    return true;
 }
 
 static void json_string(const char *text) {
@@ -431,12 +618,16 @@ static int cmd_generate(const q38_options *opt) {
     evidence.min_cuda_free = platform.cuda_free_bytes;
     evidence.cuda_total = platform.cuda_total_bytes;
     evidence.model_bytes = model->size;
+    evidence.prompt_count = prompt.token_count;
+    evidence.target_forward_index = prompt.token_count;
     q38_memory_tracker_init(&evidence.memory);
     sample_generate_memory(&evidence, model->size);
     q38_forward_diagnostics diagnostics;
     memset(&diagnostics, 0, sizeof(diagnostics));
     diagnostics.stage_trace = generate_stage_trace;
+    diagnostics.boundary_trace = generate_boundary_trace;
     diagnostics.trace_user = &evidence;
+    diagnostics.disable_ple = opt->disable_ple;
     if (!q38_decode_stream_with_matrix_backend(
             model, &weights, &state, prompt.tokens, prompt.token_count,
             generated, opt->max_tokens, logits, Q38_DECODE_VOCAB_SIZE,
@@ -445,6 +636,27 @@ static int cmd_generate(const q38_options *opt) {
             cuda, generate_trace, &evidence, error, sizeof(error))) {
         fprintf(stderr, "q38: CUDA decode: %s\n", error);
         goto cleanup;
+    }
+    if (prompt.token_count == 5 && prompt.tokens[0] == 17 &&
+        prompt.tokens[1] == 478 && prompt.tokens[2] == 220 &&
+        prompt.tokens[3] == 17 && prompt.tokens[4] == 283 &&
+        opt->max_tokens == 2) {
+        const uint32_t expected_next = opt->disable_ple ? 19u : 20u;
+        if (evidence.prompt_seen != 5 ||
+            evidence.prompt_final_argmax != 220 ||
+            evidence.generated_emit_seen != 1 ||
+            evidence.generated_consume_seen != 1 ||
+            generated[0] != 220 ||
+            evidence.first_consume_input != 220 ||
+            evidence.first_consume_argmax != expected_next ||
+            evidence.first_consume_committed_tokens != 6) {
+            fprintf(stderr, "q38: canonical decode protocol assertion failed\n");
+            goto cleanup;
+        }
+        if (evidence.prefix4_logits_hash == evidence.prompt_final_logits_hash) {
+            fprintf(stderr, "q38: canonical prompt-prefix logits assertion failed\n");
+            goto cleanup;
+        }
     }
     sample_generate_memory(&evidence, model->size);
     if (!q38_tokenizer_decode(&tokenizer, generated, opt->max_tokens,
@@ -465,6 +677,74 @@ static int cmd_generate(const q38_options *opt) {
         print_ids_json(prompt.tokens, prompt.token_count);
         printf(",\"generated_ids\":");
         print_ids_json(generated, opt->max_tokens);
+        printf(",\"prompt_final_top20\":[");
+        for (size_t i = 0; i < 20; ++i)
+            printf("%s{\"id\":%u,\"value\":%.9g}", i ? "," : "",
+                   evidence.prompt_top_ids[i], evidence.prompt_top_values[i]);
+        printf("],\"prompt_final_margin\":%.9g",
+               evidence.prompt_top_values[0] - evidence.prompt_top_values[1]);
+        printf(",\"disable_ple\":%s,\"first_step_evidence\":",
+               opt->disable_ple ? "true" : "false");
+        if (!evidence.first_prompt_top_valid) {
+            printf("null");
+        } else {
+            printf("{\"target\":\"first_generated_consume\","
+                   "\"token_index\":%zu,\"position\":%" PRIu64
+                   ",\"input_token\":%u,\"committed_tokens\":%" PRIu64
+                   ",\"top20\":[",
+                   evidence.target_forward_index, evidence.target_position,
+                   evidence.target_input_token,
+                   evidence.target_committed_tokens);
+            for (size_t i = 0; i < 20; ++i)
+                printf("%s{\"id\":%u,\"value\":%.9g}", i ? "," : "",
+                       evidence.first_prompt_top_ids[i],
+                       evidence.first_prompt_top_values[i]);
+            printf("],\"top1_top2_margin\":%.9g,"
+                   "\"hidden_before_ple\":",
+                   evidence.first_prompt_top_values[0] -
+                   evidence.first_prompt_top_values[1]);
+            if (evidence.first_hidden_before_ple_valid)
+                print_decode_stats_json(&evidence.first_hidden_before_ple);
+            else
+                printf("null");
+            printf(",\"ple_contribution\":");
+            if (evidence.first_ple_contribution_valid)
+                print_decode_stats_json(&evidence.first_ple_contribution);
+            else
+                printf("null");
+            printf(",\"hidden_after_ple\":");
+            if (evidence.first_hidden_after_ple_valid)
+                print_decode_stats_json(&evidence.first_hidden_after_ple);
+            else
+                printf("null");
+            printf(",\"final_hidden\":");
+            if (evidence.first_final_hidden_valid)
+                print_decode_stats_json(&evidence.first_final_hidden);
+            else
+                printf("null");
+            printf(",\"first_8_generated_ids\":[");
+            const size_t first_count = opt->max_tokens < 8
+                ? opt->max_tokens : 8;
+            for (size_t i = 0; i < first_count; ++i)
+                printf("%s%u", i ? "," : "", generated[i]);
+            printf("],\"ple_history_hash\":\"%016" PRIx64 "\"}",
+                   evidence.first_ple_history_hash);
+        }
+        if (prompt.token_count == 5 && prompt.tokens[0] == 17 &&
+            prompt.tokens[1] == 478 && prompt.tokens[2] == 220 &&
+            prompt.tokens[3] == 17 && prompt.tokens[4] == 283 &&
+            opt->max_tokens == 2)
+            printf(",\"protocol_assertions\":{\"prompt_consumed_exact\":true,"
+                   "\"prompt_final_argmax\":220,\"generated0\":220,"
+                   "\"generated0_forward\":false,\"first_consume_input\":220,"
+                   "\"first_consume_position\":5,\"committed_before\":5,"
+                   "\"committed_after\":%" PRIu64 ",\"first_consume_argmax\":%u,"
+                   "\"prefix4_logits_hash\":\"%016" PRIx64 "\","
+                   "\"prompt_final_logits_hash\":\"%016" PRIx64 "\"}",
+                   evidence.first_consume_committed_tokens,
+                   evidence.first_consume_argmax,
+                   evidence.prefix4_logits_hash,
+                   evidence.prompt_final_logits_hash);
         printf(",\"generated_text\":");
         json_string(generated_text);
         printf(",\"timing_ms\":{\"first_token\":%.6f,\"per_token\":[",
@@ -557,6 +837,8 @@ int main(int argc, char **argv) {
             if (i + 1 < argc) opt.prompt = argv[++i];
         } else if (strcmp(a, "--max-tokens") == 0) {
             if (i + 1 < argc) opt.max_tokens = (size_t)strtoul(argv[++i], NULL, 10);
+        } else if (strcmp(a, "--disable-ple") == 0) {
+            opt.disable_ple = true;
         } else if (strcmp(a, "--json") == 0) {
             opt.json = true;
         } else if (strcmp(a, "--verbose") == 0) {

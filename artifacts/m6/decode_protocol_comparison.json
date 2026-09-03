@@ -1,0 +1,173 @@
+{
+  "format": "q38-m6-decode-comparison-v2",
+  "native": "artifacts/m6/decode_protocol_2.json",
+  "oracle": "artifacts/m6/stateful_gguf_oracle_protocol_2.json",
+  "checks": [
+    {
+      "step": 0,
+      "native_kind": "prompt_prediction",
+      "oracle_kind": "prompt_prediction",
+      "native_consumed_token": 9419,
+      "oracle_consumed_token": 9419,
+      "native_emitted_token": 11,
+      "oracle_emitted_token": 11,
+      "status": "pass"
+    },
+    {
+      "step": 1,
+      "native_kind": "generated_emit",
+      "oracle_kind": "generated_emit",
+      "native_consumed_token": null,
+      "oracle_consumed_token": null,
+      "native_emitted_token": 11,
+      "oracle_emitted_token": 11,
+      "status": "pass"
+    },
+    {
+      "step": 2,
+      "native_kind": "generated_consume",
+      "oracle_kind": "generated_consume",
+      "native_consumed_token": 11,
+      "oracle_consumed_token": 11,
+      "native_emitted_token": 353,
+      "oracle_emitted_token": 353,
+      "status": "pass"
+    }
+  ],
+  "fresh_seed": {
+    "step": 0,
+    "native_kind": "prompt_prediction",
+    "oracle_kind": "prompt_prediction",
+    "native_consumed_token": 9419,
+    "oracle_consumed_token": 9419,
+    "native_emitted_token": 11,
+    "oracle_emitted_token": 11,
+    "status": "pass"
+  },
+  "c12_fresh_comparison": {
+    "status": "pass",
+    "expected_token": 11,
+    "actual_token": 11,
+    "prefix": [
+      9419
+    ],
+    "position": 0,
+    "final_norm": {
+      "status": "pass",
+      "tolerance": 2e-05,
+      "deltas": {
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "rms": 0.0,
+        "max_abs": 0.0
+      },
+      "failed_fields": [],
+      "checksum_equal": true
+    },
+    "logits": {
+      "status": "pass",
+      "tolerance": 2e-05,
+      "deltas": {
+        "min": 0.0,
+        "max": 0.0,
+        "mean": 0.0,
+        "rms": 0.0,
+        "max_abs": 0.0
+      },
+      "failed_fields": [],
+      "checksum_equal": true
+    },
+    "checkpoints": {
+      "0": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "3": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "7": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "15": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "31": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      },
+      "47": {
+        "status": "pass",
+        "tolerance": 2e-05,
+        "deltas": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "rms": 0.0,
+          "max_abs": 0.0
+        },
+        "failed_fields": [],
+        "checksum_equal": true
+      }
+    }
+  },
+  "native_generated": [
+    11,
+    353
+  ],
+  "oracle_generated": [
+    11,
+    353
+  ],
+  "generated_equal": true,
+  "status": "pass",
+  "reason": null
+}

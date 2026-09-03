@@ -85,16 +85,24 @@ static bool trace_step(const q38_decode_step *step, void *opaque, char *error,
         return false;
     }
     FILE *out = context->out;
-    fprintf(out, "%s{\"step\":%zu,\"generated\":%s,\"input_token\":%u,"
-                "\"next_token\":%u,\"committed_tokens\":%" PRIu64
+    const char *kind = step->kind == Q38_DECODE_TRACE_PROMPT_PREDICTION
+        ? "prompt_prediction"
+        : step->kind == Q38_DECODE_TRACE_GENERATED_EMIT
+            ? "generated_emit" : "generated_consume";
+    fprintf(out, "%s{\"step\":%zu,\"kind\":\"%s\",\"generated\":%s,"
+                "\"state_committed\":%s,\"input_token\":%u,"
+                "\"next_token\":%u,\"emitted_token\":%u,"
+                "\"consumed_token\":%u,\"committed_tokens\":%" PRIu64
                 ",\"logits_hash\":\"%016" PRIx64 "\",\"logits_finite\":%s,"
                 "\"gdn_state_hash\":\"%016" PRIx64
                 "\",\"conv_history_hash\":\"%016" PRIx64
                 "\",\"ple_history_hash\":\"%016" PRIx64 "\",\"finite\":%s,"
                 "\"gdn_state_stats\":",
             context->first ? "" : ",\n", step->step,
-            step->generated ? "true" : "false", step->input_token,
-            step->next_token, step->committed_tokens, step->logits_hash,
+            kind, step->generated ? "true" : "false",
+            step->state_committed ? "true" : "false", step->input_token,
+            step->next_token, step->emitted_token, step->consumed_token,
+            step->committed_tokens, step->logits_hash,
             step->logits_finite ? "true" : "false", step->gdn_state_hash,
             step->conv_history_hash, step->ple_history_hash,
             step->finite ? "true" : "false");
@@ -219,7 +227,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 #endif
-    fprintf(out, "{\"format\":\"q38-m6-decode-v1\",\"steps\":[\n");
+    fprintf(out, "{\"format\":\"q38-m6-decode-v2\",\"steps\":[\n");
     bool ok = generated && logits &&
 #ifdef Q38_DECODE_CUDA
               q38_decode_stream_with_matrix_backend(

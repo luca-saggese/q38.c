@@ -8,6 +8,29 @@ import json
 from pathlib import Path
 
 
+def event_kind(step: dict) -> str:
+    kind = step.get("kind")
+    if kind:
+        return kind
+    return "generated_consume" if step.get("generated") else "prompt_prediction"
+
+
+def event_tokens(step: dict, kind: str) -> tuple[object, object]:
+    def optional(value: object) -> object:
+        return None if value in (None, 4294967295) else value
+
+    if kind == "generated_emit":
+        return optional(step.get("consumed_token")), (
+            step.get("emitted_token", step.get("next_token"))
+        )
+    if kind == "generated_consume":
+        return (
+            step.get("consumed_token", step.get("input_token")),
+            step.get("emitted_token", step.get("next_token")),
+        )
+    return step.get("input_token"), step.get("next_token")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--native", type=Path, required=True)
@@ -38,33 +61,43 @@ def main() -> None:
         count = min(len(native_steps), len(oracle_steps))
         for index in range(count):
             left, right = native_steps[index], oracle_steps[index]
+            left_kind, right_kind = event_kind(left), event_kind(right)
+            left_input, left_output = event_tokens(left, left_kind)
+            right_input, right_output = event_tokens(right, right_kind)
             ok = (
-                left.get("input_token") == right.get("input_token")
-                and left.get("next_token") == right.get("next_token")
+                left_kind == right_kind
+                and left_input == right_input
+                and left_output == right_output
             )
             checks.append({
                 "step": index,
-                "native_input_token": left.get("input_token"),
-                "oracle_input_token": right.get("input_token"),
-                "native_next_token": left.get("next_token"),
-                "oracle_next_token": right.get("next_token"),
+                "native_kind": left_kind,
+                "oracle_kind": right_kind,
+                "native_consumed_token": left_input,
+                "oracle_consumed_token": right_input,
+                "native_emitted_token": left_output,
+                "oracle_emitted_token": right_output,
                 "status": "pass" if ok else "fail",
             })
             if not ok:
                 status = "fail"
                 if reason is None:
                     reason = (
-                        f"step {index} token mismatch: native "
-                        f"{left.get('next_token')} vs oracle "
-                        f"{right.get('next_token')}"
+                        f"step {index} event mismatch: native "
+                        f"{left_kind}/{left_input}/{left_output} vs oracle "
+                        f"{right_kind}/{right_input}/{right_output}"
                     )
         if len(native_steps) != len(oracle_steps):
             status = "fail"
             reason = "native/oracle step counts differ"
+        if native_tokens != oracle_tokens:
+            status = "fail"
+            reason = reason or "native/oracle generated token lists differ"
         if (
-            native_steps[0].get("generated") is not False
-            or native_steps[0].get("input_token") != oracle_steps[0].get("input_token")
-            or native_steps[0].get("next_token") != oracle_steps[0].get("next_token")
+            event_kind(native_steps[0]) != "prompt_prediction"
+            or event_kind(oracle_steps[0]) != "prompt_prediction"
+            or event_tokens(native_steps[0], "prompt_prediction") !=
+            event_tokens(oracle_steps[0], "prompt_prediction")
         ):
             status = "fail"
             reason = reason or "fresh seed step is not equal"
@@ -81,6 +114,7 @@ def main() -> None:
         ),
         "native_generated": native_tokens,
         "oracle_generated": oracle_tokens,
+        "generated_equal": native_tokens == oracle_tokens,
         "status": status,
         "reason": reason,
     }

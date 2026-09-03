@@ -41,6 +41,7 @@ typedef struct {
     bool list_tensors;    /* --list-tensors */
     bool memory_plan;     /* --memory-plan */
     bool platform;        /* --platform */
+    bool disable_ple;     /* --disable-ple diagnostic */
     bool json;            /* --json */
     bool verbose;         /* --verbose */
 } q38_options;
