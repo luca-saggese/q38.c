@@ -1,0 +1,25 @@
+{
+  "format": "q38-m7-steady-state-baseline-v1",
+  "commit": "ed5b3976c",
+  "runs": 6,
+  "cold_run": {
+    "wall_ms": 14471.747317,
+    "argmax": 11,
+    "correctness": true
+  },
+  "warm_runs": [
+    {"run": 2, "wall_ms": 957.165791, "argmax": 11, "correctness": true},
+    {"run": 3, "wall_ms": 953.978736, "argmax": 11, "correctness": true},
+    {"run": 4, "wall_ms": 951.425651, "argmax": 11, "correctness": true},
+    {"run": 5, "wall_ms": 947.342688, "argmax": 11, "correctness": true},
+    {"run": 6, "wall_ms": 951.216195, "argmax": 11, "correctness": true}
+  ],
+  "warm_median_ms": 951.425651,
+  "warm_p95_ms": 956.441,
+  "semantic_state_reset_each_run": true,
+  "resident_weights_workspace_cuda_preserved": true,
+  "same_logits_and_argmax": true,
+  "lm_head_upload_bytes_after_init": 0,
+  "lm_head_allocation_count_after_init": 0,
+  "lm_head_device_pointer_stable": true
+}
