@@ -1,0 +1,42 @@
+{
+  "baseline_artifact_sha256": "68b29ce24ab62bf2cbcd8bbdeff5e6d36941e5b00e2fe34df90e92f98d51f518",
+  "baseline_manifest": "tools/quant_manifest_q2.json",
+  "baseline_recipe": "R0",
+  "format": "q38-m8-m7-baseline-v1",
+  "frozen_commit": "354428de7e09099305bbe24241bf90bfe856fcab",
+  "frozen_commit_subject": "perf: promote all-non-PLE resident baseline\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+  "m7_closure": {
+    "acceptance_status": {
+      "benchmark_delta": "measured",
+      "exactness": "focused M6/M7 gates pass; argmax comparison recorded when workspace profile exists",
+      "format": "q38-m7-acceptance-v1",
+      "full_regression": "not-run",
+      "locality": "unavailable",
+      "long_context": "blocked",
+      "memory": "measured_baseline_only",
+      "startup": "not-run",
+      "status": "conditional",
+      "validated_change": "persistent Q2 MoE intermediate workspace"
+    },
+    "present": true,
+    "quality_corpus": "not-present; no versioned M7 quality corpus was found",
+    "required": [
+      "baseline_platform.json",
+      "baseline_memory.json",
+      "baseline_bench.json",
+      "decode_profile.json"
+    ]
+  },
+  "model_revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540",
+  "reproducibility": {
+    "checksums_file": "artifacts/m8/m7_baseline_checksums.txt",
+    "commands": [
+      "python3 tools/m7_check_gates.py",
+      "python3 tools/m7_acceptance.py"
+    ]
+  },
+  "runtime_artifact": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+  "source_inventory": "artifacts/m1/source_inventory.json",
+  "status": "frozen",
+  "tensor_classes": "artifacts/m1/tensor_classes.json"
+}

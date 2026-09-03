@@ -1,0 +1,11 @@
+{
+  "claims": [
+    "M7 focused gates are reproducible",
+    "M7 full historical sweep remains not-run"
+  ],
+  "format": "q38-m8-baseline-status-v1",
+  "m7_acceptance": "conditional",
+  "m7_closure_present": true,
+  "quality_corpus": "not-present",
+  "status": "pass"
+}
