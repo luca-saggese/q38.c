@@ -78,7 +78,7 @@ M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 	m6-stateful-oracle \
 	m6-stateful-sequence-oracle \
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
-	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-forward
+	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-gates m7-profile-forward
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
@@ -217,6 +217,9 @@ $(TEST_DIR)/test_m7_profile: $(TEST_DIR)/test_m7_profile.c q38_profile.o \
 
 m7-profile: $(TEST_DIR)/test_m7_profile
 	@./$(TEST_DIR)/test_m7_profile
+
+m7-gates: m7-replay m7-profile
+	@$(M6_PYTHON) tools/m7_check_gates.py
 
 $(TEST_DIR)/m7_profile_forward: $(TEST_DIR)/m7_profile_forward.c \
 		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o \
