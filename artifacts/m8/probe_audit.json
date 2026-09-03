@@ -1,0 +1,84 @@
+{
+  "artifact": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+  "classes": {
+    "embedding": {
+      "BF16": {
+        "bytes": 1271398400,
+        "tensors": 1
+      }
+    },
+    "gdn": {
+      "BF16": {
+        "bytes": 4173020928,
+        "tensors": 324
+      }
+    },
+    "gr": {
+      "BF16": {
+        "bytes": 1281249280,
+        "tensors": 387
+      }
+    },
+    "output": {
+      "BF16": {
+        "bytes": 1271398400,
+        "tensors": 1
+      }
+    },
+    "ple": {
+      "BF16": {
+        "bytes": 143360,
+        "tensors": 4
+      },
+      "I64": {
+        "bytes": 280,
+        "tensors": 3
+      },
+      "Q8_0": {
+        "bytes": 54435077120,
+        "tensors": 130
+      }
+    },
+    "qsa": {
+      "BF16": {
+        "bytes": 1234716672,
+        "tensors": 108
+      }
+    },
+    "routed_expert": {
+      "Q2_K": {
+        "bytes": 39636172800,
+        "tensors": 96
+      }
+    },
+    "router": {
+      "BF16": {
+        "bytes": 125829120,
+        "tensors": 48
+      }
+    },
+    "shared_expert": {
+      "BF16": {
+        "bytes": 472104960,
+        "tensors": 192
+      }
+    }
+  },
+  "file_bytes": 103901247456,
+  "format": "q38_quant_audit_v1",
+  "metadata": {
+    "general.alignment": 32,
+    "general.architecture": "qwen4_exp",
+    "general.name": "Qwen3.8-Flash-Next runtime-only Q2Experts-BF16Core-BF16PLE",
+    "q38.down_proj_layout": "transpose_last_two_axes",
+    "q38.excluded_mtp": true,
+    "q38.excluded_vision": true,
+    "q38.max_layer": 47,
+    "q38.quant_manifest": "quant_manifest_q2.json",
+    "q38.quantized": true,
+    "q38.runtime_only": true,
+    "q38.source_revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540"
+  },
+  "status": "pass",
+  "violations": []
+}

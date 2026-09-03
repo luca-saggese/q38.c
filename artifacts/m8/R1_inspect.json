@@ -1,0 +1,1 @@
+{"name":"Qwen3.8-Flash-Next runtime-only Q2Experts-BF16Core-BF16PLE","architecture":"qwen4_exp","version":3,"metadata_keys":11,"tensors":29,"file_bytes":4126298944,"tensor_bytes":4126295488,"logical_parameters":3871941344}

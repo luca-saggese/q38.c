@@ -1,0 +1,12 @@
+{
+  "disk_free_bytes": 87304052736,
+  "estimated_tensor_bytes": 4126295488,
+  "format": "q38_runtime_conversion_plan_v1",
+  "headroom_target_bytes": 115964116992,
+  "max_layer": 0,
+  "quantized": true,
+  "reason": "",
+  "source_bytes": 7743882688,
+  "status": "pass",
+  "tensor_count": 29
+}

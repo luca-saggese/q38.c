@@ -1,0 +1,13 @@
+M8 acceptance status (through M8-C02)
+
+PASS
+- M8-C00 baseline freeze: committed M7 baseline manifest/checksums; focused M7 gates reproduce.
+- M8-C01 sensitivity harness: R0-R5 class-isolated descriptors and R1 manifest generated; manifest coverage and Q4 block alignment pass.
+- M8-C02 memory solver: R0 calibrated against the measured M7 all-non-PLE footprint; R1 projection is inventory-backed.
+- Controlled R1 layer-0 GGUF: generated with existing q38_quantize; quant audit and q38 inspect pass.
+
+NOT CLAIMED
+- No Q4 quality/perplexity result: the fixed M8 calibration corpus/evaluator is absent.
+- No full-model R1 artifact: available disk headroom is insufficient for an additional full conversion alongside the 97 GiB R0 artifact.
+- No full M0-M7 regression, full Spark startup/prefill peak, or Q4 expert CUDA acceptance was run.
+- M7 remains conditional for historical/full-model gates; existing M7 commits were preserved.
