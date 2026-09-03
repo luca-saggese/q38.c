@@ -1,0 +1,41 @@
+{
+  "cols": 2560,
+  "commit_sha": "7383f2483d0c52a10897ad5edd6e123cfc71536e",
+  "correctness": {
+    "argmax": [
+      11,
+      11,
+      11
+    ],
+    "argmax_stable": true,
+    "lm_head_parity": "pass",
+    "m6_gpu_forward": "pass"
+  },
+  "effective_gb_s": [
+    0.33375556878554774,
+    0.32119858751164426,
+    0.2914200505913179
+  ],
+  "format": "q38-m7-lm-head-microbenchmark-v1",
+  "geometry": {
+    "block_threads": 256,
+    "grid_x": "rows",
+    "rows_per_block": 1,
+    "warps_per_block": 8
+  },
+  "hardware_counters": {
+    "reason": "ERR_NVGPUCTRPERM",
+    "status": "unavailable"
+  },
+  "input_bytes": 10240,
+  "output_bytes": 993280,
+  "qtype": "BF16",
+  "rows": 248320,
+  "runs": [
+    3809.369847,
+    3958.29387,
+    4362.769128
+  ],
+  "source": "real full-forward warm profiles",
+  "weight_bytes_theoretical": 1271398400
+}
