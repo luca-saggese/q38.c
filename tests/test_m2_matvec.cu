@@ -22,13 +22,24 @@ static float bf16_to_float_host(uint16_t bits) {
 }
 
 static int run_q2() {
-    const size_t rows = 3, cols = 512, blocks_per_row = 2;
+    const size_t rows = 9, cols = 1024, blocks_per_row = 4;
     std::vector<unsigned char> weights(rows * blocks_per_row *
                                        Q38_QUANT_Q2_K_BLOCK_BYTES);
     unsigned state = 0x42u;
     for (unsigned char &value : weights) value = (unsigned char)next_byte(&state);
+    for (size_t row = 0; row < rows; row++)
+        for (size_t block = 0; block < blocks_per_row; block++) {
+            const size_t offset =
+                (row * blocks_per_row + block) * Q38_QUANT_Q2_K_BLOCK_BYTES;
+            const uint16_t d = 0x3c00;    // 1.0 in binary16
+            const uint16_t dmin = 0x3800; // 0.5 in binary16
+            std::memcpy(weights.data() + offset + offsetof(q38_q2_k_block, d),
+                        &d, sizeof(d));
+            std::memcpy(weights.data() + offset + offsetof(q38_q2_k_block, dmin),
+                        &dmin, sizeof(dmin));
+        }
     std::vector<float> input(cols), expected(rows), actual(rows);
-    for (float &value : input) value = (float)((int)next_byte(&state) - 128) / 37.0f;
+    for (float &value : input) value = (float)((int)next_byte(&state) - 128) / 137.0f;
     for (size_t row = 0; row < rows; row++) {
         std::vector<float> decoded(cols);
         char error[128];
@@ -60,6 +71,9 @@ static int run_q2() {
     }
     q38_oracle_metrics metrics;
     q38_oracle_compare(expected.data(), actual.data(), rows, 1e-5f, &metrics);
+    std::printf("Q2_K matvec launch: grid=(%zu,1,1) block=(256,1,1), "
+                "8 warps/block, one row/block, warp-per-Q2_K-block; "
+                "max_abs=%g\n", rows, metrics.max_abs);
     return metrics.max_abs > 2e-4f;
 }
 

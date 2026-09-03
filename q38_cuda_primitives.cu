@@ -97,16 +97,35 @@ __global__ static void silu_kernel(const float *input, float *output,
 __global__ static void q2_matvec_kernel(const q38_q2_k_block *weights,
                                         size_t rows, size_t cols,
                                         const float *input, float *output) {
-    const size_t row = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    constexpr unsigned warp_count = 8;
+    const unsigned lane = threadIdx.x & 31u;
+    const unsigned warp = threadIdx.x >> 5;
+    const size_t row = (size_t)blockIdx.x;
     if (row >= rows) return;
     const size_t blocks_per_row = cols / Q38_QUANT_QK_K;
-    float sum = 0.0f;
-    for (size_t col = 0; col < cols; col++) {
+    __shared__ double warp_sums[warp_count];
+    double sum = 0.0;
+    /* Each warp owns complete Q2_K blocks, keeping the quantized block decode
+     * and dot product cooperative while allowing all blocks in a row to be
+     * processed by the same block. */
+    for (size_t block_index = warp; block_index < blocks_per_row;
+         block_index += warp_count) {
         const q38_q2_k_block *block =
-            weights + row * blocks_per_row + col / Q38_QUANT_QK_K;
-        sum += q2_value(block, (unsigned)(col % Q38_QUANT_QK_K)) * input[col];
+            weights + row * blocks_per_row + block_index;
+        for (unsigned element = lane; element < Q38_QUANT_QK_K; element += 32)
+            sum += (double)q2_value(block, element) *
+                   (double)input[block_index * Q38_QUANT_QK_K + element];
     }
-    output[row] = sum;
+    for (unsigned offset = 16; offset; offset >>= 1)
+        sum += __shfl_down_sync(0xffffffffu, sum, offset);
+    if (lane == 0) warp_sums[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        sum = lane < warp_count ? warp_sums[lane] : 0.0;
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0) output[row] = sum;
+    }
 }
 
 __device__ static float bf16_to_float_device(uint16_t bits) {
@@ -199,7 +218,7 @@ extern "C" bool q38_cuda_q2_matvec(const void *weights, size_t rows,
         set_error(error, error_len, "invalid CUDA Q2 matvec arguments");
         return false;
     }
-    q2_matvec_kernel<<<(unsigned)((rows + 255) / 256), 256, 0, stream>>>(
+    q2_matvec_kernel<<<(unsigned)rows, 256, 0, stream>>>(
         (const q38_q2_k_block *)weights, rows, cols, input, output);
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess) {
