@@ -1,13 +1,13 @@
 {
   "argmax_preserved": true,
   "baseline_source": "baseline_bench.json",
-  "baseline_tokens_per_second": 0.0231214236,
-  "baseline_wall_ms": 43249.932,
-  "note": "Single-token runs; observed comparison, not a multi-run significance claim.",
+  "baseline_tokens_per_second": 0.0443443443,
+  "baseline_wall_ms": 22550.7901,
+  "note": "Single-token GB10 run; LM-head uses one cooperative GEMV launch.",
   "status": "measured",
-  "wall_ms_delta": -9693.882700000002,
-  "wall_ms_percent": -22.413636858434835,
+  "wall_ms_delta": 2944.278400000003,
+  "wall_ms_percent": 13.056209502832468,
   "workspace_source": "workspace_bench.json",
-  "workspace_tokens_per_second": 0.029800886,
-  "workspace_wall_ms": 33556.0493
+  "workspace_tokens_per_second": 0.0392232718,
+  "workspace_wall_ms": 25495.0685
 }
