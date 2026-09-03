@@ -21,6 +21,12 @@ static float bf16_to_float_host(uint16_t bits) {
     return result;
 }
 
+static uint16_t float_to_bf16_host(float value) {
+    uint32_t bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (uint16_t)(bits >> 16);
+}
+
 static int run_q2() {
     const size_t rows = 9, cols = 1024, blocks_per_row = 4;
     std::vector<unsigned char> weights(rows * blocks_per_row *
@@ -82,7 +88,8 @@ static int run_bf16() {
     std::vector<uint16_t> weights(rows * cols);
     std::vector<float> input(cols), expected(rows), actual(rows);
     unsigned state = 0x99u;
-    for (uint16_t &value : weights) value = (uint16_t)next_byte(&state) << 8;
+    for (size_t i = 0; i < weights.size(); ++i)
+        weights[i] = float_to_bf16_host((float)((int)(i % 31) - 15) / 8.0f);
     for (float &value : input) value = (float)((int)next_byte(&state) - 128) / 19.0f;
     for (size_t row = 0; row < rows; row++)
         for (size_t col = 0; col < cols; col++)

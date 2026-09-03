@@ -40,6 +40,20 @@ __device__ static float q2_value(const q38_q2_k_block *block, unsigned element) 
            half_to_float_device(block->dmin) * (scale >> 4);
 }
 
+__device__ static float q2_value_blockwise(const q38_q2_k_block *block,
+                                           unsigned element, float d,
+                                           float dmin) {
+    const unsigned half = element / 128;
+    const unsigned within = element % 128;
+    const unsigned group = within / 16;
+    const unsigned l = within % 16;
+    const unsigned shift = (group / 2) * 2;
+    const uint8_t scale = block->scales[half * 8 + group];
+    const unsigned qindex = half * 32 + (group % 2) * 16 + l;
+    const unsigned quant = (block->qs[qindex] >> shift) & 3u;
+    return d * (scale & 0xfu) * quant - dmin * (scale >> 4);
+}
+
 __device__ static void q4_scale_min(unsigned index, const uint8_t *scales,
                                     uint8_t *scale, uint8_t *minimum) {
     if (index < 4) {
@@ -127,8 +141,10 @@ __global__ static void q2_matvec_kernel(const q38_q2_k_block *weights,
          block_index += warp_count) {
         const q38_q2_k_block *block =
             weights + row * blocks_per_row + block_index;
+        const float d = half_to_float_device(block->d);
+        const float dmin = half_to_float_device(block->dmin);
         for (unsigned element = lane; element < Q38_QUANT_QK_K; element += 32)
-            sum += (double)q2_value(block, element) *
+            sum += (double)q2_value_blockwise(block, element, d, dmin) *
                    (double)input[block_index * Q38_QUANT_QK_K + element];
     }
     for (unsigned offset = 16; offset; offset >>= 1)
@@ -155,8 +171,8 @@ __global__ static void bf16_matvec_kernel(const uint16_t *weights, size_t rows,
     const unsigned warp = threadIdx.x >> 5;
     const size_t row = (size_t)blockIdx.x;
     if (row >= rows) return;
-    __shared__ double warp_sums[warp_count];
-    double sum = 0.0;
+    __shared__ float warp_sums[warp_count];
+    float sum = 0.0f;
     const size_t vector_count = cols / 8;
     const size_t vector_tail = vector_count * 8;
     const bool vector_aligned = (row * cols) % 8u == 0;
@@ -170,25 +186,22 @@ __global__ static void bf16_matvec_kernel(const uint16_t *weights, size_t rows,
                 reinterpret_cast<const uint16_t *>(&packed);
             const size_t col = vector * 8;
             for (unsigned element = 0; element < 8; ++element)
-                sum += (double)bf16_to_float_device(values[element]) *
-                       (double)input[col + element];
+                sum += bf16_to_float_device(values[element]) * input[col + element];
         }
     } else {
         for (size_t col = threadIdx.x; col < vector_tail;
              col += blockDim.x)
-            sum += (double)bf16_to_float_device(weights[row * cols + col]) *
-                   (double)input[col];
+            sum += bf16_to_float_device(weights[row * cols + col]) * input[col];
     }
     for (size_t col = vector_tail + threadIdx.x; col < cols;
          col += blockDim.x)
-        sum += (double)bf16_to_float_device(weights[row * cols + col]) *
-               (double)input[col];
+        sum += bf16_to_float_device(weights[row * cols + col]) * input[col];
     for (unsigned offset = 16; offset; offset >>= 1)
         sum += __shfl_down_sync(0xffffffffu, sum, offset);
     if (lane == 0) warp_sums[warp] = sum;
     __syncthreads();
     if (warp == 0) {
-        sum = lane < warp_count ? warp_sums[lane] : 0.0;
+        sum = lane < warp_count ? warp_sums[lane] : 0.0f;
         for (unsigned offset = 16; offset; offset >>= 1)
             sum += __shfl_down_sync(0xffffffffu, sum, offset);
         if (lane == 0) output[row] = (float)sum;
