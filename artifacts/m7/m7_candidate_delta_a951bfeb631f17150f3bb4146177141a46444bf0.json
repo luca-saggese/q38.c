@@ -1,0 +1,13 @@
+{
+  "argmax_preserved": true,
+  "baseline_wall_ms": 22550.7901,
+  "lm_head_kernel_launches": [
+    1,
+    1,
+    1
+  ],
+  "median_delta_percent": -9.569706828143463,
+  "wall_ms_median": 20392.7456,
+  "wall_ms_p95": 20617.8106,
+  "warm_runs": 3
+}

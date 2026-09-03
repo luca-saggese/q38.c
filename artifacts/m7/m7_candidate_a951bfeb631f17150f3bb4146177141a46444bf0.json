@@ -1,0 +1,286 @@
+{
+  "baseline_file": "m7_baseline_frozen.json",
+  "baseline_sha256": "d5bc990d7857b4e5ae3f1d5f8d41ca48006a250dcf71d3bd7a5c690713bc18a6",
+  "binary_sha256": "c7d82df8d806d0b03a045fbd3bdb7e7ae448b8497a991320bde0e98121a43d1a",
+  "commit_sha": "a951bfeb631f17150f3bb4146177141a46444bf0",
+  "format": "q38-m7-candidate-v1",
+  "runs": [
+    {
+      "argmax": 11,
+      "backend_declines": 0,
+      "backend_rows": 3101760,
+      "case": "S",
+      "decode_tokens": 1,
+      "format": "q38-m7-bench-v1",
+      "launch_overhead_proxy_ms": 0,
+      "matrix_calls": 1157,
+      "memory": {
+        "cuda_allocated_bytes": 0,
+        "cuda_free_bytes": 0,
+        "cuda_total_bytes": 0,
+        "mem_available_bytes": 119458869248,
+        "model_file_bytes": 103901247456,
+        "model_mapped_bytes": 103901247456,
+        "peak_internal_bytes": 0,
+        "persistent_allocated_bytes": 0,
+        "persistent_allocation_count": 0,
+        "phase": "after_forward",
+        "rss_bytes": 9708957696,
+        "transient_allocated_bytes": 0,
+        "transient_allocation_count": 0,
+        "workspace_allocated_bytes": 0,
+        "workspace_allocation_count": 0
+      },
+      "prompt_tokens": 1,
+      "row_matvec_dequant_ms": 19483.6999,
+      "runs": 1,
+      "scalar_rows": 0,
+      "telemetry": {
+        "allocation_bytes": 1331997440,
+        "allocation_count": 9,
+        "cuda_elapsed_ms": 20018.691406,
+        "cuda_synchronizations": 1,
+        "subsystems": [
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 180,
+            "elapsed_ms": 9605.057018,
+            "kernel_launches": 180,
+            "name": "gdn",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 24,
+            "elapsed_ms": 337.691207,
+            "kernel_launches": 24,
+            "name": "qsa",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 672,
+            "elapsed_ms": 1446.453046,
+            "kernel_launches": 672,
+            "name": "moe",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 2,
+            "elapsed_ms": 36.733406,
+            "kernel_launches": 2,
+            "name": "ple",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 1,
+            "elapsed_ms": 4283.838106,
+            "kernel_launches": 1,
+            "name": "lm_head",
+            "synchronizations": 0
+          }
+        ],
+        "version": 1
+      },
+      "tokens_per_second": 0.0499530463,
+      "unattributed_gpu_ms": 197.300259,
+      "wall_ms": 20018.7991
+    },
+    {
+      "argmax": 11,
+      "backend_declines": 0,
+      "backend_rows": 3101760,
+      "case": "S",
+      "decode_tokens": 1,
+      "format": "q38-m7-bench-v1",
+      "launch_overhead_proxy_ms": 0,
+      "matrix_calls": 1157,
+      "memory": {
+        "cuda_allocated_bytes": 0,
+        "cuda_free_bytes": 0,
+        "cuda_total_bytes": 0,
+        "mem_available_bytes": 119446425600,
+        "model_file_bytes": 103901247456,
+        "model_mapped_bytes": 103901247456,
+        "peak_internal_bytes": 0,
+        "persistent_allocated_bytes": 0,
+        "persistent_allocation_count": 0,
+        "phase": "after_forward",
+        "rss_bytes": 9709309952,
+        "transient_allocated_bytes": 0,
+        "transient_allocation_count": 0,
+        "workspace_allocated_bytes": 0,
+        "workspace_allocation_count": 0
+      },
+      "prompt_tokens": 1,
+      "row_matvec_dequant_ms": 19860.7303,
+      "runs": 1,
+      "scalar_rows": 0,
+      "telemetry": {
+        "allocation_bytes": 1331997440,
+        "allocation_count": 9,
+        "cuda_elapsed_ms": 20392.636719,
+        "cuda_synchronizations": 1,
+        "subsystems": [
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 180,
+            "elapsed_ms": 9780.681061,
+            "kernel_launches": 180,
+            "name": "gdn",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 24,
+            "elapsed_ms": 337.701015,
+            "kernel_launches": 24,
+            "name": "qsa",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 672,
+            "elapsed_ms": 1461.102213,
+            "kernel_launches": 672,
+            "name": "moe",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 2,
+            "elapsed_ms": 37.146386,
+            "kernel_launches": 2,
+            "name": "ple",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 1,
+            "elapsed_ms": 4422.705628,
+            "kernel_launches": 1,
+            "name": "lm_head",
+            "synchronizations": 0
+          }
+        ],
+        "version": 1
+      },
+      "tokens_per_second": 0.0490370457,
+      "unattributed_gpu_ms": 194.205432,
+      "wall_ms": 20392.7456
+    },
+    {
+      "argmax": 11,
+      "backend_declines": 0,
+      "backend_rows": 3101760,
+      "case": "S",
+      "decode_tokens": 1,
+      "format": "q38-m7-bench-v1",
+      "launch_overhead_proxy_ms": 0,
+      "matrix_calls": 1157,
+      "memory": {
+        "cuda_allocated_bytes": 0,
+        "cuda_free_bytes": 0,
+        "cuda_total_bytes": 0,
+        "mem_available_bytes": 119393177600,
+        "model_file_bytes": 103901247456,
+        "model_mapped_bytes": 103901247456,
+        "peak_internal_bytes": 0,
+        "persistent_allocated_bytes": 0,
+        "persistent_allocation_count": 0,
+        "phase": "after_forward",
+        "rss_bytes": 9708957696,
+        "transient_allocated_bytes": 0,
+        "transient_allocation_count": 0,
+        "workspace_allocated_bytes": 0,
+        "workspace_allocation_count": 0
+      },
+      "prompt_tokens": 1,
+      "row_matvec_dequant_ms": 20083.0652,
+      "runs": 1,
+      "scalar_rows": 0,
+      "telemetry": {
+        "allocation_bytes": 1331997440,
+        "allocation_count": 9,
+        "cuda_elapsed_ms": 20617.705078,
+        "cuda_synchronizations": 1,
+        "subsystems": [
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 180,
+            "elapsed_ms": 9864.332885,
+            "kernel_launches": 180,
+            "name": "gdn",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 24,
+            "elapsed_ms": 337.262034,
+            "kernel_launches": 24,
+            "name": "qsa",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 672,
+            "elapsed_ms": 1442.431997,
+            "kernel_launches": 672,
+            "name": "moe",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 2,
+            "elapsed_ms": 30.446893,
+            "kernel_launches": 2,
+            "name": "ple",
+            "synchronizations": 0
+          },
+          {
+            "allocation_bytes": 0,
+            "allocation_count": 0,
+            "callbacks": 1,
+            "elapsed_ms": 4359.247719,
+            "kernel_launches": 1,
+            "name": "lm_head",
+            "synchronizations": 0
+          }
+        ],
+        "version": 1
+      },
+      "tokens_per_second": 0.0485017552,
+      "unattributed_gpu_ms": 197.377852,
+      "wall_ms": 20617.8106
+    }
+  ],
+  "summary": {
+    "argmax_preserved": true,
+    "baseline_wall_ms": 22550.7901,
+    "lm_head_kernel_launches": [
+      1,
+      1,
+      1
+    ],
+    "median_delta_percent": -9.569706828143463,
+    "wall_ms_median": 20392.7456,
+    "wall_ms_p95": 20617.8106,
+    "warm_runs": 3
+  }
+}
