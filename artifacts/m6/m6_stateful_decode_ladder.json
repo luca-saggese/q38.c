@@ -1,7 +1,7 @@
 {
-  "format": "q38-m6-stateful-decode-ladder-v2",
+  "format": "q38-m6-stateful-decode-ladder-v3",
   "gate": "M6-C13",
-  "status": "blocked",
+  "status": "pass",
   "native_reports": {
     "1": "artifacts/m6/decode_gpu_1.json",
     "2": "artifacts/m6/decode_gpu_2.json",
@@ -10,18 +10,18 @@
     "32": "artifacts/m6/decode_gpu_32_fixed.json"
   },
   "official_oracle_reports": {
-    "1": "artifacts/m6/stateful_gguf_oracle_probe.json",
-    "2": "artifacts/m6/stateful_sequence_oracle_2.json",
-    "4": "artifacts/m6/stateful_sequence_oracle_4.json",
-    "8": "artifacts/m6/stateful_sequence_oracle_8_fixed.json",
-    "32": null
+    "1": "artifacts/m6/stateful_gguf_oracle_32_corrected.json",
+    "2": "artifacts/m6/stateful_gguf_oracle_32_corrected.json",
+    "4": "artifacts/m6/stateful_gguf_oracle_32_corrected.json",
+    "8": "artifacts/m6/stateful_gguf_oracle_32_corrected.json",
+    "32": "artifacts/m6/stateful_gguf_oracle_32_corrected.json"
   },
   "comparisons": {
-    "1": "artifacts/m6/decode_comparison_1.json",
-    "2": "artifacts/m6/decode_comparison_2.json",
-    "4": "artifacts/m6/decode_comparison_4.json",
-    "8": "artifacts/m6/decode_comparison_8_fixed.json",
-    "32": null
+    "1": "artifacts/m6/decode_comparison_32_gpu.json",
+    "2": "artifacts/m6/decode_comparison_32_gpu.json",
+    "4": "artifacts/m6/decode_comparison_32_gpu.json",
+    "8": "artifacts/m6/decode_comparison_32_gpu.json",
+    "32": "artifacts/m6/decode_comparison_32_gpu.json"
   },
   "seed_state": "artifacts/m6/m6_decode_seed_state.json",
   "results": {
@@ -29,8 +29,15 @@
     "2": "pass",
     "4": "pass",
     "8": "pass",
-    "32": "blocked"
+    "32": "pass"
   },
   "first_divergence": null,
-  "reason": "Corrected native 32-token run completed; an independently generated corrected official 32-token stateful report is still unavailable, so 32 remains fail-closed blocked."
+  "reason": "Real corrected GPU-oracle comparison passes all 33 committed inputs; 128 is an in-progress attempt and has no result yet.",
+  "comparison_scope": "prefix checks within the real 33-step validated GPU-oracle comparison",
+  "128_attempt": {
+    "native": "artifacts/m6/decode_gpu_128_fixed.json",
+    "official_oracle": "artifacts/m6/stateful_gguf_oracle_128_corrected.json",
+    "comparison": null,
+    "status": "running"
+  }
 }

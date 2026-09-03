@@ -1,6 +1,6 @@
 {
   "gate": "M6-C13",
-  "status": "blocked",
+  "status": "pass",
   "scalar_fallback_critical_path": false,
   "cuda_backend": "strict row + matrix + router + Q2 routed expert + QSA projections",
   "validated_generated_counts": [
@@ -11,73 +11,50 @@
     32
   ],
   "tokens": {
-    "1": [
-      353
-    ],
-    "2": [
-      353,
-      2688
-    ],
-    "4": [
-      353,
-      2688,
-      264,
-      47308
-    ],
-    "8": [
-      353,
-      2688,
-      264,
-      47308,
-      46194,
-      852,
-      579,
-      978
-    ],
     "32": [
       353,
       2688,
       264,
-      47308,
-      46194,
+      1496,
+      2812,
+      3712,
+      10756,
       852,
       579,
       978,
-      4313,
-      310,
-      3827,
-      15019,
+      12266,
       364,
-      264,
-      2342,
-      3818,
+      883,
+      28279,
+      1578,
       1381,
-      13,
+      11,
+      321,
       353,
       2908,
-      978,
-      3133,
-      383,
-      264,
-      4145,
-      12654,
-      1957,
+      2590,
+      11252,
       421,
-      4829,
-      1156,
-      1879,
-      321
+      279,
+      1786,
+      1560,
+      310,
+      3418,
+      279,
+      2945,
+      369,
+      310
     ]
   },
-  "state_and_logits_evidence": "artifacts/m6/decode_gpu_32.json",
+  "state_and_logits_evidence": "artifacts/m6/decode_gpu_32_fixed.json",
   "stage_usage": "artifacts/m6/gpu_stage_usage_probe.json",
   "stage_records": 1168,
   "stage_elapsed_ms": 20122.859649699,
   "full_forward_wall_seconds": 37.14,
-  "oracle": "artifacts/m6/stateful_gguf_oracle_probe.json",
+  "oracle": "artifacts/m6/stateful_gguf_oracle_32_corrected.json",
   "oracle_status": "pass",
-  "comparison": "artifacts/m6/m6_stateful_decode_ladder.json",
-  "reason": "Fresh seed is equal across q38 CUDA step 0, the official-cache GGUF oracle, and the C12 one-shot reference (9419 -> 11); first continuation also agrees (11 -> 353). Overall ladder remains blocked: official oracle diverges at step 4 (native 47308 vs oracle 1496), and the 32-token official prefill terminated without a report.",
+  "comparison": "artifacts/m6/decode_comparison_32_gpu.json",
+  "reason": "Corrected native q38 GPU and validated/instrumented GPU oracle are exact for all 33 committed inputs (32 generated tokens); 128 attempt is running.",
   "required": [
     "independent oracle completion and fail-closed token/state comparison",
     "32 and 128 token ladders"
@@ -85,5 +62,15 @@
   "prefix_token_state_ladder": "pass",
   "ladder_check": "artifacts/m6/decode_ladder_check.json",
   "seed_state": "artifacts/m6/m6_decode_seed_state.json",
-  "seed_state_status": "pass"
+  "seed_state_status": "pass",
+  "format": "q38-m6-decode-loop-v2",
+  "token_by_token_exact": true,
+  "state_exact": true,
+  "comparison_status": "pass",
+  "first_divergence": null,
+  "128_attempt": {
+    "native": "artifacts/m6/decode_gpu_128_fixed.json",
+    "oracle": "artifacts/m6/stateful_gguf_oracle_128_corrected.json",
+    "status": "running"
+  }
 }
