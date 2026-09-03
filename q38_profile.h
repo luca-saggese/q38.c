@@ -61,6 +61,9 @@ bool q38_profile_boundary_trace(uint32_t layer, const char *boundary,
                                 size_t error_len);
 bool q38_profile_stage_trace(const q38_forward_stage_usage *usage, void *user,
                              char *error, size_t error_len);
+bool q38_profile_qsa_trace(uint32_t layer, const uint32_t *selected,
+                           size_t count, void *user, char *error,
+                           size_t error_len);
 
 /* CUDA-event timing is optional at runtime; all functions return CUDA status. */
 int q38_profile_cuda_init(q38_profile *profile);

@@ -10,9 +10,9 @@ static const char *const names[Q38_PROFILE_SUBSYSTEM_COUNT] = {
 
 static q38_profile_subsystem classify(const char *name) {
     if (name) {
-        if (strstr(name, "gdn")) return Q38_PROFILE_GDN;
         if (strstr(name, "qsa") || strstr(name, "attention"))
             return Q38_PROFILE_QSA;
+        if (strstr(name, "gdn")) return Q38_PROFILE_GDN;
         if (strstr(name, "moe") || strstr(name, "expert") ||
             strstr(name, "router"))
             return Q38_PROFILE_MOE;
@@ -20,7 +20,20 @@ static q38_profile_subsystem classify(const char *name) {
         if (strstr(name, "lm_head") || strstr(name, "output"))
             return Q38_PROFILE_LM_HEAD;
     }
+
     return Q38_PROFILE_LM_HEAD;
+}
+
+bool q38_profile_qsa_trace(uint32_t layer, const uint32_t *selected,
+                           size_t count, void *user, char *error,
+                           size_t error_len) {
+    (void)layer; (void)selected; (void)error; (void)error_len;
+    q38_profile *profile = (q38_profile *)user;
+    q38_profile_record *record = q38_profile_get(profile, Q38_PROFILE_QSA);
+    if (!record || (!selected && count)) return false;
+    record->callback_count++;
+    record->kernel_launches++;
+    return true;
 }
 
 void q38_profile_init(q38_profile *profile) {

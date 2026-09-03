@@ -9,6 +9,7 @@
 
 #include <inttypes.h>
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,7 +19,7 @@
 typedef struct {
     q38_profile *profile;
     uint64_t matrix_calls, backend_rows, scalar_rows, declines;
-    double row_ms, launch_ms;
+    double row_ms, launch_ms, qsa_ms;
 } profile_context;
 
 static double now_ms(void) {
@@ -34,17 +35,28 @@ static bool stage_trace(const q38_forward_stage_usage *usage, void *user,
         if (error && error_len) snprintf(error, error_len, "invalid profile stage");
         return false;
     }
+
     if (!q38_profile_stage_trace(usage, context->profile, error, error_len))
         return false;
     context->matrix_calls += usage->matrix_calls;
     context->backend_rows += usage->backend_rows;
     context->scalar_rows += usage->scalar_rows;
     context->declines += usage->backend_declines;
-    if (usage->backend_rows || usage->scalar_rows)
+    if (usage->name && strstr(usage->name, "qsa"))
+        context->qsa_ms += usage->elapsed_ms;
+    else if (usage->backend_rows || usage->scalar_rows)
         context->row_ms += usage->elapsed_ms;
     else
         context->launch_ms += usage->elapsed_ms;
     return true;
+}
+
+static bool qsa_trace(uint32_t layer, const uint32_t *selected, size_t count,
+                      void *user, char *error, size_t error_len) {
+    profile_context *context = (profile_context *)user;
+    return context && q38_profile_qsa_trace(layer, selected, count,
+                                             context->profile, error,
+                                             error_len);
 }
 
 static void allocation_observer(size_t bytes, void *user) {
@@ -103,11 +115,15 @@ static bool write_profile_files(const char *dir, double wall_ms, uint32_t argmax
              ",\"backend_rows\":%" PRIu64 ",\"scalar_rows\":%" PRIu64
              ",\"backend_declines\":%" PRIu64
              ",\"row_matvec_dequant_ms\":%.9g,"
-             "\"launch_overhead_proxy_ms\":%.9g}\n",
+             "\"launch_overhead_proxy_ms\":%.9g,"
+             "\"unattributed_gpu_ms\":%.9g}\n",
              wall_ms, wall_ms > 0.0 ? 1000.0 / wall_ms : 0.0, argmax,
              memory_json, telemetry, context->matrix_calls,
              context->backend_rows, context->scalar_rows, context->declines,
-             context->row_ms, context->launch_ms);
+             context->row_ms, context->launch_ms,
+             fmax(0.0, profile->cuda_elapsed_ms -
+                  context->row_ms - context->launch_ms -
+                  context->qsa_ms));
     if (!write_file(path, bench)) return false;
     snprintf(path, sizeof(path), "%s/decode_profile.json", dir);
     snprintf(decode, sizeof(decode),
@@ -118,9 +134,13 @@ static bool write_profile_files(const char *dir, double wall_ms, uint32_t argmax
              "\"matrix_calls\":%" PRIu64 ",\"backend_rows\":%" PRIu64
              ",\"scalar_rows\":%" PRIu64 ",\"backend_declines\":%" PRIu64
              ",\"row_matvec_dequant_ms\":%.9g,"
-             "\"launch_overhead_proxy_ms\":%.9g,\"telemetry\":%s}\n",
+             "\"launch_overhead_proxy_ms\":%.9g,\"unattributed_gpu_ms\":%.9g,"
+             "\"telemetry\":%s}\n",
              context->matrix_calls, context->backend_rows, context->scalar_rows,
-             context->declines, context->row_ms, context->launch_ms, telemetry);
+             context->declines, context->row_ms, context->launch_ms,
+             fmax(0.0, profile->cuda_elapsed_ms -
+                  context->row_ms - context->launch_ms -
+                  context->qsa_ms), telemetry);
     return write_file(path, decode);
 }
 
@@ -156,6 +176,7 @@ int main(int argc, char **argv) {
     q38_forward_diagnostics diagnostics;
     memset(&diagnostics, 0, sizeof(diagnostics));
     diagnostics.stage_trace = stage_trace;
+    diagnostics.qsa_trace = qsa_trace;
     diagnostics.trace_user = &context;
     cuda = q38_forward_cuda_context_create(error, sizeof(error));
     if (!cuda) { fprintf(stderr, "cuda: %s\n", error); ok = false; goto cleanup_state; }

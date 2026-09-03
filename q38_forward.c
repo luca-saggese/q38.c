@@ -347,6 +347,7 @@ static bool full_backend_strict;
 static uint64_t full_backend_rows;
 static uint64_t full_scalar_rows;
 static uint64_t full_backend_declines;
+static bool full_perf_strict;
 static q38_forward_diagnostics *full_diagnostics;
 
 static double full_now_ms(void) {
@@ -496,6 +497,10 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
                          size_t row, const float *input, size_t count,
                          float *scratch, float *out, char *error,
                          size_t error_len) {
+    if (full_perf_strict) {
+        return full_fail(error, error_len,
+                         "Q38_PERF_STRICT forbids row-oriented backend path");
+    }
     if (full_backend) {
         if (full_backend(model, tensor, row, input, count, out,
                          full_backend_user, error, error_len)) {
@@ -1504,9 +1509,14 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
         free((void *)w.index_q_norm); free((void *)w.index_k_norm);
         return false;
     }
+    const double qsa_started = full_now_ms();
     bool ok = q38_forward_qsa_ref(
         &w, qsa_state, input, tokens, output, selected,
         Q38_FULL_QSA_SELECTED_STRIDE, counts, error, error_len);
+    if (ok && !full_emit_stage(diagnostics, "qsa_attention", 0, 0, 0,
+                               full_now_ms() - qsa_started, error,
+                               error_len))
+        ok = false;
     if (ok && diagnostics && diagnostics->qsa_trace)
         for (size_t t = 0; t < tokens; ++t)
             if (!diagnostics->qsa_trace(
@@ -1670,13 +1680,31 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  token_count, Q38_GR_HIDDEN, diagnostics,
                                  error, error_len))
             goto fail;
-        for (size_t t = 0; t < token_count; ++t)
-            for (size_t v = 0; v < 248320; ++v)
-                if (!full_row_dot(model, weights->output, v,
-                                  mixed + t * Q38_GR_HIDDEN, Q38_GR_HIDDEN,
-                                  scratch, &logits[t * logits_stride + v],
-                                  error, error_len))
-                    goto fail;
+        if (full_matrix_backend && token_count == 1) {
+            const double started = full_now_ms();
+            if (!full_matrix_backend(
+                    model, weights->output, mixed, 248320,
+                    Q38_GR_HIDDEN, logits, full_backend_user, error,
+                    error_len)) {
+                ++full_backend_declines;
+                if (error && error_len && error[0] != '\0') goto fail;
+                goto fail;
+            }
+            full_backend_rows += 248320;
+            if (!full_emit_stage(full_diagnostics, "lm_head_projection",
+                                 248320, 0, 0, full_now_ms() - started,
+                                 error, error_len))
+                goto fail;
+        } else {
+            for (size_t t = 0; t < token_count; ++t)
+                for (size_t v = 0; v < 248320; ++v)
+                    if (!full_row_dot(model, weights->output, v,
+                                      mixed + t * Q38_GR_HIDDEN,
+                                      Q38_GR_HIDDEN, scratch,
+                                      &logits[t * logits_stride + v],
+                                      error, error_len))
+                        goto fail;
+        }
     }
     if (diagnostics) {
         diagnostics->first_divergence_layer = UINT32_MAX;
@@ -1714,6 +1742,9 @@ bool q38_forward_full_with_matrix_backend(
     full_matrix_backend = matrix_backend;
     full_expert_backend = expert_backend;
     full_backend_user = backend_user;
+    const char *strict = getenv("Q38_PERF_STRICT");
+    const bool previous_perf_strict = full_perf_strict;
+    full_perf_strict = strict && strict[0] != '\0' && strcmp(strict, "0") != 0;
     full_backend_strict = backend != NULL || matrix_backend != NULL ||
                           expert_backend != NULL;
     const bool ok = q38_forward_full(
@@ -1724,6 +1755,7 @@ bool q38_forward_full_with_matrix_backend(
     full_expert_backend = previous_expert_backend;
     full_backend_user = previous_user;
     full_backend_strict = previous_strict;
+    full_perf_strict = previous_perf_strict;
     return ok;
 }
 
