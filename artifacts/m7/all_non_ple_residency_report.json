@@ -1,0 +1,62 @@
+{
+  "format": "q38-m7-all-non-ple-residency-report-v1",
+  "mode": "guarded",
+  "requested": true,
+  "enabled": false,
+  "fallback": "streaming per-operation residency",
+  "reason": "insufficient CUDA memory for all-non-PLE residency (need=49465890560 free=8377741312 total=130596646912)",
+  "footprint": {
+    "format": "q38-m7-all-non-ple-footprint-v1",
+    "model_bytes": 103901247456,
+    "non_ple_bytes": 49465890560,
+    "excluded_ple_bytes": 54435220760,
+    "unclassified_bytes": 0,
+    "categories": {
+      "embedding": 1271398400,
+      "GR": 1281249280,
+      "GDN": 4173020928,
+      "QSA": 1234716672,
+      "router": 125829120,
+      "shared_experts": 472104960,
+      "routed_experts_Q2": 39636172800,
+      "LM-head": 1271398400
+    }
+  },
+  "cuda_memory": {
+    "free_bytes": 8377741312,
+    "total_bytes": 130596646912,
+    "required_bytes": 49465890560,
+    "headroom_if_loaded_bytes": -41088149248
+  },
+  "host_memory": {
+    "available_bytes": 120850608128,
+    "total_bytes": 130596646912,
+    "headroom_if_loaded_bytes": 71384717568
+  },
+  "benchmark": {
+    "runs": 6,
+    "cold_runs": 1,
+    "warm_runs": 5,
+    "same_process": true,
+    "semantic_state_reset": true,
+    "cuda_residency_preserved": true,
+    "cold_wall_ms": 16469.562524,
+    "warm_wall_ms_median": 810.26055,
+    "resident_hits": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "resident_misses": [
+      1624,
+      1624,
+      1624,
+      1624,
+      1624,
+      1624
+    ]
+  }
+}

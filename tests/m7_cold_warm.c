@@ -98,11 +98,20 @@ int main(int argc, char **argv) {
     memset(&state, 0, sizeof(state));
     q38_profile profile;
     q38_profile_init(&profile);
+    bool all_non_ple_enabled = false;
     if (!cuda || !logits1 || !logits2 ||
-        !q38_weights_bind_subset(model, 47, &weights, error, sizeof(error)) ||
-        !q38_forward_cuda_prepare_lm_head(cuda, model, weights.output, error,
-                                          sizeof(error))) {
+        !q38_weights_bind_subset(model, 47, &weights, error, sizeof(error))) {
         fprintf(stderr, "%s\n", error[0] ? error : "setup failed");
+        return 1;
+    }
+    all_non_ple_enabled =
+        q38_forward_cuda_enable_all_non_ple_residency(
+            cuda, model, error, sizeof(error));
+    if (!all_non_ple_enabled)
+        fprintf(stderr, "all-non-PLE residency disabled: %s\n", error);
+    if (!q38_forward_cuda_prepare_lm_head(cuda, model, weights.output, error,
+                                          sizeof(error))) {
+        fprintf(stderr, "%s\n", error);
         return 1;
     }
     q38_forward_cuda_set_telemetry_observer(cuda, telemetry_observer, &profile);
@@ -138,11 +147,12 @@ int main(int argc, char **argv) {
         double wall = now_ms() - start;
         q38_forward_cuda_get_residency_stats(cuda, &after);
         size_t best = argmax(logits, 248320);
-        char *telemetry = calloc(1024 * 1024, 1);
-        if (!telemetry || !q38_profile_json(&profile, telemetry, 1024 * 1024)) {
+        char *telemetry = calloc(8 * 1024 * 1024, 1);
+        if (!telemetry || !q38_profile_json(&profile, telemetry, 8 * 1024 * 1024)) {
             free(telemetry); fclose(artifact); return 1;
         }
-        printf(        "{\"run\":%d,\"cold\":%s,\"wall_ms\":%.6f,"
+        printf(        "{\"run\":%d,\"cold\":%s,\"all_non_ple_resident\":%s,"
+        "\"persistent_resident_bytes\":%zu,\"persistent_resident_tensors\":%" PRIu64 ",\"wall_ms\":%.6f,"
         "\"matrix_upload_bytes\":%zu,\"matrix_upload_ms\":null,"
         "\"lm_head_upload_bytes\":0,\"lm_head_allocation_count\":0,"
         "\"allocations\":null,\"cuda_allocations\":null,"
@@ -158,7 +168,10 @@ int main(int argc, char **argv) {
                "\"qsa_attention_ms\":%.6f,\"qsa_state_update_ms\":%.6f,"
                "\"telemetry\":%s,"
                "\"correctness\":%s,\"stable_device_pointer\":%s}\n",
-               run, run == 1 ? "true" : "false", wall, after.matrix_upload_bytes - before.matrix_upload_bytes,
+               run, run == 1 ? "true" : "false",
+               after.all_non_ple_resident ? "true" : "false",
+               after.persistent_resident_bytes, after.persistent_resident_tensors,
+               wall, after.matrix_upload_bytes - before.matrix_upload_bytes,
                after.resident_hits - before.resident_hits,
                after.resident_misses - before.resident_misses, s.gdn,
                s.lm_head, s.moe, s.qsa, s.ple, best, s.moe_router,
@@ -169,7 +182,9 @@ int main(int argc, char **argv) {
                s.qsa_state_update, telemetry, ok ? "true" : "false",
                after.lm_head_device_pointer ? "true" : "false");
         fprintf(artifact,
-                "{\"run\":%d,\"cold\":%s,\"wall_ms\":%.6f,\"telemetry\":%s,"
+                "{\"run\":%d,\"cold\":%s,\"all_non_ple_resident\":%s,"
+                "\"persistent_resident_bytes\":%zu,\"persistent_resident_tensors\":%" PRIu64 ","
+                "\"wall_ms\":%.6f,\"telemetry\":%s,"
                 "\"moe\":{\"router_ms\":%.6f,\"routed_gate_up_ms\":%.6f,"
                 "\"routed_down_ms\":%.6f,\"shared_gate_ms\":%.6f,"
                 "\"shared_up_ms\":%.6f,\"shared_down_ms\":%.6f,"
@@ -177,6 +192,8 @@ int main(int argc, char **argv) {
                 "\"indexer_compression_ms\":%.6f,\"score_ms\":%.6f,"
                 "\"top_k_ms\":%.6f,\"gather_ms\":%.6f,\"attention_ms\":%.6f,"
                 "\"state_update_ms\":%.6f}}\n", run, run == 1 ? "true" : "false",
+                all_non_ple_enabled ? "true" : "false",
+                after.persistent_resident_bytes, after.persistent_resident_tensors,
                 wall, telemetry, s.moe_router, s.moe_routed_gate_up,
                 s.moe_routed_down, s.moe_shared_gate, s.moe_shared_up,
                 s.moe_shared_down, s.moe_activation_reduction, s.qsa_qkv,

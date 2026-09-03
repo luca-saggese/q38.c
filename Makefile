@@ -79,7 +79,7 @@ M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 	m6-stateful-sequence-oracle \
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
 	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-schema m7-gates \
-	m7-profile-forward m7-acceptance
+	m7-profile-forward m7-residency-footprint m7-acceptance
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
@@ -269,6 +269,15 @@ $(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
 
 m7-cold-warm: $(TEST_DIR)/m7_cold_warm
 	@./$(TEST_DIR)/m7_cold_warm $(M7_MODEL)
+
+$(TEST_DIR)/m7_residency_footprint: $(TEST_DIR)/m7_residency_footprint.c \
+		q38_gguf.o
+	$(CC) $(CFLAGS) -I. -o $@ $(TEST_DIR)/m7_residency_footprint.c \
+		q38_gguf.o
+
+m7-residency-footprint: $(TEST_DIR)/m7_residency_footprint
+	@./$(TEST_DIR)/m7_residency_footprint $(M7_MODEL) \
+		> artifacts/m7/residency_footprint.json
 
 m7-acceptance: m7-gates $(TEST_DIR)/test_m6_moe_cuda
 	@./$(TEST_DIR)/test_m6_moe_cuda

@@ -6,14 +6,17 @@
   "same_process": true,
   "semantic_state_reset": true,
   "cuda_residency_preserved": true,
-  "cold_wall_ms": 14369.889374,
-  "warm_wall_ms_median": 808.776072,
+  "all_non_ple_residency_requested": true,
+  "all_non_ple_residency_enabled": false,
+  "all_non_ple_residency_guarded": true,
+  "cold_wall_ms": 16469.562524,
+  "warm_wall_ms_median": 810.26055,
   "warm_wall_ms": [
-    809.188558,
-    801.251089,
-    804.186427,
-    808.776072,
-    810.402435
+    810.26055,
+    814.195697,
+    813.056808,
+    807.814849,
+    806.842073
   ],
   "resident_hits": [
     1,
@@ -24,29 +27,33 @@
     1
   ],
   "resident_misses": [
-    1144,
-    1144,
-    1144,
-    1144,
-    1144,
-    1144
+    1624,
+    1624,
+    1624,
+    1624,
+    1624,
+    1624
   ],
+  "non_ple_bytes": 49465890560,
+  "excluded_ple_bytes": 54435220760,
+  "cuda_free_bytes": 8377741312,
+  "cuda_headroom_if_loaded_bytes": -41088149248,
   "moe": {
-    "router_ms": 3.887785,
-    "routed_gate_up_ms": 153.636576,
-    "routed_down_ms": 153.636576,
-    "shared_gate_ms": 4.37,
-    "shared_up_ms": 4.266095,
-    "shared_down_ms": 4.342603,
-    "activation_reduction_ms": 321.593567
+    "router_ms": 3.869399,
+    "routed_gate_up_ms": 153.82526,
+    "routed_down_ms": 153.82526,
+    "shared_gate_ms": 4.306881,
+    "shared_up_ms": 4.215036,
+    "shared_down_ms": 4.284801,
+    "activation_reduction_ms": 321.708409
   },
   "qsa": {
-    "q_k_v_ms": 46.7495,
-    "indexer_compression_ms": 46.7495,
-    "score_ms": 31.166333,
-    "top_k_ms": 31.166333,
-    "gather_ms": 31.166333,
-    "attention_ms": 93.498999,
-    "state_update_ms": 31.166333
+    "q_k_v_ms": 47.106984,
+    "indexer_compression_ms": 47.106984,
+    "score_ms": 31.404656,
+    "top_k_ms": 31.404656,
+    "gather_ms": 31.404656,
+    "attention_ms": 94.213969,
+    "state_update_ms": 31.404656
   }
 }

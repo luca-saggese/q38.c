@@ -39,6 +39,11 @@ typedef struct {
     uint64_t cuda_allocations;
     bool lm_head_resident;
     const void *lm_head_device_pointer;
+    bool all_non_ple_resident;
+    size_t persistent_resident_bytes;
+    uint64_t persistent_resident_tensors;
+    uint64_t persistent_hits;
+    uint64_t persistent_misses;
 } q38_forward_cuda_residency_stats;
 
 q38_forward_cuda_context *q38_forward_cuda_context_create(char *error,
@@ -54,6 +59,9 @@ void q38_forward_cuda_set_telemetry_observer(
 void q38_forward_cuda_set_stage_context(q38_forward_cuda_context *context,
                                         uint32_t layer,
                                         const char *logical_stage);
+bool q38_forward_cuda_enable_all_non_ple_residency(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    char *error, size_t error_len);
 bool q38_forward_cuda_prepare_lm_head(
     q38_forward_cuda_context *context, const q38_gguf *model,
     const q38_tensor *tensor, char *error, size_t error_len);

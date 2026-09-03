@@ -12,6 +12,12 @@
 #include <string.h>
 #include <time.h>
 
+struct persistent_tensor {
+    const void *host;
+    void *device;
+    size_t bytes;
+};
+
 struct q38_forward_cuda_context {
     void *device_weights;
     size_t device_weights_bytes;
@@ -27,6 +33,7 @@ struct q38_forward_cuda_context {
     size_t lm_head_device_weights_bytes;
     const void *lm_head_host_data;
     bool lm_head_resident;
+    bool lm_head_uses_persistent;
     size_t matrix_upload_bytes;
     uint64_t resident_hits;
     uint64_t resident_misses;
@@ -39,6 +46,12 @@ struct q38_forward_cuda_context {
     void *telemetry_observer_user;
     uint32_t current_layer;
     const char *current_stage;
+    persistent_tensor *persistent;
+    size_t persistent_count;
+    size_t persistent_bytes;
+    bool all_non_ple_resident;
+    uint64_t persistent_hits;
+    uint64_t persistent_misses;
 };
 
 static bool fail(char *error, size_t error_len, const char *message) {
@@ -90,6 +103,24 @@ static void copy_tensor_name(const q38_tensor *tensor, char *out,
         ? (size_t)tensor->name.len : out_len - 1;
     if (tensor && tensor->name.ptr && n) memcpy(out, tensor->name.ptr, n);
     out[n] = '\0';
+}
+
+static bool is_ple_tensor(const q38_tensor *tensor) {
+    if (!tensor || !tensor->name.ptr) return false;
+    const char *name = tensor->name.ptr;
+    const size_t len = (size_t)tensor->name.len;
+    return (len >= 4 && memmem(name, len, ".ple", 4)) ||
+           (len >= 11 && memmem(name, len, "ngram_heads", 11)) ||
+           (len >= 17 && memmem(name, len, "layer_multipliers", 17));
+}
+
+static persistent_tensor *persistent_find(q38_forward_cuda_context *context,
+                                          const void *host) {
+    if (!context || !host) return NULL;
+    for (size_t i = 0; i < context->persistent_count; ++i)
+        if (context->persistent[i].host == host)
+            return &context->persistent[i];
+    return NULL;
 }
 
 static double host_now_ms(void) {
@@ -147,6 +178,16 @@ extern "C" bool q38_forward_cuda_expert_backend(
     const size_t down_bytes = 640u * down_row_bytes;
     if (!gate_data || !down_data)
         return fail(error, error_len, "invalid CUDA routed expert payload");
+    persistent_tensor *gate_resident = persistent_find(context, gate_data);
+    persistent_tensor *down_resident = persistent_find(context, down_data);
+    const bool use_persistent = context->all_non_ple_resident &&
+        gate_resident && down_resident &&
+        gate_resident->bytes >= (size_t)gate_up->bytes &&
+        down_resident->bytes >= (size_t)down->bytes;
+    if (context->all_non_ple_resident) {
+        if (use_persistent) ++context->persistent_hits;
+        else ++context->persistent_misses;
+    }
     const double host_started = host_now_ms();
     cudaEvent_t upload_start = NULL, upload_stop = NULL;
     cudaEvent_t kernel_start = NULL, kernel_stop = NULL;
@@ -156,14 +197,16 @@ extern "C" bool q38_forward_cuda_expert_backend(
         cudaEventCreate(&kernel_stop) != cudaSuccess)
         return fail(error, error_len, "CUDA telemetry event allocation failed");
     const uint64_t allocation_before = context->cuda_allocations;
-    if (!ensure_buffer(&context->device_weights, &context->device_weights_bytes,
+    if ((!use_persistent &&
+        !ensure_buffer(&context->device_weights, &context->device_weights_bytes,
                        gate_bytes, context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
+                       &context->cuda_allocations)) ||
+        (!use_persistent &&
         !ensure_buffer(&context->device_aux, &context->device_aux_bytes,
                        down_bytes, context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
+                       &context->cuda_allocations)) ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements, 2560u * sizeof(float),
                        context->allocation_observer,
@@ -185,18 +228,25 @@ extern "C" bool q38_forward_cuda_expert_backend(
         (const unsigned char *)gate_data + expert * 1280u * gate_row_bytes;
     const unsigned char *down_src =
         (const unsigned char *)down_data + expert * 640u * down_row_bytes;
+    void *gate_storage = use_persistent
+        ? (unsigned char *)gate_resident->device + expert * 1280u * gate_row_bytes
+        : context->device_weights;
+    void *down_storage = use_persistent
+        ? (unsigned char *)down_resident->device + expert * 640u * down_row_bytes
+        : context->device_aux;
     if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
-        cudaMemcpyAsync(context->device_weights, gate_src, gate_bytes,
-                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
-        cudaMemcpyAsync(context->device_aux, down_src, down_bytes,
-                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        (!use_persistent &&
+         (cudaMemcpyAsync(gate_storage, gate_src, gate_bytes,
+                          cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+          cudaMemcpyAsync(down_storage, down_src, down_bytes,
+                          cudaMemcpyHostToDevice, context->stream) != cudaSuccess)) ||
         cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
         cudaMemcpyAsync(context->device_input, input, 2560u * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert upload failed");
     if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess ||
         !q38_moe_cuda_expert_q2_workspace(
-            context->device_weights, context->device_aux,
+            gate_storage, down_storage,
             context->device_input, context->device_output,
             context->device_moe_mid, context->stream,
             error, error_len))
@@ -208,13 +258,13 @@ extern "C" bool q38_forward_cuda_expert_backend(
         return fail(error, error_len, "CUDA routed expert execution failed");
     ++context->cuda_synchronizations;
     emit_telemetry(context, gate_up, gate_rows, gate_cols, gate_bytes,
-                   false, true, gate_bytes,
+                   use_persistent, !use_persistent, use_persistent ? 0 : gate_bytes,
                    event_elapsed(upload_start, upload_stop),
                    event_elapsed(kernel_start, kernel_stop),
                    host_now_ms() - host_started,
                    context->cuda_allocations - allocation_before, 1);
     emit_telemetry(context, down, down_rows, down_cols, down_bytes,
-                   false, true, down_bytes, 0.0f, 0.0f, 0.0,
+                   use_persistent, !use_persistent, use_persistent ? 0 : down_bytes, 0.0f, 0.0f, 0.0,
                    0, 0);
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
@@ -252,6 +302,67 @@ q38_forward_cuda_context_create(char *error, size_t error_len) {
     return context;
 }
 
+extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!context || !model)
+        return fail(error, error_len, "invalid all-non-PLE residency arguments");
+    if (context->all_non_ple_resident) return true;
+    size_t count = 0, total = 0;
+    for (uint64_t i = 0; i < model->n_tensors; ++i) {
+        const q38_tensor *tensor = &model->tensors[i];
+        if (is_ple_tensor(tensor) || !tensor->bytes ||
+            tensor->bytes > SIZE_MAX) continue;
+        if (count == SIZE_MAX || total > SIZE_MAX - (size_t)tensor->bytes)
+            return fail(error, error_len, "all-non-PLE residency size overflow");
+        ++count;
+        total += (size_t)tensor->bytes;
+    }
+    size_t free_bytes = 0, total_bytes = 0;
+    if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess &&
+        free_bytes && total > free_bytes) {
+        if (error && error_len)
+            snprintf(error, error_len,
+                     "insufficient CUDA memory for all-non-PLE residency "
+                     "(need=%zu free=%zu total=%zu)", total, free_bytes,
+                     total_bytes);
+        return false;
+    }
+    persistent_tensor *entries =
+        (persistent_tensor *)calloc(count ? count : 1, sizeof(*entries));
+    if (!entries) return fail(error, error_len, "all-non-PLE residency index allocation failed");
+    size_t at = 0;
+    for (uint64_t i = 0; i < model->n_tensors; ++i) {
+        const q38_tensor *tensor = &model->tensors[i];
+        if (is_ple_tensor(tensor) || !tensor->bytes) continue;
+        const void *host = q38_gguf_tensor_data(model, tensor);
+        if (!host || cudaMalloc(&entries[at].device, (size_t)tensor->bytes) !=
+                         cudaSuccess ||
+            cudaMemcpyAsync(entries[at].device, host, (size_t)tensor->bytes,
+                            cudaMemcpyHostToDevice, context->stream) !=
+                cudaSuccess) {
+            for (size_t j = 0; j <= at; ++j) cudaFree(entries[j].device);
+            free(entries);
+            return fail(error, error_len, "all-non-PLE residency upload failed");
+        }
+        entries[at].host = host;
+        entries[at].bytes = (size_t)tensor->bytes;
+        ++at;
+    }
+    if (cudaStreamSynchronize(context->stream) != cudaSuccess) {
+        for (size_t i = 0; i < at; ++i) cudaFree(entries[i].device);
+        free(entries);
+        return fail(error, error_len, "all-non-PLE residency synchronization failed");
+    }
+    ++context->cuda_synchronizations;
+    context->persistent = entries;
+    context->persistent_count = at;
+    context->persistent_bytes = total;
+    context->all_non_ple_resident = true;
+    return true;
+}
+
 extern "C" void
 q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     if (!context) return;
@@ -260,7 +371,11 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_output);
     cudaFree(context->device_aux);
     cudaFree(context->device_moe_mid);
-    cudaFree(context->lm_head_device_weights);
+    if (!context->lm_head_uses_persistent)
+        cudaFree(context->lm_head_device_weights);
+    for (size_t i = 0; i < context->persistent_count; ++i)
+        cudaFree(context->persistent[i].device);
+    free(context->persistent);
     if (context->stream) cudaStreamDestroy(context->stream);
     free(context);
 }
@@ -279,7 +394,18 @@ extern "C" bool q38_forward_cuda_prepare_lm_head(
         context->lm_head_host_data == data &&
         context->lm_head_device_weights_bytes == tensor->bytes)
         return true;
+    const void *persistent = q38_gguf_tensor_data(model, tensor);
+    persistent_tensor *entry = persistent_find(context, persistent);
+    if (entry) {
+        context->lm_head_device_weights = entry->device;
+        context->lm_head_device_weights_bytes = entry->bytes;
+        context->lm_head_host_data = persistent;
+        context->lm_head_resident = true;
+        context->lm_head_uses_persistent = true;
+        return true;
+    }
     if (context->lm_head_device_weights &&
+        !context->lm_head_uses_persistent &&
         context->lm_head_device_weights_bytes < tensor->bytes) {
         cudaFree(context->lm_head_device_weights);
         context->lm_head_device_weights = NULL;
@@ -298,6 +424,7 @@ extern "C" bool q38_forward_cuda_prepare_lm_head(
     context->lm_head_device_weights_bytes = tensor->bytes;
     context->lm_head_host_data = data;
     context->lm_head_resident = true;
+    context->lm_head_uses_persistent = false;
     return true;
 }
 
@@ -313,6 +440,11 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->cuda_allocations = context->cuda_allocations;
     stats->lm_head_resident = context->lm_head_resident;
     stats->lm_head_device_pointer = context->lm_head_device_weights;
+    stats->all_non_ple_resident = context->all_non_ple_resident;
+    stats->persistent_resident_bytes = context->persistent_bytes;
+    stats->persistent_resident_tensors = context->persistent_count;
+    stats->persistent_hits = context->persistent_hits;
+    stats->persistent_misses = context->persistent_misses;
 }
 
 extern "C" void *
@@ -384,6 +516,36 @@ extern "C" bool q38_forward_cuda_matvec_backend(
                        context->allocation_observer_user,
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA forward matvec allocation failed");
+    persistent_tensor *resident = persistent_find(context, data);
+    if (context->all_non_ple_resident && resident &&
+        resident->bytes == (size_t)tensor->bytes) {
+        ++context->persistent_hits;
+        const void *weight_storage =
+            (const unsigned char *)resident->device + row * row_bytes;
+        bool launched = false;
+        if (tensor->type == 30)
+            launched = q38_cuda_bf16_matvec(
+                (const uint16_t *)weight_storage, 1, cols,
+                context->device_input, context->device_output, context->stream,
+                error, error_len);
+        else if (tensor->type == 10)
+            launched = q38_cuda_q2_matvec(
+                (void *)weight_storage, 1, cols, context->device_input,
+                context->device_output, context->stream, error, error_len);
+        else
+            launched = q38_cuda_gdn_project(
+                tensor->type == 8 ? Q38_GDN_WEIGHT_Q8_0 : Q38_GDN_WEIGHT_F32,
+                (void *)weight_storage, 1, cols, context->device_input, 1,
+                context->device_output, context->stream, error, error_len);
+        if (!launched ||
+            cudaMemcpyAsync(output, context->device_output, sizeof(float),
+                            cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
+            cudaStreamSynchronize(context->stream) != cudaSuccess)
+            return fail(error, error_len, "CUDA resident matvec execution failed");
+        ++context->cuda_synchronizations;
+        return true;
+    }
+    if (context->all_non_ple_resident) ++context->persistent_misses;
 
     if (cudaMemcpyAsync(context->device_weights, row_data, weight_bytes,
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
@@ -448,11 +610,17 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         is_lm_head_tensor(tensor) &&
         context->lm_head_resident && context->lm_head_host_data == data &&
         context->lm_head_device_weights_bytes == tensor->bytes;
-    if (use_resident_lm_head)
+    persistent_tensor *persistent_weight = persistent_find(context, data);
+    const bool use_persistent_weight = context->all_non_ple_resident &&
+        persistent_weight && persistent_weight->bytes == (size_t)tensor->bytes;
+    if (use_resident_lm_head || use_persistent_weight)
         ++context->resident_hits;
-    else
+    else {
         ++context->resident_misses;
-    if ((!use_resident_lm_head &&
+        if (context->all_non_ple_resident) ++context->persistent_misses;
+    }
+    if (use_persistent_weight) ++context->persistent_hits;
+    if ((!use_resident_lm_head && !use_persistent_weight &&
          !ensure_buffer(&context->device_weights,
                         &context->device_weights_bytes, (size_t)tensor->bytes,
                         context->allocation_observer,
@@ -470,7 +638,7 @@ extern "C" bool q38_forward_cuda_matrix_backend(
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA forward matrix allocation failed");
     if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
-        (!use_resident_lm_head &&
+        (!use_resident_lm_head && !use_persistent_weight &&
          cudaMemcpyAsync(context->device_weights, data, (size_t)tensor->bytes,
                          cudaMemcpyHostToDevice, context->stream) !=
              cudaSuccess) ||
@@ -478,13 +646,14 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         cudaMemcpyAsync(context->device_input, input, cols * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA forward matrix upload failed");
-    if (cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
-        cudaEventRecord(kernel_start, context->stream) != cudaSuccess)
+    if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA matrix timing failed");
-    if (!use_resident_lm_head) context->matrix_upload_bytes += tensor->bytes;
+    if (!use_resident_lm_head && !use_persistent_weight)
+        context->matrix_upload_bytes += tensor->bytes;
     bool launched = false;
     void *weight_storage = use_resident_lm_head
                                ? context->lm_head_device_weights
+                               : use_persistent_weight ? persistent_weight->device
                                : context->device_weights;
     if (tensor->type == 30) {
         launched = q38_cuda_bf16_matvec(
@@ -519,8 +688,10 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     float upload_ms = event_elapsed(upload_start, upload_stop);
     float kernel_ms = event_elapsed(kernel_start, kernel_stop);
     emit_telemetry(context, tensor, rows, cols, (size_t)tensor->bytes,
-                   use_resident_lm_head, !use_resident_lm_head,
-                   use_resident_lm_head ? 0 : (size_t)tensor->bytes,
+                   use_resident_lm_head || use_persistent_weight,
+                   !(use_resident_lm_head || use_persistent_weight),
+                   (use_resident_lm_head || use_persistent_weight) ? 0 :
+                       (size_t)tensor->bytes,
                    upload_ms, kernel_ms, host_now_ms() - host_started,
                    context->cuda_allocations - allocation_before, 1);
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
