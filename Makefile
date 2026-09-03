@@ -78,7 +78,7 @@ M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 	m6-stateful-oracle \
 	m6-stateful-sequence-oracle \
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
-	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-gates \
+	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-schema m7-gates \
 	m7-profile-forward m7-acceptance
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
@@ -191,9 +191,9 @@ $(TEST_DIR)/test_m2_golden: $(TEST_DIR)/test_m2_golden.c q38_golden.o q38_golden
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_golden.c q38_golden.o
 
 $(TEST_DIR)/test_m2_weights: $(TEST_DIR)/test_m2_weights.c q38_weights.o \
-		q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
+		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o q38_weights.h q38_ple.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_weights.c q38_weights.o \
-		q38_gguf.o q38_model_config.o q38_ple.o
+		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
 
 $(TEST_DIR)/test_m2_tokenizer: $(TEST_DIR)/test_m2_tokenizer.c \
 		q38_tokenizer.o q38_tokenizer.h
@@ -219,7 +219,10 @@ $(TEST_DIR)/test_m7_profile: $(TEST_DIR)/test_m7_profile.c q38_profile.o \
 m7-profile: $(TEST_DIR)/test_m7_profile
 	@./$(TEST_DIR)/test_m7_profile
 
-m7-gates: m7-replay m7-profile
+m7-profile-schema:
+	@$(M6_PYTHON) tools/test_m7_profile_schema.py
+
+m7-gates: m7-replay m7-profile m7-profile-schema
 	@$(M6_PYTHON) tools/m7_check_gates.py
 
 $(TEST_DIR)/m7_profile_forward: $(TEST_DIR)/m7_profile_forward.c \

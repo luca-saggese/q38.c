@@ -39,7 +39,10 @@ __global__ static void gdn_dense_project_kernel(uint32_t weight_type,
                                                 size_t rows, size_t cols,
                                                 const float *input,
                                                 size_t tokens, float *output) {
-    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    constexpr unsigned warp_count = 8;
+    const unsigned lane = threadIdx.x & 31u;
+    const unsigned warp = threadIdx.x >> 5;
+    const size_t index = (size_t)blockIdx.x;
     const size_t total = rows * tokens;
     if (index >= total) return;
     const size_t token = index / rows;
@@ -48,15 +51,27 @@ __global__ static void gdn_dense_project_kernel(uint32_t weight_type,
     float sum = 0.0f;
     if (weight_type == Q38_GDN_WEIGHT_F32) {
         const float *w = (const float *)weights + row * cols;
-        for (size_t col = 0; col < cols; col++) sum += w[col] * x[col];
+        for (size_t col = threadIdx.x; col < cols; col += blockDim.x)
+            sum += w[col] * x[col];
     } else {
         const size_t blocks_per_row = cols / 32u;
         const q38_gdn_q8_0_block *w =
             (const q38_gdn_q8_0_block *)weights + row * blocks_per_row;
-        for (size_t col = 0; col < cols; col++)
-            sum += gdn_q8_value(w + col / 32u, (unsigned)(col % 32u)) * x[col];
+        for (size_t col = threadIdx.x; col < cols; col += blockDim.x)
+            sum += gdn_q8_value(w + col / 32u, (unsigned)(col % 32u)) *
+                   x[col];
     }
-    output[index] = sum;
+    __shared__ float warp_sums[warp_count];
+    for (unsigned offset = 16; offset; offset >>= 1)
+        sum += __shfl_down_sync(0xffffffffu, sum, offset);
+    if (lane == 0) warp_sums[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        sum = lane < warp_count ? warp_sums[lane] : 0.0f;
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0) output[index] = sum;
+    }
 }
 
 __device__ static float gdn_conv_weight(uint32_t type, const void *kernel,
@@ -293,8 +308,7 @@ extern "C" bool q38_cuda_gdn_project(
         set_error(error, error_len, "unsupported GDN projection weight type");
         return false;
     }
-    gdn_dense_project_kernel<<<(unsigned)((rows * tokens + 255u) / 256u),
-                               256, 0, stream>>>(
+    gdn_dense_project_kernel<<<(unsigned)(rows * tokens), 256, 0, stream>>>(
         weight_type, weights, rows, cols, input, tokens, output);
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess) {

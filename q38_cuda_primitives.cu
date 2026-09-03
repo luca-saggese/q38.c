@@ -80,12 +80,17 @@ __global__ static void dequant_kernel(uint32_t type, const void *blocks,
 __global__ static void rms_norm_kernel(const float *input, const float *weight,
                                        float *output, size_t elements,
                                        float epsilon) {
-    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (index >= elements) return;
-    float sum = 0.0f;
-    for (size_t i = 0; i < elements; i++) sum += input[i] * input[i];
-    output[index] = input[index] * rsqrtf(sum / (float)elements + epsilon) *
-                    weight[index];
+    __shared__ float sum_squares;
+    const unsigned thread = threadIdx.x;
+    if (thread == 0) {
+        float sum = 0.0f;
+        for (size_t i = 0; i < elements; i++) sum += input[i] * input[i];
+        sum_squares = sum;
+    }
+    __syncthreads();
+    const float inv_rms = rsqrtf(sum_squares / (float)elements + epsilon);
+    for (size_t i = thread; i < elements; i += blockDim.x)
+        output[i] = input[i] * inv_rms * weight[i];
 }
 
 __global__ static void silu_kernel(const float *input, float *output,
@@ -135,12 +140,49 @@ __device__ static float bf16_to_float_device(uint16_t bits) {
 __global__ static void bf16_matvec_kernel(const uint16_t *weights, size_t rows,
                                           size_t cols, const float *input,
                                           float *output) {
-    const size_t row = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    constexpr unsigned warp_count = 8;
+    const unsigned lane = threadIdx.x & 31u;
+    const unsigned warp = threadIdx.x >> 5;
+    const size_t row = (size_t)blockIdx.x;
     if (row >= rows) return;
-    float sum = 0.0f;
-    for (size_t col = 0; col < cols; col++)
-        sum += bf16_to_float_device(weights[row * cols + col]) * input[col];
-    output[row] = sum;
+    __shared__ double warp_sums[warp_count];
+    double sum = 0.0;
+    const size_t vector_count = cols / 8;
+    const size_t vector_tail = vector_count * 8;
+    const bool vector_aligned = (row * cols) % 8u == 0;
+    if (vector_aligned) {
+        const uint4 *vector_weights =
+            reinterpret_cast<const uint4 *>(weights + row * cols);
+        for (size_t vector = threadIdx.x; vector < vector_count;
+             vector += blockDim.x) {
+            const uint4 packed = vector_weights[vector];
+            const uint16_t *values =
+                reinterpret_cast<const uint16_t *>(&packed);
+            const size_t col = vector * 8;
+            for (unsigned element = 0; element < 8; ++element)
+                sum += (double)bf16_to_float_device(values[element]) *
+                       (double)input[col + element];
+        }
+    } else {
+        for (size_t col = threadIdx.x; col < vector_tail;
+             col += blockDim.x)
+            sum += (double)bf16_to_float_device(weights[row * cols + col]) *
+                   (double)input[col];
+    }
+    for (size_t col = vector_tail + threadIdx.x; col < cols;
+         col += blockDim.x)
+        sum += (double)bf16_to_float_device(weights[row * cols + col]) *
+               (double)input[col];
+    for (unsigned offset = 16; offset; offset >>= 1)
+        sum += __shfl_down_sync(0xffffffffu, sum, offset);
+    if (lane == 0) warp_sums[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        sum = lane < warp_count ? warp_sums[lane] : 0.0;
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0) output[row] = (float)sum;
+    }
 }
 
 static void set_error(char *error, size_t error_len, const char *message) {
@@ -179,8 +221,8 @@ extern "C" bool q38_cuda_rms_norm(const float *input, const float *weight,
         set_error(error, error_len, "invalid CUDA RMSNorm arguments");
         return false;
     }
-    rms_norm_kernel<<<(unsigned)((elements + 255) / 256), 256, 0, stream>>>(
-        input, weight, output, elements, epsilon);
+    rms_norm_kernel<<<1, 256, 0, stream>>>(input, weight, output, elements,
+                                           epsilon);
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess) {
         if (error && error_len) snprintf(error, error_len, "CUDA RMSNorm launch failed: %s",
@@ -238,7 +280,7 @@ extern "C" bool q38_cuda_bf16_matvec(const uint16_t *weights, size_t rows,
         set_error(error, error_len, "invalid CUDA BF16 matvec arguments");
         return false;
     }
-    bf16_matvec_kernel<<<(unsigned)((rows + 255) / 256), 256, 0, stream>>>(
+    bf16_matvec_kernel<<<(unsigned)rows, 256, 0, stream>>>(
         weights, rows, cols, input, output);
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess) {

@@ -17,11 +17,11 @@ static q38_profile_subsystem classify(const char *name) {
             strstr(name, "router"))
             return Q38_PROFILE_MOE;
         if (strstr(name, "ple")) return Q38_PROFILE_PLE;
-        if (strstr(name, "lm_head") || strstr(name, "output"))
+        if (strstr(name, "lm_head"))
             return Q38_PROFILE_LM_HEAD;
     }
 
-    return Q38_PROFILE_LM_HEAD;
+    return (q38_profile_subsystem)-1;
 }
 
 bool q38_profile_qsa_trace(uint32_t layer, const uint32_t *selected,
@@ -113,7 +113,7 @@ bool q38_profile_boundary_trace(uint32_t layer, const char *boundary,
     (void)error; (void)error_len;
     q38_profile *profile = (q38_profile *)user;
     q38_profile_record *record = q38_profile_get(profile, classify(boundary));
-    if (!record) return false;
+    if (!record) return true;
     record->callback_count++;
     return true;
 }
@@ -124,7 +124,8 @@ bool q38_profile_stage_trace(const q38_forward_stage_usage *usage, void *user,
     q38_profile *profile = (q38_profile *)user;
     q38_profile_record *record = q38_profile_get(profile,
                                                  classify(usage ? usage->name : NULL));
-    if (!record || !usage) return false;
+    if (!usage) return false;
+    if (!record) return true;
     record->callback_count++;
     record->kernel_launches += usage->matrix_calls;
     record->elapsed_ms += usage->elapsed_ms;
