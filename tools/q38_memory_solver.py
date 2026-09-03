@@ -95,6 +95,15 @@ def measured_values(path):
     if not path:
         return {}
     data = load(path)
+    if "footprint" in data:
+        footprint = data["footprint"]
+        benchmark = data.get("benchmark", {})
+        return {
+            "measured_peak_bytes": benchmark.get(
+                "persistent_resident_bytes", footprint.get("non_ple_bytes")),
+            "measured_mmap_bytes": footprint.get("model_bytes"),
+            "measured_model_file_bytes": footprint.get("model_bytes"),
+        }
     after = data.get("after", data)
     return {
         "measured_peak_bytes": after.get("rss_bytes"),
@@ -109,6 +118,7 @@ def main():
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--calibrate-artifact")
+    parser.add_argument("--fixed-header-bytes", type=int)
     parser.add_argument("--measured-memory")
     parser.add_argument("--alignment", type=int, default=32)
     parser.add_argument("--residency-policy", default="all_non_ple",
@@ -136,6 +146,13 @@ def main():
         }
         if calibration["fixed_header_bytes"] < 0:
             raise SystemExit("calibration artifact is smaller than estimated payload")
+    elif args.fixed_header_bytes is not None:
+        if args.fixed_header_bytes < 0:
+            raise SystemExit("--fixed-header-bytes must be non-negative")
+        calibration = {
+            "status": "reused",
+            "fixed_header_bytes": args.fixed_header_bytes,
+        }
     fixed_header = calibration.get("fixed_header_bytes", 0)
     model_file = payload + data_overhead + fixed_header
     ple_bytes = by_class.get("ple", {}).get("quantized_bytes", 0)

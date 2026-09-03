@@ -1,0 +1,60 @@
+{
+  "calibration": {
+    "artifact": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+    "artifact_sha256": "68b29ce24ab62bf2cbcd8bbdeff5e6d36941e5b00e2fe34df90e92f98d51f518",
+    "estimated_payload_plus_alignment_bytes": 103901112352,
+    "fixed_header_bytes": 135104,
+    "measured_file_bytes": 103901247456,
+    "peak_comparison": {
+      "error_percent": 0.0002752118651030307,
+      "within_five_percent": true
+    }
+  },
+  "format": "q38-m8-memory-solver-calibration-v1",
+  "notes": [
+    "File-size calibration uses the existing full M7 Q2 GGUF.",
+    "R0 resident calibration uses the promoted M7 all-non-PLE footprint.",
+    "Persistent state/workspace/cache budgets default to zero because M7 did not measure phase peaks.",
+    "No quality or Spark acceptance result is claimed."
+  ],
+  "policy": "all_non_ple",
+  "r0": {
+    "gates": {
+      "prefill": "pass",
+      "prefill_max_bytes": 124554051584,
+      "startup": "pass",
+      "startup_max_bytes": 120259084288,
+      "steady_state": "pass",
+      "steady_state_preferred_bytes": 115964116992
+    },
+    "measured": {
+      "measured_mmap_bytes": 103901247456,
+      "measured_model_file_bytes": 103901247456,
+      "measured_peak_bytes": 49465890560
+    },
+    "model_file_bytes": 103901247456,
+    "peak_error_percent": 0.0002752118651030307,
+    "predicted_resident_bytes": 49466026696,
+    "projected_peak_bytes": 49466026696
+  },
+  "r1": {
+    "gates": {
+      "prefill": "pass",
+      "prefill_max_bytes": 124554051584,
+      "startup": "pass",
+      "startup_max_bytes": 120259084288,
+      "steady_state": "pass",
+      "steady_state_preferred_bytes": 115964116992
+    },
+    "measured": {
+      "measured_mmap_bytes": 103901247456,
+      "measured_model_file_bytes": 103901247456,
+      "measured_peak_bytes": 49465890560
+    },
+    "model_file_bytes": 132212799456,
+    "peak_error_percent": 57.234768879090815,
+    "predicted_resident_bytes": 77777578696,
+    "projected_peak_bytes": 77777578696
+  },
+  "status": "calibrated"
+}
