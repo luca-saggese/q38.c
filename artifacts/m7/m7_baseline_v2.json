@@ -1,0 +1,24 @@
+{
+  "argmax": [
+    11,
+    11,
+    11
+  ],
+  "baseline_version": "v2",
+  "code_commit": "7383f2483d0c52a10897ad5edd6e123cfc71536e",
+  "evidence_commit": "9be85c5e9",
+  "format": "q38-m7-baseline-v2",
+  "hardware_counters": {
+    "reason": "NVIDIA performance counters denied: ERR_NVGPUCTRPERM",
+    "status": "unavailable",
+    "tool": "ncu"
+  },
+  "history": {
+    "m7_fp32_v2_wall_ms": 18490.0346,
+    "m7_frozen_v1_wall_ms": 22550.7901,
+    "m7_initial_wall_ms": 43249.932
+  },
+  "lm_head_launches": 1,
+  "median_wall_ms": 18490.0346,
+  "p95_wall_ms": 18773.5461
+}
