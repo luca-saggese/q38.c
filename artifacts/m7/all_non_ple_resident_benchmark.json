@@ -1,0 +1,88 @@
+{
+  "format": "q38-m7-all-non-ple-resident-benchmark-v1",
+  "promotion": false,
+  "promoted_baseline": false,
+  "mode": "guarded",
+  "requested": true,
+  "enabled": false,
+  "blocker": "insufficient CUDA memory for persistent original quantized non-PLE storage",
+  "blocker_detail": "need=49465890560 free=8185118720 total=130596646912",
+  "hard_gates": {
+    "coverage": false,
+    "no_duplicates": true,
+    "no_ple_entries": true,
+    "resident_enabled": false,
+    "same_process": true,
+    "semantic_state_reset": true,
+    "strong_speedup": false,
+    "speedup_evaluable": false
+  },
+  "footprint": {
+    "format": "q38-m7-all-non-ple-footprint-v1",
+    "model_bytes": 103901247456,
+    "non_ple_bytes": 49465890560,
+    "excluded_ple_bytes": 54435220760,
+    "unclassified_bytes": 0,
+    "categories": {
+      "embedding": 1271398400,
+      "GR": 1281249280,
+      "GDN": 4173020928,
+      "QSA": 1234716672,
+      "router": 125829120,
+      "shared_experts": 472104960,
+      "routed_experts_Q2": 39636172800,
+      "LM-head": 1271398400
+    }
+  },
+  "cuda_memory": {
+    "free_bytes": 8185118720,
+    "total_bytes": 130596646912,
+    "required_bytes": 49465890560,
+    "headroom_if_loaded_bytes": -41280771840
+  },
+  "benchmark": {
+    "runs": 6,
+    "cold_runs": 1,
+    "warm_runs": 5,
+    "same_process": true,
+    "semantic_state_reset": true,
+    "cold_wall_ms": 14319.546936,
+    "warm_wall_ms_median": 811.16233,
+    "resident_hits": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "resident_misses": [
+      664,
+      664,
+      664,
+      664,
+      664,
+      664
+    ],
+    "persistent_hits": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "persistent_misses": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "persistent_expected_bytes": 49465890560,
+    "persistent_expected_tensors": 1157,
+    "persistent_resident_bytes": 0
+  },
+  "speedup": "not_evaluable_resident_mode_disabled"
+}

@@ -152,7 +152,10 @@ int main(int argc, char **argv) {
             free(telemetry); fclose(artifact); return 1;
         }
         printf(        "{\"run\":%d,\"cold\":%s,\"all_non_ple_resident\":%s,"
-        "\"persistent_resident_bytes\":%zu,\"persistent_resident_tensors\":%" PRIu64 ",\"wall_ms\":%.6f,"
+        "\"persistent_resident_bytes\":%zu,\"persistent_resident_tensors\":%" PRIu64 ","
+        "\"persistent_expected_bytes\":%zu,\"persistent_expected_tensors\":%" PRIu64 ","
+        "\"persistent_coverage_ok\":%s,\"persistent_duplicate_tensors\":%" PRIu64 ","
+        "\"persistent_ple_entries\":%" PRIu64 ",\"wall_ms\":%.6f,"
         "\"matrix_upload_bytes\":%zu,\"matrix_upload_ms\":null,"
         "\"lm_head_upload_bytes\":0,\"lm_head_allocation_count\":0,"
         "\"allocations\":null,\"cuda_allocations\":null,"
@@ -171,6 +174,9 @@ int main(int argc, char **argv) {
                run, run == 1 ? "true" : "false",
                after.all_non_ple_resident ? "true" : "false",
                after.persistent_resident_bytes, after.persistent_resident_tensors,
+               after.persistent_expected_bytes, after.persistent_expected_tensors,
+               after.persistent_coverage_ok ? "true" : "false",
+               after.persistent_duplicate_tensors, after.persistent_ple_entries,
                wall, after.matrix_upload_bytes - before.matrix_upload_bytes,
                after.resident_hits - before.resident_hits,
                after.resident_misses - before.resident_misses, s.gdn,
@@ -184,7 +190,11 @@ int main(int argc, char **argv) {
         fprintf(artifact,
                 "{\"run\":%d,\"cold\":%s,\"all_non_ple_resident\":%s,"
                 "\"persistent_resident_bytes\":%zu,\"persistent_resident_tensors\":%" PRIu64 ","
-                "\"wall_ms\":%.6f,\"telemetry\":%s,"
+                "\"persistent_expected_bytes\":%zu,\"persistent_expected_tensors\":%" PRIu64 ","
+                "\"persistent_coverage_ok\":%s,\"persistent_duplicate_tensors\":%" PRIu64 ","
+                "\"persistent_ple_entries\":%" PRIu64 ",\"persistent_hits\":%" PRIu64 ","
+                "\"persistent_misses\":%" PRIu64 ",\"resident_hits\":%" PRIu64 ","
+                "\"resident_misses\":%" PRIu64 ",\"wall_ms\":%.6f,\"telemetry\":%s,"
                 "\"moe\":{\"router_ms\":%.6f,\"routed_gate_up_ms\":%.6f,"
                 "\"routed_down_ms\":%.6f,\"shared_gate_ms\":%.6f,"
                 "\"shared_up_ms\":%.6f,\"shared_down_ms\":%.6f,"
@@ -194,6 +204,13 @@ int main(int argc, char **argv) {
                 "\"state_update_ms\":%.6f}}\n", run, run == 1 ? "true" : "false",
                 all_non_ple_enabled ? "true" : "false",
                 after.persistent_resident_bytes, after.persistent_resident_tensors,
+                after.persistent_expected_bytes, after.persistent_expected_tensors,
+                after.persistent_coverage_ok ? "true" : "false",
+                after.persistent_duplicate_tensors, after.persistent_ple_entries,
+                after.persistent_hits - before.persistent_hits,
+                after.persistent_misses - before.persistent_misses,
+                after.resident_hits - before.resident_hits,
+                after.resident_misses - before.resident_misses,
                 wall, telemetry, s.moe_router, s.moe_routed_gate_up,
                 s.moe_routed_down, s.moe_shared_gate, s.moe_shared_up,
                 s.moe_shared_down, s.moe_activation_reduction, s.qsa_qkv,

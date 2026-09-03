@@ -44,6 +44,12 @@ typedef struct {
     uint64_t persistent_resident_tensors;
     uint64_t persistent_hits;
     uint64_t persistent_misses;
+    size_t persistent_expected_bytes;
+    uint64_t persistent_expected_tensors;
+    uint64_t persistent_duplicate_tensors;
+    uint64_t persistent_ple_tensors;
+    uint64_t persistent_ple_entries;
+    bool persistent_coverage_ok;
 } q38_forward_cuda_residency_stats;
 
 q38_forward_cuda_context *q38_forward_cuda_context_create(char *error,

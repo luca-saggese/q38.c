@@ -52,6 +52,12 @@ struct q38_forward_cuda_context {
     bool all_non_ple_resident;
     uint64_t persistent_hits;
     uint64_t persistent_misses;
+    size_t persistent_expected_bytes;
+    uint64_t persistent_expected_tensors;
+    uint64_t persistent_duplicate_tensors;
+    uint64_t persistent_ple_tensors;
+    uint64_t persistent_ple_entries;
+    bool persistent_coverage_ok;
 };
 
 static bool fail(char *error, size_t error_len, const char *message) {
@@ -312,13 +318,18 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     size_t count = 0, total = 0;
     for (uint64_t i = 0; i < model->n_tensors; ++i) {
         const q38_tensor *tensor = &model->tensors[i];
-        if (is_ple_tensor(tensor) || !tensor->bytes ||
-            tensor->bytes > SIZE_MAX) continue;
+        if (is_ple_tensor(tensor)) {
+            ++context->persistent_ple_tensors;
+            continue;
+        }
+        if (!tensor->bytes || tensor->bytes > SIZE_MAX) continue;
         if (count == SIZE_MAX || total > SIZE_MAX - (size_t)tensor->bytes)
             return fail(error, error_len, "all-non-PLE residency size overflow");
         ++count;
         total += (size_t)tensor->bytes;
     }
+    context->persistent_expected_tensors = count;
+    context->persistent_expected_bytes = total;
     size_t free_bytes = 0, total_bytes = 0;
     if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess &&
         free_bytes && total > free_bytes) {
@@ -337,6 +348,16 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         const q38_tensor *tensor = &model->tensors[i];
         if (is_ple_tensor(tensor) || !tensor->bytes) continue;
         const void *host = q38_gguf_tensor_data(model, tensor);
+        bool duplicate = false;
+        for (size_t j = 0; j < at; ++j)
+            if (host && entries[j].host == host) duplicate = true;
+        if (duplicate) {
+            ++context->persistent_duplicate_tensors;
+            for (size_t j = 0; j < at; ++j) cudaFree(entries[j].device);
+            free(entries);
+            return fail(error, error_len,
+                        "duplicate tensor in all-non-PLE residency set");
+        }
         if (!host || cudaMalloc(&entries[at].device, (size_t)tensor->bytes) !=
                          cudaSuccess ||
             cudaMemcpyAsync(entries[at].device, host, (size_t)tensor->bytes,
@@ -360,6 +381,10 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     context->persistent_count = at;
     context->persistent_bytes = total;
     context->all_non_ple_resident = true;
+    context->persistent_coverage_ok =
+        at == context->persistent_expected_tensors &&
+        total == context->persistent_expected_bytes &&
+        context->persistent_ple_entries == 0;
     return true;
 }
 
@@ -445,6 +470,12 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->persistent_resident_tensors = context->persistent_count;
     stats->persistent_hits = context->persistent_hits;
     stats->persistent_misses = context->persistent_misses;
+    stats->persistent_expected_bytes = context->persistent_expected_bytes;
+    stats->persistent_expected_tensors = context->persistent_expected_tensors;
+    stats->persistent_duplicate_tensors = context->persistent_duplicate_tensors;
+    stats->persistent_ple_tensors = context->persistent_ple_tensors;
+    stats->persistent_ple_entries = context->persistent_ple_entries;
+    stats->persistent_coverage_ok = context->persistent_coverage_ok;
 }
 
 extern "C" void *
