@@ -1,0 +1,1 @@
+{"format":"q38-m7-all-non-ple-footprint-v1","model_bytes":103901247456,"non_ple_bytes":49465890560,"excluded_ple_bytes":54435220760,"unclassified_bytes":0,"categories":{"embedding":1271398400,"GR":1281249280,"GDN":4173020928,"QSA":1234716672,"router":125829120,"shared_experts":472104960,"routed_experts_Q2":39636172800,"LM-head":1271398400}}
