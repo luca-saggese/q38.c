@@ -1,0 +1,93 @@
+{
+  "baseline_manifest": "tools/quant_manifest_q2.json",
+  "baseline_manifest_sha256": "739fffc7bc1ebaccfcdf6efb621e23a1cd6d68f2cc9f6839861c3a0d774410c7",
+  "class_isolation": {
+    "changed_classes": [
+      "routed_down",
+      "routed_gate_up"
+    ],
+    "quality": "not-run",
+    "reason": "No fixed M8 calibration evaluator/corpus was executed."
+  },
+  "format": "q38-m8-sensitivity-v1",
+  "manifest_sha256": "b48dcfe126414410927cc86980061652e854a091236586815e34eb42e25f8b1e",
+  "recipe": "R3",
+  "status": "descriptor_generated",
+  "storage": {
+    "embedding": {
+      "effective_types": {
+        "BF16": 1
+      },
+      "quantized_bytes": 1271398400,
+      "source_bytes": 1271398400,
+      "tensors": 1
+    },
+    "gdn": {
+      "effective_types": {
+        "BF16": 324
+      },
+      "quantized_bytes": 4173020928,
+      "source_bytes": 4173020928,
+      "tensors": 324
+    },
+    "gr": {
+      "effective_types": {
+        "BF16": 387
+      },
+      "quantized_bytes": 1281249280,
+      "source_bytes": 1281249280,
+      "tensors": 387
+    },
+    "output": {
+      "effective_types": {
+        "BF16": 1
+      },
+      "quantized_bytes": 1271398400,
+      "source_bytes": 1271398400,
+      "tensors": 1
+    },
+    "ple": {
+      "effective_types": {
+        "BF16": 4,
+        "I64": 3,
+        "Q8_0": 130
+      },
+      "quantized_bytes": 54435220760,
+      "source_bytes": 102466171160,
+      "tensors": 137
+    },
+    "qsa": {
+      "effective_types": {
+        "BF16": 108
+      },
+      "quantized_bytes": 1234716672,
+      "source_bytes": 1234716672,
+      "tensors": 108
+    },
+    "routed_expert": {
+      "effective_types": {
+        "BF16": 48,
+        "Q4_K": 48
+      },
+      "quantized_bytes": 125829120000,
+      "source_bytes": 241591910400,
+      "tensors": 96
+    },
+    "router": {
+      "effective_types": {
+        "BF16": 48
+      },
+      "quantized_bytes": 125829120,
+      "source_bytes": 125829120,
+      "tensors": 48
+    },
+    "shared_expert": {
+      "effective_types": {
+        "BF16": 192
+      },
+      "quantized_bytes": 472104960,
+      "source_bytes": 472104960,
+      "tensors": 192
+    }
+  }
+}
