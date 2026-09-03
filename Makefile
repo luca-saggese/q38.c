@@ -33,9 +33,10 @@ CUDA_LDLIBS ?= -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcuda
 C_OBJS := q38.o q38_gguf.o q38_memory.o q38_platform.o \
 	q38_tokenizer.o q38_decode.o q38_forward.o q38_moe.o q38_weights.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
-	q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
+	q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o \
+	q38_profile.o
 CUDA_OBJS := q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
-	q38_gdn.o q38_moe_cuda.o
+	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o
 Q38_OBJS := $(C_OBJS) $(CUDA_OBJS)
 
 TEST_DIR := tests
@@ -76,12 +77,18 @@ M6_ORACLE_GPU ?= artifacts/m6/stateful_sequence_oracle_resume_probe.json
 	m6-stateful-oracle \
 	m6-stateful-sequence-oracle \
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
-	post-m5-bis post-m5-ter post-m5-supplement
+	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
 q38_decode.o: q38_decode.c q38_decode.h q38_forward.h
 	$(CC) $(CFLAGS) -c -o $@ q38_decode.c
+
+q38_replay.o: q38_replay.c q38_replay.h q38_forward.h
+	$(CC) $(CFLAGS) -c -o $@ q38_replay.c
+
+q38_profile.o: q38_profile.c q38_profile.h q38_forward.h
+	$(CC) $(CFLAGS) -c -o $@ q38_profile.c
 
 all: spark
 
@@ -89,6 +96,14 @@ all: spark
 q38_cuda.o: q38_cuda.cu q38_cuda.h q38.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
 	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_cuda.cu
+
+q38_cuda_timing.o: q38_cuda_timing.cu q38_cuda_timing.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_cuda_timing.cu
+
+q38_profile_cuda.o: q38_profile_cuda.cu q38_profile.h
+	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_profile_cuda.cu
 
 # --- C objects ------------------------------------------------------------
 q38.o: q38.c q38.h q38_gguf.h q38_memory.h q38_platform.h q38_cuda.h \
@@ -184,6 +199,23 @@ $(TEST_DIR)/test_m2_tokenizer: $(TEST_DIR)/test_m2_tokenizer.c \
 
 $(TEST_DIR)/test_m4_session: $(TEST_DIR)/test_m4_session.c q38_session.o q38_session.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_session.c q38_session.o
+
+$(TEST_DIR)/test_m7_replay: $(TEST_DIR)/test_m7_replay.c q38_replay.o \
+		q38_qsa.o q38_state.o q38_session.o q38_replay.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m7_replay.c q38_replay.o \
+		q38_qsa.o q38_state.o q38_session.o -lm
+
+m7-replay: $(TEST_DIR)/test_m7_replay
+	@./$(TEST_DIR)/test_m7_replay
+	@echo "M7 replay snapshot and callback trace harness passed"
+
+$(TEST_DIR)/test_m7_profile: $(TEST_DIR)/test_m7_profile.c q38_profile.o \
+		q38_profile_cuda.o q38_profile.h q38_forward.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m7_profile.c \
+		q38_profile.o q38_profile_cuda.o $(CUDA_LDLIBS)
+
+m7-profile: $(TEST_DIR)/test_m7_profile
+	@./$(TEST_DIR)/test_m7_profile
 
 m4-c00:
 	@test -f docs/qwen_ple_semantics.md
