@@ -1,0 +1,13 @@
+{
+  "argmax_preserved": true,
+  "baseline_source": "baseline_bench.json",
+  "baseline_tokens_per_second": 0.0231214236,
+  "baseline_wall_ms": 43249.932,
+  "note": "Single-token runs; observed comparison, not a multi-run significance claim.",
+  "status": "measured",
+  "wall_ms_delta": -9693.882700000002,
+  "wall_ms_percent": -22.413636858434835,
+  "workspace_source": "workspace_bench.json",
+  "workspace_tokens_per_second": 0.029800886,
+  "workspace_wall_ms": 33556.0493
+}

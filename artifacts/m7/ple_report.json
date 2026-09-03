@@ -1,0 +1,8 @@
+{
+  "elapsed_ms": 33.47703,
+  "kernel_launches": 2,
+  "optimization": "not-run",
+  "reason": "M7 scope is limited to the validated MoE workspace optimization.",
+  "source": "decode_profile.json",
+  "status": "baseline_observed_no_m7_change"
+}

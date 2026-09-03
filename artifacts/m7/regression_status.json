@@ -1,0 +1,10 @@
+{
+  "focused": {
+    "m6_moe_cuda": "pass",
+    "m7_baseline_gates": "pass",
+    "m7_profile": "pass",
+    "m7_replay": "pass"
+  },
+  "full_m0_m6": "not-run",
+  "reason": "Full historical sweep is opt-in via M7_RUN_FULL=1."
+}

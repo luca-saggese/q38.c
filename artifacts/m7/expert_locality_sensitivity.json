@@ -1,0 +1,11 @@
+{
+  "reason": "No versioned multi-token routing corpus or locality sampler is present.",
+  "required_fields": [
+    "routed_pairs",
+    "unique_experts",
+    "top_n_frequency",
+    "reuse_distance",
+    "observed_hit_rate"
+  ],
+  "status": "unavailable"
+}

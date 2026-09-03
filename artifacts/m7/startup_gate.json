@@ -1,0 +1,8 @@
+{
+  "reason": "Dedicated startup peak and whole-file registration probe unavailable.",
+  "required": {
+    "startup_peak_gib_max": 112,
+    "whole_file_cuda_host_register": 0
+  },
+  "status": "not-run"
+}

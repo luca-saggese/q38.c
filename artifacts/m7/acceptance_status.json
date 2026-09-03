@@ -1,0 +1,12 @@
+{
+  "benchmark_delta": "measured",
+  "exactness": "focused M6/M7 gates pass; argmax comparison recorded when workspace profile exists",
+  "format": "q38-m7-acceptance-v1",
+  "full_regression": "not-run",
+  "locality": "unavailable",
+  "long_context": "blocked",
+  "memory": "measured_baseline_only",
+  "startup": "not-run",
+  "status": "conditional",
+  "validated_change": "persistent Q2 MoE intermediate workspace"
+}

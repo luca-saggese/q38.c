@@ -78,7 +78,8 @@ M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 	m6-stateful-oracle \
 	m6-stateful-sequence-oracle \
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
-	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-gates m7-profile-forward
+	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-gates \
+	m7-profile-forward m7-acceptance
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
@@ -239,6 +240,17 @@ m7-profile-forward: $(TEST_DIR)/m7_profile_forward
 	@./$(TEST_DIR)/m7_profile_forward \
 		$(M7_MODEL) \
 		artifacts/m7
+
+m7-acceptance: m7-gates $(TEST_DIR)/test_m6_moe_cuda
+	@./$(TEST_DIR)/test_m6_moe_cuda
+	@if [ "$${M7_RUN_FULL:-0}" = 1 ]; then \
+		$(MAKE) m0-acceptance m1-acceptance m2-acceptance m3-acceptance \
+			m4-acceptance m5-acceptance m6-acceptance; \
+	else \
+		echo "M7: full M0-M6 sweep not run (set M7_RUN_FULL=1)"; \
+	fi
+	@$(M6_PYTHON) tools/m7_acceptance.py
+	@echo "M7 acceptance artifacts generated (missing expensive probes are recorded)"
 
 m4-c00:
 	@test -f docs/qwen_ple_semantics.md
