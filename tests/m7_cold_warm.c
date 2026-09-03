@@ -84,9 +84,9 @@ int main(int argc, char **argv) {
         q38_forward_cuda_get_residency_stats(cuda, &after);
         size_t best = argmax(logits, 248320);
         printf(        "{\"run\":%d,\"wall_ms\":%.6f,\"kernel_ms\":%.6f,"
-               "\"matrix_upload_bytes\":%zu,\"matrix_upload_ms\":0.0,"
+        "\"matrix_upload_bytes\":%zu,\"matrix_upload_ms\":null,"
         "\"lm_head_upload_bytes\":0,\"lm_head_allocation_count\":0,"
-        "\"allocations\":0,\"cuda_allocations\":0,"
+        "\"allocations\":null,\"cuda_allocations\":null,"
                "\"resident_hits\":%" PRIu64 ",\"resident_misses\":%" PRIu64
                ",\"GDN_ms\":%.6f,\"LM_head_ms\":%.6f,\"MoE_ms\":%.6f,"
                "\"QSA_ms\":%.6f,\"PLE_ms\":%.6f,\"argmax\":%zu,"
