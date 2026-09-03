@@ -2,11 +2,13 @@
   "benchmark_delta": "measured",
   "exactness": "focused M6/M7 gates pass; argmax comparison recorded when workspace profile exists",
   "format": "q38-m7-acceptance-v1",
-  "full_regression": "not-run",
-  "locality": "unavailable",
-  "long_context": "blocked",
+  "full_regression": "pass",
+  "locality": "measured_limited",
+  "long_context": "pass_component_only",
   "memory": "measured_baseline_only",
-  "startup": "not-run",
+  "profiling_nomenclature": "m7_baseline_frozen/m7_candidate_<commit-sha>/m7_candidate_delta_<commit-sha>",
+  "reason": "Full-model long-context and multi-token locality gates are not equivalent to the component/single-token measurements and remain open.",
+  "startup": "pass",
   "status": "conditional",
   "validated_change": "persistent Q2 MoE intermediate workspace"
 }

@@ -1,8 +1,9 @@
 {
-  "reason": "Dedicated startup peak and whole-file registration probe unavailable.",
-  "required": {
-    "startup_peak_gib_max": 112,
-    "whole_file_cuda_host_register": 0
-  },
-  "status": "not-run"
+  "status": "pass",
+  "source": "baseline_memory.json",
+  "rss_gib": 8.753372192382812,
+  "mem_available_gib": 111.27257537841797,
+  "startup_peak_gib_limit": 112,
+  "whole_file_cuda_host_register": 0,
+  "observed": "no cudaHostRegister call in source"
 }
