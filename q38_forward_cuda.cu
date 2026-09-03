@@ -21,6 +21,10 @@ struct q38_forward_cuda_context {
     size_t device_aux_bytes;
     float *device_moe_mid;
     size_t device_moe_mid_bytes;
+    void *lm_head_device_weights;
+    size_t lm_head_device_weights_bytes;
+    const void *lm_head_host_data;
+    bool lm_head_resident;
     cudaStream_t stream;
     q38_forward_cuda_allocation_observer allocation_observer;
     void *allocation_observer_user;
@@ -29,6 +33,11 @@ struct q38_forward_cuda_context {
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
     return false;
+}
+
+static bool is_lm_head_tensor(const q38_tensor *tensor) {
+    return tensor && tensor->name.len == 14 &&
+           memcmp(tensor->name.ptr, "lm_head.weight", 14) == 0;
 }
 
 
@@ -158,8 +167,44 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_output);
     cudaFree(context->device_aux);
     cudaFree(context->device_moe_mid);
+    cudaFree(context->lm_head_device_weights);
     if (context->stream) cudaStreamDestroy(context->stream);
     free(context);
+}
+
+extern "C" bool q38_forward_cuda_prepare_lm_head(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_tensor *tensor, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!context || !model || !tensor || !is_lm_head_tensor(tensor) ||
+        !tensor->bytes)
+        return fail(error, error_len, "invalid LM-head residency tensor");
+    const void *data = q38_gguf_tensor_data(model, tensor);
+    if (!data)
+        return fail(error, error_len, "invalid LM-head residency payload");
+    if (context->lm_head_resident &&
+        context->lm_head_host_data == data &&
+        context->lm_head_device_weights_bytes == tensor->bytes)
+        return true;
+    if (context->lm_head_device_weights &&
+        context->lm_head_device_weights_bytes < tensor->bytes) {
+        cudaFree(context->lm_head_device_weights);
+        context->lm_head_device_weights = NULL;
+        context->lm_head_device_weights_bytes = 0;
+    }
+    if (!context->lm_head_device_weights &&
+        cudaMalloc(&context->lm_head_device_weights, tensor->bytes) !=
+            cudaSuccess)
+        return fail(error, error_len, "LM-head residency allocation failed");
+    if (cudaMemcpyAsync(context->lm_head_device_weights, data, tensor->bytes,
+                        cudaMemcpyHostToDevice, context->stream) !=
+            cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "LM-head residency upload failed");
+    context->lm_head_device_weights_bytes = tensor->bytes;
+    context->lm_head_host_data = data;
+    context->lm_head_resident = true;
+    return true;
 }
 
 extern "C" void *
@@ -263,9 +308,15 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     if (!data || !tensor->bytes || rows > SIZE_MAX / sizeof(float) ||
         cols > SIZE_MAX / sizeof(float))
         return fail(error, error_len, "invalid CUDA forward matrix payload");
-    if (!ensure_buffer(&context->device_weights, &context->device_weights_bytes,
-                       (size_t)tensor->bytes, context->allocation_observer,
-                       context->allocation_observer_user) ||
+    const bool use_resident_lm_head =
+        is_lm_head_tensor(tensor) &&
+        context->lm_head_resident && context->lm_head_host_data == data &&
+        context->lm_head_device_weights_bytes == tensor->bytes;
+    if ((!use_resident_lm_head &&
+         !ensure_buffer(&context->device_weights,
+                        &context->device_weights_bytes, (size_t)tensor->bytes,
+                        context->allocation_observer,
+                        context->allocation_observer_user)) ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements,
                        cols * sizeof(float), context->allocation_observer,
@@ -275,26 +326,31 @@ extern "C" bool q38_forward_cuda_matrix_backend(
                        rows * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user))
         return fail(error, error_len, "CUDA forward matrix allocation failed");
-    if (cudaMemcpyAsync(context->device_weights, data, (size_t)tensor->bytes,
-                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+    if ((!use_resident_lm_head &&
+         cudaMemcpyAsync(context->device_weights, data, (size_t)tensor->bytes,
+                         cudaMemcpyHostToDevice, context->stream) !=
+             cudaSuccess) ||
         cudaMemcpyAsync(context->device_input, input, cols * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA forward matrix upload failed");
     bool launched = false;
+    void *weight_storage = use_resident_lm_head
+                               ? context->lm_head_device_weights
+                               : context->device_weights;
     if (tensor->type == 30) {
         launched = q38_cuda_bf16_matvec(
-            (const uint16_t *)context->device_weights, rows, cols,
+            (const uint16_t *)weight_storage, rows, cols,
             context->device_input, context->device_output, context->stream,
             error, error_len);
     } else if (tensor->type == 10) {
         launched = q38_cuda_q2_matvec(
-            context->device_weights, rows, cols, context->device_input,
+            weight_storage, rows, cols, context->device_input,
             context->device_output, context->stream, error, error_len);
     } else if (tensor->type == 0 || tensor->type == 8) {
         const uint32_t type = tensor->type == 8 ? Q38_GDN_WEIGHT_Q8_0
                                                 : Q38_GDN_WEIGHT_F32;
         launched = q38_cuda_gdn_project(
-            type, context->device_weights, rows, cols, context->device_input, 1,
+            type, weight_storage, rows, cols, context->device_input, 1,
             context->device_output, context->stream, error, error_len);
     } else {
         return fail(error, error_len, "unsupported CUDA forward matrix type");

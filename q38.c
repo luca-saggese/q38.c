@@ -604,6 +604,11 @@ static int cmd_generate(const q38_options *opt) {
         fprintf(stderr, "q38: CUDA backend: %s\n", error);
         goto cleanup;
     }
+    if (!q38_forward_cuda_prepare_lm_head(cuda, model, weights.output, error,
+                                          sizeof(error))) {
+        fprintf(stderr, "q38: LM-head residency: %s\n", error);
+        goto cleanup;
+    }
     generated = calloc(opt->max_tokens, sizeof(*generated));
     logits = calloc(Q38_DECODE_VOCAB_SIZE, sizeof(*logits));
     if (!generated || !logits) {

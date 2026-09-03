@@ -180,6 +180,9 @@ int main(int argc, char **argv) {
     diagnostics.trace_user = &context;
     cuda = q38_forward_cuda_context_create(error, sizeof(error));
     if (!cuda) { fprintf(stderr, "cuda: %s\n", error); ok = false; goto cleanup_state; }
+    ok = ok && q38_forward_cuda_prepare_lm_head(
+        cuda, model, weights.output, error, sizeof(error));
+    if (!ok) { fprintf(stderr, "lm-head residency: %s\n", error); goto cleanup_state; }
     (void)q38_profile_cuda_init(&profile);
     q38_forward_cuda_set_allocation_observer(cuda, allocation_observer,
                                              &profile);
