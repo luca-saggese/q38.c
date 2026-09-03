@@ -21,11 +21,17 @@ def load(path):
 
 
 def sha256(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-def quantized_bytes(tensor, target, fallback):
+def quantized_bytes(tensor, target, fallback, layout_transform=None):
     shape = list(tensor["shape"])
+    if layout_transform == "transpose_last_two_axes":
+        shape[-1], shape[-2] = shape[-2], shape[-1]
     effective = target
     if target in BLOCK_INFO and (len(shape) < 2 or
                                  shape[-1] % BLOCK_INFO[target][0]):
@@ -57,7 +63,8 @@ def solve(classes, manifest, alignment):
         rule = matches[0][0]
         target = rule["quant_type"] if tensor["source_dtype"] == "BF16" else tensor["source_dtype"]
         payload, effective = quantized_bytes(
-            tensor, target, rule.get("fallback_quant_type"))
+            tensor, target, rule.get("fallback_quant_type"),
+            rule.get("layout_transform"))
         rows.append({
             "name": tensor["name"],
             "class": tensor["class"],

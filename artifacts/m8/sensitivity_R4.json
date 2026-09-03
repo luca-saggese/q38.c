@@ -68,10 +68,9 @@
     },
     "routed_expert": {
       "effective_types": {
-        "BF16": 48,
-        "Q4_K": 48
+        "Q4_K": 96
       },
-      "quantized_bytes": 125829120000,
+      "quantized_bytes": 67947724800,
       "source_bytes": 241591910400,
       "tensors": 96
     },

@@ -32,8 +32,10 @@ def digest(value):
     return hashlib.sha256(encoded).hexdigest()
 
 
-def tensor_bytes(tensor, quant_type, fallback=None):
+def tensor_bytes(tensor, quant_type, fallback=None, layout_transform=None):
     shape = list(tensor["shape"])
+    if layout_transform == "transpose_last_two_axes":
+        shape[-1], shape[-2] = shape[-2], shape[-1]
     target = quant_type
     if target in BLOCK_INFO and (len(shape) < 2 or
                                  shape[-1] % BLOCK_INFO[target][0]):
@@ -122,7 +124,8 @@ def evaluate(classes, manifest):
         source_type = tensor["source_dtype"]
         target = rule["quant_type"] if source_type == "BF16" else source_type
         bytes_count, effective = tensor_bytes(
-            tensor, target, rule.get("fallback_quant_type"))
+            tensor, target, rule.get("fallback_quant_type"),
+            rule.get("layout_transform"))
         item = totals.setdefault(tensor["class"], {
             "tensors": 0, "source_bytes": 0, "quantized_bytes": 0,
             "effective_types": {},
