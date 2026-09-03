@@ -19,6 +19,8 @@ struct q38_forward_cuda_context {
     size_t device_output_bytes;
     void *device_aux;
     size_t device_aux_bytes;
+    float *device_moe_mid;
+    size_t device_moe_mid_bytes;
     cudaStream_t stream;
     q38_forward_cuda_allocation_observer allocation_observer;
     void *allocation_observer_user;
@@ -88,6 +90,11 @@ extern "C" bool q38_forward_cuda_expert_backend(
         !ensure_buffer((void **)&context->device_output,
                        &context->device_output_bytes, 2560u * sizeof(float),
                        context->allocation_observer,
+                       context->allocation_observer_user) ||
+        !ensure_buffer((void **)&context->device_moe_mid,
+                       &context->device_moe_mid_bytes,
+                       Q38_MOE_INTERMEDIATE * sizeof(float),
+                       context->allocation_observer,
                        context->allocation_observer_user))
         return fail(error, error_len, "CUDA routed expert allocation failed");
     const unsigned char *gate_src =
@@ -101,9 +108,10 @@ extern "C" bool q38_forward_cuda_expert_backend(
         cudaMemcpyAsync(context->device_input, input, 2560u * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert upload failed");
-    if (!q38_moe_cuda_expert_q2(
+    if (!q38_moe_cuda_expert_q2_workspace(
             context->device_weights, context->device_aux,
-            context->device_input, context->device_output, context->stream,
+            context->device_input, context->device_output,
+            context->device_moe_mid, context->stream,
             error, error_len) ||
         cudaMemcpyAsync(output, context->device_output, 2560u * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
@@ -149,6 +157,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_input);
     cudaFree(context->device_output);
     cudaFree(context->device_aux);
+    cudaFree(context->device_moe_mid);
     if (context->stream) cudaStreamDestroy(context->stream);
     free(context);
 }

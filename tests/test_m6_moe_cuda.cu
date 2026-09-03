@@ -49,13 +49,15 @@ int main() {
     for (auto &block : gate_up) { block.d = 0x3c00; block.dmin = 0; block.scales[0] = 1; }
     for (auto &block : down) { block.d = 0x3c00; block.dmin = 0; block.scales[0] = 1; }
     void *dgu = nullptr, *dd = nullptr;
-    float *do_ = nullptr;
+    float *do_ = nullptr, *dmid = nullptr;
     if (cudaMalloc(&dgu, gate_up.size()*sizeof(q38_q2_k_block)) != cudaSuccess ||
         cudaMalloc(&dd, down.size()*sizeof(q38_q2_k_block)) != cudaSuccess ||
-        cudaMalloc(&do_, Q38_MOE_HIDDEN*sizeof(float)) != cudaSuccess) return 1;
+        cudaMalloc(&do_, Q38_MOE_HIDDEN*sizeof(float)) != cudaSuccess ||
+        cudaMalloc(&dmid, Q38_MOE_INTERMEDIATE*sizeof(float)) != cudaSuccess) return 1;
     cudaMemcpy(dgu, gate_up.data(), gate_up.size()*sizeof(q38_q2_k_block), cudaMemcpyHostToDevice);
     cudaMemcpy(dd, down.data(), down.size()*sizeof(q38_q2_k_block), cudaMemcpyHostToDevice);
-    if (!q38_moe_cuda_expert_q2(dgu, dd, dh, do_, 0, error, sizeof(error)) ||
+    if (!q38_moe_cuda_expert_q2_workspace(dgu, dd, dh, do_, dmid, 0,
+                                          error, sizeof(error)) ||
         cudaDeviceSynchronize() != cudaSuccess) {
         std::fprintf(stderr, "q2 failed: %s\n", error);
         return 1;
@@ -66,7 +68,7 @@ int main() {
         std::fprintf(stderr, "q2 output %g\n", v);
         return 1;
     }
-    cudaFree(dgu); cudaFree(dd); cudaFree(do_);
+    cudaFree(dgu); cudaFree(dd); cudaFree(do_); cudaFree(dmid);
     std::vector<float> sg(Q38_MOE_INTERMEDIATE * Q38_MOE_HIDDEN, 0.0f);
     std::vector<float> su(Q38_MOE_INTERMEDIATE * Q38_MOE_HIDDEN, 0.0f);
     std::vector<float> sd(Q38_MOE_HIDDEN * Q38_MOE_INTERMEDIATE, 0.0f);

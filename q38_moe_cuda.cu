@@ -144,23 +144,37 @@ __global__ static void q2_down_kernel(const q38_q2_k_block *weights,
     output[d] = value;
 }
 
+extern "C" bool q38_moe_cuda_expert_q2_workspace(
+    const void *device_gate_up, const void *device_down,
+    const float *device_hidden, float *device_output, float *device_mid,
+    cudaStream_t stream, char *error, size_t error_len) {
+    if (!device_gate_up || !device_down || !device_hidden || !device_output ||
+        !device_mid)
+        return fail(error, error_len, "invalid CUDA Q2 expert arguments");
+    q2_gate_up_kernel<<<3, 256, 0, stream>>>(
+        (const q38_q2_k_block *)device_gate_up, device_hidden, device_mid);
+    q2_down_kernel<<<10, 256, 0, stream>>>(
+        (const q38_q2_k_block *)device_down, device_mid, device_output);
+    const cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
+
 extern "C" bool q38_moe_cuda_expert_q2(
     const void *device_gate_up, const void *device_down,
     const float *device_hidden, float *device_output, cudaStream_t stream,
     char *error, size_t error_len) {
-    if (!device_gate_up || !device_down || !device_hidden || !device_output)
-        return fail(error, error_len, "invalid CUDA Q2 expert arguments");
     float *mid = nullptr;
     cudaError_t status = cudaMalloc(&mid, Q38_MOE_INTERMEDIATE * sizeof(float));
     if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
-    q2_gate_up_kernel<<<3, 256, 0, stream>>>(
-        (const q38_q2_k_block *)device_gate_up, device_hidden, mid);
-    q2_down_kernel<<<10, 256, 0, stream>>>(
-        (const q38_q2_k_block *)device_down, mid, device_output);
-    status = cudaGetLastError();
+    const bool ok = q38_moe_cuda_expert_q2_workspace(
+        device_gate_up, device_down, device_hidden, device_output, mid, stream,
+        error, error_len);
+    if (ok) status = cudaStreamSynchronize(stream);
     cudaFree(mid);
-    if (status != cudaSuccess) return fail(error, error_len, cudaGetErrorString(status));
-    return true;
+    if (ok && status != cudaSuccess)
+        return fail(error, error_len, cudaGetErrorString(status));
+    return ok;
 }
 
 __global__ static void shared_kernel(const float *hidden, size_t tokens,
