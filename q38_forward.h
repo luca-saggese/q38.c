@@ -124,11 +124,17 @@ typedef struct {
     uint64_t scalar_rows;
     uint64_t backend_declines;
     double elapsed_ms;
+    uint32_t layer;
+    const char *logical_stage;
 } q38_forward_stage_usage;
 
 typedef bool (*q38_forward_stage_trace)(
     const q38_forward_stage_usage *usage, void *user, char *error,
     size_t error_len);
+
+typedef void (*q38_forward_backend_context_trace)(
+    uint32_t layer, const char *logical_stage, const q38_tensor *tensor,
+    size_t rows, size_t cols, void *user);
 
 typedef struct {
     /*
@@ -168,6 +174,7 @@ typedef struct {
      */
     q38_forward_boundary_trace boundary_trace;
     q38_forward_stage_trace stage_trace;
+    q38_forward_backend_context_trace backend_context;
 } q38_forward_diagnostics;
 
 /* Optional diagnostic row-matvec backend.  It is strict when installed via
