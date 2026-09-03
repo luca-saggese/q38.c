@@ -54,7 +54,7 @@
   "oracle": "artifacts/m6/stateful_gguf_oracle_32_corrected.json",
   "oracle_status": "pass",
   "comparison": "artifacts/m6/decode_comparison_32_gpu.json",
-  "reason": "Corrected native q38 GPU and validated/instrumented GPU oracle are exact for all 33 committed inputs (32 generated tokens); 128 attempt is running.",
+  "reason": "Corrected native q38 GPU and validated/instrumented GPU oracle are exact for all 33 committed inputs (32 generated tokens); no 128-token result is claimed.",
   "required": [
     "independent oracle completion and fail-closed token/state comparison",
     "32 and 128 token ladders"
@@ -69,8 +69,8 @@
   "comparison_status": "pass",
   "first_divergence": null,
   "128_attempt": {
-    "native": "artifacts/m6/decode_gpu_128_fixed.json",
-    "oracle": "artifacts/m6/stateful_gguf_oracle_128_corrected.json",
-    "status": "running"
+    "native": null,
+    "oracle": null,
+    "status": "not_run"
   }
 }

@@ -32,12 +32,12 @@
     "32": "pass"
   },
   "first_divergence": null,
-  "reason": "Real corrected GPU-oracle comparison passes all 33 committed inputs; 128 is an in-progress attempt and has no result yet.",
+  "reason": "Real corrected GPU-oracle comparison passes all 33 committed inputs; no 128-token result is claimed.",
   "comparison_scope": "prefix checks within the real 33-step validated GPU-oracle comparison",
   "128_attempt": {
-    "native": "artifacts/m6/decode_gpu_128_fixed.json",
-    "official_oracle": "artifacts/m6/stateful_gguf_oracle_128_corrected.json",
+    "native": null,
+    "official_oracle": null,
     "comparison": null,
-    "status": "running"
+    "status": "not_run"
   }
 }
