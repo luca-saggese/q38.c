@@ -1,0 +1,52 @@
+{
+  "format": "q38-m7-canonical-cold-warm-v1",
+  "runs": 6,
+  "cold_runs": 1,
+  "warm_runs": 5,
+  "same_process": true,
+  "semantic_state_reset": true,
+  "cuda_residency_preserved": true,
+  "cold_wall_ms": 14369.889374,
+  "warm_wall_ms_median": 808.776072,
+  "warm_wall_ms": [
+    809.188558,
+    801.251089,
+    804.186427,
+    808.776072,
+    810.402435
+  ],
+  "resident_hits": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "resident_misses": [
+    1144,
+    1144,
+    1144,
+    1144,
+    1144,
+    1144
+  ],
+  "moe": {
+    "router_ms": 3.887785,
+    "routed_gate_up_ms": 153.636576,
+    "routed_down_ms": 153.636576,
+    "shared_gate_ms": 4.37,
+    "shared_up_ms": 4.266095,
+    "shared_down_ms": 4.342603,
+    "activation_reduction_ms": 321.593567
+  },
+  "qsa": {
+    "q_k_v_ms": 46.7495,
+    "indexer_compression_ms": 46.7495,
+    "score_ms": 31.166333,
+    "top_k_ms": 31.166333,
+    "gather_ms": 31.166333,
+    "attention_ms": 93.498999,
+    "state_update_ms": 31.166333
+  }
+}

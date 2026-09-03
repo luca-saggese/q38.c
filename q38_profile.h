@@ -3,6 +3,8 @@
 
 #include "q38_forward.h"
 
+typedef struct q38_forward_cuda_telemetry q38_forward_cuda_telemetry;
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,7 +30,32 @@ typedef struct {
     uint64_t allocation_count;
     uint64_t allocation_bytes;
     double elapsed_ms;
+    uint64_t resident_hits;
+    uint64_t resident_misses;
+    uint64_t upload_bytes;
+    double upload_ms;
+    double kernel_ms;
+    double backend_overhead_ms;
 } q38_profile_record;
+
+typedef struct {
+    char subsystem[16];
+    uint32_t layer;
+    char logical_stage[64];
+    char tensor_name[128];
+    uint32_t qtype;
+    size_t rows;
+    size_t cols;
+    size_t bytes;
+    bool resident_hit;
+    bool resident_miss;
+    size_t upload_bytes;
+    double upload_ms;
+    double kernel_ms;
+    double backend_overhead_ms;
+    uint64_t allocation_count;
+    uint64_t sync_count;
+} q38_profile_telemetry_record;
 
 typedef struct {
     q38_profile_record subsystem[Q38_PROFILE_SUBSYSTEM_COUNT];
@@ -37,6 +64,8 @@ typedef struct {
     uint64_t cuda_synchronizations;
     uint64_t allocation_count;
     uint64_t allocation_bytes;
+    size_t telemetry_count;
+    q38_profile_telemetry_record telemetry[4096];
 } q38_profile;
 
 void q38_profile_init(q38_profile *profile);
@@ -51,6 +80,8 @@ void q38_profile_record_allocation(q38_profile *profile,
                                   q38_profile_subsystem subsystem,
                                   size_t bytes);
 void q38_profile_record_runtime_allocation(q38_profile *profile, size_t bytes);
+void q38_profile_record_cuda_telemetry(
+    q38_profile *profile, const q38_forward_cuda_telemetry *telemetry);
 bool q38_profile_json(const q38_profile *profile, char *buffer,
                       size_t buffer_len);
 

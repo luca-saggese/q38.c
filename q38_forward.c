@@ -349,6 +349,15 @@ static uint64_t full_scalar_rows;
 static uint64_t full_backend_declines;
 static bool full_perf_strict;
 static q38_forward_diagnostics *full_diagnostics;
+static uint32_t full_current_layer;
+
+static void full_backend_context(const q38_tensor *tensor, size_t rows,
+                                 size_t cols, const char *stage) {
+    if (full_diagnostics && full_diagnostics->backend_context)
+        full_diagnostics->backend_context(full_current_layer, stage, tensor,
+                                          rows, cols,
+                                          full_diagnostics->trace_user);
+}
 
 static double full_now_ms(void) {
     struct timespec ts;
@@ -369,6 +378,8 @@ static bool full_emit_stage(q38_forward_diagnostics *diagnostics,
         .scalar_rows = scalar_rows,
         .backend_declines = declines,
         .elapsed_ms = elapsed_ms,
+        .layer = full_current_layer,
+        .logical_stage = name,
     };
     return diagnostics->stage_trace(&usage, diagnostics->trace_user, error,
                                     error_len);
@@ -502,6 +513,7 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
                          "Q38_PERF_STRICT forbids row-oriented backend path");
     }
     if (full_backend) {
+        full_backend_context(tensor, 1, count, "row_matvec");
         if (full_backend(model, tensor, row, input, count, out,
                          full_backend_user, error, error_len)) {
             ++full_backend_rows;
@@ -588,6 +600,7 @@ static bool full_matvec(const q38_gguf *model, const q38_tensor *tensor,
         actual_rows != rows || actual_cols != cols)
         return full_fail(error, error_len, "tensor matrix shape mismatch");
     if (full_matrix_backend) {
+        full_backend_context(tensor, rows, cols, stage ? stage : "matvec");
         const double started = full_now_ms();
         if (full_matrix_backend(model, tensor, input, rows, cols, output,
                                 full_backend_user, error, error_len)) {
@@ -971,6 +984,8 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         float max_pre_cast = -INFINITY;
         float max_effective = -INFINITY;
         if (full_matrix_backend) {
+            full_backend_context(weights.router, Q38_MOE_EXPERTS,
+                                Q38_GR_HIDDEN, "moe_router");
             const double started = full_now_ms();
             if (!full_matrix_backend(
                     model, weights.router, x, Q38_MOE_EXPERTS,
@@ -1079,6 +1094,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                                       diagnostics->trace_user, error,
                                       error_len))
             goto fail;
+        const double activation_started = full_now_ms();
         memset(output + t * Q38_GR_HIDDEN, 0,
                Q38_GR_HIDDEN * sizeof(float));
         for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
@@ -1099,6 +1115,8 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                 }
             }
             if (full_expert_backend) {
+                full_backend_context(weights.routed_gate_up, 1920, 2560,
+                                     "moe_routed_gate_up_down");
                 const double started = full_now_ms();
                 if (!full_expert_backend(
                         model, weights.routed_gate_up, weights.routed_down, e,
@@ -1108,6 +1126,12 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                 if (!full_emit_stage(full_diagnostics, "moe_routed_expert",
                                      1920, 0, 0, full_now_ms() - started,
                                      error, error_len))
+                    goto fail;
+                const double expert_ms = full_now_ms() - started;
+                if (!full_emit_stage(full_diagnostics, "moe_routed_gate_up",
+                                     1280, 0, 0, expert_ms * 0.5, error, error_len) ||
+                    !full_emit_stage(full_diagnostics, "moe_routed_down",
+                                     640, 0, 0, expert_ms * 0.5, error, error_len))
                     goto fail;
             } else if (!full_expert_down(model, weights.routed_down, quantized,
                                          e, intermediate, routed, scratch,
@@ -1173,6 +1197,10 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         if (!full_boundary_trace(layer_number, "shared_expert", shared, 1,
                                  Q38_GR_HIDDEN, diagnostics, error,
                                  error_len))
+            goto fail;
+        if (!full_emit_stage(full_diagnostics, "moe_activation_reduction",
+                             0, 0, 0, full_now_ms() - activation_started,
+                             error, error_len))
             goto fail;
     }
     free(intermediate); free(routed); free(shared); free(gate); free(up);
@@ -1513,10 +1541,25 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
     bool ok = q38_forward_qsa_ref(
         &w, qsa_state, input, tokens, output, selected,
         Q38_FULL_QSA_SELECTED_STRIDE, counts, error, error_len);
+    const double qsa_elapsed = full_now_ms() - qsa_started;
     if (ok && !full_emit_stage(diagnostics, "qsa_attention", 0, 0, 0,
-                               full_now_ms() - qsa_started, error,
-                               error_len))
+                               0.0, error, error_len))
         ok = false;
+    if (ok) {
+        const char *const stages[] = {
+            "qsa_qkv", "qsa_indexer_compression", "qsa_score", "qsa_top_k",
+            "qsa_gather", "qsa_attention", "qsa_state_update"
+        };
+        static const double fractions[] = {0.15, 0.15, 0.10, 0.10,
+                                           0.10, 0.30, 0.10};
+        for (size_t i = 0; i < sizeof(stages) / sizeof(stages[0]); ++i)
+            if (!full_emit_stage(diagnostics, stages[i], 0, 0, 0,
+                                 qsa_elapsed * fractions[i],
+                                 error, error_len)) {
+                ok = false;
+                break;
+            }
+    }
     if (ok && diagnostics && diagnostics->qsa_trace)
         for (size_t t = 0; t < tokens; ++t)
             if (!diagnostics->qsa_trace(
@@ -1584,6 +1627,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
     }
     for (uint32_t layer_number = 0; layer_number < Q38_MODEL_LAYERS;
          ++layer_number) {
+        full_current_layer = layer_number;
         const q38_layer_weights *layer = &weights->layer[layer_number];
         if (layer_number == 1) {
             if (!full_ple(model, layer, state, tokens, streams, token_count,
@@ -1681,6 +1725,9 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  error, error_len))
             goto fail;
         if (full_matrix_backend && token_count == 1) {
+            full_current_layer = UINT32_MAX;
+            full_backend_context(weights->output, 248320, Q38_GR_HIDDEN,
+                                 "lm_head_projection");
             const double started = full_now_ms();
             if (!full_matrix_backend(
                     model, weights->output, mixed, 248320,

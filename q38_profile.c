@@ -1,4 +1,5 @@
 #include "q38_profile.h"
+#include "q38_forward_cuda.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -84,25 +85,80 @@ void q38_profile_record_runtime_allocation(q38_profile *profile, size_t bytes) {
     profile->allocation_bytes += bytes;
 }
 
+void q38_profile_record_cuda_telemetry(
+    q38_profile *profile, const q38_forward_cuda_telemetry *telemetry) {
+    if (!profile || !telemetry || profile->telemetry_count >=
+        sizeof(profile->telemetry) / sizeof(profile->telemetry[0]))
+        return;
+    q38_profile_telemetry_record *out =
+        &profile->telemetry[profile->telemetry_count++];
+    memset(out, 0, sizeof(*out));
+    snprintf(out->subsystem, sizeof(out->subsystem), "%s",
+             telemetry->subsystem ? telemetry->subsystem : "unknown");
+    snprintf(out->logical_stage, sizeof(out->logical_stage), "%s",
+             telemetry->logical_stage ? telemetry->logical_stage : "");
+    snprintf(out->tensor_name, sizeof(out->tensor_name), "%s",
+             telemetry->tensor_name ? telemetry->tensor_name : "");
+    out->layer = telemetry->layer;
+    out->qtype = telemetry->qtype;
+    out->rows = telemetry->rows;
+    out->cols = telemetry->cols;
+    out->bytes = telemetry->bytes;
+    out->resident_hit = telemetry->resident_hit;
+    out->resident_miss = telemetry->resident_miss;
+    out->upload_bytes = telemetry->upload_bytes;
+    out->upload_ms = telemetry->upload_ms;
+    out->kernel_ms = telemetry->kernel_ms;
+    out->backend_overhead_ms = telemetry->backend_overhead_ms;
+    out->allocation_count = telemetry->allocation_count;
+    out->sync_count = telemetry->sync_count;
+    q38_profile_record *aggregate =
+        q38_profile_get(profile, classify(telemetry->subsystem));
+    if (aggregate) {
+        aggregate->resident_hits += telemetry->resident_hit ? 1 : 0;
+        aggregate->resident_misses += telemetry->resident_miss ? 1 : 0;
+        aggregate->upload_bytes += telemetry->upload_bytes;
+        aggregate->upload_ms += telemetry->upload_ms;
+        aggregate->kernel_ms += telemetry->kernel_ms;
+        aggregate->backend_overhead_ms += telemetry->backend_overhead_ms;
+    }
+}
+
 bool q38_profile_json(const q38_profile *profile, char *buffer,
                       size_t buffer_len) {
     if (!profile || !buffer || !buffer_len) return false;
-    int written = snprintf(
-        buffer, buffer_len,
-        "{\"version\":1,\"cuda_elapsed_ms\":%.6f,\"cuda_synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"subsystems\":["
-        "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f},"
-        "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f},"
-        "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f},"
-        "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f},"
-        "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f}]}",
-        profile->cuda_elapsed_ms, profile->cuda_synchronizations,
-        profile->allocation_count, profile->allocation_bytes,
-        profile->subsystem[0].name, profile->subsystem[0].callback_count, profile->subsystem[0].kernel_launches, profile->subsystem[0].synchronizations, profile->subsystem[0].allocation_count, profile->subsystem[0].allocation_bytes, profile->subsystem[0].elapsed_ms,
-        profile->subsystem[1].name, profile->subsystem[1].callback_count, profile->subsystem[1].kernel_launches, profile->subsystem[1].synchronizations, profile->subsystem[1].allocation_count, profile->subsystem[1].allocation_bytes, profile->subsystem[1].elapsed_ms,
-        profile->subsystem[2].name, profile->subsystem[2].callback_count, profile->subsystem[2].kernel_launches, profile->subsystem[2].synchronizations, profile->subsystem[2].allocation_count, profile->subsystem[2].allocation_bytes, profile->subsystem[2].elapsed_ms,
-        profile->subsystem[3].name, profile->subsystem[3].callback_count, profile->subsystem[3].kernel_launches, profile->subsystem[3].synchronizations, profile->subsystem[3].allocation_count, profile->subsystem[3].allocation_bytes, profile->subsystem[3].elapsed_ms,
-        profile->subsystem[4].name, profile->subsystem[4].callback_count, profile->subsystem[4].kernel_launches, profile->subsystem[4].synchronizations, profile->subsystem[4].allocation_count, profile->subsystem[4].allocation_bytes, profile->subsystem[4].elapsed_ms);
-    return written >= 0 && (size_t)written < buffer_len;
+    size_t used = 0;
+#define APPEND(...) do { \
+        int n__ = snprintf(buffer + used, buffer_len - used, __VA_ARGS__); \
+        if (n__ < 0 || (size_t)n__ >= buffer_len - used) return false; \
+        used += (size_t)n__; \
+    } while (0)
+    APPEND("{\"version\":1,\"cuda_elapsed_ms\":%.9g,\"cuda_synchronizations\":%llu,\"allocation_count\":%llu,\"allocation_bytes\":%llu,\"subsystems\":[",
+           profile->cuda_elapsed_ms, (unsigned long long)profile->cuda_synchronizations,
+           (unsigned long long)profile->allocation_count, (unsigned long long)profile->allocation_bytes);
+    for (size_t i = 0; i < Q38_PROFILE_SUBSYSTEM_COUNT; ++i) {
+        const q38_profile_record *r = &profile->subsystem[i];
+        APPEND("%s{\"name\":\"%s\",\"callbacks\":%llu,\"kernel_launches\":%llu,\"synchronizations\":%llu,\"allocation_count\":%llu,\"allocation_bytes\":%llu,\"elapsed_ms\":%.9g,\"resident_hits\":%llu,\"resident_misses\":%llu,\"upload_bytes\":%llu,\"upload_ms\":%.9g,\"kernel_ms\":%.9g,\"backend_overhead_ms\":%.9g}",
+               i ? "," : "", r->name, (unsigned long long)r->callback_count,
+               (unsigned long long)r->kernel_launches, (unsigned long long)r->synchronizations,
+               (unsigned long long)r->allocation_count, (unsigned long long)r->allocation_bytes,
+               r->elapsed_ms, (unsigned long long)r->resident_hits,
+               (unsigned long long)r->resident_misses, (unsigned long long)r->upload_bytes,
+               r->upload_ms, r->kernel_ms, r->backend_overhead_ms);
+    }
+    APPEND("],\"records\":[");
+    for (size_t i = 0; i < profile->telemetry_count; ++i) {
+        const q38_profile_telemetry_record *r = &profile->telemetry[i];
+        APPEND("%s{\"subsystem\":\"%s\",\"layer\":%u,\"logical_stage\":\"%s\",\"tensor_name\":\"%s\",\"qtype\":%u,\"rows\":%zu,\"cols\":%zu,\"bytes\":%zu,\"resident_hit\":%s,\"resident_miss\":%s,\"upload_bytes\":%zu,\"upload_ms\":%.9g,\"kernel_ms\":%.9g,\"backend_overhead_ms\":%.9g,\"allocation_count\":%llu,\"sync_count\":%llu}",
+               i ? "," : "", r->subsystem, r->layer, r->logical_stage,
+               r->tensor_name, r->qtype, r->rows, r->cols, r->bytes,
+               r->resident_hit ? "true" : "false", r->resident_miss ? "true" : "false",
+               r->upload_bytes, r->upload_ms, r->kernel_ms, r->backend_overhead_ms,
+               (unsigned long long)r->allocation_count, (unsigned long long)r->sync_count);
+    }
+    APPEND("]}");
+#undef APPEND
+    return true;
 }
 
 bool q38_profile_boundary_trace(uint32_t layer, const char *boundary,
@@ -129,5 +185,20 @@ bool q38_profile_stage_trace(const q38_forward_stage_usage *usage, void *user,
     record->callback_count++;
     record->kernel_launches += usage->matrix_calls;
     record->elapsed_ms += usage->elapsed_ms;
+    if (profile->telemetry_count <
+        sizeof(profile->telemetry) / sizeof(profile->telemetry[0])) {
+        q38_profile_telemetry_record *event =
+            &profile->telemetry[profile->telemetry_count++];
+        memset(event, 0, sizeof(*event));
+        snprintf(event->subsystem, sizeof(event->subsystem), "%s",
+                 record->name ? record->name : "unknown");
+        snprintf(event->logical_stage, sizeof(event->logical_stage), "%s",
+                 usage->logical_stage ? usage->logical_stage :
+                 (usage->name ? usage->name : ""));
+        event->layer = usage->layer;
+        event->backend_overhead_ms = usage->elapsed_ms;
+        event->allocation_count = record->allocation_count;
+        event->sync_count = record->synchronizations;
+    }
     return true;
 }

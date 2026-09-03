@@ -1,5 +1,6 @@
 #include "q38_forward.h"
 #include "q38_forward_cuda.h"
+#include "q38_profile.h"
 #include "q38_gguf.h"
 #include "q38_weights.h"
 
@@ -19,8 +20,27 @@ static double now_ms(void) {
 typedef struct {
     double gdn, lm_head, moe, qsa, ple;
     double moe_router, moe_routed_expert, moe_shared_gate;
-    double moe_shared_up, moe_shared_down;
+    double moe_shared_up, moe_shared_down, moe_routed_gate_up;
+    double moe_routed_down, moe_activation_reduction;
+    double qsa_qkv, qsa_indexer_compression, qsa_score, qsa_top_k;
+    double qsa_gather, qsa_attention, qsa_state_update;
 } stages;
+
+static q38_forward_cuda_context *backend_cuda;
+static q38_profile *stage_profile;
+
+static void backend_context(uint32_t layer, const char *stage,
+                            const q38_tensor *tensor, size_t rows,
+                            size_t cols, void *user) {
+    (void)tensor; (void)rows; (void)cols;
+    (void)user;
+    q38_forward_cuda_set_stage_context(backend_cuda, layer, stage);
+}
+
+static void telemetry_observer(const q38_forward_cuda_telemetry *telemetry,
+                               void *user) {
+    q38_profile_record_cuda_telemetry((q38_profile *)user, telemetry);
+}
 
 static bool stage_trace(const q38_forward_stage_usage *u, void *user,
                         char *error, size_t error_len) {
@@ -34,13 +54,26 @@ static bool stage_trace(const q38_forward_stage_usage *u, void *user,
     else if (strstr(u->name, "gdn")) dst = &s->gdn;
     else if (strstr(u->name, "moe_router")) dst = &s->moe_router;
     else if (strstr(u->name, "moe_routed_expert")) dst = &s->moe_routed_expert;
+    else if (strstr(u->name, "moe_routed_gate_up")) dst = &s->moe_routed_gate_up;
+    else if (strstr(u->name, "moe_routed_down")) dst = &s->moe_routed_down;
+    else if (strstr(u->name, "moe_activation_reduction")) dst = &s->moe_activation_reduction;
     else if (strstr(u->name, "moe_shared_gate")) dst = &s->moe_shared_gate;
     else if (strstr(u->name, "moe_shared_up")) dst = &s->moe_shared_up;
     else if (strstr(u->name, "moe_shared_down")) dst = &s->moe_shared_down;
     else if (strstr(u->name, "moe")) dst = &s->moe;
-    else if (strstr(u->name, "qsa")) dst = &s->qsa;
+    else if (strstr(u->name, "qsa_qkv")) dst = &s->qsa_qkv;
+    else if (strstr(u->name, "qsa_indexer_compression")) dst = &s->qsa_indexer_compression;
+    else if (strstr(u->name, "qsa_score")) dst = &s->qsa_score;
+    else if (strstr(u->name, "qsa_top_k")) dst = &s->qsa_top_k;
+    else if (strstr(u->name, "qsa_gather")) dst = &s->qsa_gather;
+    else if (strstr(u->name, "qsa_attention")) dst = &s->qsa_attention;
+    else if (strstr(u->name, "qsa_state_update")) dst = &s->qsa_state_update;
+    if (u->name && strstr(u->name, "qsa")) s->qsa += u->elapsed_ms;
     else if (strstr(u->name, "ple")) dst = &s->ple;
     if (dst) *dst += u->elapsed_ms;
+    if (stage_profile &&
+        !q38_profile_stage_trace(u, stage_profile, error, error_len))
+        return false;
     return true;
 }
 
@@ -61,6 +94,10 @@ int main(int argc, char **argv) {
         q38_forward_cuda_context_create(error, sizeof(error));
     float *logits1 = calloc(248320, sizeof(float));
     float *logits2 = calloc(248320, sizeof(float));
+    q38_forward_state state;
+    memset(&state, 0, sizeof(state));
+    q38_profile profile;
+    q38_profile_init(&profile);
     if (!cuda || !logits1 || !logits2 ||
         !q38_weights_bind_subset(model, 47, &weights, error, sizeof(error)) ||
         !q38_forward_cuda_prepare_lm_head(cuda, model, weights.output, error,
@@ -68,18 +105,29 @@ int main(int argc, char **argv) {
         fprintf(stderr, "%s\n", error[0] ? error : "setup failed");
         return 1;
     }
+    q38_forward_cuda_set_telemetry_observer(cuda, telemetry_observer, &profile);
+    backend_cuda = cuda;
+    if (!q38_forward_state_init(&state, &weights, 248044, error,
+                                sizeof(error))) {
+        fprintf(stderr, "%s\n", error);
+        return 1;
+    }
+    FILE *artifact = fopen(argc > 2 ? argv[2] :
+                           "artifacts/m7/canonical_cold_warm.jsonl", "w");
+    if (!artifact) return 1;
     const uint32_t token = 9419;
     for (int run = 1; run <= 6; ++run) {
-        q38_forward_state state;
-        memset(&state, 0, sizeof(state));
         stages s = {0};
+        q38_profile_destroy(&profile);
+        q38_profile_init(&profile);
+        stage_profile = &profile;
+        q38_forward_cuda_set_telemetry_observer(cuda, telemetry_observer, &profile);
         q38_forward_diagnostics d;
         memset(&d, 0, sizeof(d));
         d.stage_trace = stage_trace;
+        d.backend_context = backend_context;
         d.trace_user = &s;
         float *logits = run == 1 ? logits1 : logits2;
-        if (!q38_forward_state_init(&state, &weights, 248044, error,
-                                    sizeof(error))) return 1;
         q38_forward_cuda_residency_stats before, after;
         q38_forward_cuda_get_residency_stats(cuda, &before);
         double start = now_ms();
@@ -90,7 +138,11 @@ int main(int argc, char **argv) {
         double wall = now_ms() - start;
         q38_forward_cuda_get_residency_stats(cuda, &after);
         size_t best = argmax(logits, 248320);
-        printf(        "{\"run\":%d,\"wall_ms\":%.6f,\"kernel_ms\":%.6f,"
+        char *telemetry = calloc(1024 * 1024, 1);
+        if (!telemetry || !q38_profile_json(&profile, telemetry, 1024 * 1024)) {
+            free(telemetry); fclose(artifact); return 1;
+        }
+        printf(        "{\"run\":%d,\"cold\":%s,\"wall_ms\":%.6f,"
         "\"matrix_upload_bytes\":%zu,\"matrix_upload_ms\":null,"
         "\"lm_head_upload_bytes\":0,\"lm_head_allocation_count\":0,"
         "\"allocations\":null,\"cuda_allocations\":null,"
@@ -99,17 +151,40 @@ int main(int argc, char **argv) {
                "\"QSA_ms\":%.6f,\"PLE_ms\":%.6f,\"argmax\":%zu,"
                "\"moe_router_ms\":%.6f,\"moe_routed_expert_ms\":%.6f,"
                "\"moe_shared_gate_ms\":%.6f,\"moe_shared_up_ms\":%.6f,"
-               "\"moe_shared_down_ms\":%.6f,"
+               "\"moe_shared_down_ms\":%.6f,\"moe_routed_gate_up_ms\":%.6f,"
+               "\"moe_routed_down_ms\":%.6f,\"moe_activation_reduction_ms\":%.6f,"
+               "\"qsa_qkv_ms\":%.6f,\"qsa_indexer_compression_ms\":%.6f,"
+               "\"qsa_score_ms\":%.6f,\"qsa_top_k_ms\":%.6f,\"qsa_gather_ms\":%.6f,"
+               "\"qsa_attention_ms\":%.6f,\"qsa_state_update_ms\":%.6f,"
+               "\"telemetry\":%s,"
                "\"correctness\":%s,\"stable_device_pointer\":%s}\n",
-               run, wall, s.lm_head, after.matrix_upload_bytes - before.matrix_upload_bytes,
+               run, run == 1 ? "true" : "false", wall, after.matrix_upload_bytes - before.matrix_upload_bytes,
                after.resident_hits - before.resident_hits,
                after.resident_misses - before.resident_misses, s.gdn,
                s.lm_head, s.moe, s.qsa, s.ple, best, s.moe_router,
                s.moe_routed_expert, s.moe_shared_gate, s.moe_shared_up,
-               s.moe_shared_down, ok ? "true" : "false",
+               s.moe_shared_down, s.moe_routed_gate_up, s.moe_routed_down,
+               s.moe_activation_reduction, s.qsa_qkv, s.qsa_indexer_compression,
+               s.qsa_score, s.qsa_top_k, s.qsa_gather, s.qsa_attention,
+               s.qsa_state_update, telemetry, ok ? "true" : "false",
                after.lm_head_device_pointer ? "true" : "false");
-        q38_forward_state_destroy(&state);
+        fprintf(artifact,
+                "{\"run\":%d,\"cold\":%s,\"wall_ms\":%.6f,\"telemetry\":%s,"
+                "\"moe\":{\"router_ms\":%.6f,\"routed_gate_up_ms\":%.6f,"
+                "\"routed_down_ms\":%.6f,\"shared_gate_ms\":%.6f,"
+                "\"shared_up_ms\":%.6f,\"shared_down_ms\":%.6f,"
+                "\"activation_reduction_ms\":%.6f},\"qsa\":{\"q_k_v_ms\":%.6f,"
+                "\"indexer_compression_ms\":%.6f,\"score_ms\":%.6f,"
+                "\"top_k_ms\":%.6f,\"gather_ms\":%.6f,\"attention_ms\":%.6f,"
+                "\"state_update_ms\":%.6f}}\n", run, run == 1 ? "true" : "false",
+                wall, telemetry, s.moe_router, s.moe_routed_gate_up,
+                s.moe_routed_down, s.moe_shared_gate, s.moe_shared_up,
+                s.moe_shared_down, s.moe_activation_reduction, s.qsa_qkv,
+                s.qsa_indexer_compression, s.qsa_score, s.qsa_top_k,
+                s.qsa_gather, s.qsa_attention, s.qsa_state_update);
+        free(telemetry);
         if (!ok) { fprintf(stderr, "%s\n", error); return 1; }
+        if (run < 6) q38_forward_state_reset(&state);
     }
     if (argmax(logits1, 248320) != argmax(logits2, 248320) ||
         memcmp(logits1, logits2, 248320 * sizeof(float)) != 0) {
@@ -117,6 +192,9 @@ int main(int argc, char **argv) {
         return 1;
     }
     free(logits1); free(logits2);
+    fclose(artifact);
+    q38_forward_state_destroy(&state);
+    q38_profile_destroy(&profile);
     q38_forward_cuda_context_destroy(cuda);
     q38_gguf_close(model);
     return 0;

@@ -18,9 +18,23 @@
 
 typedef struct {
     q38_profile *profile;
+    q38_forward_cuda_context *cuda;
     uint64_t matrix_calls, backend_rows, scalar_rows, declines;
     double row_ms, launch_ms, qsa_ms;
 } profile_context;
+
+static void backend_context(uint32_t layer, const char *stage,
+                            const q38_tensor *tensor, size_t rows,
+                            size_t cols, void *user) {
+    (void)tensor; (void)rows; (void)cols;
+    profile_context *context = (profile_context *)user;
+    if (context) q38_forward_cuda_set_stage_context(context->cuda, layer, stage);
+}
+
+static void cuda_telemetry(const q38_forward_cuda_telemetry *telemetry,
+                           void *user) {
+    q38_profile_record_cuda_telemetry((q38_profile *)user, telemetry);
+}
 
 static double now_ms(void) {
     struct timespec ts;
@@ -102,12 +116,18 @@ static bool write_profile_files(const char *dir, double wall_ms, uint32_t argmax
                                 const q38_memory_snapshot *memory,
                                 const q38_profile *profile,
                                 const profile_context *context) {
-    char path[512], telemetry[4096], memory_json[1024], bench[6500],
-        decode[5200];
+    char path[512], telemetry[1024 * 1024], memory_json[1024];
+    char *bench = NULL, *decode = NULL;
     if (!q38_profile_json(profile, telemetry, sizeof(telemetry))) return false;
     q38_memory_snapshot_json(memory, memory_json, sizeof(memory_json));
+    bench = (char *)malloc(strlen(telemetry) + 2048);
+    decode = (char *)malloc(strlen(telemetry) + 2048);
+    if (!bench || !decode) {
+        free(bench); free(decode);
+        return false;
+    }
     snprintf(path, sizeof(path), "%s/baseline_bench.json", dir);
-    snprintf(bench, sizeof(bench),
+    snprintf(bench, strlen(telemetry) + 2048,
              "{\"format\":\"q38-m7-bench-v1\",\"case\":\"S\","
              "\"prompt_tokens\":1,\"decode_tokens\":1,\"runs\":1,"
              "\"wall_ms\":%.9g,\"tokens_per_second\":%.9g,\"argmax\":%u,"
@@ -124,9 +144,12 @@ static bool write_profile_files(const char *dir, double wall_ms, uint32_t argmax
              fmax(0.0, profile->cuda_elapsed_ms -
                   context->row_ms - context->launch_ms -
                   context->qsa_ms));
-    if (!write_file(path, bench)) return false;
+    if (!write_file(path, bench)) {
+        free(bench); free(decode);
+        return false;
+    }
     snprintf(path, sizeof(path), "%s/decode_profile.json", dir);
-    snprintf(decode, sizeof(decode),
+    snprintf(decode, strlen(telemetry) + 2048,
              "{\"format\":\"q38-m7-decode-profile-v1\","
              "\"classification\":{\"row_matvec_dequant\":"
              "\"backend_rows + scalar_rows\","
@@ -141,7 +164,9 @@ static bool write_profile_files(const char *dir, double wall_ms, uint32_t argmax
              fmax(0.0, profile->cuda_elapsed_ms -
                   context->row_ms - context->launch_ms -
                   context->qsa_ms), telemetry);
-    return write_file(path, decode);
+    const bool ok = write_file(path, decode);
+    free(bench); free(decode);
+    return ok;
 }
 
 int main(int argc, char **argv) {
@@ -183,9 +208,12 @@ int main(int argc, char **argv) {
     ok = ok && q38_forward_cuda_prepare_lm_head(
         cuda, model, weights.output, error, sizeof(error));
     if (!ok) { fprintf(stderr, "lm-head residency: %s\n", error); goto cleanup_state; }
+    context.cuda = cuda;
     (void)q38_profile_cuda_init(&profile);
     q38_forward_cuda_set_allocation_observer(cuda, allocation_observer,
                                              &profile);
+    q38_forward_cuda_set_telemetry_observer(cuda, cuda_telemetry, &profile);
+    diagnostics.backend_context = backend_context;
     (void)q38_profile_cuda_begin(&profile, Q38_PROFILE_LM_HEAD,
                                  q38_forward_cuda_stream(cuda));
     logits = (float *)calloc(Q38_DECODE_VOCAB_SIZE, sizeof(float));

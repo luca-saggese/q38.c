@@ -6,9 +6,11 @@
 
 #include <cuda_runtime.h>
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 struct q38_forward_cuda_context {
     void *device_weights;
@@ -29,9 +31,14 @@ struct q38_forward_cuda_context {
     uint64_t resident_hits;
     uint64_t resident_misses;
     uint64_t cuda_allocations;
+    uint64_t cuda_synchronizations;
     cudaStream_t stream;
     q38_forward_cuda_allocation_observer allocation_observer;
     void *allocation_observer_user;
+    q38_forward_cuda_telemetry_observer telemetry_observer;
+    void *telemetry_observer_user;
+    uint32_t current_layer;
+    const char *current_stage;
 };
 
 static bool fail(char *error, size_t error_len, const char *message) {
@@ -64,7 +71,57 @@ static bool tensor_shape(const q38_tensor *tensor, size_t *rows, size_t *cols) {
 
 static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes,
                           q38_forward_cuda_allocation_observer observer,
-                          void *observer_user);
+                          void *observer_user, uint64_t *allocation_count);
+
+static const char *subsystem_for_stage(const char *stage) {
+    if (stage && strstr(stage, "qsa")) return "qsa";
+    if (stage && (strstr(stage, "moe") || strstr(stage, "expert") ||
+                  strstr(stage, "router"))) return "moe";
+    if (stage && strstr(stage, "ple")) return "ple";
+    if (stage && strstr(stage, "lm_head")) return "lm_head";
+    if (stage && strstr(stage, "gdn")) return "gdn";
+    return "unknown";
+}
+
+static void copy_tensor_name(const q38_tensor *tensor, char *out,
+                             size_t out_len) {
+    if (!out || !out_len) return;
+    size_t n = tensor && tensor->name.len < out_len - 1
+        ? (size_t)tensor->name.len : out_len - 1;
+    if (tensor && tensor->name.ptr && n) memcpy(out, tensor->name.ptr, n);
+    out[n] = '\0';
+}
+
+static double host_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
+
+static float event_elapsed(cudaEvent_t start, cudaEvent_t stop) {
+    float ms = 0.0f;
+    return cudaEventElapsedTime(&ms, start, stop) == cudaSuccess ? ms : 0.0f;
+}
+
+static void emit_telemetry(q38_forward_cuda_context *context,
+                           const q38_tensor *tensor, size_t rows, size_t cols,
+                           size_t bytes, bool hit, bool miss,
+                           size_t upload_bytes, float upload_ms,
+                           float kernel_ms, double wall_ms,
+                           uint64_t allocations, uint64_t syncs) {
+    if (!context || !context->telemetry_observer) return;
+    char name[128];
+    copy_tensor_name(tensor, name, sizeof(name));
+    q38_forward_cuda_telemetry record = {
+        subsystem_for_stage(context->current_stage), context->current_layer,
+        context->current_stage ? context->current_stage : "backend", name,
+        tensor ? tensor->type : 0, rows, cols, bytes, hit, miss, upload_bytes,
+        upload_ms, kernel_ms,
+        (float)fmax(0.0, wall_ms - (double)upload_ms - (double)kernel_ms),
+        allocations, syncs
+    };
+    context->telemetry_observer(&record, context->telemetry_observer_user);
+}
 
 extern "C" bool q38_forward_cuda_expert_backend(
     const q38_gguf *model, const q38_tensor *gate_up,
@@ -90,58 +147,90 @@ extern "C" bool q38_forward_cuda_expert_backend(
     const size_t down_bytes = 640u * down_row_bytes;
     if (!gate_data || !down_data)
         return fail(error, error_len, "invalid CUDA routed expert payload");
+    const double host_started = host_now_ms();
+    cudaEvent_t upload_start = NULL, upload_stop = NULL;
+    cudaEvent_t kernel_start = NULL, kernel_stop = NULL;
+    if (cudaEventCreate(&upload_start) != cudaSuccess ||
+        cudaEventCreate(&upload_stop) != cudaSuccess ||
+        cudaEventCreate(&kernel_start) != cudaSuccess ||
+        cudaEventCreate(&kernel_stop) != cudaSuccess)
+        return fail(error, error_len, "CUDA telemetry event allocation failed");
+    const uint64_t allocation_before = context->cuda_allocations;
     if (!ensure_buffer(&context->device_weights, &context->device_weights_bytes,
                        gate_bytes, context->allocation_observer,
-                       context->allocation_observer_user) ||
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
         !ensure_buffer(&context->device_aux, &context->device_aux_bytes,
                        down_bytes, context->allocation_observer,
-                       context->allocation_observer_user) ||
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements, 2560u * sizeof(float),
                        context->allocation_observer,
-                       context->allocation_observer_user) ||
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
         !ensure_buffer((void **)&context->device_output,
                        &context->device_output_bytes, 2560u * sizeof(float),
                        context->allocation_observer,
-                       context->allocation_observer_user) ||
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
         !ensure_buffer((void **)&context->device_moe_mid,
                        &context->device_moe_mid_bytes,
                        Q38_MOE_INTERMEDIATE * sizeof(float),
                        context->allocation_observer,
-                       context->allocation_observer_user))
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
         return fail(error, error_len, "CUDA routed expert allocation failed");
     const unsigned char *gate_src =
         (const unsigned char *)gate_data + expert * 1280u * gate_row_bytes;
     const unsigned char *down_src =
         (const unsigned char *)down_data + expert * 640u * down_row_bytes;
-    if (cudaMemcpyAsync(context->device_weights, gate_src, gate_bytes,
+    if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(context->device_weights, gate_src, gate_bytes,
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
         cudaMemcpyAsync(context->device_aux, down_src, down_bytes,
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
         cudaMemcpyAsync(context->device_input, input, 2560u * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert upload failed");
-    if (!q38_moe_cuda_expert_q2_workspace(
+    if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess ||
+        !q38_moe_cuda_expert_q2_workspace(
             context->device_weights, context->device_aux,
             context->device_input, context->device_output,
             context->device_moe_mid, context->stream,
-            error, error_len) ||
+            error, error_len))
+        return fail(error, error_len, "CUDA routed expert execution failed");
+    if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess ||
         cudaMemcpyAsync(output, context->device_output, 2560u * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
         cudaStreamSynchronize(context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert execution failed");
+    ++context->cuda_synchronizations;
+    emit_telemetry(context, gate_up, gate_rows, gate_cols, gate_bytes,
+                   false, true, gate_bytes,
+                   event_elapsed(upload_start, upload_stop),
+                   event_elapsed(kernel_start, kernel_stop),
+                   host_now_ms() - host_started,
+                   context->cuda_allocations - allocation_before, 1);
+    emit_telemetry(context, down, down_rows, down_cols, down_bytes,
+                   false, true, down_bytes, 0.0f, 0.0f, 0.0,
+                   0, 0);
+    cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+    cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
     return true;
 }
 
 static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes,
                           q38_forward_cuda_allocation_observer observer,
-                          void *observer_user) {
+                          void *observer_user, uint64_t *allocation_count) {
     if (*capacity >= bytes) return true;
     if (*buffer) cudaFree(*buffer);
     *buffer = NULL;
     *capacity = 0;
     if (cudaMalloc(buffer, bytes) != cudaSuccess) return false;
     if (observer) observer(bytes, observer_user);
+    if (allocation_count) ++*allocation_count;
     *capacity = bytes;
     return true;
 }
@@ -239,6 +328,22 @@ extern "C" void q38_forward_cuda_set_allocation_observer(
     context->allocation_observer_user = user;
 }
 
+extern "C" void q38_forward_cuda_set_telemetry_observer(
+    q38_forward_cuda_context *context,
+    q38_forward_cuda_telemetry_observer observer, void *user) {
+    if (!context) return;
+    context->telemetry_observer = observer;
+    context->telemetry_observer_user = user;
+}
+
+extern "C" void q38_forward_cuda_set_stage_context(
+    q38_forward_cuda_context *context, uint32_t layer,
+    const char *logical_stage) {
+    if (!context) return;
+    context->current_layer = layer;
+    context->current_stage = logical_stage;
+}
+
 extern "C" bool q38_forward_cuda_matvec_backend(
     const q38_gguf *model, const q38_tensor *tensor, size_t row,
     const float *input, size_t cols, float *output, void *user, char *error,
@@ -266,15 +371,18 @@ extern "C" bool q38_forward_cuda_matvec_backend(
     if (!ensure_buffer(&context->device_weights,
                        &context->device_weights_bytes, weight_bytes,
                        context->allocation_observer,
-                       context->allocation_observer_user) ||
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements,
                        cols * sizeof(float), context->allocation_observer,
-                       context->allocation_observer_user) ||
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
         !ensure_buffer((void **)&context->device_output,
                        &context->device_output_bytes, sizeof(float),
                        context->allocation_observer,
-                       context->allocation_observer_user))
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
         return fail(error, error_len, "CUDA forward matvec allocation failed");
 
     if (cudaMemcpyAsync(context->device_weights, row_data, weight_bytes,
@@ -327,6 +435,15 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     if (!data || !tensor->bytes || rows > SIZE_MAX / sizeof(float) ||
         cols > SIZE_MAX / sizeof(float))
         return fail(error, error_len, "invalid CUDA forward matrix payload");
+    const double host_started = host_now_ms();
+    cudaEvent_t upload_start = NULL, upload_stop = NULL;
+    cudaEvent_t kernel_start = NULL, kernel_stop = NULL;
+    if (cudaEventCreate(&upload_start) != cudaSuccess ||
+        cudaEventCreate(&upload_stop) != cudaSuccess ||
+        cudaEventCreate(&kernel_start) != cudaSuccess ||
+        cudaEventCreate(&kernel_stop) != cudaSuccess)
+        return fail(error, error_len, "CUDA telemetry event allocation failed");
+    const uint64_t allocation_before = context->cuda_allocations;
     const bool use_resident_lm_head =
         is_lm_head_tensor(tensor) &&
         context->lm_head_resident && context->lm_head_host_data == data &&
@@ -339,23 +456,31 @@ extern "C" bool q38_forward_cuda_matrix_backend(
          !ensure_buffer(&context->device_weights,
                         &context->device_weights_bytes, (size_t)tensor->bytes,
                         context->allocation_observer,
-                        context->allocation_observer_user)) ||
+                        context->allocation_observer_user,
+                       &context->cuda_allocations)) ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements,
                        cols * sizeof(float), context->allocation_observer,
-                       context->allocation_observer_user) ||
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
         !ensure_buffer((void **)&context->device_output,
                        &context->device_output_bytes,
                        rows * sizeof(float), context->allocation_observer,
-                       context->allocation_observer_user))
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
         return fail(error, error_len, "CUDA forward matrix allocation failed");
-    if ((!use_resident_lm_head &&
+    if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
+        (!use_resident_lm_head &&
          cudaMemcpyAsync(context->device_weights, data, (size_t)tensor->bytes,
                          cudaMemcpyHostToDevice, context->stream) !=
              cudaSuccess) ||
+        cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
         cudaMemcpyAsync(context->device_input, input, cols * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA forward matrix upload failed");
+    if (cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
+        cudaEventRecord(kernel_start, context->stream) != cudaSuccess)
+        return fail(error, error_len, "CUDA matrix timing failed");
     if (!use_resident_lm_head) context->matrix_upload_bytes += tensor->bytes;
     bool launched = false;
     void *weight_storage = use_resident_lm_head
@@ -379,6 +504,8 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     } else {
         return fail(error, error_len, "unsupported CUDA forward matrix type");
     }
+    if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess)
+        return fail(error, error_len, "CUDA kernel timing failed");
 
     if (!launched ||
         cudaMemcpyAsync(output, context->device_output, rows * sizeof(float),
@@ -388,5 +515,15 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         return launched ? fail(error, error_len,
                                "CUDA forward matrix download failed")
                         : false;
+    ++context->cuda_synchronizations;
+    float upload_ms = event_elapsed(upload_start, upload_stop);
+    float kernel_ms = event_elapsed(kernel_start, kernel_stop);
+    emit_telemetry(context, tensor, rows, cols, (size_t)tensor->bytes,
+                   use_resident_lm_head, !use_resident_lm_head,
+                   use_resident_lm_head ? 0 : (size_t)tensor->bytes,
+                   upload_ms, kernel_ms, host_now_ms() - host_started,
+                   context->cuda_allocations - allocation_before, 1);
+    cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+    cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
     return true;
 }
