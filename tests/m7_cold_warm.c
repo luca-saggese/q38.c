@@ -18,6 +18,8 @@ static double now_ms(void) {
 
 typedef struct {
     double gdn, lm_head, moe, qsa, ple;
+    double moe_router, moe_routed_expert, moe_shared_gate;
+    double moe_shared_up, moe_shared_down;
 } stages;
 
 static bool stage_trace(const q38_forward_stage_usage *u, void *user,
@@ -30,6 +32,11 @@ static bool stage_trace(const q38_forward_stage_usage *u, void *user,
     double *dst = NULL;
     if (strstr(u->name, "lm_head")) dst = &s->lm_head;
     else if (strstr(u->name, "gdn")) dst = &s->gdn;
+    else if (strstr(u->name, "moe_router")) dst = &s->moe_router;
+    else if (strstr(u->name, "moe_routed_expert")) dst = &s->moe_routed_expert;
+    else if (strstr(u->name, "moe_shared_gate")) dst = &s->moe_shared_gate;
+    else if (strstr(u->name, "moe_shared_up")) dst = &s->moe_shared_up;
+    else if (strstr(u->name, "moe_shared_down")) dst = &s->moe_shared_down;
     else if (strstr(u->name, "moe")) dst = &s->moe;
     else if (strstr(u->name, "qsa")) dst = &s->qsa;
     else if (strstr(u->name, "ple")) dst = &s->ple;
@@ -90,11 +97,16 @@ int main(int argc, char **argv) {
                "\"resident_hits\":%" PRIu64 ",\"resident_misses\":%" PRIu64
                ",\"GDN_ms\":%.6f,\"LM_head_ms\":%.6f,\"MoE_ms\":%.6f,"
                "\"QSA_ms\":%.6f,\"PLE_ms\":%.6f,\"argmax\":%zu,"
+               "\"moe_router_ms\":%.6f,\"moe_routed_expert_ms\":%.6f,"
+               "\"moe_shared_gate_ms\":%.6f,\"moe_shared_up_ms\":%.6f,"
+               "\"moe_shared_down_ms\":%.6f,"
                "\"correctness\":%s,\"stable_device_pointer\":%s}\n",
                run, wall, s.lm_head, after.matrix_upload_bytes - before.matrix_upload_bytes,
                after.resident_hits - before.resident_hits,
                after.resident_misses - before.resident_misses, s.gdn,
-               s.lm_head, s.moe, s.qsa, s.ple, best, ok ? "true" : "false",
+               s.lm_head, s.moe, s.qsa, s.ple, best, s.moe_router,
+               s.moe_routed_expert, s.moe_shared_gate, s.moe_shared_up,
+               s.moe_shared_down, ok ? "true" : "false",
                after.lm_head_device_pointer ? "true" : "false");
         q38_forward_state_destroy(&state);
         if (!ok) { fprintf(stderr, "%s\n", error); return 1; }
