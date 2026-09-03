@@ -1094,10 +1094,10 @@ $(TEST_DIR)/test_m2_embedding: $(TEST_DIR)/test_m2_embedding.c \
 
 $(TEST_DIR)/test_m2_lm_head: $(TEST_DIR)/test_m2_lm_head.cu \
 		q38_cuda_primitives.o q38_oracle.o q38_weights.o q38_gguf.o \
-		q38_model_config.o q38_ple.o q38_cuda_primitives.h
+		q38_model_config.o q38_ple.o q38_qsa.o q38_cuda_primitives.h
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m2_lm_head.cu \
 		q38_cuda_primitives.o q38_oracle.o q38_weights.o q38_gguf.o \
-		q38_model_config.o q38_ple.o $(CUDA_LDLIBS) -lm
+		q38_model_config.o q38_ple.o q38_qsa.o $(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_m2_memory: $(TEST_DIR)/test_m2_memory.c \
 		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
