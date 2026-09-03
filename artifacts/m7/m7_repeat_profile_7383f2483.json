@@ -1,0 +1,60 @@
+{
+  "argmax": [
+    11,
+    11,
+    11
+  ],
+  "commit_sha": "7383f2483d0c52a10897ad5edd6e123cfc71536e",
+  "format": "q38-m7-repeat-profile-v1",
+  "frozen_baseline_wall_ms": 22550.7901,
+  "median_delta_percent": -18.007153993243012,
+  "median_wall_ms": 18490.0346,
+  "p95_wall_ms": 18773.5461,
+  "runs": [
+    18481.6532,
+    18490.0346,
+    18773.5461
+  ],
+  "subsystems": {
+    "gdn": {
+      "elapsed_ms": [
+        8944.920721,
+        8779.227308,
+        8773.293466
+      ],
+      "launches": 180
+    },
+    "lm_head": {
+      "elapsed_ms": [
+        3809.369847,
+        3958.29387,
+        4362.769128
+      ],
+      "launches": 1
+    },
+    "moe": {
+      "elapsed_ms": [
+        1296.543299,
+        1333.253696,
+        1372.742098
+      ],
+      "launches": 672
+    },
+    "ple": {
+      "elapsed_ms": [
+        38.104932,
+        31.503161,
+        32.485869
+      ],
+      "launches": 2
+    },
+    "qsa": {
+      "elapsed_ms": [
+        334.184644,
+        333.261912,
+        336.097822
+      ],
+      "launches": 24
+    }
+  }
+}
