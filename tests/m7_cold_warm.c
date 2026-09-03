@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <time.h>
 
 static double now_ms(void) {
@@ -28,6 +29,50 @@ typedef struct {
 
 static q38_forward_cuda_context *backend_cuda;
 static q38_profile *stage_profile;
+static FILE *residency_progress;
+
+static void residency_progress_observer(const char *group,
+                                        const q38_tensor *tensor,
+                                        size_t cumulative_bytes,
+                                        size_t free_bytes, size_t total_bytes,
+                                        void *user) {
+    (void)user;
+    if (!residency_progress) return;
+    char name[128], smi[256] = "";
+    {
+        size_t n = tensor && tensor->name.len < sizeof(name) - 1
+            ? (size_t)tensor->name.len : sizeof(name) - 1;
+        if (tensor && tensor->name.ptr && n) memcpy(name, tensor->name.ptr, n);
+        name[n] = '\0';
+    }
+    FILE *pipe = popen("nvidia-smi --query-gpu=memory.used,memory.free,memory.total "
+                       "--format=csv,noheader,nounits 2>/dev/null", "r");
+    if (pipe) {
+        if (fgets(smi, sizeof(smi), pipe)) {
+            size_t n = strlen(smi);
+            while (n && (smi[n - 1] == '\n' || smi[n - 1] == '\r')) smi[--n] = '\0';
+        }
+        pclose(pipe);
+    }
+    unsigned long pages = 0;
+    FILE *statm = fopen("/proc/self/statm", "r");
+    if (statm) { (void)fscanf(statm, "%*lu %lu", &pages); fclose(statm); }
+    unsigned long available = 0;
+    FILE *meminfo = fopen("/proc/meminfo", "r");
+    if (meminfo) {
+        char key[32]; unsigned long value; char unit[16];
+        while (fscanf(meminfo, "%31s %lu %15s", key, &value, unit) == 3)
+            if (strcmp(key, "MemAvailable:") == 0) { available = value * 1024; break; }
+        fclose(meminfo);
+    }
+    fprintf(residency_progress,
+            "{\"group\":\"%s\",\"tensor_name\":\"%s\",\"cumulative_resident_bytes\":%zu,"
+            "\"cuda_free_bytes\":%zu,\"cuda_total_bytes\":%zu,\"rss_bytes\":%lu,"
+            "\"mem_available_bytes\":%lu,\"nvidia_smi\":\"%s\"}\n",
+            group ? group : "unknown", name, cumulative_bytes, free_bytes,
+            total_bytes, pages * (unsigned long)sysconf(_SC_PAGESIZE), available, smi);
+    fflush(residency_progress);
+}
 
 static void backend_context(uint32_t layer, const char *stage,
                             const q38_tensor *tensor, size_t rows,
@@ -98,12 +143,18 @@ int main(int argc, char **argv) {
     memset(&state, 0, sizeof(state));
     q38_profile profile;
     q38_profile_init(&profile);
+    residency_progress = fopen("artifacts/m7/all_non_ple_residency_progress.jsonl",
+                               "w");
+    if (!residency_progress) return 1;
     bool all_non_ple_enabled = false;
     if (!cuda || !logits1 || !logits2 ||
         !q38_weights_bind_subset(model, 47, &weights, error, sizeof(error))) {
         fprintf(stderr, "%s\n", error[0] ? error : "setup failed");
         return 1;
     }
+    setenv("Q38_FORCE_ALL_NON_PLE_RESIDENCY", "1", 1);
+    q38_forward_cuda_set_residency_progress_observer(
+        cuda, residency_progress_observer, NULL);
     all_non_ple_enabled =
         q38_forward_cuda_enable_all_non_ple_residency(
             cuda, model, error, sizeof(error));
@@ -230,6 +281,7 @@ int main(int argc, char **argv) {
     q38_forward_state_destroy(&state);
     q38_profile_destroy(&profile);
     q38_forward_cuda_context_destroy(cuda);
+    fclose(residency_progress);
     q38_gguf_close(model);
     return 0;
 }

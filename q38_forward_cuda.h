@@ -32,6 +32,9 @@ typedef struct q38_forward_cuda_telemetry {
 } q38_forward_cuda_telemetry;
 typedef void (*q38_forward_cuda_telemetry_observer)(
     const q38_forward_cuda_telemetry *telemetry, void *user);
+typedef void (*q38_forward_cuda_residency_progress_observer)(
+    const char *group, const q38_tensor *tensor, size_t cumulative_bytes,
+    size_t free_bytes, size_t total_bytes, void *user);
 typedef struct {
     size_t matrix_upload_bytes;
     uint64_t resident_hits;
@@ -50,6 +53,9 @@ typedef struct {
     uint64_t persistent_ple_tensors;
     uint64_t persistent_ple_entries;
     bool persistent_coverage_ok;
+    const char *persistent_failure;
+    size_t persistent_loaded_bytes;
+    uint64_t persistent_loaded_tensors;
 } q38_forward_cuda_residency_stats;
 
 q38_forward_cuda_context *q38_forward_cuda_context_create(char *error,
@@ -68,6 +74,9 @@ void q38_forward_cuda_set_stage_context(q38_forward_cuda_context *context,
 bool q38_forward_cuda_enable_all_non_ple_residency(
     q38_forward_cuda_context *context, const q38_gguf *model,
     char *error, size_t error_len);
+void q38_forward_cuda_set_residency_progress_observer(
+    q38_forward_cuda_context *context,
+    q38_forward_cuda_residency_progress_observer observer, void *user);
 bool q38_forward_cuda_prepare_lm_head(
     q38_forward_cuda_context *context, const q38_gguf *model,
     const q38_tensor *tensor, char *error, size_t error_len);

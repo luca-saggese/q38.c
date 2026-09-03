@@ -1,5 +1,5 @@
 {
-  "format": "q38-m7-all-non-ple-resident-benchmark-v1",
+  "format": "q38-m7-all-non-ple-resident-baseline-v1",
   "promotion": true,
   "promoted_baseline": true,
   "mode": "forced_progressive",

@@ -58,6 +58,11 @@ struct q38_forward_cuda_context {
     uint64_t persistent_ple_tensors;
     uint64_t persistent_ple_entries;
     bool persistent_coverage_ok;
+    char persistent_failure[256];
+    size_t persistent_loaded_bytes;
+    uint64_t persistent_loaded_tensors;
+    q38_forward_cuda_residency_progress_observer progress_observer;
+    void *progress_observer_user;
 };
 
 static bool fail(char *error, size_t error_len, const char *message) {
@@ -118,6 +123,22 @@ static bool is_ple_tensor(const q38_tensor *tensor) {
     return (len >= 4 && memmem(name, len, ".ple", 4)) ||
            (len >= 11 && memmem(name, len, "ngram_heads", 11)) ||
            (len >= 17 && memmem(name, len, "layer_multipliers", 17));
+}
+
+static const char *residency_group(const q38_tensor *tensor) {
+    if (!tensor || !tensor->name.ptr) return "unknown";
+    const char *name = tensor->name.ptr;
+    size_t len = (size_t)tensor->name.len;
+    if (memmem(name, len, "embed_tokens", 12)) return "embedding";
+    if (memmem(name, len, "hyper_connection", 17)) return "GR";
+    if (memmem(name, len, "linear_attn", 11)) return "GDN";
+    if (memmem(name, len, "self_attn", 9) || memmem(name, len, "indexer", 7))
+        return "QSA";
+    if (memmem(name, len, ".mlp.gate.weight", 16)) return "router";
+    if (memmem(name, len, "shared_expert", 13)) return "shared_experts";
+    if (memmem(name, len, "experts.", 8)) return "routed_experts_Q2";
+    if (memmem(name, len, "lm_head.weight", 14)) return "LM-head";
+    return "unknown";
 }
 
 static persistent_tensor *persistent_find(q38_forward_cuda_context *context,
@@ -331,7 +352,8 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     context->persistent_expected_tensors = count;
     context->persistent_expected_bytes = total;
     size_t free_bytes = 0, total_bytes = 0;
-    if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess &&
+    const bool forced = getenv("Q38_FORCE_ALL_NON_PLE_RESIDENCY") != NULL;
+    if (!forced && cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess &&
         free_bytes && total > free_bytes) {
         if (error && error_len)
             snprintf(error, error_len,
@@ -344,6 +366,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         (persistent_tensor *)calloc(count ? count : 1, sizeof(*entries));
     if (!entries) return fail(error, error_len, "all-non-PLE residency index allocation failed");
     size_t at = 0;
+    size_t loaded_bytes = 0;
     for (uint64_t i = 0; i < model->n_tensors; ++i) {
         const q38_tensor *tensor = &model->tensors[i];
         if (is_ple_tensor(tensor) || !tensor->bytes) continue;
@@ -363,23 +386,78 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
             cudaMemcpyAsync(entries[at].device, host, (size_t)tensor->bytes,
                             cudaMemcpyHostToDevice, context->stream) !=
                 cudaSuccess) {
-            for (size_t j = 0; j <= at; ++j) cudaFree(entries[j].device);
-            free(entries);
-            return fail(error, error_len, "all-non-PLE residency upload failed");
+            cudaFree(entries[at].device);
+            context->persistent = entries;
+            context->persistent_count = at;
+            context->persistent_bytes = loaded_bytes;
+            context->persistent_loaded_bytes = loaded_bytes;
+            context->persistent_loaded_tensors = at;
+            context->all_non_ple_resident = false;
+            char name[128];
+            copy_tensor_name(tensor, name, sizeof(name));
+            if (error && error_len)
+                snprintf(error, error_len,
+                         "all-non-PLE residency upload failed at %s/%s: %s",
+                         residency_group(tensor), name,
+                         cudaGetErrorString(cudaGetLastError()));
+            const char *detail = error && error_len ? error :
+                "all-non-PLE residency upload failed";
+            snprintf(context->persistent_failure,
+                     sizeof(context->persistent_failure), "%s", detail);
+            return false;
         }
         entries[at].host = host;
         entries[at].bytes = (size_t)tensor->bytes;
         ++at;
+        loaded_bytes += (size_t)tensor->bytes;
+        if (cudaStreamSynchronize(context->stream) != cudaSuccess) {
+            char name[128];
+            copy_tensor_name(tensor, name, sizeof(name));
+            if (error && error_len)
+                snprintf(error, error_len,
+                         "all-non-PLE residency copy failed at %s/%s: %s",
+                         residency_group(tensor), name,
+                         cudaGetErrorString(cudaGetLastError()));
+            context->persistent = entries;
+            context->persistent_count = at;
+            context->persistent_bytes = loaded_bytes;
+            context->persistent_loaded_bytes = loaded_bytes;
+            context->persistent_loaded_tensors = at;
+            context->all_non_ple_resident = false;
+            snprintf(context->persistent_failure,
+                     sizeof(context->persistent_failure), "%s",
+                     error && error_len ? error :
+                     "all-non-PLE residency copy failed");
+            return false;
+        }
+        ++context->cuda_synchronizations;
+        size_t progress_free = 0, progress_total = 0;
+        (void)cudaMemGetInfo(&progress_free, &progress_total);
+        if (context->progress_observer)
+            context->progress_observer(
+                residency_group(tensor), tensor, loaded_bytes,
+                progress_free, progress_total,
+                context->progress_observer_user);
     }
     if (cudaStreamSynchronize(context->stream) != cudaSuccess) {
-        for (size_t i = 0; i < at; ++i) cudaFree(entries[i].device);
-        free(entries);
-        return fail(error, error_len, "all-non-PLE residency synchronization failed");
+        context->persistent = entries;
+        context->persistent_count = at;
+        context->persistent_bytes = loaded_bytes;
+        context->persistent_loaded_bytes = loaded_bytes;
+        context->persistent_loaded_tensors = at;
+        context->all_non_ple_resident = false;
+        snprintf(context->persistent_failure,
+                 sizeof(context->persistent_failure),
+                 "all-non-PLE residency synchronization failed: %s",
+                 cudaGetErrorString(cudaGetLastError()));
+        return fail(error, error_len, context->persistent_failure);
     }
     ++context->cuda_synchronizations;
     context->persistent = entries;
     context->persistent_count = at;
-    context->persistent_bytes = total;
+    context->persistent_bytes = loaded_bytes;
+    context->persistent_loaded_bytes = loaded_bytes;
+    context->persistent_loaded_tensors = at;
     context->all_non_ple_resident = true;
     context->persistent_coverage_ok =
         at == context->persistent_expected_tensors &&
@@ -476,6 +554,10 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->persistent_ple_tensors = context->persistent_ple_tensors;
     stats->persistent_ple_entries = context->persistent_ple_entries;
     stats->persistent_coverage_ok = context->persistent_coverage_ok;
+    stats->persistent_failure = context->persistent_failure[0]
+        ? context->persistent_failure : NULL;
+    stats->persistent_loaded_bytes = context->persistent_loaded_bytes;
+    stats->persistent_loaded_tensors = context->persistent_loaded_tensors;
 }
 
 extern "C" void *
@@ -497,6 +579,14 @@ extern "C" void q38_forward_cuda_set_telemetry_observer(
     if (!context) return;
     context->telemetry_observer = observer;
     context->telemetry_observer_user = user;
+}
+
+extern "C" void q38_forward_cuda_set_residency_progress_observer(
+    q38_forward_cuda_context *context,
+    q38_forward_cuda_residency_progress_observer observer, void *user) {
+    if (!context) return;
+    context->progress_observer = observer;
+    context->progress_observer_user = user;
 }
 
 extern "C" void q38_forward_cuda_set_stage_context(
