@@ -30,6 +30,10 @@ bool q38_cuda_q2_matvec(const void *weights, size_t rows, size_t cols,
 bool q38_cuda_bf16_matvec(const uint16_t *weights, size_t rows, size_t cols,
                           const float *input, float *output,
                           cudaStream_t stream, char *error, size_t error_len);
+bool q38_cuda_bf16_matvec_configured(
+    const uint16_t *weights, size_t rows, size_t cols, const float *input,
+    float *output, unsigned threads, cudaStream_t stream, char *error,
+    size_t error_len);
 
 #ifdef __cplusplus
 }

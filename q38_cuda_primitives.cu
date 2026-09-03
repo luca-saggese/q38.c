@@ -163,10 +163,10 @@ __device__ static float bf16_to_float_device(uint16_t bits) {
     return __uint_as_float((uint32_t)bits << 16);
 }
 
+template <unsigned warp_count>
 __global__ static void bf16_matvec_kernel(const uint16_t *weights, size_t rows,
                                           size_t cols, const float *input,
                                           float *output) {
-    constexpr unsigned warp_count = 8;
     const unsigned lane = threadIdx.x & 31u;
     const unsigned warp = threadIdx.x >> 5;
     const size_t row = (size_t)blockIdx.x;
@@ -298,13 +298,32 @@ extern "C" bool q38_cuda_bf16_matvec(const uint16_t *weights, size_t rows,
                                       size_t cols, const float *input,
                                       float *output, cudaStream_t stream,
                                       char *error, size_t error_len) {
+    return q38_cuda_bf16_matvec_configured(
+        weights, rows, cols, input, output, 256, stream, error, error_len);
+}
+
+extern "C" bool q38_cuda_bf16_matvec_configured(
+    const uint16_t *weights, size_t rows, size_t cols, const float *input,
+    float *output, unsigned threads, cudaStream_t stream, char *error,
+    size_t error_len) {
     if (error && error_len) error[0] = '\0';
     if (!weights || !rows || !cols || !input || !output) {
         set_error(error, error_len, "invalid CUDA BF16 matvec arguments");
         return false;
     }
-    bf16_matvec_kernel<<<(unsigned)rows, 256, 0, stream>>>(
-        weights, rows, cols, input, output);
+    if (threads == 128)
+        bf16_matvec_kernel<4><<<(unsigned)rows, 128, 0, stream>>>(
+            weights, rows, cols, input, output);
+    else if (threads == 256)
+        bf16_matvec_kernel<8><<<(unsigned)rows, 256, 0, stream>>>(
+            weights, rows, cols, input, output);
+    else if (threads == 512)
+        bf16_matvec_kernel<16><<<(unsigned)rows, 512, 0, stream>>>(
+            weights, rows, cols, input, output);
+    else {
+        set_error(error, error_len, "unsupported CUDA BF16 matvec geometry");
+        return false;
+    }
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess) {
         if (error && error_len) snprintf(error, error_len, "CUDA BF16 matvec launch failed: %s",

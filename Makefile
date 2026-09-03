@@ -244,6 +244,16 @@ m7-profile-forward: $(TEST_DIR)/m7_profile_forward
 		$(M7_MODEL) \
 		artifacts/m7
 
+$(TEST_DIR)/m7_lm_head_kernel_bench: $(TEST_DIR)/m7_lm_head_kernel_bench.cu \
+		q38_cuda_primitives.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_ple.o q38_qsa.o q38_quant.o
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_lm_head_kernel_bench.cu \
+		q38_cuda_primitives.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_ple.o q38_qsa.o q38_quant.o $(CUDA_LDLIBS) -lm
+
+m7-lm-head-kernel: $(TEST_DIR)/m7_lm_head_kernel_bench
+	@./$(TEST_DIR)/m7_lm_head_kernel_bench $(M7_MODEL)
+
 m7-acceptance: m7-gates $(TEST_DIR)/test_m6_moe_cuda
 	@./$(TEST_DIR)/test_m6_moe_cuda
 	@if [ "$${M7_RUN_FULL:-0}" = 1 ]; then \
