@@ -29,9 +29,13 @@ NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math $(NVCC_ARCH_FLAGS)
 CUDA_LDLIBS ?= -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart
 
 # --- Objects ------------------------------------------------------------
-# q38_cuda.o is compiled by nvcc; the rest by cc.
-C_OBJS := q38.o q38_gguf.o q38_memory.o q38_platform.o
-CUDA_OBJS := q38_cuda.o
+# CUDA kernels are compiled by nvcc; host runtime objects use cc.
+C_OBJS := q38.o q38_gguf.o q38_memory.o q38_platform.o \
+	q38_tokenizer.o q38_decode.o q38_forward.o q38_moe.o q38_weights.o \
+	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+	q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
+CUDA_OBJS := q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
+	q38_gdn.o q38_moe_cuda.o
 Q38_OBJS := $(C_OBJS) $(CUDA_OBJS)
 
 TEST_DIR := tests
@@ -87,7 +91,8 @@ q38_cuda.o: q38_cuda.cu q38_cuda.h q38.h
 	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_cuda.cu
 
 # --- C objects ------------------------------------------------------------
-q38.o: q38.c q38.h q38_gguf.h q38_memory.h q38_platform.h q38_cuda.h
+q38.o: q38.c q38.h q38_gguf.h q38_memory.h q38_platform.h q38_cuda.h \
+	q38_decode.h q38_forward_cuda.h q38_tokenizer.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38.c
 
 q38_gguf.o: q38_gguf.c q38_gguf.h

@@ -13,11 +13,10 @@ extern "C" {
 /* =========================================================================
  * q38 — Qwen3.8-Flash-Next / DGX Spark prototype runtime skeleton.
  *
- * M0 exposes a single, narrow public surface: platform probe, GGUF inspect,
- * tensor inventory, and memory-plan dry run. There is no inference path in
- * M0, and no backend enum: the only supported target is GB10 / SM 12.1 CUDA
- * on Linux aarch64. Anything else is refused explicitly, never silently
- * degraded.
+ * The CLI exposes platform probe, GGUF inspection, memory planning, and a
+ * minimal CUDA generation smoke wrapper. The only supported target is GB10 /
+ * SM 12.1 CUDA on Linux aarch64. Anything else is refused explicitly, never
+ * silently degraded.
  * ========================================================================= */
 
 /* --- Command mode ------------------------------------------------ */
@@ -27,11 +26,15 @@ typedef enum {
     Q38_MODE_INSPECT,      /* --inspect model.gguf */
     Q38_MODE_LIST_TENSORS, /* --list-tensors model.gguf */
     Q38_MODE_MEMORY_PLAN,  /* --memory-plan model.gguf */
+    Q38_MODE_GENERATE,     /* --generate model.gguf */
 } q38_mode;
 
 /* --- Narrowed engine options -------------------------------------- */
 typedef struct {
     const char *model_path;
+    const char *tokenizer_path;
+    const char *prompt;
+    size_t max_tokens;
     int context_hint;     /* KV context size hint (bytes/none, informational) */
     int prefill_hint;     /* prefill chunk hint (informational)               */
     bool inspect;         /* --inspect */
