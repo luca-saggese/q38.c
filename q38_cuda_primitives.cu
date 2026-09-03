@@ -80,16 +80,26 @@ __global__ static void dequant_kernel(uint32_t type, const void *blocks,
 __global__ static void rms_norm_kernel(const float *input, const float *weight,
                                        float *output, size_t elements,
                                        float epsilon) {
-    __shared__ float sum_squares;
-    const unsigned thread = threadIdx.x;
-    if (thread == 0) {
-        float sum = 0.0f;
-        for (size_t i = 0; i < elements; i++) sum += input[i] * input[i];
-        sum_squares = sum;
+    constexpr unsigned warp_count = 8;
+    const unsigned lane = threadIdx.x & 31u;
+    const unsigned warp = threadIdx.x >> 5;
+    __shared__ double warp_sums[warp_count];
+    double sum = 0.0;
+    for (size_t i = threadIdx.x; i < elements; i += blockDim.x)
+        sum += (double)input[i] * (double)input[i];
+    for (unsigned offset = 16; offset; offset >>= 1)
+        sum += __shfl_down_sync(0xffffffffu, sum, offset);
+    if (lane == 0) warp_sums[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        sum = lane < warp_count ? warp_sums[lane] : 0.0;
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0) warp_sums[0] = sum;
     }
     __syncthreads();
-    const float inv_rms = rsqrtf(sum_squares / (float)elements + epsilon);
-    for (size_t i = thread; i < elements; i += blockDim.x)
+    const float inv_rms = rsqrtf(warp_sums[0] / (float)elements + epsilon);
+    for (size_t i = threadIdx.x; i < elements; i += blockDim.x)
         output[i] = input[i] * inv_rms * weight[i];
 }
 
