@@ -66,6 +66,7 @@ M6_ORACLE_TIMEOUT ?= 600
 M6_PYTHON ?= .venv-m6/bin/python
 M6_ORACLE_CPU ?= artifacts/m6/stateful_oracle_cpu_1_noc12.json
 M6_ORACLE_GPU ?= artifacts/m6/stateful_sequence_oracle_resume_probe.json
+M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -77,7 +78,7 @@ M6_ORACLE_GPU ?= artifacts/m6/stateful_sequence_oracle_resume_probe.json
 	m6-stateful-oracle \
 	m6-stateful-sequence-oracle \
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
-	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile
+	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-forward
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
@@ -216,6 +217,25 @@ $(TEST_DIR)/test_m7_profile: $(TEST_DIR)/test_m7_profile.c q38_profile.o \
 
 m7-profile: $(TEST_DIR)/test_m7_profile
 	@./$(TEST_DIR)/test_m7_profile
+
+$(TEST_DIR)/m7_profile_forward: $(TEST_DIR)/m7_profile_forward.c \
+		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o \
+		q38_moe.o q38_weights.o q38_model_config.o q38_ple.o q38_qsa.o \
+		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
+		q38_gr_ref.o q38_profile.o q38_cuda.o q38_forward_cuda.o \
+		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_profile_forward.c \
+		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o \
+		q38_moe.o q38_weights.o q38_model_config.o q38_ple.o q38_qsa.o \
+		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
+		q38_gr_ref.o q38_profile.o q38_cuda.o q38_forward_cuda.o \
+		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
+		$(CUDA_LDLIBS) -lm
+
+m7-profile-forward: $(TEST_DIR)/m7_profile_forward
+	@./$(TEST_DIR)/m7_profile_forward \
+		$(M7_MODEL) \
+		artifacts/m7
 
 m4-c00:
 	@test -f docs/qwen_ple_semantics.md

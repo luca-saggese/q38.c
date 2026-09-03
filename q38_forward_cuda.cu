@@ -20,12 +20,15 @@ struct q38_forward_cuda_context {
     void *device_aux;
     size_t device_aux_bytes;
     cudaStream_t stream;
+    q38_forward_cuda_allocation_observer allocation_observer;
+    void *allocation_observer_user;
 };
 
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
     return false;
 }
+
 
 static bool tensor_shape(const q38_tensor *tensor, size_t *rows, size_t *cols) {
     if (!tensor || !rows || !cols || !tensor->ndim || tensor->ndim > 3)
@@ -44,7 +47,9 @@ static bool tensor_shape(const q38_tensor *tensor, size_t *rows, size_t *cols) {
     return true;
 }
 
-static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes);
+static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes,
+                          q38_forward_cuda_allocation_observer observer,
+                          void *observer_user);
 
 extern "C" bool q38_forward_cuda_expert_backend(
     const q38_gguf *model, const q38_tensor *gate_up,
@@ -71,13 +76,19 @@ extern "C" bool q38_forward_cuda_expert_backend(
     if (!gate_data || !down_data)
         return fail(error, error_len, "invalid CUDA routed expert payload");
     if (!ensure_buffer(&context->device_weights, &context->device_weights_bytes,
-                       gate_bytes) ||
+                       gate_bytes, context->allocation_observer,
+                       context->allocation_observer_user) ||
         !ensure_buffer(&context->device_aux, &context->device_aux_bytes,
-                       down_bytes) ||
+                       down_bytes, context->allocation_observer,
+                       context->allocation_observer_user) ||
         !ensure_buffer((void **)&context->device_input,
-                       &context->device_input_elements, 2560u * sizeof(float)) ||
+                       &context->device_input_elements, 2560u * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user) ||
         !ensure_buffer((void **)&context->device_output,
-                       &context->device_output_bytes, 2560u * sizeof(float)))
+                       &context->device_output_bytes, 2560u * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user))
         return fail(error, error_len, "CUDA routed expert allocation failed");
     const unsigned char *gate_src =
         (const unsigned char *)gate_data + expert * 1280u * gate_row_bytes;
@@ -101,12 +112,15 @@ extern "C" bool q38_forward_cuda_expert_backend(
     return true;
 }
 
-static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes) {
+static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes,
+                          q38_forward_cuda_allocation_observer observer,
+                          void *observer_user) {
     if (*capacity >= bytes) return true;
     if (*buffer) cudaFree(*buffer);
     *buffer = NULL;
     *capacity = 0;
     if (cudaMalloc(buffer, bytes) != cudaSuccess) return false;
+    if (observer) observer(bytes, observer_user);
     *capacity = bytes;
     return true;
 }
@@ -139,6 +153,19 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     free(context);
 }
 
+extern "C" void *
+q38_forward_cuda_stream(q38_forward_cuda_context *context) {
+    return context ? (void *)context->stream : NULL;
+}
+
+extern "C" void q38_forward_cuda_set_allocation_observer(
+    q38_forward_cuda_context *context,
+    q38_forward_cuda_allocation_observer observer, void *user) {
+    if (!context) return;
+    context->allocation_observer = observer;
+    context->allocation_observer_user = user;
+}
+
 extern "C" bool q38_forward_cuda_matvec_backend(
     const q38_gguf *model, const q38_tensor *tensor, size_t row,
     const float *input, size_t cols, float *output, void *user, char *error,
@@ -164,12 +191,17 @@ extern "C" bool q38_forward_cuda_matvec_backend(
     if (cols > SIZE_MAX / sizeof(float))
         return fail(error, error_len, "CUDA forward matvec size overflow");
     if (!ensure_buffer(&context->device_weights,
-                       &context->device_weights_bytes, weight_bytes) ||
+                       &context->device_weights_bytes, weight_bytes,
+                       context->allocation_observer,
+                       context->allocation_observer_user) ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements,
-                       cols * sizeof(float)) ||
+                       cols * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user) ||
         !ensure_buffer((void **)&context->device_output,
-                       &context->device_output_bytes, sizeof(float)))
+                       &context->device_output_bytes, sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user))
         return fail(error, error_len, "CUDA forward matvec allocation failed");
 
     if (cudaMemcpyAsync(context->device_weights, row_data, weight_bytes,
@@ -223,13 +255,16 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         cols > SIZE_MAX / sizeof(float))
         return fail(error, error_len, "invalid CUDA forward matrix payload");
     if (!ensure_buffer(&context->device_weights, &context->device_weights_bytes,
-                       (size_t)tensor->bytes) ||
+                       (size_t)tensor->bytes, context->allocation_observer,
+                       context->allocation_observer_user) ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements,
-                       cols * sizeof(float)) ||
+                       cols * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user) ||
         !ensure_buffer((void **)&context->device_output,
                        &context->device_output_bytes,
-                       rows * sizeof(float)))
+                       rows * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user))
         return fail(error, error_len, "CUDA forward matrix allocation failed");
     if (cudaMemcpyAsync(context->device_weights, data, (size_t)tensor->bytes,
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||

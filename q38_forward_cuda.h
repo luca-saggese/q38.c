@@ -11,10 +11,15 @@ extern "C" {
 #endif
 
 typedef struct q38_forward_cuda_context q38_forward_cuda_context;
+typedef void (*q38_forward_cuda_allocation_observer)(size_t bytes, void *user);
 
 q38_forward_cuda_context *q38_forward_cuda_context_create(char *error,
                                                            size_t error_len);
 void q38_forward_cuda_context_destroy(q38_forward_cuda_context *context);
+void *q38_forward_cuda_stream(q38_forward_cuda_context *context);
+void q38_forward_cuda_set_allocation_observer(
+    q38_forward_cuda_context *context,
+    q38_forward_cuda_allocation_observer observer, void *user);
 
 bool q38_forward_cuda_matvec_backend(
     const q38_gguf *model, const q38_tensor *tensor, size_t row,

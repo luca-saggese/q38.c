@@ -77,8 +77,10 @@ int q38_profile_cuda_end(q38_profile *profile,
     if (status == cudaSuccess)
         status = cudaEventElapsedTime(&elapsed, state->start[subsystem],
                                       state->stop[subsystem]);
-    if (status == cudaSuccess)
-        profile->subsystem[subsystem].elapsed_ms += elapsed;
+    if (status == cudaSuccess) {
+        profile->cuda_elapsed_ms += elapsed;
+        profile->cuda_synchronizations++;
+    }
     state->active[subsystem] = 0;
     return (int)status;
 }

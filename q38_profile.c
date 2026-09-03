@@ -65,17 +65,25 @@ void q38_profile_record_allocation(q38_profile *profile,
     record->allocation_bytes += bytes;
 }
 
+void q38_profile_record_runtime_allocation(q38_profile *profile, size_t bytes) {
+    if (!profile) return;
+    profile->allocation_count++;
+    profile->allocation_bytes += bytes;
+}
+
 bool q38_profile_json(const q38_profile *profile, char *buffer,
                       size_t buffer_len) {
     if (!profile || !buffer || !buffer_len) return false;
     int written = snprintf(
         buffer, buffer_len,
-        "{\"version\":1,\"subsystems\":["
+        "{\"version\":1,\"cuda_elapsed_ms\":%.6f,\"cuda_synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"subsystems\":["
         "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f},"
         "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f},"
         "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f},"
         "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f},"
         "{\"name\":\"%s\",\"callbacks\":%" PRIu64 ",\"kernel_launches\":%" PRIu64 ",\"synchronizations\":%" PRIu64 ",\"allocation_count\":%" PRIu64 ",\"allocation_bytes\":%" PRIu64 ",\"elapsed_ms\":%.6f}]}",
+        profile->cuda_elapsed_ms, profile->cuda_synchronizations,
+        profile->allocation_count, profile->allocation_bytes,
         profile->subsystem[0].name, profile->subsystem[0].callback_count, profile->subsystem[0].kernel_launches, profile->subsystem[0].synchronizations, profile->subsystem[0].allocation_count, profile->subsystem[0].allocation_bytes, profile->subsystem[0].elapsed_ms,
         profile->subsystem[1].name, profile->subsystem[1].callback_count, profile->subsystem[1].kernel_launches, profile->subsystem[1].synchronizations, profile->subsystem[1].allocation_count, profile->subsystem[1].allocation_bytes, profile->subsystem[1].elapsed_ms,
         profile->subsystem[2].name, profile->subsystem[2].callback_count, profile->subsystem[2].kernel_launches, profile->subsystem[2].synchronizations, profile->subsystem[2].allocation_count, profile->subsystem[2].allocation_bytes, profile->subsystem[2].elapsed_ms,

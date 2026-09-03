@@ -33,6 +33,10 @@ typedef struct {
 typedef struct {
     q38_profile_record subsystem[Q38_PROFILE_SUBSYSTEM_COUNT];
     void *cuda_state;
+    double cuda_elapsed_ms;
+    uint64_t cuda_synchronizations;
+    uint64_t allocation_count;
+    uint64_t allocation_bytes;
 } q38_profile;
 
 void q38_profile_init(q38_profile *profile);
@@ -46,6 +50,7 @@ void q38_profile_record_sync(q38_profile *profile,
 void q38_profile_record_allocation(q38_profile *profile,
                                   q38_profile_subsystem subsystem,
                                   size_t bytes);
+void q38_profile_record_runtime_allocation(q38_profile *profile, size_t bytes);
 bool q38_profile_json(const q38_profile *profile, char *buffer,
                       size_t buffer_len);
 
