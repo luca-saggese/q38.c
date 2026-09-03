@@ -25,6 +25,10 @@ struct q38_forward_cuda_context {
     size_t lm_head_device_weights_bytes;
     const void *lm_head_host_data;
     bool lm_head_resident;
+    size_t matrix_upload_bytes;
+    uint64_t resident_hits;
+    uint64_t resident_misses;
+    uint64_t cuda_allocations;
     cudaStream_t stream;
     q38_forward_cuda_allocation_observer allocation_observer;
     void *allocation_observer_user;
@@ -192,6 +196,7 @@ extern "C" bool q38_forward_cuda_prepare_lm_head(
         context->lm_head_device_weights = NULL;
         context->lm_head_device_weights_bytes = 0;
     }
+
     if (!context->lm_head_device_weights &&
         cudaMalloc(&context->lm_head_device_weights, tensor->bytes) !=
             cudaSuccess)
@@ -205,6 +210,20 @@ extern "C" bool q38_forward_cuda_prepare_lm_head(
     context->lm_head_host_data = data;
     context->lm_head_resident = true;
     return true;
+}
+
+extern "C" void q38_forward_cuda_get_residency_stats(
+    const q38_forward_cuda_context *context,
+    q38_forward_cuda_residency_stats *stats) {
+    if (!stats) return;
+    memset(stats, 0, sizeof(*stats));
+    if (!context) return;
+    stats->matrix_upload_bytes = context->matrix_upload_bytes;
+    stats->resident_hits = context->resident_hits;
+    stats->resident_misses = context->resident_misses;
+    stats->cuda_allocations = context->cuda_allocations;
+    stats->lm_head_resident = context->lm_head_resident;
+    stats->lm_head_device_pointer = context->lm_head_device_weights;
 }
 
 extern "C" void *
@@ -312,6 +331,10 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         is_lm_head_tensor(tensor) &&
         context->lm_head_resident && context->lm_head_host_data == data &&
         context->lm_head_device_weights_bytes == tensor->bytes;
+    if (use_resident_lm_head)
+        ++context->resident_hits;
+    else
+        ++context->resident_misses;
     if ((!use_resident_lm_head &&
          !ensure_buffer(&context->device_weights,
                         &context->device_weights_bytes, (size_t)tensor->bytes,
@@ -333,6 +356,7 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         cudaMemcpyAsync(context->device_input, input, cols * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA forward matrix upload failed");
+    if (!use_resident_lm_head) context->matrix_upload_bytes += tensor->bytes;
     bool launched = false;
     void *weight_storage = use_resident_lm_head
                                ? context->lm_head_device_weights

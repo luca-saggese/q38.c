@@ -254,6 +254,20 @@ $(TEST_DIR)/m7_lm_head_kernel_bench: $(TEST_DIR)/m7_lm_head_kernel_bench.cu \
 m7-lm-head-kernel: $(TEST_DIR)/m7_lm_head_kernel_bench
 	@./$(TEST_DIR)/m7_lm_head_kernel_bench $(M7_MODEL)
 
+$(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
+		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o \
+		q38_forward_cuda.o q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_cold_warm.c \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
+		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_forward_cuda.o \
+		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o $(CUDA_LDLIBS) -lm
+
+m7-cold-warm: $(TEST_DIR)/m7_cold_warm
+	@./$(TEST_DIR)/m7_cold_warm $(M7_MODEL)
+
 m7-acceptance: m7-gates $(TEST_DIR)/test_m6_moe_cuda
 	@./$(TEST_DIR)/test_m6_moe_cuda
 	@if [ "$${M7_RUN_FULL:-0}" = 1 ]; then \
