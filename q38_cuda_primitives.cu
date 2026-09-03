@@ -97,8 +97,8 @@ __global__ static void rms_norm_kernel(const float *input, const float *weight,
     constexpr unsigned warp_count = 8;
     const unsigned lane = threadIdx.x & 31u;
     const unsigned warp = threadIdx.x >> 5;
-    __shared__ double warp_sums[warp_count];
-    double sum = 0.0;
+    __shared__ float warp_sums[warp_count];
+    float sum = 0.0f;
     for (size_t i = threadIdx.x; i < elements; i += blockDim.x)
         sum += (double)input[i] * (double)input[i];
     for (unsigned offset = 16; offset; offset >>= 1)
@@ -144,15 +144,15 @@ __global__ static void q2_matvec_kernel(const q38_q2_k_block *weights,
         const float d = half_to_float_device(block->d);
         const float dmin = half_to_float_device(block->dmin);
         for (unsigned element = lane; element < Q38_QUANT_QK_K; element += 32)
-            sum += (double)q2_value_blockwise(block, element, d, dmin) *
-                   (double)input[block_index * Q38_QUANT_QK_K + element];
+            sum += q2_value_blockwise(block, element, d, dmin) *
+                   input[block_index * Q38_QUANT_QK_K + element];
     }
     for (unsigned offset = 16; offset; offset >>= 1)
         sum += __shfl_down_sync(0xffffffffu, sum, offset);
     if (lane == 0) warp_sums[warp] = sum;
     __syncthreads();
     if (warp == 0) {
-        sum = lane < warp_count ? warp_sums[lane] : 0.0;
+        sum = lane < warp_count ? warp_sums[lane] : 0.0f;
         for (unsigned offset = 16; offset; offset >>= 1)
             sum += __shfl_down_sync(0xffffffffu, sum, offset);
         if (lane == 0) output[row] = sum;
