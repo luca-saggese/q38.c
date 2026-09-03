@@ -1,0 +1,146 @@
+{
+  "expert_policy": {
+    "default": {
+      "down": "Q2_K",
+      "gate": "Q2_K",
+      "up": "Q2_K"
+    },
+    "overrides": []
+  },
+  "format": "q38_quant_manifest_v2",
+  "model_revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540",
+  "rules": [
+    {
+      "class": "vision",
+      "expected_max_matches": 333,
+      "expected_min_matches": 333,
+      "id": "exclude_vision",
+      "include": false,
+      "pattern": "^model\\.visual\\.",
+      "quant_type": "excluded",
+      "rationale": "M1 runtime is text-only."
+    },
+    {
+      "class": "mtp",
+      "expected_max_matches": 31,
+      "expected_min_matches": 31,
+      "id": "exclude_mtp",
+      "include": false,
+      "pattern": "^mtp\\.",
+      "quant_type": "excluded",
+      "rationale": "M1 excludes the initial MTP path."
+    },
+    {
+      "class": "embedding",
+      "expected_max_matches": 1,
+      "expected_min_matches": 1,
+      "id": "embedding_bf16",
+      "include": true,
+      "pattern": "^model\\.language_model\\.embed_tokens\\.weight$",
+      "quant_type": "BF16",
+      "rationale": "Preserve input representation quality."
+    },
+    {
+      "class": "output",
+      "expected_max_matches": 1,
+      "expected_min_matches": 1,
+      "id": "output_bf16",
+      "include": true,
+      "pattern": "^lm_head\\.weight$",
+      "quant_type": "BF16",
+      "rationale": "Preserve output logit quality."
+    },
+    {
+      "class": "routed_expert",
+      "expected_max_matches": 48,
+      "expected_min_matches": 48,
+      "id": "routed_gate_up_q2_k",
+      "include": true,
+      "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.mlp\\.experts\\.gate_up_proj$",
+      "quant_type": "Q4_K",
+      "rationale": "M8 R1 isolated ablation: Use the donor Q2_K path for deterministic bring-up and broad kernel compatibility."
+    },
+    {
+      "class": "routed_expert",
+      "expected_max_matches": 48,
+      "expected_min_matches": 48,
+      "id": "routed_down_q2_k",
+      "include": true,
+      "layout_transform": "transpose_last_two_axes",
+      "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.mlp\\.experts\\.down_proj$",
+      "quant_type": "Q4_K",
+      "rationale": "M8 R1 isolated ablation: Use Q2-class storage while keeping projection policy explicit."
+    },
+    {
+      "class": "router",
+      "expected_max_matches": 48,
+      "expected_min_matches": 48,
+      "id": "router_bf16",
+      "include": true,
+      "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.mlp\\.gate\\.weight$",
+      "quant_type": "BF16",
+      "rationale": "Routing decisions are sensitive and inexpensive to preserve."
+    },
+    {
+      "class": "shared_expert",
+      "expected_max_matches": 144,
+      "expected_min_matches": 144,
+      "id": "shared_expert_bf16",
+      "include": true,
+      "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.mlp\\.shared_expert\\.(gate|up|down)_proj\\.weight$",
+      "quant_type": "BF16",
+      "rationale": "The always-active shared expert remains high precision."
+    },
+    {
+      "class": "shared_expert",
+      "expected_max_matches": 48,
+      "expected_min_matches": 48,
+      "id": "shared_expert_gate_bf16",
+      "include": true,
+      "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.mlp\\.shared_expert_gate\\.weight$",
+      "quant_type": "BF16",
+      "rationale": "Preserve the shared-expert gating signal."
+    },
+    {
+      "class": "gdn",
+      "expected_max_matches": 324,
+      "expected_min_matches": 324,
+      "id": "gdn_bf16",
+      "include": true,
+      "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.linear_attn\\.",
+      "quant_type": "BF16",
+      "rationale": "Preserve recurrent state and linear-attention projections."
+    },
+    {
+      "class": "qsa",
+      "expected_max_matches": 108,
+      "expected_min_matches": 108,
+      "id": "qsa_bf16",
+      "include": true,
+      "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.self_attn\\.",
+      "quant_type": "BF16",
+      "rationale": "Preserve full-attention and indexer projections."
+    },
+    {
+      "class": "gr",
+      "expected_max_matches": 387,
+      "expected_min_matches": 387,
+      "id": "gated_residual_bf16",
+      "include": true,
+      "pattern": "^model\\.language_model\\.(hyper_connection_mixer|layers\\.[0-9]+\\.(attn|mlp)_hyper_connection)\\.",
+      "quant_type": "BF16",
+      "rationale": "Preserve gated residual and hyper-connection state."
+    },
+    {
+      "class": "ple",
+      "expected_max_matches": 137,
+      "expected_min_matches": 137,
+      "fallback_quant_type": "BF16",
+      "id": "ple_q8_0",
+      "include": true,
+      "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.ple\\.",
+      "quant_type": "Q8_0",
+      "rationale": "Use the donor Q8_0 row format because PLE rows are 160-wide and are not Q2_K block aligned."
+    }
+  ]
+}
