@@ -561,6 +561,6 @@
   },
   "format": "q38-m8-sensitivity-results-v1",
   "quality_status": "not-run",
-  "reason": "M8 calibration corpus and evaluator are not present; storage deltas are inventory-derived.",
+  "reason": "M8 calibration corpus is not present and the evaluator scaffold was not run; storage deltas are inventory-derived.",
   "status": "descriptor_generated"
 }

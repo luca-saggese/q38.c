@@ -2,7 +2,7 @@
   "artifact_sha256": "9c0dbd43a5e9078785d307047c10c1810186b59b334a452c777e91b646893f44",
   "baseline": "M7 R0",
   "format": "q38-m8-r1-quality-v1",
-  "reason": "No versioned M8 calibration corpus or quality evaluator is present; no Q4 quality result is claimed.",
+  "reason": "The deterministic evaluator scaffold exists, but no versioned M8 calibration corpus was provided; no Q4 quality result is claimed.",
   "recipe": "R1",
   "required_metrics": [
     "layer_logit_error",
