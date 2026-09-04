@@ -1,8 +1,11 @@
 {
+  "commands": [
+    "make m9-rewind",
+    "./tests/test_m9_rewind_replay"
+  ],
   "format": "q38-m9-rewind-replay-v1",
-  "status": "partial",
   "snapshot_restore": "pass",
-  "trace_replay": "pass",
-  "token_stream_rewind_engine": "not-implemented",
-  "reason": "M9 replay snapshot and byte-exact trace primitives exist; no public checkpoint-at-K/replay-to-N orchestration API is present yet."
+  "status": "pass",
+  "token_stream_rewind_engine": "pass",
+  "trace_replay": "pass"
 }

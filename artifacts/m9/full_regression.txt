@@ -7,9 +7,9 @@ PASS
   ./tests/test_m6_session_contamination
 
 PARTIAL / NOT IMPLEMENTED
-  Checkpoint roundtrip and version/layout rejection pass.
+  Checkpoint roundtrip, version/layout rejection, and deterministic replay orchestration pass.
   Deterministic trace record/verify passes.
-  Full rewind orchestration, HTTP server/worker supervisor, fatal CUDA restart,
+  HTTP server/worker supervisor, fatal CUDA restart,
   sustained multi-request soak, and RSS plateau measurement are not implemented.
   MTP is explicitly disabled because reference semantics and Q4 losslessness
   are unavailable.

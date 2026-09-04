@@ -19,6 +19,16 @@ bool q38_replay_snapshot_save(const char *path,
 bool q38_replay_snapshot_load(const char *path, q38_forward_state *state,
                               char *error, size_t error_len);
 
+typedef bool (*q38_replay_step_fn)(q38_forward_state *state, uint32_t token,
+                                   void *user, char *error, size_t error_len);
+
+/* Restore a checkpoint and apply the caller's deterministic token step for
+ * every token after the checkpoint.  The callback owns model execution. */
+bool q38_replay_restore_and_replay(const char *path, q38_forward_state *state,
+                                   const uint32_t *tokens, size_t token_count,
+                                   q38_replay_step_fn step, void *user,
+                                   char *error, size_t error_len);
+
 typedef enum {
     Q38_REPLAY_RECORD = 0,
     Q38_REPLAY_VERIFY = 1,

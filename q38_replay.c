@@ -172,6 +172,21 @@ bool q38_replay_snapshot_load(const char *path, q38_forward_state *state,
     return ok;
 }
 
+bool q38_replay_restore_and_replay(const char *path, q38_forward_state *state,
+                                   const uint32_t *tokens, size_t token_count,
+                                   q38_replay_step_fn step, void *user,
+                                   char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!q38_replay_snapshot_load(path, state, error, error_len))
+        return false;
+    if (!step && token_count)
+        return fail(error, error_len, "replay step callback is required");
+    for (size_t i = 0; i < token_count; ++i)
+        if (!step(state, tokens[i], user, error, error_len))
+            return false;
+    return true;
+}
+
 static bool trace_event(q38_replay_trace *trace, uint32_t kind,
                         const void *payload, size_t payload_size,
                         char *error, size_t error_len) {
