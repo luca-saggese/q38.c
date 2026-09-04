@@ -1,0 +1,10 @@
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m6_moe_binding tests/test_m6_moe_binding.c \
+	q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o \
+	q38_qsa.o
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m6_moe_ref tests/test_m6_moe_ref.c q38_moe_ref.o -lm
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m6_dispatch tests/test_m6_dispatch.c q38_moe_ref.o -lm
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m6_ubatch tests/test_m6_ubatch.c q38_moe_ref.o -lm
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m6_forward_api tests/test_m6_forward_api.c \
+	q38_forward.o q38_decode.o q38_moe.o q38_weights.o q38_gguf.o \
+	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+	q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm

@@ -6,6 +6,9 @@ PASS
   make m2-acceptance (all M2 artifacts and gates)
   make m3-acceptance (GR/GDN/reference/CUDA/chunk gates)
   make m4-acceptance (PLE scalar/CUDA/cache/loader/failure gates)
+  make tests/test_m6_moe_binding tests/test_m6_moe_ref tests/test_m6_dispatch \
+    tests/test_m6_ubatch tests/test_m6_forward_api, followed by their binaries
+    (independent M6 binding/reference/dispatch/ubatch/API gates)
   make m7-acceptance (M7 baseline gates; full sweep opt-in and not enabled)
   make m8-q4-kernel (Q4_K CUDA routed-expert/reference parity)
   python3 tools/q38_validate_manifest.py artifacts/m1/tensor_classes.json artifacts/m8/quant_manifest_R1.json
