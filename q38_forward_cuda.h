@@ -66,6 +66,7 @@ typedef struct {
     uint64_t gguf_name_lookup_in_decode;
     uint64_t non_ple_residency_miss;
     size_t non_ple_upload_bytes_per_token;
+    float gpu_argmax_kernel_ms;
 } q38_forward_cuda_residency_stats;
 
 q38_forward_cuda_context *q38_forward_cuda_context_create(char *error,

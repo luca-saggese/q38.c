@@ -125,20 +125,43 @@
       "correctness_max_abs": 7.4505806e-09
     },
     "routed_expert_q4_gemv": {
-      "source": "artifacts/post_m8_opt/routed_expert_q4_gemv.txt",
-      "geometry": "synthetic Q4_K parity fixture; 2x intermediate gate/up plus down",
+      "source": "artifacts/post_m8_opt/routed_expert_q4_gemv.json",
+      "model": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+      "hidden_source": "real_m8_forward",
+      "layer": 0,
+      "expert": 0,
+      "launch_geometry": {
+        "gate_up": "grid=3 block=256",
+        "down": "grid=10 block=256"
+      },
       "qtype": "Q4_K",
-      "matrix_bytes": null,
-      "kernel_median_ms": null,
-      "kernel_p95_ms": null,
-      "effective_gbps": null,
-      "correctness": "CUDA/reference parity passed"
+      "gate_up": {
+        "rows": 1280,
+        "cols": 2560,
+        "packed_bytes": 1843200,
+        "kernel_median_ms": 1.343904,
+        "kernel_p95_ms": 1.347936,
+        "effective_gbps": 1.371527,
+        "correctness_max_abs": 2.98023224e-08
+      },
+      "down": {
+        "rows": 2560,
+        "cols": 640,
+        "packed_bytes": 921600,
+        "kernel_median_ms": 0.056832,
+        "kernel_p95_ms": 0.057440,
+        "effective_gbps": 16.216216,
+        "correctness_max_abs": 1.49011612e-08
+      },
+      "read_ceiling_gbps": 237.234382,
+      "lm_head_bf16_gbps": 251.172387,
+      "decision": "Q4 expert primitive is software-limited; gate/up is 0.58% of read ceiling and down is 6.84%."
     }
   },
   "decision": {
     "descriptor_end_to_end_gain": false,
     "strict_gain": false,
     "interpretation": "The descriptor path is an architectural simplification and does not show a measured warm end-to-end speedup in this harness.",
-    "next_step": "Do not apply further optimization based on this benchmark alone. Integrate GPU argmax into the benchmark harness and add a real routed-expert Q4 GEMV timing fixture before the next ROI decision."
+    "next_step": "Keep descriptor path unchanged. Optimize Q4 primitive or measure grouped/fused MoE after counting expert calls per token; do not treat descriptor as throughput gain."
   }
 }

@@ -276,12 +276,13 @@ $(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_profile.o \
 		q38_forward_cuda.o q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o \
-		q38_profile_cuda.o
+		q38_profile_cuda.o q38_residency.o q38_topk_cuda.o
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_cold_warm.c \
 		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_profile.o q38_forward_cuda.o \
 		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
+		q38_residency.o q38_topk_cuda.o \
 		$(CUDA_LDLIBS) -lm
 
 m7-cold-warm: $(TEST_DIR)/m7_cold_warm
@@ -806,6 +807,27 @@ $(TEST_DIR)/test_m8_q4_moe_cuda: $(TEST_DIR)/test_m8_q4_moe_cuda.cu \
 
 m8-q4-kernel: $(TEST_DIR)/test_m8_q4_moe_cuda
 	@./$(TEST_DIR)/test_m8_q4_moe_cuda
+
+$(TEST_DIR)/m8_routed_expert_q4_bench: \
+		$(TEST_DIR)/m8_routed_expert_q4_bench.cu \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
+		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
+		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
+		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
+		q38_topk_cuda.o
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
+		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
+		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
+		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
+		q38_topk_cuda.o $(CUDA_LDLIBS) -lm
+
+m8-routed-expert-q4-bench: $(TEST_DIR)/m8_routed_expert_q4_bench
+	@mkdir -p artifacts/post_m8_opt
+	@./$(TEST_DIR)/m8_routed_expert_q4_bench $(DIRECT_RUNTIME_ARTIFACT) \
+		| tee artifacts/post_m8_opt/routed_expert_q4_gemv.json
 
 $(TEST_DIR)/test_m9_checkpoint_mismatch: \
 		$(TEST_DIR)/test_m9_checkpoint_mismatch.c q38_replay.o q38_state.o \

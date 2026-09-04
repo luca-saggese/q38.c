@@ -89,6 +89,7 @@ struct q38_forward_cuda_context {
     uint64_t gguf_name_lookup_in_decode;
     uint64_t non_ple_residency_miss;
     size_t non_ple_upload_bytes_per_token;
+    float gpu_argmax_kernel_ms;
     q38_forward_cuda_residency_progress_observer progress_observer;
     void *progress_observer_user;
 };
@@ -658,6 +659,7 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->non_ple_residency_miss = context->non_ple_residency_miss;
     stats->non_ple_upload_bytes_per_token =
         context->non_ple_upload_bytes_per_token;
+    stats->gpu_argmax_kernel_ms = context->gpu_argmax_kernel_ms;
 }
 
 extern "C" void *
@@ -965,9 +967,22 @@ extern "C" bool q38_forward_cuda_greedy_argmax(
                        context->allocation_observer_user,
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA greedy argmax allocation failed");
-    const bool launched = q38_argmax_cuda(
-        context->device_output, 1, context->device_output_elements,
-        context->device_argmax, context->stream, error, error_len);
+    bool launched = false;
+    cudaEvent_t start = NULL, stop = NULL;
+    if (cudaEventCreate(&start) == cudaSuccess &&
+        cudaEventCreate(&stop) == cudaSuccess) {
+        cudaEventRecord(start, context->stream);
+        launched = q38_argmax_cuda(
+            context->device_output, 1, context->device_output_elements,
+            context->device_argmax, context->stream, error, error_len);
+        cudaEventRecord(stop, context->stream);
+        cudaEventSynchronize(stop);
+        float elapsed = 0.0f;
+        if (cudaEventElapsedTime(&elapsed, start, stop) == cudaSuccess)
+            context->gpu_argmax_kernel_ms = elapsed;
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
     bool ok = launched &&
         cudaMemcpyAsync(token, context->device_argmax, sizeof(*token),
                         cudaMemcpyDeviceToHost, context->stream) == cudaSuccess &&

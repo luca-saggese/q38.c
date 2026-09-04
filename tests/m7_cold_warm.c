@@ -4,8 +4,11 @@
 #include "q38_gguf.h"
 #include "q38_weights.h"
 
+#include <cuda_runtime_api.h>
+
 #include <math.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +33,39 @@ typedef struct {
 static q38_forward_cuda_context *backend_cuda;
 static q38_profile *stage_profile;
 static FILE *residency_progress;
+static size_t peak_cuda_bytes;
+static unsigned long peak_rss_bytes;
+static unsigned long min_mem_available_bytes = ULONG_MAX;
+
+static void sample_memory(void) {
+    size_t free_bytes = 0, total_bytes = 0;
+    if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess) {
+        size_t used = total_bytes - free_bytes;
+        if (used > peak_cuda_bytes) peak_cuda_bytes = used;
+    }
+    unsigned long pages = 0;
+    FILE *statm = fopen("/proc/self/statm", "r");
+    if (statm) {
+        (void)fscanf(statm, "%*lu %lu", &pages);
+        fclose(statm);
+    }
+    unsigned long rss = pages * (unsigned long)sysconf(_SC_PAGESIZE);
+    if (rss > peak_rss_bytes) peak_rss_bytes = rss;
+    FILE *meminfo = fopen("/proc/meminfo", "r");
+    if (meminfo) {
+        char key[32], unit[16];
+        unsigned long value;
+        while (fscanf(meminfo, "%31s %lu %15s", key, &value, unit) == 3) {
+            if (strcmp(key, "MemAvailable:") == 0) {
+                unsigned long bytes = value * 1024;
+                if (bytes < min_mem_available_bytes)
+                    min_mem_available_bytes = bytes;
+                break;
+            }
+        }
+        fclose(meminfo);
+    }
+}
 
 static void residency_progress_observer(const char *group,
                                         const q38_tensor *tensor,
@@ -72,6 +108,7 @@ static void residency_progress_observer(const char *group,
             group ? group : "unknown", name, cumulative_bytes, free_bytes,
             total_bytes, pages * (unsigned long)sysconf(_SC_PAGESIZE), available, smi);
     fflush(residency_progress);
+    sample_memory();
 }
 
 static void backend_context(uint32_t layer, const char *stage,
@@ -196,6 +233,14 @@ int main(int argc, char **argv) {
             model, &weights, &state, &token, 1, logits, 248320, &d,
             q38_forward_cuda_matvec_backend, q38_forward_cuda_matrix_backend,
             q38_forward_cuda_expert_backend, cuda, error, sizeof(error));
+        sample_memory();
+        uint32_t gpu_argmax_token = 0;
+        float gpu_argmax_ms = 0.0f;
+        bool gpu_argmax_ok = q38_forward_cuda_greedy_argmax(
+            cuda, &gpu_argmax_token, error, sizeof(error));
+        q38_forward_cuda_residency_stats argmax_stats;
+        q38_forward_cuda_get_residency_stats(cuda, &argmax_stats);
+        gpu_argmax_ms = argmax_stats.gpu_argmax_kernel_ms;
         double wall = now_ms() - start;
         q38_forward_cuda_get_residency_stats(cuda, &after);
         size_t best = argmax(logits, 248320);
@@ -221,7 +266,10 @@ int main(int argc, char **argv) {
                "\"qsa_qkv_ms\":%.6f,\"qsa_indexer_compression_ms\":%.6f,"
                "\"qsa_score_ms\":%.6f,\"qsa_top_k_ms\":%.6f,\"qsa_gather_ms\":%.6f,"
                "\"qsa_attention_ms\":%.6f,\"qsa_state_update_ms\":%.6f,"
-               "\"telemetry\":%s,"
+               "\"telemetry\":%s,\"gpu_argmax_kernel_ms\":%.6f,"
+               "\"gpu_argmax_token\":%u,\"gpu_argmax_ok\":%s,"
+               "\"peak_cuda_bytes\":%zu,\"peak_rss_bytes\":%lu,"
+               "\"mem_available_min_bytes\":%lu,"
                "\"correctness\":%s,\"stable_device_pointer\":%s}\n",
                run, run == 1 ? "true" : "false",
                after.all_non_ple_resident ? "true" : "false",
@@ -237,7 +285,10 @@ int main(int argc, char **argv) {
                s.moe_shared_down, s.moe_routed_gate_up, s.moe_routed_down,
                s.moe_activation_reduction, s.qsa_qkv, s.qsa_indexer_compression,
                s.qsa_score, s.qsa_top_k, s.qsa_gather, s.qsa_attention,
-               s.qsa_state_update, telemetry, ok ? "true" : "false",
+               s.qsa_state_update, telemetry, gpu_argmax_ms,
+               gpu_argmax_token, gpu_argmax_ok ? "true" : "false",
+               peak_cuda_bytes, peak_rss_bytes, min_mem_available_bytes,
+               ok ? "true" : "false",
                after.lm_head_device_pointer ? "true" : "false");
         fprintf(artifact,
                 "{\"run\":%d,\"cold\":%s,\"all_non_ple_resident\":%s,"
@@ -246,7 +297,11 @@ int main(int argc, char **argv) {
                 "\"persistent_coverage_ok\":%s,\"persistent_duplicate_tensors\":%" PRIu64 ","
                 "\"persistent_ple_entries\":%" PRIu64 ",\"persistent_hits\":%" PRIu64 ","
                 "\"persistent_misses\":%" PRIu64 ",\"resident_hits\":%" PRIu64 ","
-                "\"resident_misses\":%" PRIu64 ",\"wall_ms\":%.6f,\"telemetry\":%s,"
+                "\"resident_misses\":%" PRIu64 ",\"wall_ms\":%.6f,"
+                "\"gpu_argmax_kernel_ms\":%.6f,\"gpu_argmax_token\":%u,"
+                "\"gpu_argmax_ok\":%s,\"peak_cuda_bytes\":%zu,"
+                "\"peak_rss_bytes\":%lu,\"mem_available_min_bytes\":%lu,"
+                "\"telemetry\":%s,"
                 "\"moe\":{\"router_ms\":%.6f,\"routed_gate_up_ms\":%.6f,"
                 "\"routed_down_ms\":%.6f,\"shared_gate_ms\":%.6f,"
                 "\"shared_up_ms\":%.6f,\"shared_down_ms\":%.6f,"
@@ -263,7 +318,10 @@ int main(int argc, char **argv) {
                 after.persistent_misses - before.persistent_misses,
                 after.resident_hits - before.resident_hits,
                 after.resident_misses - before.resident_misses,
-                wall, telemetry, s.moe_router, s.moe_routed_gate_up,
+                wall, gpu_argmax_ms, gpu_argmax_token,
+                gpu_argmax_ok ? "true" : "false", peak_cuda_bytes,
+                peak_rss_bytes, min_mem_available_bytes, telemetry,
+                s.moe_router, s.moe_routed_gate_up,
                 s.moe_routed_down, s.moe_shared_gate, s.moe_shared_up,
                 s.moe_shared_down, s.moe_activation_reduction, s.qsa_qkv,
                 s.qsa_indexer_compression, s.qsa_score, s.qsa_top_k,
