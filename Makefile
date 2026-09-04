@@ -897,6 +897,15 @@ $(TEST_DIR)/m6_real_forward: $(TEST_DIR)/m6_real_forward.c \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
+$(TEST_DIR)/m8_r1_quality: $(TEST_DIR)/m8_r1_quality.c \
+		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_residency.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m8_r1_quality.c \
+		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_residency.o -lm
+
 $(TEST_DIR)/m6_decode_trace: $(TEST_DIR)/m6_decode_trace.c \
 		q38_decode.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
