@@ -1,0 +1,160 @@
+{
+  "format": "q38-q2-vs-q4-symmetric-resident-v1",
+  "status": "pass",
+  "methodology": {
+    "same_resident_execution_path": true,
+    "ple_policy": "permanent file-backed mmap",
+    "all_non_ple_resident": true,
+    "same_process_per_case": true,
+    "runs": 6,
+    "cold_runs": 1,
+    "warm_runs": 5,
+    "semantic_state_reset": true,
+    "warm_non_ple_upload_bytes": 0,
+    "warm_non_ple_residency_misses": 0,
+    "subsystem_timers": "non-additive; do not sum against wall"
+  },
+  "models": {
+    "q2_m7_style": {
+      "artifact": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+      "cold_ms": 1027.308438,
+      "warm_runs_ms": [715.327819, 716.874004, 717.906603, 711.354913, 709.879752],
+      "warm_median_ms": 715.327819,
+      "warm_p95_ms": 717.906603,
+      "tok_per_s": 1.398941,
+      "resident_non_ple_bytes": 74683719680,
+      "peak_cuda_unified_bytes": 126782767104,
+      "peak_rss_bytes": 38140354560,
+      "mem_available_min_bytes": 72704401408,
+      "warm_upload_bytes": 0,
+      "warm_residency_misses": 0,
+      "kernel_launches_per_token": 1959,
+      "host_syncs_per_token": 1145,
+      "d2h_bytes_per_token": 1267011840,
+      "argmax": 11,
+      "gpu_argmax_ms": 0.302336,
+      "correctness": true,
+      "weight_bytes_per_token": 8127365120,
+      "effective_weight_gbps": 24.006914,
+      "breakdown_ms": {
+        "GR": null,
+        "GDN": 22.866036,
+        "QSA": 338.488956,
+        "MoE": 933.882549,
+        "PLE": 147.905525,
+        "LM_head": 18.359909,
+        "GPU_argmax": 0.302336,
+        "backend_overhead": 5.765302
+      },
+      "moe": {
+        "selected_experts_per_token": 480,
+        "routed_expert_gemv_calls_per_token": 480,
+        "routed_expert_packed_bytes_per_token": 774144000,
+        "kernel_ms": 304.016608,
+        "effective_gbps": 4.277262
+      }
+    },
+    "q4_r1_post_m8": {
+      "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+      "cold_ms": 2050.231809,
+      "warm_runs_ms": [1125.034878, 1122.496625, 1127.720172, 1125.878965, 1123.156183],
+      "warm_median_ms": 1125.034878,
+      "warm_p95_ms": 1127.720172,
+      "tok_per_s": 0.888862,
+      "resident_non_ple_bytes": 77777442560,
+      "peak_cuda_unified_bytes": 129872646144,
+      "peak_rss_bytes": 52763312128,
+      "mem_available_min_bytes": 44525936640,
+      "warm_upload_bytes": 0,
+      "warm_residency_misses": 0,
+      "kernel_launches_per_token": 1959,
+      "host_syncs_per_token": 1145,
+      "d2h_bytes_per_token": 1267011840,
+      "argmax": 11,
+      "gpu_argmax_ms": 0.335456,
+      "correctness": true,
+      "weight_bytes_per_token": 8680325120,
+      "effective_weight_gbps": 11.513662,
+      "breakdown_ms": {
+        "GR": null,
+        "GDN": 24.315248,
+        "QSA": 473.636613,
+        "MoE": 2188.507970,
+        "PLE": 170.112999,
+        "LM_head": 9.381789,
+        "GPU_argmax": 0.335456,
+        "backend_overhead": 12.844220
+      },
+      "moe": {
+        "selected_experts_per_token": 480,
+        "routed_expert_gemv_calls_per_token": 480,
+        "routed_expert_packed_bytes_per_token": 1327104000,
+        "kernel_ms": 718.225824,
+        "effective_gbps": 1.847192
+      }
+    }
+  },
+  "expert_ab_same_layer_expert_hidden": {
+    "layer": 0,
+    "expert": 0,
+    "hidden_source": "same CUDA resident Q4 forward capture reused for Q2",
+    "geometry": {
+      "gate_up": "grid=3 block=256",
+      "down": "grid=10 block=256"
+    },
+    "q2": {
+      "qtype": "Q2_K",
+      "gate_up": {
+        "rows": 1280,
+        "cols": 2560,
+        "packed_bytes": 1075200,
+        "median_ms": 0.541280,
+        "p95_ms": 0.543968,
+        "effective_gbps": 1.986403,
+        "correctness_max_abs": 5.96046448e-08
+      },
+      "down": {
+        "rows": 2560,
+        "cols": 640,
+        "packed_bytes": 537600,
+        "median_ms": 0.037504,
+        "p95_ms": 0.039360,
+        "effective_gbps": 14.334471,
+        "correctness_max_abs": 1.11758709e-08
+      }
+    },
+    "q4": {
+      "qtype": "Q4_K",
+      "gate_up": {
+        "rows": 1280,
+        "cols": 2560,
+        "packed_bytes": 1843200,
+        "median_ms": 1.354848,
+        "p95_ms": 1.360736,
+        "effective_gbps": 1.360448,
+        "correctness_max_abs": 2.98023224e-08
+      },
+      "down": {
+        "rows": 2560,
+        "cols": 640,
+        "packed_bytes": 921600,
+        "median_ms": 0.055680,
+        "p95_ms": 0.055840,
+        "effective_gbps": 16.551724,
+        "correctness_max_abs": 2.23517418e-08
+      }
+    },
+    "q4_vs_q2": {
+      "gate_up_kernel_slowdown": 2.504,
+      "down_kernel_slowdown": 1.485,
+      "gate_up_packed_bytes_ratio": 1.714286,
+      "down_packed_bytes_ratio": 1.714286
+    }
+  },
+  "decision": {
+    "post_m7_q2_runtime_improved_vs_old_baseline": "yes; comparable resident warm is 715.33 ms versus 1119.00 ms historical baseline, 1.564x faster",
+    "q4_cost_vs_q2_same_resident_path": "Q4 warm is 1.573x slower; MoE is the dominant delta",
+    "format_vs_runtime_moe": "both; Q4 gate/up is 2.50x slower than Q2 for the same geometry, while both primitives remain far below the GB10 read ceiling, so the routed-expert primitive/layout and dispatch path are both software-limited",
+    "next_focus": "routed-expert Q4 primitive/layout and grouped/fused MoE dispatch; do not change descriptor path"
+  }
+}

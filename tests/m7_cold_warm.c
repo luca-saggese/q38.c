@@ -1,5 +1,6 @@
 #include "q38_forward.h"
 #include "q38_forward_cuda.h"
+#include "q38_moe.h"
 #include "q38_profile.h"
 #include "q38_gguf.h"
 #include "q38_weights.h"
@@ -36,6 +37,31 @@ static FILE *residency_progress;
 static size_t peak_cuda_bytes;
 static unsigned long peak_rss_bytes;
 static unsigned long min_mem_available_bytes = ULONG_MAX;
+static FILE *hidden_capture;
+static bool hidden_captured;
+
+static bool capture_moe_hidden(uint32_t layer, const q38_moe_trace *trace,
+                               void *user, char *error, size_t error_len) {
+    (void)layer;
+    (void)user;
+    if (hidden_captured) return true;
+    if (!trace || !trace->router_input ||
+        trace->router_input_count != 2560) {
+        if (error && error_len)
+            snprintf(error, error_len, "invalid CUDA MoE hidden capture");
+        return false;
+    }
+    if (!hidden_capture ||
+        fwrite(trace->router_input, sizeof(float), trace->router_input_count,
+               hidden_capture) != trace->router_input_count) {
+        if (error && error_len)
+            snprintf(error, error_len, "failed to write CUDA MoE hidden");
+        return false;
+    }
+    fflush(hidden_capture);
+    hidden_captured = true;
+    return true;
+}
 
 static void sample_memory(void) {
     size_t free_bytes = 0, total_bytes = 0;
@@ -212,6 +238,8 @@ int main(int argc, char **argv) {
     FILE *artifact = fopen(argc > 2 ? argv[2] :
                            "artifacts/m7/canonical_cold_warm.jsonl", "w");
     if (!artifact) return 1;
+    hidden_capture = fopen("artifacts/post_m8_opt/shared_hidden_layer0.bin", "wb");
+    if (!hidden_capture) return 1;
     const uint32_t token = 9419;
     for (int run = 1; run <= 6; ++run) {
         stages s = {0};
@@ -224,6 +252,7 @@ int main(int argc, char **argv) {
         memset(&d, 0, sizeof(d));
         d.stage_trace = stage_trace;
         d.backend_context = backend_context;
+        d.moe_trace = capture_moe_hidden;
         d.trace_user = &s;
         float *logits = run == 1 ? logits1 : logits2;
         q38_forward_cuda_residency_stats before, after;
@@ -254,6 +283,8 @@ int main(int argc, char **argv) {
         "\"persistent_coverage_ok\":%s,\"persistent_duplicate_tensors\":%" PRIu64 ","
         "\"persistent_ple_entries\":%" PRIu64 ",\"wall_ms\":%.6f,"
         "\"matrix_upload_bytes\":%zu,\"matrix_upload_ms\":null,"
+        "\"non_ple_upload_bytes_per_token\":%zu,"
+        "\"non_ple_residency_miss\":%" PRIu64 ","
         "\"lm_head_upload_bytes\":0,\"lm_head_allocation_count\":0,"
         "\"allocations\":null,\"cuda_allocations\":null,"
                "\"resident_hits\":%" PRIu64 ",\"resident_misses\":%" PRIu64
@@ -278,6 +309,8 @@ int main(int argc, char **argv) {
                after.persistent_coverage_ok ? "true" : "false",
                after.persistent_duplicate_tensors, after.persistent_ple_entries,
                wall, after.matrix_upload_bytes - before.matrix_upload_bytes,
+               after.non_ple_upload_bytes_per_token,
+               after.non_ple_residency_miss,
                after.resident_hits - before.resident_hits,
                after.resident_misses - before.resident_misses, s.gdn,
                s.lm_head, s.moe, s.qsa, s.ple, best, s.moe_router,
@@ -341,6 +374,7 @@ int main(int argc, char **argv) {
     q38_profile_destroy(&profile);
     q38_forward_cuda_context_destroy(cuda);
     if (residency_progress) fclose(residency_progress);
+    if (hidden_capture) fclose(hidden_capture);
     q38_gguf_close(model);
     return 0;
 }

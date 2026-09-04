@@ -295,6 +295,32 @@ extern "C" bool q38_moe_cuda_expert_q2(
     return ok;
 }
 
+extern "C" bool q38_moe_cuda_q2_gate_up(
+    const void *device_gate_up, const float *device_hidden,
+    float *device_mid, cudaStream_t stream, char *error, size_t error_len) {
+    if (!device_gate_up || !device_hidden || !device_mid)
+        return fail(error, error_len, "invalid CUDA Q2 gate/up arguments");
+    q2_gate_up_kernel<<<3, 256, 0, stream>>>(
+        (const q38_q2_k_block *)device_gate_up, device_hidden, device_mid);
+    const cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+        return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
+
+extern "C" bool q38_moe_cuda_q2_down(
+    const void *device_down, const float *device_mid,
+    float *device_output, cudaStream_t stream, char *error, size_t error_len) {
+    if (!device_down || !device_mid || !device_output)
+        return fail(error, error_len, "invalid CUDA Q2 down arguments");
+    q2_down_kernel<<<10, 256, 0, stream>>>(
+        (const q38_q2_k_block *)device_down, device_mid, device_output);
+    const cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+        return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
+
 __global__ static void shared_kernel(const float *hidden, size_t tokens,
                                      const float *gate_proj, const float *up_proj,
                                      const float *down_proj,

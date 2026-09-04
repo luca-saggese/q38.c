@@ -47,13 +47,15 @@ static bool capture_moe(uint32_t layer, const q38_moe_trace *trace,
     return true;
 }
 
-static bool decode_gate_up(const q38_q4_k_block *weights,
+static bool decode_gate_up(const void *weights, uint32_t qtype,
                            std::vector<float> *dense) {
     dense->assign(2 * Q38_MOE_INTERMEDIATE * Q38_MOE_HIDDEN, 0.0f);
     char error[128];
     for (size_t row = 0; row < 2 * Q38_MOE_INTERMEDIATE; ++row) {
+        const size_t stride = qtype == Q38_QUANT_Q2_K
+            ? sizeof(q38_q2_k_block) : sizeof(q38_q4_k_block);
         if (!q38_quant_dequantize_row(
-                Q38_QUANT_Q4_K, weights + row * 10, 10,
+                qtype, static_cast<const uint8_t *>(weights) + row * 10 * stride, 10,
                 dense->data() + row * Q38_MOE_HIDDEN, Q38_MOE_HIDDEN,
                 error, sizeof(error)))
             return fail(error);
@@ -61,14 +63,17 @@ static bool decode_gate_up(const q38_q4_k_block *weights,
     return true;
 }
 
-static bool decode_down(const q38_q4_k_block *weights,
+static bool decode_down(const void *weights, uint32_t qtype,
                         std::vector<float> *dense) {
     dense->assign(Q38_MOE_INTERMEDIATE * Q38_MOE_HIDDEN, 0.0f);
     std::vector<float> row(Q38_MOE_HIDDEN);
     char error[128];
     for (size_t i = 0; i < Q38_MOE_INTERMEDIATE; ++i) {
+        const size_t stride = qtype == Q38_QUANT_Q2_K
+            ? sizeof(q38_q2_k_block) : sizeof(q38_q4_k_block);
         if (!q38_quant_dequantize_row(
-                Q38_QUANT_Q4_K, weights + i * 10, 10, row.data(),
+                qtype, static_cast<const uint8_t *>(weights) + i * 10 * stride,
+                10, row.data(),
                 row.size(), error, sizeof(error)))
             return fail(error);
         std::copy(row.begin(), row.end(),
@@ -77,20 +82,29 @@ static bool decode_down(const q38_q4_k_block *weights,
     return true;
 }
 
-static bool run_gate_up(const void *weights, const float *hidden,
+static bool run_gate_up(const void *weights, uint32_t qtype,
+                        const float *hidden,
                         float *mid, cudaStream_t stream, cudaEvent_t start,
                         cudaEvent_t stop, std::vector<double> *samples) {
     char error[256];
     for (int i = 0; i < 1; ++i) {
-        if (!q38_moe_cuda_q4_gate_up(weights, hidden, mid, stream, error,
-                                     sizeof(error)))
+        const bool ok = qtype == Q38_QUANT_Q2_K
+            ? q38_moe_cuda_q2_gate_up(weights, hidden, mid, stream, error,
+                                      sizeof(error))
+            : q38_moe_cuda_q4_gate_up(weights, hidden, mid, stream, error,
+                                      sizeof(error));
+        if (!ok)
             return fail(error);
     }
     if (cudaStreamSynchronize(stream) != cudaSuccess) return fail("gate/up warmup failed");
     for (int i = 0; i < 10; ++i) {
         cudaEventRecord(start, stream);
-        if (!q38_moe_cuda_q4_gate_up(weights, hidden, mid, stream, error,
-                                     sizeof(error)))
+        const bool ok = qtype == Q38_QUANT_Q2_K
+            ? q38_moe_cuda_q2_gate_up(weights, hidden, mid, stream, error,
+                                      sizeof(error))
+            : q38_moe_cuda_q4_gate_up(weights, hidden, mid, stream, error,
+                                      sizeof(error));
+        if (!ok)
             return fail(error);
         cudaEventRecord(stop, stream);
         cudaEventSynchronize(stop);
@@ -99,18 +113,27 @@ static bool run_gate_up(const void *weights, const float *hidden,
     return true;
 }
 
-static bool run_down(const void *weights, const float *mid, float *output,
+static bool run_down(const void *weights, uint32_t qtype,
+                     const float *mid, float *output,
                      cudaStream_t stream, cudaEvent_t start, cudaEvent_t stop,
                      std::vector<double> *samples) {
     char error[256];
-    if (!q38_moe_cuda_q4_down(weights, mid, output, stream, error,
-                              sizeof(error)))
+    const bool warm_ok = qtype == Q38_QUANT_Q2_K
+        ? q38_moe_cuda_q2_down(weights, mid, output, stream, error,
+                               sizeof(error))
+        : q38_moe_cuda_q4_down(weights, mid, output, stream, error,
+                               sizeof(error));
+    if (!warm_ok)
         return fail(error);
     if (cudaStreamSynchronize(stream) != cudaSuccess) return fail("down warmup failed");
     for (int i = 0; i < 10; ++i) {
         cudaEventRecord(start, stream);
-        if (!q38_moe_cuda_q4_down(weights, mid, output, stream, error,
-                                  sizeof(error)))
+        const bool ok = qtype == Q38_QUANT_Q2_K
+            ? q38_moe_cuda_q2_down(weights, mid, output, stream, error,
+                                   sizeof(error))
+            : q38_moe_cuda_q4_down(weights, mid, output, stream, error,
+                                   sizeof(error));
+        if (!ok)
             return fail(error);
         cudaEventRecord(stop, stream);
         cudaEventSynchronize(stop);
@@ -138,15 +161,47 @@ int main(int argc, char **argv) {
                                 sizeof(error)))
         return fail(error) ? 1 : 1;
     Capture capture = {};
-    q38_forward_diagnostics diagnostics = {};
-    diagnostics.moe_trace = capture_moe;
-    diagnostics.trace_user = &capture;
-    const uint32_t token = 9419;
-    std::vector<float> logits(248320);
-    if (!q38_forward_full(model, &weights, &state, &token, 1, logits.data(),
-                          logits.size(), &diagnostics, error, sizeof(error)))
-        return fail(error) ? 1 : 1;
-    if (capture.hidden.empty()) return fail("forward did not capture hidden") ? 1 : 1;
+    const char *hidden_path = argc > 2 ? argv[2] : nullptr;
+    if (hidden_path) {
+        FILE *hidden_file = std::fopen(hidden_path, "rb");
+        if (!hidden_file ||
+            std::fread(capture.hidden.data(), sizeof(float), 0, hidden_file) != 0) {
+            if (hidden_file) std::fclose(hidden_file);
+            hidden_file = nullptr;
+        }
+        if (hidden_file) {
+            capture.hidden.resize(Q38_MOE_HIDDEN);
+            const size_t count = std::fread(capture.hidden.data(), sizeof(float),
+                                            capture.hidden.size(), hidden_file);
+            std::fclose(hidden_file);
+            if (count != capture.hidden.size())
+                capture.hidden.clear();
+        }
+    }
+    if (capture.hidden.empty()) {
+        q38_forward_diagnostics diagnostics = {};
+        diagnostics.moe_trace = capture_moe;
+        diagnostics.trace_user = &capture;
+        const uint32_t token = 9419;
+        std::vector<float> logits(248320);
+        if (!q38_forward_full(model, &weights, &state, &token, 1, logits.data(),
+                              logits.size(), &diagnostics, error, sizeof(error)))
+            return fail(error) ? 1 : 1;
+        if (capture.hidden.empty())
+            return fail("forward did not capture hidden") ? 1 : 1;
+        if (hidden_path) {
+            FILE *hidden_file = std::fopen(hidden_path, "wb");
+            if (!hidden_file ||
+                std::fwrite(capture.hidden.data(), sizeof(float),
+                            capture.hidden.size(), hidden_file) !=
+                    capture.hidden.size()) {
+                if (hidden_file) std::fclose(hidden_file);
+                return fail("failed to save captured hidden") ? 1 : 1;
+            }
+            std::fclose(hidden_file);
+        }
+    }
+    capture.layer = 0;
 
     q38_tensor *gate_up = weights.layer[capture.layer].experts.bank[0].gate_up;
     q38_tensor *down = weights.layer[capture.layer].experts.bank[0].down;
@@ -156,16 +211,17 @@ int main(int argc, char **argv) {
         !q38_moe_expert_slice(model, down, 0, &down_offset, &down_bytes,
                                error, sizeof(error)))
         return fail(error) ? 1 : 1;
-    if (gate_up->type != Q38_QUANT_Q4_K || down->type != Q38_QUANT_Q4_K)
-        return fail("R1 expert is not Q4_K") ? 1 : 1;
+    if (gate_up->type != down->type ||
+        (gate_up->type != Q38_QUANT_Q2_K &&
+         gate_up->type != Q38_QUANT_Q4_K))
+        return fail("unsupported routed expert qtype") ? 1 : 1;
 
-    const auto *host_gate = reinterpret_cast<const q38_q4_k_block *>(
-        model->map + gate_offset);
-    const auto *host_down = reinterpret_cast<const q38_q4_k_block *>(
-        model->map + down_offset);
+    const void *host_gate = model->map + gate_offset;
+    const void *host_down = model->map + down_offset;
+    const uint32_t qtype = gate_up->type;
     std::vector<float> gate_dense, down_dense;
-    if (!decode_gate_up(host_gate, &gate_dense) ||
-        !decode_down(host_down, &down_dense))
+    if (!decode_gate_up(host_gate, qtype, &gate_dense) ||
+        !decode_down(host_down, qtype, &down_dense))
         return 1;
     std::vector<float> expected_mid(Q38_MOE_INTERMEDIATE);
     std::vector<float> expected_output(Q38_MOE_HIDDEN);
@@ -188,7 +244,7 @@ int main(int argc, char **argv) {
     cudaStreamCreate(&stream);
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    q38_q4_k_block *device_gate = nullptr, *device_down = nullptr;
+    void *device_gate = nullptr, *device_down = nullptr;
     float *device_hidden = nullptr, *device_mid = nullptr, *device_output = nullptr;
     cudaMalloc(&device_gate, gate_bytes);
     cudaMalloc(&device_down, down_bytes);
@@ -201,10 +257,10 @@ int main(int argc, char **argv) {
                capture.hidden.size() * sizeof(float), cudaMemcpyHostToDevice);
 
     std::vector<double> gate_samples, down_samples;
-    if (!run_gate_up(device_gate, device_hidden, device_mid, stream, start,
+    if (!run_gate_up(device_gate, qtype, device_hidden, device_mid, stream, start,
                      stop, &gate_samples) ||
-        !run_down(device_down, device_mid, device_output, stream, start, stop,
-                  &down_samples))
+        !run_down(device_down, qtype, device_mid, device_output, stream, start,
+                  stop, &down_samples))
         return 1;
     std::vector<float> actual_mid(expected_mid.size());
     std::vector<float> actual_output(expected_output.size());
@@ -223,16 +279,17 @@ int main(int argc, char **argv) {
     const double gate_bytes_per_call = (double)gate_bytes;
     const double down_bytes_per_call = (double)down_bytes;
     std::printf(
-        "{\"format\":\"q38-r1-routed-expert-q4-v1\",\"model\":\"%s\","
+        "{\"format\":\"q38-routed-expert-q-gemv-v1\",\"model\":\"%s\","
         "\"layer\":%u,\"expert\":0,\"hidden_source\":\"real_m8_forward\","
-        "\"qtype\":\"Q4_K\",\"gate_up\":{\"rows\":%zu,\"cols\":%zu,"
+        "\"qtype\":\"%s\",\"gate_up\":{\"rows\":%zu,\"cols\":%zu,"
         "\"packed_bytes\":%llu,\"kernel_median_ms\":%.6f,\"p95_ms\":%.6f,"
         "\"effective_GBps\":%.6f,\"geometry\":\"grid=3 block=256\","
         "\"correctness_max_abs\":%.9g},\"down\":{\"rows\":%zu,\"cols\":%zu,"
         "\"packed_bytes\":%llu,\"kernel_median_ms\":%.6f,\"p95_ms\":%.6f,"
         "\"effective_GBps\":%.6f,\"geometry\":\"grid=10 block=256\","
         "\"correctness_max_abs\":%.9g},\"forward_layer\":%u}\n",
-        path, capture.layer, (size_t)(2 * Q38_MOE_INTERMEDIATE),
+        path, capture.layer, qtype == Q38_QUANT_Q2_K ? "Q2_K" : "Q4_K",
+        (size_t)(2 * Q38_MOE_INTERMEDIATE),
         (size_t)Q38_MOE_HIDDEN,
         (unsigned long long)gate_bytes, gate_samples[5], gate_samples[9],
         gate_bytes_per_call / (gate_samples[5] * 1e6),
