@@ -414,13 +414,15 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             return false;
         }
         if (tensor->type != 30 && tensor->type != 27 &&
-            tensor->type != 8 && tensor->type != 10 && tensor->type != 16) {
+            tensor->type != 8 && tensor->type != 10 && tensor->type != 12 &&
+            tensor->type != 16) {
             set_error(error, error_len, "unsupported tensor type in runtime artifact");
             return false;
         }
         if (name_has(tensor, ".mlp.experts.gate_up_proj")) {
             if (!shape_is(tensor, routed_gate_up_shape, 3) ||
-                (out->quantized ? tensor->type != 10 : tensor->type != 30))
+                (out->quantized ? (tensor->type != 10 && tensor->type != 12)
+                                : tensor->type != 30))
                 set_error(error, error_len, "routed gate/up shape/type mismatch");
             else {
                 if (!dst->experts.bank_count)
@@ -436,7 +438,8 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             const uint64_t *shape = out->quantized
                 ? routed_down_transposed : routed_down_source;
             if (!shape_is(tensor, shape, 3) ||
-                (out->quantized ? tensor->type != 10 : tensor->type != 30))
+                (out->quantized ? (tensor->type != 10 && tensor->type != 12)
+                                : tensor->type != 30))
                 set_error(error, error_len, "routed down shape/type mismatch");
             else {
                 if (!dst->experts.bank_count)

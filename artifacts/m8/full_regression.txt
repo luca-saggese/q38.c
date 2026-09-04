@@ -1,31 +1,31 @@
 M8 regression run (real commands, 2026-09-04)
 
 PASS
-  make m0-acceptance (M0 platform/GGUF/memory tests)
-  make m1-acceptance (inventory, manifest, quant blocks, subset conversion/bind)
-  make m2-acceptance (all M2 artifacts and gates)
-  make m3-acceptance (GR/GDN/reference/CUDA/chunk gates)
-  make m4-acceptance (PLE scalar/CUDA/cache/loader/failure gates)
-  make tests/test_m6_moe_binding tests/test_m6_moe_ref tests/test_m6_dispatch \
-    tests/test_m6_ubatch tests/test_m6_forward_api, followed by their binaries
-    (independent M6 binding/reference/dispatch/ubatch/API gates)
-  make m7-acceptance (M7 baseline gates; full sweep opt-in and not enabled)
-  make m8-q4-kernel (Q4_K CUDA routed-expert/reference parity)
-  python3 tools/q38_validate_manifest.py artifacts/m1/tensor_classes.json artifacts/m8/quant_manifest_R1.json
-  python3 tools/q38_quant_block_test.py artifacts/m1/tensor_classes.json artifacts/m8/quant_manifest_R1.json
+  make m0-acceptance
+  make m1-validate m1-quant-block (inventory, manifest, donor block checks)
+  make m2-acceptance
+  make m4-acceptance
+  independent M6 binaries: test_m6_moe_binding, test_m6_moe_ref,
+    test_m6_moe_cuda, test_m6_dispatch, test_m6_ubatch, test_m6_forward_api
+  make m7-acceptance
+  make m8-q4-kernel
+  full R1 conversion, q38 --inspect, full R1 q38 --generate (1 token and 8 tokens)
+  full R1 quant audit, manifest validation, and Q4 block alignment
+  paired 4-record frozen-corpus greedy comparison: exact match, zero token changes
 
 BLOCKED/FAILED
-  make m5-acceptance: failed at M5-C12 native/reference mismatch at index 2560
-    (-0.0039879242 vs -0.0011472413). This is an existing M5 baseline
-    regression and was not changed as part of M8.
-  M6 acceptance chain was not rerun because it depends on the failed M5 chain;
-    existing M6 artifacts remain preserved.
+  make m1-acceptance was not run: user-deleted M1 layers0-3 GGUF would require
+    recreating a large obsolete artifact; preserved full M7 and M2 GGUF were not touched.
+  make m3-acceptance/m3-audit requires that deleted layers0-3 GGUF and therefore
+    remains blocked by the explicit user cleanup.
+  make m5-acceptance fails at M5-C12 native/reference mismatch at index 2560
+    (-0.0039879242 vs -0.0011472413); this pre-existing baseline issue was not changed.
+  M6 chained acceptance remains blocked by M5, although independent M6 tests pass.
   Full M0-M7 sweep remains opt-in in the Makefile (M7_RUN_FULL=1).
 
-M8 conversion/quality gates
-  Full R1 conversion plan: BLOCKED; estimated payload 132212663320 bytes,
-  disk free 79605035008 bytes, preserved artifacts were not deleted.
-  Layer-0 R1 conversion, inspect, and quant audit: PASS.
-  Q4 CUDA expert kernel/reference parity: PASS.
-  Full-model R1 quality/perplexity and Spark startup/prefill/throughput: NOT RUN;
-  no unavailable result is inferred.
+QUALITY/MEMORY LIMITS
+  Full R1 now materialized: 132212799456 bytes; audit and runtime generation pass.
+  q38_eval greedy comparison passes, but perplexity/NLL/KL/layer-logit metrics are
+  not computed by the available evaluator; no stronger quality claim is made.
+  Long-context Spark startup/prefill peak instrumentation is unavailable; one/8-token
+  CUDA smoke memory/performance results are recorded in final_memory.json/final_bench.json.

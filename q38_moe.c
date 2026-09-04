@@ -36,9 +36,15 @@ bool q38_moe_weights_validate(const q38_moe_weights *w,
         !shape(w->shared_down_proj, 2, shared_down) ||
         !shape(w->shared_gate, 2, gate))
         return fail(error, error_len, "MoE tensor shape mismatch");
-    const uint32_t routed_type = w->routed_quantized ? 10u : 30u;
-    if (w->routed_gate_up->type != routed_type ||
-        w->routed_down->type != routed_type ||
+    if (w->routed_quantized &&
+        (w->routed_gate_up->type != 10u ||
+         w->routed_down->type != 10u) &&
+        (w->routed_gate_up->type != 12u ||
+         w->routed_down->type != 12u))
+        return fail(error, error_len, "MoE routed quant type mismatch");
+    if ((!w->routed_quantized &&
+         (w->routed_gate_up->type != 30u ||
+          w->routed_down->type != 30u)) ||
         w->shared_gate_proj->type != 30 || w->shared_up_proj->type != 30 ||
         w->shared_down_proj->type != 30 || w->shared_gate->type != 30)
         return fail(error, error_len, "MoE tensor type mismatch");

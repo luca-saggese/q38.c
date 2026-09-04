@@ -1,0 +1,20 @@
+{
+  "baseline": "artifacts/m8/baseline_quality_records.jsonl",
+  "baseline_sha256": "787ed6a51644ec1860158ecef2066f5623f9827a9d6c9e69cef3c88e2d205464",
+  "candidate": "artifacts/m8/R1_quality_records.jsonl",
+  "candidate_sha256": "787ed6a51644ec1860158ecef2066f5623f9827a9d6c9e69cef3c88e2d205464",
+  "changed_records": 0,
+  "corpus": {
+    "sha256": "3893f2e9804977e72079e7342b9f8c9d92fbd451fbfac59d604ab31760eaf639",
+    "status": "provided"
+  },
+  "exact_matches": 4,
+  "format": "q38-m8-eval-v1",
+  "missing_baseline": [],
+  "missing_candidate": [],
+  "quality_metrics": "not-computed",
+  "reason": "Token comparison is not perplexity, KL, NLL, or task quality.",
+  "records": 4,
+  "status": "pass",
+  "token_changes": 0
+}

@@ -1,28 +1,38 @@
 {
-  "baseline_observed": {
-    "cuda_allocated_bytes": 0,
-    "cuda_free_bytes": 8157949952,
+  "baseline_8_token": {
+    "cuda_free_initial_bytes": 4498866176,
+    "cuda_free_min_bytes": 759226368,
     "cuda_total_bytes": 130596646912,
-    "mem_available_bytes": 121757061120,
-    "model_file_bytes": 103901247456,
-    "model_mapped_bytes": 103901247456,
+    "peak_cuda_allocated_bytes": 3739639808,
     "peak_internal_bytes": 0,
-    "phase": "gguf_mapped",
-    "rss_bytes": 103092224
+    "peak_rss_bytes": 12984197120
   },
-  "conversion_plan": {
-    "disk_free_bytes": 79596388352,
-    "estimated_tensor_bytes": 132212663320,
-    "reason": "estimated payload exceeds the M1 108 GiB pressure target; local filesystem is too small for the runtime artifact",
-    "status": "blocked"
-  },
-  "format": "q38-m8-final-memory-v1",
+  "format": "q38-m8-final-memory-v2",
   "gates": {
     "prefill_max_bytes": 124554051584,
     "startup_max_bytes": 120259084288,
     "steady_state_preferred_bytes": 115964116992
   },
-  "r1_full_inventory_projection": {
+  "r1_8_token": {
+    "cuda_free_initial_bytes": 4377198592,
+    "cuda_free_min_bytes": 752365568,
+    "cuda_total_bytes": 130596646912,
+    "peak_cuda_allocated_bytes": 3624833024,
+    "peak_internal_bytes": 0,
+    "peak_rss_bytes": 15005958144
+  },
+  "r1_mapped_plan": {
+    "cuda_allocated_bytes": 0,
+    "cuda_free_bytes": 1941286912,
+    "cuda_total_bytes": 130596646912,
+    "mem_available_bytes": 123018092544,
+    "model_file_bytes": 132212799456,
+    "model_mapped_bytes": 132212799456,
+    "peak_internal_bytes": 0,
+    "phase": "gguf_mapped",
+    "rss_bytes": 103067648
+  },
+  "solver_projection": {
     "gates": {
       "prefill": "pass",
       "prefill_max_bytes": 124554051584,
@@ -33,20 +43,8 @@
     },
     "model_file_bytes": 132212799456,
     "predicted_resident_bytes": 77777578696,
-    "projected_peak_bytes": 77777578696,
-    "status": "projected_not_measured"
+    "projected_peak_bytes": 77777578696
   },
-  "r1_layer0_observed": {
-    "cuda_allocated_bytes": 0,
-    "cuda_free_bytes": 8142561280,
-    "cuda_total_bytes": 130596646912,
-    "mem_available_bytes": 121741676544,
-    "model_file_bytes": 4126298944,
-    "model_mapped_bytes": 4126298944,
-    "peak_internal_bytes": 0,
-    "phase": "gguf_mapped",
-    "rss_bytes": 102789120
-  },
-  "reason": "Full R1 startup/prefill cannot be measured because its 132,212,799,456-byte artifact cannot be written alongside preserved user files.",
-  "status": "blocked"
+  "status": "conditional",
+  "status_note": "Full R1 one-token and 8-token CUDA runs completed without NaN/Inf; long-context startup/prefill peak instrumentation is not available in this CLI."
 }

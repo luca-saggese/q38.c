@@ -192,7 +192,8 @@ extern "C" bool q38_forward_cuda_expert_backend(
     if (!context || !model || !gate_up || !down || !input || !output ||
         !tensor_shape(gate_up, &gate_rows, &gate_cols) ||
         !tensor_shape(down, &down_rows, &down_cols) ||
-        gate_up->type != 10 || down->type != 10 ||
+        (gate_up->type != 10 && gate_up->type != 12) ||
+        down->type != gate_up->type ||
         gate_cols != 2560 || down_cols != 2560 ||
         gate_rows % 1280 != 0 || down_rows % 640 != 0 ||
         expert >= gate_rows / 1280 || expert >= down_rows / 640)
@@ -271,13 +272,16 @@ extern "C" bool q38_forward_cuda_expert_backend(
         cudaMemcpyAsync(context->device_input, input, 2560u * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert upload failed");
-    if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess ||
-        !q38_moe_cuda_expert_q2_workspace(
-            gate_storage, down_storage,
-            context->device_input, context->device_output,
-            context->device_moe_mid, context->stream,
-            error, error_len))
+    if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert execution failed");
+    const bool launched = (gate_up->type == 10
+        ? q38_moe_cuda_expert_q2_workspace
+        : q38_moe_cuda_expert_q4_workspace)(
+            gate_storage, down_storage, context->device_input,
+            context->device_output, context->device_moe_mid, context->stream,
+            error, error_len);
+    if (!launched)
+        return false;
     if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess ||
         cudaMemcpyAsync(output, context->device_output, 2560u * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||

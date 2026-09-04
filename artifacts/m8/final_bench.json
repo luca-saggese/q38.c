@@ -1,24 +1,48 @@
 {
   "baseline": {
     "artifact": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
-    "first_token_ms": 17985.712201,
-    "generated_ids": [
-      11
-    ],
-    "peak_cuda_allocated_bytes": 3009204224,
-    "peak_rss_bytes": 10753249280,
-    "run": "artifacts/m8/baseline_quality_run.json"
+    "first_token_ms": 16896.086058,
+    "median_decode_ms": 1430.038249,
+    "peak_cuda_allocated_bytes": 3739639808,
+    "peak_rss_bytes": 12984197120,
+    "tokens": [
+      11,
+      353,
+      2688,
+      264,
+      1496,
+      2812,
+      3712,
+      10756
+    ]
   },
-  "candidate": {
-    "artifact": "artifacts/m8/qwen38-runtime-layers0-R1-Q4Experts-BF16Core-BF16PLE.gguf",
-    "status": "not-measured"
+  "corpus": "artifacts/m8/quality_corpus.jsonl",
+  "delta": {
+    "first_token_ms_percent": -16.87835011144331,
+    "median_decode_ms_percent": 30.301343778952305
   },
-  "format": "q38-m8-final-bench-v1",
+  "format": "q38-m8-final-bench-v2",
+  "greedy_eval": "artifacts/m8/final_greedy_eval.json",
   "q4_kernel": {
-    "artifact": "artifacts/m8/q4_cuda_test.txt",
     "command": "make m8-q4-kernel",
     "status": "pass"
   },
-  "reason": "No full-model R1 throughput comparison is available without the blocked full artifact.",
-  "status": "blocked"
+  "r1": {
+    "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+    "first_token_ms": 14044.305498,
+    "median_decode_ms": 1863.359055,
+    "peak_cuda_allocated_bytes": 3624833024,
+    "peak_rss_bytes": 15005958144,
+    "tokens": [
+      11,
+      353,
+      2688,
+      264,
+      1496,
+      2812,
+      3712,
+      10756
+    ]
+  },
+  "status": "conditional"
 }
