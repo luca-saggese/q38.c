@@ -19,6 +19,14 @@
     "sha256": "b6a97c9af746c7d51815e8e34dc8e44744131d8ed1391ce366896d2561b8acc7",
     "status": "frozen-diagnostic"
   },
+  "direct_q2_m7_vs_q4_r1": {
+    "changed_records": 0,
+    "q2_m7_greedy_records": 4,
+    "q4_r1_greedy_records": 4,
+    "reason": "Existing four-record greedy comparison only; this is not the BF16 quality drift gate.",
+    "status": "measured-limited",
+    "token_changes": 0
+  },
   "evaluator": {
     "metrics": [
       "argmax_agreement",
@@ -56,6 +64,16 @@
     "perplexity": "not-computed"
   },
   "metrics_note": "The evaluator now computes deterministic paired metrics when >=32 complete runtime/reference records are supplied. No numeric quality metrics are claimed until those records exist.",
+  "quality_drift_vs_bf16_reference": {
+    "argmax_agreement": null,
+    "kl": null,
+    "logit_error": null,
+    "qsa_selected_id_stability": null,
+    "reason": "No paired finite BF16/reference and full-R1 vectors are available.",
+    "router_top10_stability": null,
+    "status": "not-computed",
+    "top_k_overlap": null
+  },
   "reason": "Full R1 generation and paired greedy comparison completed. Perplexity/NLL/KL/layer-logit/task metrics remain unavailable in the provided evaluator.",
   "recipe": "R1 selective routed-expert Q4_K / core BF16 / PLE Q2-class",
   "regression": {

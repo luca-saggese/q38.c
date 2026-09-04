@@ -13,6 +13,13 @@
     "startup_max_bytes": 120259084288,
     "steady_state_preferred_bytes": 115964116992
   },
+  "ple_policy": {
+    "cache": "bounded",
+    "exclude_ple_from_residency_fit": true,
+    "full_ple_mirror": false,
+    "staging": "bounded",
+    "storage": "file-backed SSD/mmap"
+  },
   "r1_8_token": {
     "cuda_free_initial_bytes": 4377198592,
     "cuda_free_min_bytes": 752365568,
@@ -40,6 +47,7 @@
     "resident_non_ple_bytes": null,
     "upload_bytes_per_token": null
   },
+  "residency_fit_criterion": "non-PLE resident bytes only; total GGUF including PLE is not RAM-fit criterion",
   "solver_projection": {
     "gates": {
       "prefill": "pass",

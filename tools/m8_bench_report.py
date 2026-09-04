@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--artifact", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--m7-baseline", type=Path)
     args = parser.parse_args()
     paths = sorted(args.runs.glob("run_*.json"))
     if len(paths) != 6:
@@ -36,8 +37,19 @@ def main():
         "peak_rss_bytes": [memory.get("peak_rss_bytes") for memory in memories],
     }
     result = {
-        "format": "q38-m8-r1-cold-warm-v1",
+        "format": "q38-m8-r1-cold-warm-v2",
         "artifact": str(args.artifact),
+        "ple_policy": {
+            "storage": "file-backed SSD/mmap",
+            "cache": "bounded",
+            "staging": "bounded",
+            "resident_bytes": "excluded from residency fit",
+            "full_mirror": False,
+        },
+        "residency_fit": {
+            "criterion": "non-PLE resident bytes only",
+            "total_gguf_bytes_is_fit_criterion": False,
+        },
         "runs": 6,
         "cold_runs": 1,
         "warm_runs": 5,
@@ -82,6 +94,8 @@ def main():
             "mem_available_bytes": None,
             "upload_bytes_per_token": None,
             "resident_misses": None,
+            "warm_upload_bytes_per_token": None,
+            "warm_resident_misses": None,
             "status": "not-computed",
             "reason": (
                 "The existing --generate JSON API exposes workspace "
@@ -91,6 +105,33 @@ def main():
         },
         "status": "conditional",
     }
+    if args.m7_baseline:
+        baseline = json.loads(args.m7_baseline.read_text(encoding="utf-8"))
+        baseline_memory = baseline.get("memory", {})
+        result["direct_q2_m7_vs_q4_r1"] = {
+            "q2_m7_artifact": (
+                "artifacts/m1/"
+                "qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf"
+            ),
+            "q2_m7_evidence": str(args.m7_baseline),
+            "q2_m7_first_token_ms": baseline.get("timing_ms", {}).get(
+                "first_token"
+            ),
+            "q2_m7_median_decode_ms": statistics.median(
+                baseline.get("timing_ms", {}).get("per_token", [None])[1:]
+            ) if len(baseline.get("timing_ms", {}).get("per_token", [])) > 1
+            else None,
+            "q2_m7_peak_rss_bytes": baseline_memory.get("peak_rss_bytes"),
+            "q4_r1_cold_ms": timings[0],
+            "q4_r1_warm_median_ms": statistics.median(timings[1:]),
+            "q4_r1_warm_p95_ms": percentile(timings[1:], 0.95),
+            "quality_drift_vs_bf16_reference": None,
+            "quality_drift_status": "not-computed",
+            "reason": (
+                "The paired BF16/reference quality record set is not "
+                "available; no drift is inferred from generated text."
+            ),
+        }
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
 
 

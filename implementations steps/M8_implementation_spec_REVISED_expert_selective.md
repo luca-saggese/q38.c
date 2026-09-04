@@ -4,6 +4,11 @@ Qwen3.8-Flash-Next / DGX Spark prototype
 
 _Selective Q4: sensitivity-driven quantization, memory solver, quality gates e ricetta finale DGX Spark._ 
 
+**Vincolo permanente PLE:** PLE resta file-backed su SSD/mmap con cache e
+staging bounded. Tutti i fit di residency usano esclusivamente i byte
+non-PLE; il GGUF totale comprensivo di PLE non è un criterio di RAM fit e non
+è mai ammesso un full PLE mirror.
+
 **Metodo:** nessuna ricetta di quantizzazione o accelerazione viene promossa perché 'sembra funzionare'. Deve superare simultaneamente correctness, quality, memory e stability gates sul DGX Spark. 
 
 ## **1. Definition of Done** 
@@ -448,4 +453,3 @@ artifacts/m8/
 Se il mixed-quant expert layout non è supportabile senza riscrivere M1/M6 internals, il progetto deve tornare a M1: expert-wise selective quantization non può essere aggiunta come hack in M8. 
 
 Target: GB10 / 128 GB unified coherent memory / CUDA only 
-

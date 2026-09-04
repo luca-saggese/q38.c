@@ -17,6 +17,9 @@ transposed down-projection layout is preserved.
 - M0, M1 validation/block, M2, M4, independent M6, and M7 gates pass; see
   `full_regression.txt` for exact status.
 - Memory solver calibration is inventory-backed and within 5% for M7 R0.
+- PLE is permanently file-backed SSD/mmap with bounded cache/staging. PLE
+  bytes are excluded from residency-fit accounting and no full PLE mirror is
+  permitted.
 
 ## Evidence and blockers
 
@@ -31,10 +34,15 @@ corpus is ready, but paired finite BF16-reference/full-R1 vectors are not
 available, so no quality metrics are claimed.
 
 Six real R1 CLI runs are recorded in `r1_bench_runs/` and aggregated in
-`R1_memory_bench.json`. The existing CLI does not expose persistent non-PLE
-residency, unified peak, MemAvailable, upload bytes/token, or residency misses;
-those fields remain null. The same-process M7 harness could not be rebuilt
-because unrelated CUDA files contain unresolved merge markers.
+`R1_memory_bench.json`. Cold, warm median/p95, RSS, and workspace CUDA
+allocation are recorded. The existing CLI does not expose persistent non-PLE
+residency, warm upload bytes/token, unified peak, MemAvailable, or residency
+misses; those fields remain null. The same-process M7 harness could not be
+rebuilt because unrelated CUDA files contain unresolved merge markers.
+
+The report includes direct Q2 M7 versus Q4 R1 timing and limited greedy
+comparison. BF16/reference quality drift is explicitly `not-computed` until
+paired full-vector records exist; generated text is not used as a proxy.
 
 The deleted layer-3 M5-C12 fixture is classified obsolete and replaced by a
 direct full-R1 gate (`artifacts/m5/m5_c12_modern_gate.json`). M1/M3 no longer

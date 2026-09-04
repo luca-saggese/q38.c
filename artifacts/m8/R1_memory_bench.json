@@ -1,6 +1,17 @@
 {
-  "format": "q38-m8-r1-cold-warm-v1",
+  "format": "q38-m8-r1-cold-warm-v2",
   "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+  "ple_policy": {
+    "storage": "file-backed SSD/mmap",
+    "cache": "bounded",
+    "staging": "bounded",
+    "resident_bytes": "excluded from residency fit",
+    "full_mirror": false
+  },
+  "residency_fit": {
+    "criterion": "non-PLE resident bytes only",
+    "total_gguf_bytes_is_fit_criterion": false
+  },
   "runs": 6,
   "cold_runs": 1,
   "warm_runs": 5,
@@ -44,8 +55,23 @@
     "mem_available_bytes": null,
     "upload_bytes_per_token": null,
     "resident_misses": null,
+    "warm_upload_bytes_per_token": null,
+    "warm_resident_misses": null,
     "status": "not-computed",
     "reason": "The existing --generate JSON API exposes workspace allocation and RSS only; it does not expose persistent non-PLE residency, MemAvailable, upload counters, or misses."
   },
-  "status": "conditional"
+  "status": "conditional",
+  "direct_q2_m7_vs_q4_r1": {
+    "q2_m7_artifact": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+    "q2_m7_evidence": "artifacts/m8/baseline_perf_8.json",
+    "q2_m7_first_token_ms": 16896.086058,
+    "q2_m7_median_decode_ms": 1430.038249,
+    "q2_m7_peak_rss_bytes": 12984197120,
+    "q4_r1_cold_ms": 23434.189792,
+    "q4_r1_warm_median_ms": 14815.800655,
+    "q4_r1_warm_p95_ms": 16667.506326,
+    "quality_drift_vs_bf16_reference": null,
+    "quality_drift_status": "not-computed",
+    "reason": "The paired BF16/reference quality record set is not available; no drift is inferred from generated text."
+  }
 }

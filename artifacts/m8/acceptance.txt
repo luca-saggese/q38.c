@@ -3,6 +3,8 @@ M8 acceptance status (full R1 artifact)
 PASS
 - Full R1 selective Q4 GGUF is preserved at 132212799456 bytes and recorded in
   R1_checksums.txt; M7/M2 artifacts were not deleted.
+- PLE is permanently file-backed SSD/mmap with bounded cache/staging. All
+  residency-fit accounting excludes PLE bytes; no full PLE mirror is used.
 - Inventory validation, Q4 alignment, inspect, quant audit, and Q4 scalar/CUDA
   routed-expert parity pass.
 - Real R1 CUDA generation runs pass without NaN/Inf; raw 1-cold+5-warm runs
@@ -20,9 +22,12 @@ CONDITIONAL / EXACT BLOCKERS
   metrics remain not-computed; no metrics are fabricated.
 - The same-process M7 benchmark could not be rebuilt because unrelated
   q38_forward CUDA files contain unresolved merge markers. The real R1 runs
-  therefore record process-isolated timings; persistent non-PLE bytes,
-  unified peak, MemAvailable, upload bytes/token, and residency misses are
-  explicitly null in R1_memory_bench.json.
+  therefore record process-isolated timings. Required non-PLE resident bytes,
+  warm upload bytes/token and misses, unified peak, and MemAvailable are
+  explicitly null in R1_memory_bench.json; RSS, cold, warm median/p95, and
+  workspace CUDA allocation are recorded.
+- Direct Q2 M7 versus Q4 R1 timing and limited greedy comparison are recorded,
+  while BF16/reference quality drift remains uncomputed rather than inferred.
 - Long-context startup/prefill instrumentation remains unavailable.
 - M8 remains conditional, not PASS, until paired quality vectors and the
   required residency telemetry are available.
