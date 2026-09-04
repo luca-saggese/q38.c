@@ -116,6 +116,8 @@ def _quality_metrics(baseline, candidate, top_k):
             raise ValueError(f"{identifier}: router layer count mismatch")
         if len(left_qsa) != len(right_qsa):
             raise ValueError(f"{identifier}: QSA layer count mismatch")
+        if any(len(layer) != 10 for layer in left_routes + right_routes):
+            raise ValueError(f"{identifier}: router_top10 must contain ten IDs")
         pairs.append((identifier, left_logits, right_logits,
                       left_routes, right_routes, left_qsa, right_qsa))
     if not pairs:
