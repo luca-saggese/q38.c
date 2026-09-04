@@ -8,11 +8,10 @@
     "status": "measured_single_prompt"
   },
   "candidate": {
-    "artifact": "artifacts/m8/qwen38-runtime-layers0-R1-Q4Experts-BF16Core-BF16PLE.gguf",
-    "run_exit_code": 1,
-    "scope": "layer-0 controlled artifact",
-    "status": "not_scoreable",
-    "stderr": "q38: model state: runtime-only architecture metadata mismatch"
+    "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+    "run_exit_code": 0,
+    "scope": "full 48-layer R1 artifact",
+    "status": "measured"
   },
   "corpus": {
     "manifest": "artifacts/m8/quality_corpus_manifest.json",
@@ -46,7 +45,7 @@
   "recipe": "R1 selective routed-expert Q4_K / core BF16 / PLE Q2-class",
   "regression": {
     "m5_status": "failed_m5_c12_native_reference_mismatch",
-    "m6_status": "not-rerun_after_m5_failure"
+    "m6_status": "independent_tests_pass_chained_acceptance_blocked_by_m5"
   },
   "status": "conditional"
 }
