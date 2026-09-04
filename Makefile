@@ -80,7 +80,7 @@ M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
 	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-schema m7-gates \
 	m7-profile-forward m7-residency-footprint m7-acceptance m8-q4-kernel \
-	m9-checkpoint
+	m9-checkpoint m9-rewind
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
@@ -799,6 +799,15 @@ $(TEST_DIR)/test_m9_checkpoint_mismatch: \
 m9-checkpoint: $(TEST_DIR)/test_m9_checkpoint_mismatch
 	@mkdir -p artifacts/m9
 	@./$(TEST_DIR)/test_m9_checkpoint_mismatch
+
+$(TEST_DIR)/test_m9_rewind_replay: $(TEST_DIR)/test_m9_rewind_replay.c \
+		q38_replay.o q38_state.o q38_qsa.o q38_session.o q38_replay.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m9_rewind_replay.c \
+		q38_replay.o q38_state.o q38_qsa.o q38_session.o
+
+m9-rewind: $(TEST_DIR)/test_m9_rewind_replay
+	@mkdir -p artifacts/m9
+	@./$(TEST_DIR)/test_m9_rewind_replay
 
 m6-c03: m6-c02 $(TEST_DIR)/test_m6_moe_cuda
 	@./$(TEST_DIR)/test_m6_moe_cuda
