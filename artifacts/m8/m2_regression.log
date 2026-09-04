@@ -1,0 +1,63 @@
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m2_golden tests/test_m2_golden.c q38_golden.o
+./tests/test_m2_golden
+test_m2_golden: binary roundtrip and checksum passed
+printf '%s\n' \
+	'{"format":"q38-golden-binary","version":1,"endianness":"little","checksum":"FNV-1a-64","metadata":"fixed q38_golden_meta"}' \
+	> artifacts/m2/golden_format_version.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_weights tests/test_weights.c q38_weights.o \
+q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m2_weights tests/test_m2_weights.c q38_weights.o \
+	q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
+./tests/test_m2_weights
+test_m2_weights: strict missing and shape/type gates passed
+./tests/test_weights \
+	artifacts/m1/runtime-layers0-q2-test.gguf 0
+test_weights: strict subset bind passed
+printf '%s\n' \
+	'{"gate":"M2-C01","binding":"strict","subset_max_layer":0,"required_layers":1,"tensor_count":29,"payload":"mmap views only","status":"pass"}' \
+	> artifacts/m2/binding_report.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m2_tokenizer tests/test_m2_tokenizer.c q38_tokenizer.o
+python3 tools/generate_m2_tokenizer_vectors.py \
+	--model-dir /home/lvx/q38model \
+	--output artifacts/m2/tokenizer_vectors.json
+[transformers] You are using a model of type `qwen4_exp` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+./tests/test_m2_tokenizer
+test_m2_tokenizer: frozen raw and chat token IDs passed
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m2_quant tests/test_m2_quant.c q38_quant.o \
+	q38_oracle.o -lm
+./tests/test_m2_quant
+test_m2_quant: Q2_K and Q4_K scalar boundary/oracle tests passed
+printf '%s\n' \
+	'{"gate":"M2-C03","type":"Q2_K","block_bytes":84,"elements_per_block":256,"oracle":"scalar F32","status":"pass"}' \
+	> artifacts/m2/quant_q2_oracle.json
+printf '%s\n' \
+	'{"gate":"M2-C03","type":"Q4_K","block_bytes":144,"elements_per_block":256,"oracle":"scalar F32","status":"pass"}' \
+	> artifacts/m2/quant_q4_oracle.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m2_cuda tests/test_m2_cuda.cu \
+	q38_cuda_primitives.o q38_quant.o q38_oracle.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m2_cuda
+test_m2_cuda: CUDA Q2_K/Q4_K dequant parity passed
+printf '%s\n' \
+	'{"gate":"M2-C04","paths":["Q2_K","Q4_K"],"comparison":"CUDA vs scalar F32","status":"pass"}' \
+	> artifacts/m2/primitive_accuracy.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m2_norm tests/test_m2_norm.cu \
+	q38_cuda_primitives.o q38_oracle.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m2_norm
+test_m2_norm: RMSNorm and SiLU CUDA/oracle parity passed
+printf '%s\n' \
+	'{"gate":"M2-C05","paths":["RMSNorm","SiLU"],"accumulation":"F32","comparison":"CUDA vs scalar oracle","status":"pass"}' \
+	> artifacts/m2/norm_activation.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m2_matvec tests/test_m2_matvec.cu \
+	q38_cuda_primitives.o q38_quant.o q38_oracle.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m2_matvec
+Q2_K matvec launch: grid=(9,1,1) block=(256,1,1), 8 warps/block, one row/block, warp-per-Q2_K-block; max_abs=0.000183105
+test_m2_matvec: Q2 expert and BF16 core matvec parity passed
+printf '%s\n' \
+	'{"gate":"M2-C06","paths":["Q2_K expert","BF16 core"],"shapes":"random rows and non-multiple BF16 tails","status":"pass"}' \
+	> artifacts/m2/matvec_dispatch.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m2_embedding tests/test_m2_embedding.c q38_weights.o \
+	q38_gguf.o q38_model_config.o q38_ple.o
+/usr/bin/ld: q38_weights.o: nella funzione `validate_layer_complete':
+/home/lvx/q38.c/q38_weights.c:251:(.text+0xa64): riferimento non definito a `q38_qsa_weights_validate'
+collect2: error: ld returned 1 exit status
+make: *** [Makefile:1127: tests/test_m2_embedding] Errore 1

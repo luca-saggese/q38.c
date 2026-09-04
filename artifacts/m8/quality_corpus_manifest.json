@@ -1,0 +1,15 @@
+{
+  "format": "q38-m8-quality-corpus-v1",
+  "metrics_ready": false,
+  "reason": "Derived from frozen M6 token-sequence artifacts; no full R1 model is available for paired quality scoring.",
+  "records": 4,
+  "records_sha256": "3893f2e9804977e72079e7342b9f8c9d92fbd451fbfac59d604ab31760eaf639",
+  "source_artifacts": [
+    "artifacts/m6/stateful_sequence_oracle_2.json",
+    "artifacts/m6/stateful_sequence_oracle_4.json",
+    "artifacts/m6/stateful_sequence_oracle_8.json",
+    "artifacts/m6/stateful_sequence_oracle_resume_probe.json"
+  ],
+  "status": "frozen-diagnostic",
+  "tokenizer_dir": "/home/lvx/q38model"
+}

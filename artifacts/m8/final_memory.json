@@ -1,0 +1,52 @@
+{
+  "baseline_observed": {
+    "cuda_allocated_bytes": 0,
+    "cuda_free_bytes": 8157949952,
+    "cuda_total_bytes": 130596646912,
+    "mem_available_bytes": 121757061120,
+    "model_file_bytes": 103901247456,
+    "model_mapped_bytes": 103901247456,
+    "peak_internal_bytes": 0,
+    "phase": "gguf_mapped",
+    "rss_bytes": 103092224
+  },
+  "conversion_plan": {
+    "disk_free_bytes": 79596388352,
+    "estimated_tensor_bytes": 132212663320,
+    "reason": "estimated payload exceeds the M1 108 GiB pressure target; local filesystem is too small for the runtime artifact",
+    "status": "blocked"
+  },
+  "format": "q38-m8-final-memory-v1",
+  "gates": {
+    "prefill_max_bytes": 124554051584,
+    "startup_max_bytes": 120259084288,
+    "steady_state_preferred_bytes": 115964116992
+  },
+  "r1_full_inventory_projection": {
+    "gates": {
+      "prefill": "pass",
+      "prefill_max_bytes": 124554051584,
+      "startup": "pass",
+      "startup_max_bytes": 120259084288,
+      "steady_state": "pass",
+      "steady_state_preferred_bytes": 115964116992
+    },
+    "model_file_bytes": 132212799456,
+    "predicted_resident_bytes": 77777578696,
+    "projected_peak_bytes": 77777578696,
+    "status": "projected_not_measured"
+  },
+  "r1_layer0_observed": {
+    "cuda_allocated_bytes": 0,
+    "cuda_free_bytes": 8142561280,
+    "cuda_total_bytes": 130596646912,
+    "mem_available_bytes": 121741676544,
+    "model_file_bytes": 4126298944,
+    "model_mapped_bytes": 4126298944,
+    "peak_internal_bytes": 0,
+    "phase": "gguf_mapped",
+    "rss_bytes": 102789120
+  },
+  "reason": "Full R1 startup/prefill cannot be measured because its 132,212,799,456-byte artifact cannot be written alongside preserved user files.",
+  "status": "blocked"
+}

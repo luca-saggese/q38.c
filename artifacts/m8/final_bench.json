@@ -1,0 +1,24 @@
+{
+  "baseline": {
+    "artifact": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+    "first_token_ms": 17985.712201,
+    "generated_ids": [
+      11
+    ],
+    "peak_cuda_allocated_bytes": 3009204224,
+    "peak_rss_bytes": 10753249280,
+    "run": "artifacts/m8/baseline_quality_run.json"
+  },
+  "candidate": {
+    "artifact": "artifacts/m8/qwen38-runtime-layers0-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+    "status": "not-measured"
+  },
+  "format": "q38-m8-final-bench-v1",
+  "q4_kernel": {
+    "artifact": "artifacts/m8/q4_cuda_test.txt",
+    "command": "make m8-q4-kernel",
+    "status": "pass"
+  },
+  "reason": "No full-model R1 throughput comparison is available without the blocked full artifact.",
+  "status": "blocked"
+}

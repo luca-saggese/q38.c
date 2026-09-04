@@ -1,0 +1,49 @@
+M4-C00: PLE semantics freeze passed
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m4_session tests/test_m4_session.c q38_session.o
+test_m4_session: n-gram history boundaries and EOS reset passed
+printf '%s\n' '{"gate":"M4-C01","history":"two-token session history","eos_reset":true,"chunk_boundary":true,"status":"pass"}' > artifacts/m4/session_history.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m4_ple_ref tests/test_m4_ple_ref.c \
+	q38_ple_ref.o q38_session.o q38_quant.o -lm
+test_m4_ple_ref: verified scalar hash/index and history invariance
+printf '%s\n' '{"gate":"M4-C02","oracle":"scalar uint64 XOR/multiply modulo indexing","heads":16,"orders":["bigram","trigram"],"status":"pass"}' > artifacts/m4/ple_ref.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m4_ple_store tests/test_m4_ple_store.c q38_ple.o q38_gguf.o
+test_m4_ple_store: strict table geometry and row addressing passed
+printf '%s\n' '{"gate":"M4-C03","table":"dedicated PLE descriptor","row_width":2560,"strict_geometry":true,"status":"pass"}' > artifacts/m4/ple_store.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m4_ple_row tests/test_m4_ple_row.c \
+	q38_ple_ref.o q38_session.o q38_quant.o -lm
+test_m4_ple_row: Q2_K/Q4_K scalar row decode and validation passed
+printf '%s\n' '{"gate":"M4-C04","decoder":"scalar PLE row","qtypes":["Q2_K","Q4_K"],"row_width":2560,"status":"pass"}' > artifacts/m4/ple_row_quant_tests.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m4_ple_cuda tests/test_m4_ple_cuda.cu \
+	q38_ple_cuda.o q38_ple_ref.o q38_session.o q38_quant.o \
+	-L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+test_m4_ple_cuda: CUDA row lookup matches scalar Q2/Q4 oracle
+printf '%s\n' '{"gate":"M4-C05","lookup":"naive CUDA row decode","qtypes":["Q2_K","Q4_K"],"cache":"disabled","status":"pass"}' > artifacts/m4/ple_cuda_lookup.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/q38_forward_probe q38_forward_probe.c \
+	q38_ple_ref.o q38_session.o q38_quant.o -lm
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m4_ple_injection tests/test_m4_ple_injection.c \
+	q38_ple_ref.o q38_session.o q38_quant.o -lm
+q38_forward_probe: 7 PLE ID cases match independent goldens
+q38_forward_probe: legacy ID corpus intentionally contains no activation vectors; standalone checkpoint-backed injection vectors are validated by test_m4_ple_injection
+test_m4_ple_injection: independent hidden/contribution/after golden passed
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_ple_chunking tests/test_ple_chunking.c \
+	q38_ple_ref.o q38_session.o q38_quant.o -lm
+test_ple_chunking: 7 cases and 42 deterministic partitions passed
+test_ple_chunking: row-ID/history invariance passed; activation invariance is covered by the checkpoint-backed M4-C06 injection probe
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m4_ple_cache tests/test_m4_ple_cache.c \
+	q38_ple_cache.o q38_ple_ref.o q38_session.o q38_quant.o -lm
+test_m4_ple_cache: bounded deterministic quantized-row cache passed
+test_m4_ple_cache: cold and warm rows decode identically
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m4_ple_cuda_batch tests/test_m4_ple_cuda_batch.cu \
+	q38_ple_cuda.o q38_ple_ref.o q38_session.o q38_quant.o \
+	-L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+test_m4_ple_cuda_batch: deduplicated CUDA lookup preserves IDs and output order
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m4_ple_loader tests/test_m4_ple_loader.c \
+	q38_ple.o q38_ple_cache.o q38_gguf.o q38_memory.o
+test_m4_ple_loader: GGUF shard binding and file-backed row reads passed
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m4_ple_prefetch tests/test_m4_ple_prefetch.c \
+	q38_ple_prefetch.o q38_ple.o q38_gguf.o
+test_m4_ple_prefetch: disabled-by-default advisory prefetch passed
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m4_ple_cuda_failure tests/test_m4_ple_cuda_failure.cu \
+	q38_ple_cuda.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart
+q38: fatal CUDA error during PLE row lookup execution: misaligned address
+test_m4_ple_cuda_failure: CUDA lookup faults terminate child

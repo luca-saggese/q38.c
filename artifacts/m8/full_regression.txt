@@ -1,17 +1,28 @@
-M8 regression status through M8-C02
+M8 regression run (real commands, 2026-09-04)
 
-PASS (executed)
-  python3 tools/m7_check_gates.py
-  make m7-gates
+PASS
+  make m0-acceptance (M0 platform/GGUF/memory tests)
+  make m1-acceptance (inventory, manifest, quant blocks, subset conversion/bind)
+  make m2-acceptance (all M2 artifacts and gates)
+  make m3-acceptance (GR/GDN/reference/CUDA/chunk gates)
+  make m4-acceptance (PLE scalar/CUDA/cache/loader/failure gates)
+  make m7-acceptance (M7 baseline gates; full sweep opt-in and not enabled)
+  make m8-q4-kernel (Q4_K CUDA routed-expert/reference parity)
   python3 tools/q38_validate_manifest.py artifacts/m1/tensor_classes.json artifacts/m8/quant_manifest_R1.json
   python3 tools/q38_quant_block_test.py artifacts/m1/tensor_classes.json artifacts/m8/quant_manifest_R1.json
-  python3 tools/q38_quant_audit.py artifacts/m8/qwen38-runtime-layers0-R1-Q4Experts-BF16Core-BF16PLE.gguf ...
-  ./q38 --inspect artifacts/m8/qwen38-runtime-layers0-R1-Q4Experts-BF16Core-BF16PLE.gguf --json
 
-NOT RUN / BLOCKED
-  Full M0-M7 historical regression is opt-in and was not run.
-  Full-model R1 conversion is blocked by available disk headroom beside the 97 GiB R0 artifact.
-  Q4 CUDA expert/ubatch acceptance and quality corpus evaluation are M8-C03+ work.
-  Spark startup/prefill peak and long-context gates were not measured for R1.
+BLOCKED/FAILED
+  make m5-acceptance: failed at M5-C12 native/reference mismatch at index 2560
+    (-0.0039879242 vs -0.0011472413). This is an existing M5 baseline
+    regression and was not changed as part of M8.
+  M6 acceptance chain was not rerun because it depends on the failed M5 chain;
+    existing M6 artifacts remain preserved.
+  Full M0-M7 sweep remains opt-in in the Makefile (M7_RUN_FULL=1).
 
-No quality or final-release claim is made by this file.
+M8 conversion/quality gates
+  Full R1 conversion plan: BLOCKED; estimated payload 132212663320 bytes,
+  disk free 79605035008 bytes, preserved artifacts were not deleted.
+  Layer-0 R1 conversion, inspect, and quant audit: PASS.
+  Q4 CUDA expert kernel/reference parity: PASS.
+  Full-model R1 quality/perplexity and Spark startup/prefill/throughput: NOT RUN;
+  no unavailable result is inferred.

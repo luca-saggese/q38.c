@@ -1,0 +1,9 @@
+M7 replay snapshot and callback trace harness passed
+M7 profile telemetry passed
+M7 independent profile schema gates passed
+M7 baseline gates passed
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m6_moe_cuda tests/test_m6_moe_cuda.cu \
+	q38_moe_cuda.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+test_m6_moe_cuda: naive router projection passed
+M7: full M0-M6 sweep not run (set M7_RUN_FULL=1)
+M7 acceptance artifacts generated (missing expensive probes are recorded)

@@ -1,0 +1,222 @@
+./tests/test_m2_golden
+test_m2_golden: binary roundtrip and checksum passed
+printf '%s\n' \
+	'{"format":"q38-golden-binary","version":1,"endianness":"little","checksum":"FNV-1a-64","metadata":"fixed q38_golden_meta"}' \
+	> artifacts/m2/golden_format_version.json
+./tests/test_m2_weights
+test_m2_weights: strict missing and shape/type gates passed
+./tests/test_weights \
+	artifacts/m1/runtime-layers0-q2-test.gguf 0
+test_weights: strict subset bind passed
+printf '%s\n' \
+	'{"gate":"M2-C01","binding":"strict","subset_max_layer":0,"required_layers":1,"tensor_count":29,"payload":"mmap views only","status":"pass"}' \
+	> artifacts/m2/binding_report.json
+python3 tools/generate_m2_tokenizer_vectors.py \
+	--model-dir /home/lvx/q38model \
+	--output artifacts/m2/tokenizer_vectors.json
+[transformers] You are using a model of type `qwen4_exp` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+./tests/test_m2_tokenizer
+test_m2_tokenizer: frozen raw and chat token IDs passed
+./tests/test_m2_quant
+test_m2_quant: Q2_K and Q4_K scalar boundary/oracle tests passed
+printf '%s\n' \
+	'{"gate":"M2-C03","type":"Q2_K","block_bytes":84,"elements_per_block":256,"oracle":"scalar F32","status":"pass"}' \
+	> artifacts/m2/quant_q2_oracle.json
+printf '%s\n' \
+	'{"gate":"M2-C03","type":"Q4_K","block_bytes":144,"elements_per_block":256,"oracle":"scalar F32","status":"pass"}' \
+	> artifacts/m2/quant_q4_oracle.json
+./tests/test_m2_cuda
+test_m2_cuda: CUDA Q2_K/Q4_K dequant parity passed
+printf '%s\n' \
+	'{"gate":"M2-C04","paths":["Q2_K","Q4_K"],"comparison":"CUDA vs scalar F32","status":"pass"}' \
+	> artifacts/m2/primitive_accuracy.json
+./tests/test_m2_norm
+test_m2_norm: RMSNorm and SiLU CUDA/oracle parity passed
+printf '%s\n' \
+	'{"gate":"M2-C05","paths":["RMSNorm","SiLU"],"accumulation":"F32","comparison":"CUDA vs scalar oracle","status":"pass"}' \
+	> artifacts/m2/norm_activation.json
+./tests/test_m2_matvec
+Q2_K matvec launch: grid=(9,1,1) block=(256,1,1), 8 warps/block, one row/block, warp-per-Q2_K-block; max_abs=0.000183105
+test_m2_matvec: Q2 expert and BF16 core matvec parity passed
+printf '%s\n' \
+	'{"gate":"M2-C06","paths":["Q2_K expert","BF16 core"],"shapes":"random rows and non-multiple BF16 tails","status":"pass"}' \
+	> artifacts/m2/matvec_dispatch.json
+./tests/test_m2_embedding \
+	artifacts/m1/runtime-layers0-q2-test.gguf \
+	> artifacts/m2/embedding_probe.json
+python3 tools/validate_m2_embedding.py \
+	--model-dir /home/lvx/q38model \
+	--probe artifacts/m2/embedding_probe.json
+validate_m2_embedding: frozen BF16 rows match GGUF probe
+./tests/test_m2_lm_head \
+	artifacts/m1/runtime-layers0-q2-test.gguf \
+	> artifacts/m2/lm_head_probe.json
+python3 tools/validate_m2_lm_head.py \
+	--model-dir /home/lvx/q38model \
+	--probe artifacts/m2/lm_head_probe.json
+validate_m2_lm_head: frozen BF16 rows and top-order match
+./tests/test_weights \
+	artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf 47
+test_weights: strict subset bind passed
+printf '%s\n' \
+	'{"gate":"M2-C09","binding":"strict","layers":48,"runtime_tensor_count":1294,"ple":"handle-backed views","status":"pass"}' \
+	> artifacts/m2/full_binding_report.json
+./tests/test_m2_memory \
+	artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
+	> artifacts/m2/memory.json
+./tests/test_gguf
+ok:   valid GGUF opens
+ok:   version == 3
+ok:   n_kv == 2
+ok:   n_tensors == 1
+ok:   get name
+ok:   name value
+ok:   get alignment
+ok:   alignment == 32
+ok:   tensor elements == 4
+ok:   tensor bytes == 16
+ok:   type name f32
+ok:   truncated GGUF fails safely
+ok:   bad magic fails safely
+test_gguf: all tests passed
+./tests/test_memory
+ok:   peak after first alloc
+ok:   peak monotonic up
+ok:   live bytes after free
+ok:   peak unchanged after free
+ok:   over-free clamped to zero
+ok:   snapshot phase set
+ok:   snapshot model_file_bytes
+ok:   snapshot model_mapped_bytes
+ok:   snapshot carries peak
+ok:   json has phase key
+ok:   json has rss_bytes key
+ok:   json has mem_available_bytes key
+ok:   json has cuda_free_bytes key
+ok:   json has cuda_total_bytes key
+ok:   json has model_file_bytes key
+ok:   json has model_mapped_bytes key
+ok:   json has cuda_allocated_bytes key
+ok:   json has peak_internal_bytes key
+test_memory: all tests passed
+./tests/test_model_config
+test_model_config: all tests passed
+./tests/test_quant_blocks
+test_quant_blocks: Q2/Q8/IQ2/Q4 donor block tests passed
+python3 tools/m2_acceptance.py \
+	--artifact-dir artifacts/m2 \
+	--model-dir /home/lvx/q38model
+m2_acceptance: all M2 artifacts and gates passed
+cp docs/qwen_gdn_semantics.md artifacts/m3/qwen_gdn_semantics.md
+python3 tools/m3_c00_audit.py \
+	--doc docs/qwen_gdn_semantics.md \
+	--model-dir /home/lvx/q38model \
+	--output artifacts/m3/reference_audit.json
+m3_c00_audit: reference freeze checklist passed; blockers recorded
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m3_gr_binding tests/test_m3_gr_binding.c q38_weights.o \
+	q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
+./tests/test_m3_gr_binding \
+	artifacts/m1/runtime-layers0-q2-test.gguf
+test_m3_gr_binding: strict attention/MLP GR binding passed
+printf '%s\n' \
+	'{"gate":"M3-C01","families":["attn_hyper_connection","mlp_hyper_connection"],"rank":320,"branches":4,"status":"pass"}' \
+	> artifacts/m3/gr_binding.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m3_gr_ref tests/test_m3_gr_ref.c q38_gr_ref.o -lm
+./tests/test_m3_gr_ref
+test_m3_gr_ref: external non-zero GR SiLU/scaling goldens passed
+printf '%s\n' \
+	'{"gate":"M3-C02","formula":"SiLU(low_rank/hc_count), 2*sigmoid(inject/hc_count)","dtype":"F32","vectors":"zero smoke plus independent non-zero negative-SiLU/scaling goldens","status":"pass"}' \
+	> artifacts/m3/gr_golden.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m3_gr_cuda tests/test_m3_gr_cuda.cu \
+	q38_gr.o q38_gr_ref.o q38_oracle.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m3_gr_cuda
+test_m3_gr_cuda: CUDA matches independent non-zero GR goldens
+printf '%s\n' \
+	'{"gate":"M3-C03","kernel":"non-fused GR CUDA baseline","comparison":"CUDA vs independent external F32 goldens","status":"pass"}' \
+	> artifacts/m3/gr_cuda_accuracy.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m3_gdn_binding tests/test_m3_gdn_binding.c q38_weights.o \
+	q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
+./tests/test_m3_gdn_binding \
+	artifacts/m1/runtime-layers0-q2-test.gguf
+test_m3_gdn_binding: strict projection/conv/gate binding passed
+printf '%s\n' \
+	'{"gate":"M3-C04","family":"GDN","key_heads":16,"value_heads":48,"head_dim":128,"conv_kernel":4,"status":"pass"}' \
+	> artifacts/m3/gdn_binding.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m3_state tests/test_m3_state.c q38_state.o
+./tests/test_m3_state
+test_m3_state: 36-slot GDN isolation/reset and GR workspace accounting passed
+printf '%s\n' \
+	'{"gate":"M3-C05","scope":"48-layer model","gdn_layers":36,"full_attention_layers":[3,7,11,15,19,23,27,31,35,39,43,47],"layer_to_gdn_slot":"explicit pointer-free table","recurrent_state":{"logical_shape":["gdn_slot",1,48,128,128],"dtype":"F32","bytes_per_slot":3145728,"bytes":113246208},"conv_history":{"logical_shape":["gdn_slot",1,3,10240],"kernel":4,"bytes_per_slot":122880,"bytes":4423680},"gr_workspace":{"logical_shape":[1,4,2560],"dtype":"F32","bytes":40960},"persistent_excludes_gr":true,"physical_layout":"contiguous per-slot regions; no GB10 tiling","status":"pass"}' \
+	> artifacts/m3/state_layout.json
+printf '%s\n' \
+	'{"gate":"M3-C05","persistent_recurrent_state_bytes":113246208,"conv_history_bytes":4423680,"gr_workspace_bytes":40960,"workspace_bytes":0,"persistent_bytes":117669888,"activation_bytes":40960,"allocation_bytes":117710848,"status":"pass"}' \
+	> artifacts/m3/state_memory.json
+cc -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -o tests/test_m3_gdn_ref tests/test_m3_gdn_ref.c q38_gdn_ref.o -lm
+./tests/test_m3_gdn_ref
+test_m3_gdn_ref: scalar F32 GDN recurrence microtests passed
+printf '%s\n' \
+	'{"gate":"M3-C06","dtype":"F32","state_logical_shape":["sequence","value_head","row","column"],"value_heads":48,"head_dim":128,"equations":["Sbar=decay*S_prev","prediction=Sbar^T*k","delta=(v-prediction)*beta","S_next=Sbar+k*delta^T","y=scale*S_next^T*q"],"ordering":["decay","prediction","delta","outer_product_update","read","scale"],"microtests":["zero_state","beta_zero","decay_ordering","exact_prediction","basis_orientation","two_timesteps","head_mapping"],"physical_layout":"contiguous logical state; no GB10 optimization or packing","status":"pass"}' \
+	> artifacts/m3/gdn_microtests.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m3_gdn_cuda tests/test_m3_gdn_cuda.cu \
+	q38_gdn.o q38_cuda_primitives.o q38_oracle.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m3_gdn_cuda
+test_m3_gdn_cuda: projection dispatch, causal history, QKV layout, and SiLU ordering passed
+printf '%s\n' \
+	'{"gate":"M3-C07","kernel":"reference/simple CUDA GDN projection plus causal depthwise convolution","scope":"deterministic device-resident fixture; full model upload remains out of scope","projection_dispatch":["Q2_K","Q8_0","BF16","F32"],"projection_logical_shapes":{"input":["token",2560],"qkv":["token",10240],"z":["token",6144]},"qkv_slice_order":["Q[0:2048]","K[2048:4096]","V[4096:10240]"],"conv":{"logical_input":["token",10240],"logical_kernel":["tap",10240],"kernel":4,"history":["token",3,10240],"history_update":"last three concatenated input tokens"},"ordering":["projection","causal_convolution","history_update","SiLU"],"physical_layout":"explicit logical row-major API; no GB10 optimization or fusion","status":"pass"}' \
+	> artifacts/m3/gdn_projection_conv.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m3_gdn_recurrence_cuda \
+	tests/test_m3_gdn_recurrence_cuda.cu q38_gdn.o q38_gdn_ref.o \
+	q38_cuda_primitives.o \
+	-L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m3_gdn_recurrence_cuda
+test_m3_gdn_recurrence_cuda: 1, 2, 4, and 5 token FP32 recurrence/state cases passed
+printf '%s\n' \
+	'{"gate":"M3-C08","kernel":"simple CUDA FP32 GDN recurrence baseline","state_logical_shape":["sequence","value_head","row","column"],"state_dtype":"F32","state_layout":"contiguous logical row-major; sequence=1","inputs":{"q":["token",48,128],"k":["token",48,128],"v":["token",48,128],"decay":["token",48],"beta":["token",48]},"equations":["Sbar=decay*S_prev","prediction=Sbar^T*k","delta=(v-prediction)*beta","S_next=Sbar+k*delta^T","y=scale*S_next^T*q"],"token_cases":[1,2,4,5],"checks":["output parity","state parity","zero reset","stream synchronization","CUDA launch/runtime errors"],"status":"pass"}' \
+	> artifacts/m3/gdn_recurrence_cuda.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m3_forward_probe tests/test_m3_forward_probe.cu \
+	q38_gr.o q38_gr_ref.o q38_gdn.o q38_gdn_ref.o \
+	q38_cuda_primitives.o q38_oracle.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m3_forward_probe \
+	artifacts/m3/layer0_intermediates.json
+test_m3_forward_probe: layer-0-shaped GR + GDN intermediates match scalar reference
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m3_multigdn tests/test_m3_multigdn.cu \
+	q38_gdn.o q38_gdn_ref.o q38_cuda_primitives.o \
+	-L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m3_multigdn \
+	artifacts/m3/multigdn_intermediates.json
+test_m3_multigdn: three consecutive GDN layers match scalar references and reset deterministically
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m3_chunk_invariance \
+	tests/test_m3_chunk_invariance.cu q38_gdn.o q38_gdn_ref.o \
+	q38_cuda_primitives.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m3_chunk_invariance \
+	artifacts/m3/chunk_invariance.json
+test_m3_chunk_invariance: one-chunk, boundary, random, and reset invariance passed
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m3_cuda_profile_baseline \
+	tests/test_m3_cuda_profile_baseline.cu q38_gdn.o \
+	q38_cuda_primitives.o q38_state.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m3_cuda_profile_baseline \
+	artifacts/m3/cuda_profile_baseline.json
+test_m3_cuda_profile_baseline: wrote artifacts/m3/cuda_profile_baseline.json
+make[1]: «q38_tokenizer.o» è aggiornato.
+make[1]: «tests/test_m2_tokenizer» è aggiornato.
+test_m2_tokenizer: frozen raw and chat token IDs passed
+native tokenizer runtime gate: passed
+./tests/test_m3_gr_ref
+test_m3_gr_ref: external non-zero GR SiLU/scaling goldens passed
+./tests/test_m3_gr_cuda
+test_m3_gr_cuda: CUDA matches independent non-zero GR goldens
+./tests/test_m3_state
+test_m3_state: 36-slot GDN isolation/reset and GR workspace accounting passed
+test_weights: strict subset bind passed
+test_weights: strict subset bind passed
+test_weights: strict subset bind passed
+test_weights: strict subset bind passed
+printf '%s\n' \
+	'{"gate":"M3-AUDIT","gr":"external non-zero scalar/CUDA goldens with negative SiLU and hc_count scaling","state":"36 independent GDN slots with explicit 48-layer mapping; GR activation excluded from persistent bytes","ple":{"zero_based_layer":1,"counts":{"max_layer_0":29,"max_layer_1":190,"max_layer_2":214,"max_layer_3":238},"finding":"no off-by-one; frozen fixture places PLE at layers.1"},"tokenizer":"native C byte-level BPE, decode, special tokens, multimodal markers, and frozen chat-template vectors; Python oracle is test-only","status":"pass"}' \
+	> artifacts/m3/audit.json
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m3_gdn_fused \
+	tests/test_m3_gdn_fused.cu q38_gdn.o q38_gdn_ref.o \
+	q38_cuda_primitives.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+./tests/test_m3_gdn_fused \
+	artifacts/m3/cuda_profile_fused.json
+test_m3_gdn_fused: chunk sizes 1, 2, 4, and 5 passed; wrote artifacts/m3/cuda_profile_fused.json

@@ -1,13 +1,21 @@
-M8 acceptance status (through M8-C02)
+M8 acceptance status (closure attempt)
 
 PASS
-- M8-C00 baseline freeze: committed M7 baseline manifest/checksums; focused M7 gates reproduce.
-- M8-C01 sensitivity harness: R0-R5 class-isolated descriptors and R1 manifest generated; manifest coverage and Q4 block alignment pass.
-- M8-C02 memory solver: R0 calibrated against the measured M7 all-non-PLE footprint; R1 projection is inventory-backed.
-- Controlled R1 layer-0 GGUF: generated with existing q38_quantize; quant audit and q38 inspect pass.
+- M8-C00 baseline manifest/checksums preserved.
+- R1 selective manifest covers the full runtime inventory; Q4 block alignment passes.
+- R0 memory solver calibration is inventory-backed and within 5% of measured M7 data.
+- Controlled layer-0 R1 GGUF conversion, q38 inspect, and quant audit pass.
+- Q4_K scalar/CUDA routed-expert parity test passes on NVIDIA GB10.
+- M0, M1, M2, M3, M4, and independent M7 gates pass in recorded commands.
+- A provenance-backed diagnostic corpus is frozen in quality_corpus.jsonl.
 
-NOT CLAIMED
-- No Q4 quality/perplexity result: the fixed M8 calibration corpus is absent (the evaluator scaffold is present but was not run).
-- No full-model R1 artifact: available disk headroom is insufficient for an additional full conversion alongside the 97 GiB R0 artifact.
-- No full M0-M7 regression, full Spark startup/prefill peak, or Q4 expert CUDA acceptance was run.
-- M7 remains conditional for historical/full-model gates; existing M7 commits were preserved.
+NOT CLAIMED / BLOCKERS
+- Full R1 output is 132,212,663,320 bytes versus 79,605,035,008 bytes free;
+  it cannot be created alongside preserved user files without deletion.
+- The available R1 file is layer-0 only and fails full-generation binding, so paired
+  Q4 quality/perplexity and full R1 throughput results are unavailable.
+- Full R1 Spark startup/prefill peak and long-context memory acceptance are not measured.
+- M5 acceptance currently fails at M5-C12 with native/reference mismatch
+  (-0.0039879242 versus -0.0011472413 at index 2560); M6 chained acceptance was
+  not rerun after that failure. M7 remains conditional because its full sweep is opt-in.
+- No Spark, Spark-quality, or unavailable model result is fabricated.
