@@ -20,7 +20,20 @@
     "sha256": "a249a82d0a5df5ed7920ee6bb402d2cecbb03a55088a35387527fa910b040b7d",
     "status": "frozen-diagnostic"
   },
-  "format": "q38-m8-final-quality-v1",
+  "format": "q38-m8-final-quality-v2",
+  "full_r1_generation": {
+    "artifact": "artifacts/m8/R1_full_quality_run.json",
+    "generated_ids": [
+      11
+    ],
+    "status": "pass"
+  },
+  "greedy_comparison": {
+    "changed_records": 0,
+    "records": 4,
+    "status": "pass",
+    "token_changes": 0
+  },
   "metrics": {
     "greedy_token_changes": "not-computed",
     "kl_delta": "not-computed",
@@ -28,11 +41,12 @@
     "nll_delta": "not-computed",
     "perplexity": "not-computed"
   },
-  "reason": "Full R1 artifact cannot be materialized with current disk; layer-0 artifact is rejected by runtime for full generation. No quality claim is made.",
+  "metrics_note": "Perplexity/NLL/KL/layer-logit metrics remain not-computed because tools/q38_eval.py only compares generated-token records.",
+  "reason": "Full R1 generation and paired greedy comparison completed. Perplexity/NLL/KL/layer-logit/task metrics remain unavailable in the provided evaluator.",
   "recipe": "R1 selective routed-expert Q4_K / core BF16 / PLE Q2-class",
   "regression": {
     "m5_status": "failed_m5_c12_native_reference_mismatch",
     "m6_status": "not-rerun_after_m5_failure"
   },
-  "status": "blocked"
+  "status": "conditional"
 }

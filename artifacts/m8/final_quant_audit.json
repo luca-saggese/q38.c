@@ -1,5 +1,5 @@
 {
-  "artifact": "artifacts/m8/qwen38-runtime-layers0-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+  "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
   "classes": {
     "embedding": {
       "BF16": {
@@ -9,14 +9,14 @@
     },
     "gdn": {
       "BF16": {
-        "bytes": 115917248,
-        "tensors": 9
+        "bytes": 4173020928,
+        "tensors": 324
       }
     },
     "gr": {
       "BF16": {
-        "bytes": 39546880,
-        "tensors": 11
+        "bytes": 1281249280,
+        "tensors": 387
       }
     },
     "output": {
@@ -25,26 +25,46 @@
         "tensors": 1
       }
     },
+    "ple": {
+      "BF16": {
+        "bytes": 143360,
+        "tensors": 4
+      },
+      "I64": {
+        "bytes": 280,
+        "tensors": 3
+      },
+      "Q8_0": {
+        "bytes": 54435077120,
+        "tensors": 130
+      }
+    },
+    "qsa": {
+      "BF16": {
+        "bytes": 1234716672,
+        "tensors": 108
+      }
+    },
     "routed_expert": {
       "Q4_K": {
-        "bytes": 1415577600,
-        "tensors": 2
+        "bytes": 67947724800,
+        "tensors": 96
       }
     },
     "router": {
       "BF16": {
-        "bytes": 2621440,
-        "tensors": 1
+        "bytes": 125829120,
+        "tensors": 48
       }
     },
     "shared_expert": {
       "BF16": {
-        "bytes": 9835520,
-        "tensors": 4
+        "bytes": 472104960,
+        "tensors": 192
       }
     }
   },
-  "file_bytes": 4126298944,
+  "file_bytes": 132212799456,
   "format": "q38_quant_audit_v1",
   "metadata": {
     "general.alignment": 32,
@@ -53,8 +73,8 @@
     "q38.down_proj_layout": "transpose_last_two_axes",
     "q38.excluded_mtp": true,
     "q38.excluded_vision": true,
-    "q38.max_layer": 0,
-    "q38.quant_manifest": "quant_manifest_R1.json",
+    "q38.max_layer": 47,
+    "q38.quant_manifest": "quant_manifest_q4_selective.json",
     "q38.quantized": true,
     "q38.runtime_only": true,
     "q38.source_revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540"
