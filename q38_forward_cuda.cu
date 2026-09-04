@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
 struct persistent_tensor {
     const void *host;
     void *device;
@@ -289,6 +288,7 @@ extern "C" bool q38_forward_cuda_expert_backend(
         return fail(error, error_len, "CUDA routed expert execution failed");
     ++context->cuda_synchronizations;
     emit_telemetry(context, gate_up, gate_rows, gate_cols, gate_bytes,
+
                    use_persistent, !use_persistent, use_persistent ? 0 : gate_bytes,
                    event_elapsed(upload_start, upload_stop),
                    event_elapsed(kernel_start, kernel_stop),
@@ -813,6 +813,7 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     float upload_ms = event_elapsed(upload_start, upload_stop);
     float kernel_ms = event_elapsed(kernel_start, kernel_stop);
     emit_telemetry(context, tensor, rows, cols, (size_t)tensor->bytes,
+
                    use_resident_lm_head || use_persistent_weight,
                    !(use_resident_lm_head || use_persistent_weight),
                    (use_resident_lm_head || use_persistent_weight) ? 0 :

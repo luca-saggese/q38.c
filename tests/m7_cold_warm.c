@@ -281,7 +281,7 @@ int main(int argc, char **argv) {
     q38_forward_state_destroy(&state);
     q38_profile_destroy(&profile);
     q38_forward_cuda_context_destroy(cuda);
-    fclose(residency_progress);
+    if (residency_progress) fclose(residency_progress);
     q38_gguf_close(model);
     return 0;
 }
