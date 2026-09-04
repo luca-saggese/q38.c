@@ -4,6 +4,14 @@
 #include <stdio.h>
 #include <string.h>
 
+typedef struct q38_forward_cuda_context q38_forward_cuda_context;
+extern bool q38_forward_cuda_matrix_backend(
+    const q38_gguf *, const q38_tensor *, const float *, size_t, size_t,
+    float *, void *, char *, size_t) __attribute__((weak));
+extern bool q38_forward_cuda_greedy_argmax(
+    q38_forward_cuda_context *, uint32_t *, char *, size_t)
+    __attribute__((weak));
+
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
     return false;
@@ -241,6 +249,19 @@ static bool q38_decode_backend(const q38_gguf *model,
             best = i;
             best_value = logits[i];
         }
+    }
+    if (q38_forward_cuda_matrix_backend &&
+        q38_forward_cuda_greedy_argmax &&
+        matrix_backend == q38_forward_cuda_matrix_backend) {
+        uint32_t device_best = 0;
+        if (!q38_forward_cuda_greedy_argmax(
+                (q38_forward_cuda_context *)backend_user, &device_best,
+                error, error_len))
+            return false;
+        if (device_best >= Q38_DECODE_VOCAB_SIZE)
+            return fail(error, error_len,
+                        "CUDA greedy argmax returned an invalid token");
+        best = device_best;
     }
     *next_token = (uint32_t)best;
     return true;

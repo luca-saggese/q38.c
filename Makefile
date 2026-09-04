@@ -34,15 +34,15 @@ C_OBJS := q38.o q38_gguf.o q38_memory.o q38_platform.o \
 	q38_tokenizer.o q38_decode.o q38_forward.o q38_moe.o q38_weights.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 	q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o \
-	q38_profile.o
+	q38_profile.o q38_residency.o
 CUDA_OBJS := q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
 	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o
-Q38_OBJS := $(C_OBJS) $(CUDA_OBJS)
+Q38_OBJS := $(C_OBJS) $(CUDA_OBJS) q38_topk_cuda.o
 
 TEST_DIR := tests
 TEST_BINS := $(TEST_DIR)/test_platform $(TEST_DIR)/test_gguf \
 	$(TEST_DIR)/test_memory $(TEST_DIR)/test_model_config \
-	$(TEST_DIR)/test_quant_blocks
+	$(TEST_DIR)/test_quant_blocks $(TEST_DIR)/test_residency
 ARTIFACT_DIR := artifacts/m0
 M1_ARTIFACT_DIR := artifacts/m1
 M2_ARTIFACT_DIR := artifacts/m2
@@ -68,6 +68,7 @@ M6_PYTHON ?= .venv-m6/bin/python
 M6_ORACLE_CPU ?= artifacts/m6/stateful_oracle_cpu_1_noc12.json
 M6_ORACLE_GPU ?= artifacts/m6/stateful_sequence_oracle_resume_probe.json
 M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
+M9_MODEL ?= $(DIRECT_RUNTIME_ARTIFACT)
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -81,11 +82,11 @@ M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
 	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-schema m7-gates \
 	m7-profile-forward m7-residency-footprint m7-acceptance m8-q4-kernel \
-	m9-checkpoint m9-rewind
+	m7-read-ceiling m9-checkpoint m9-rewind m9-state-equivalence
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
-q38_decode.o: q38_decode.c q38_decode.h q38_forward.h
+q38_decode.o: q38_decode.c q38_decode.h q38_forward.h q38_forward_cuda.h
 	$(CC) $(CFLAGS) -c -o $@ q38_decode.c
 
 q38_replay.o: q38_replay.c q38_replay.h q38_forward.h
@@ -93,6 +94,13 @@ q38_replay.o: q38_replay.c q38_replay.h q38_forward.h
 
 q38_profile.o: q38_profile.c q38_profile.h q38_forward.h
 	$(CC) $(CFLAGS) -c -o $@ q38_profile.c
+
+q38_residency.o: q38_residency.c q38_residency.h q38_gguf.h
+	$(CC) $(CFLAGS) -c -o $@ q38_residency.c
+
+$(TEST_DIR)/test_residency: $(TEST_DIR)/test_residency.c q38_residency.o \
+	q38_residency.h
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_residency.c q38_residency.o
 
 all: spark
 
@@ -111,7 +119,8 @@ q38_profile_cuda.o: q38_profile_cuda.cu q38_profile.h
 
 # --- C objects ------------------------------------------------------------
 q38.o: q38.c q38.h q38_gguf.h q38_memory.h q38_platform.h q38_cuda.h \
-	q38_decode.h q38_forward_cuda.h q38_tokenizer.h q38_weights.h
+	q38_decode.h q38_forward_cuda.h q38_tokenizer.h q38_weights.h \
+	q38_residency.h
 	$(CC) $(CFLAGS) -c -o $@ q38.c
 
 q38_gguf.o: q38_gguf.c q38_gguf.h
@@ -255,6 +264,12 @@ $(TEST_DIR)/m7_lm_head_kernel_bench: $(TEST_DIR)/m7_lm_head_kernel_bench.cu \
 
 m7-lm-head-kernel: $(TEST_DIR)/m7_lm_head_kernel_bench
 	@./$(TEST_DIR)/m7_lm_head_kernel_bench $(M7_MODEL)
+
+$(TEST_DIR)/gb10_read_bw_probe: $(TEST_DIR)/gb10_read_bw_probe.cu
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< $(CUDA_LDLIBS)
+
+m7-read-ceiling: $(TEST_DIR)/gb10_read_bw_probe
+	@./$(TEST_DIR)/gb10_read_bw_probe
 
 $(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
 		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
@@ -811,6 +826,21 @@ m9-rewind: $(TEST_DIR)/test_m9_rewind_replay
 	@mkdir -p artifacts/m9
 	@./$(TEST_DIR)/test_m9_rewind_replay
 
+$(TEST_DIR)/test_m9_state_equivalence: \
+		$(TEST_DIR)/test_m9_state_equivalence.c q38_decode.o q38_replay.o \
+		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
+		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_memory.o q38_residency.o
+	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m9_state_equivalence.c \
+		q38_decode.o q38_replay.o q38_forward.o q38_moe.o q38_weights.o \
+		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o q38_state.o \
+		q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
+		q38_memory.o q38_residency.o -lm
+
+m9-state-equivalence: $(TEST_DIR)/test_m9_state_equivalence
+	@mkdir -p artifacts/m9
+	@./$(TEST_DIR)/test_m9_state_equivalence $(M9_MODEL)
+
 m6-c03: m6-c02 $(TEST_DIR)/test_m6_moe_cuda
 	@./$(TEST_DIR)/test_m6_moe_cuda
 	@printf '%s\n' '{"gate":"M6-C03","kernel":"naive CUDA router projection and deterministic top-10","outputs":"token-major F32 router logits plus host route IDs/weights","status":"pass"}' > artifacts/m6/router_cuda.json
@@ -1155,7 +1185,7 @@ $(TEST_DIR)/test_m2_matvec: $(TEST_DIR)/test_m2_matvec.cu \
 
 $(TEST_DIR)/test_m2_embedding: $(TEST_DIR)/test_m2_embedding.c \
 		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o \
-		q38_weights.h q38_ple.h q38_qsa.h
+		q38_weights.h 		q38_ple.h q38_qsa.h q38_residency.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_embedding.c q38_weights.o \
 		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
 
@@ -1425,13 +1455,13 @@ m1-acceptance: m1-validate m1-quant-block m1-bind
 		--classes $(M1_ARTIFACT_DIR)/tensor_classes.json \
 		--manifest tools/quant_manifest_q2.json
 
-q38_weights.o: q38_weights.c q38_weights.h q38_gguf.h q38_model_config.h q38_ple.h q38_qsa.h
+q38_weights.o: q38_weights.c q38_weights.h q38_gguf.h q38_model_config.h q38_ple.h q38_qsa.h q38_residency.h
 	$(CC) $(CFLAGS) -c -o $@ q38_weights.c
 
 $(TEST_DIR)/test_weights: $(TEST_DIR)/test_weights.c q38_weights.o q38_gguf.o \
-	q38_model_config.o q38_ple.o q38_qsa.o q38_weights.h q38_ple.h q38_qsa.h
+	q38_model_config.o q38_ple.o q38_qsa.o q38_residency.o q38_weights.h q38_ple.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_weights.c q38_weights.o \
-	q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
+	q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o q38_residency.o
 
 m1-bind: m1-validate $(TEST_DIR)/test_weights
 	@test -f $(DIRECT_RUNTIME_ARTIFACT)

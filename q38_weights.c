@@ -7,6 +7,11 @@ static void set_error(char *error, size_t error_len, const char *message) {
     if (error && error_len > 0) snprintf(error, error_len, "%s", message);
 }
 
+void q38_weights_release(q38_weights *weights) {
+    if (!weights) return;
+    q38_model_residency_destroy(&weights->residency);
+}
+
 static bool shape_is(const q38_tensor *tensor, const uint64_t *shape,
                      uint32_t ndim) {
     if (!tensor || tensor->ndim != ndim) return false;
@@ -645,6 +650,52 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             snprintf(error, error_len, "runtime tensor count mismatch: expected %u, got %u",
                      expected, bound);
         return false;
+    }
+    uint32_t expert_banks = 0;
+    for (uint32_t layer = 0; layer <= max_layer; ++layer) {
+        if (out->layer[layer].experts.bank_count > expert_banks)
+            expert_banks = out->layer[layer].experts.bank_count;
+    }
+    if (!q38_model_residency_init(&out->residency, expert_banks,
+                                  error, error_len))
+        return false;
+    if (!q38_model_residency_account_tensor(
+            &out->residency, out->token_embd, false, UINT32_MAX,
+            error, error_len) ||
+        !q38_model_residency_account_tensor(
+            &out->residency, out->output, false, UINT32_MAX,
+            error, error_len)) {
+        q38_model_residency_destroy(&out->residency);
+        return false;
+    }
+    for (uint32_t i = 0; i < out->global_tensor_count; ++i)
+        if (!q38_model_residency_account_tensor(
+                &out->residency, out->global_tensor[i], false, UINT32_MAX,
+                error, error_len)) {
+            q38_model_residency_destroy(&out->residency);
+            return false;
+        }
+    for (uint32_t layer = 0; layer <= max_layer; ++layer) {
+        const q38_layer_weights *src = &out->layer[layer];
+        for (uint32_t i = 0; i < src->tensor_count; ++i) {
+            const q38_tensor *tensor = src->tensor[i];
+            bool ple = false;
+            for (uint32_t p = 0; p < src->ple_tensor_count; ++p)
+                if (src->ple_tensor[p] == tensor) { ple = true; break; }
+            uint32_t bank = UINT32_MAX;
+            for (uint32_t b = 0; b < src->experts.bank_count; ++b) {
+                if (src->experts.bank[b].gate_up == tensor ||
+                    src->experts.bank[b].down == tensor) {
+                    bank = b;
+                    break;
+                }
+            }
+            if (!q38_model_residency_account_tensor(
+                    &out->residency, tensor, ple, bank, error, error_len)) {
+                q38_model_residency_destroy(&out->residency);
+                return false;
+            }
+        }
     }
     out->bound_layers = max_layer + 1;
     out->bound_tensor_count = bound;

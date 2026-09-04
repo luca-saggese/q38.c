@@ -3,6 +3,7 @@
 #include "q38_cuda_primitives.h"
 #include "q38_gdn.h"
 #include "q38_moe_cuda.h"
+#include "q38_topk_cuda.h"
 
 #include <cuda_runtime.h>
 
@@ -17,6 +18,23 @@ struct persistent_tensor {
     size_t bytes;
 };
 
+typedef enum {
+    Q38_STORAGE_RESIDENT,
+    Q38_STORAGE_FILE_BACKED_PLE,
+} q38_storage_class;
+
+typedef struct {
+    const void *ptr;
+    uint64_t bytes;
+    uint32_t rows;
+    uint32_t cols;
+    uint32_t qtype;
+    uint32_t tensor_id;
+    q38_storage_class storage;
+    uint64_t gguf_offset;
+    const char *name;
+} q38_exec_tensor;
+
 struct q38_forward_cuda_context {
     void *device_weights;
     size_t device_weights_bytes;
@@ -24,6 +42,9 @@ struct q38_forward_cuda_context {
     size_t device_input_elements;
     float *device_output;
     size_t device_output_bytes;
+    size_t device_output_elements;
+    uint32_t *device_argmax;
+    size_t device_argmax_bytes;
     void *device_aux;
     size_t device_aux_bytes;
     float *device_moe_mid;
@@ -60,6 +81,14 @@ struct q38_forward_cuda_context {
     char persistent_failure[256];
     size_t persistent_loaded_bytes;
     uint64_t persistent_loaded_tensors;
+    bool exec_strict;
+    const q38_gguf *exec_model;
+    q38_exec_tensor *exec_tensors;
+    size_t exec_tensor_count;
+    uint64_t resident_lookup_in_decode;
+    uint64_t gguf_name_lookup_in_decode;
+    uint64_t non_ple_residency_miss;
+    size_t non_ple_upload_bytes_per_token;
     q38_forward_cuda_residency_progress_observer progress_observer;
     void *progress_observer_user;
 };
@@ -149,6 +178,22 @@ static persistent_tensor *persistent_find(q38_forward_cuda_context *context,
     return NULL;
 }
 
+static q38_exec_tensor *exec_tensor_for(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_tensor *tensor) {
+    if (!context || !model || model != context->exec_model || !tensor ||
+        !context->exec_tensors || tensor < model->tensors ||
+        tensor >= model->tensors + model->n_tensors)
+        return NULL;
+    return &context->exec_tensors[tensor - model->tensors];
+}
+
+static bool exec_tensor_is_resident(const q38_exec_tensor *exec,
+                                    const q38_tensor *tensor) {
+    return exec && exec->storage == Q38_STORAGE_RESIDENT && exec->ptr &&
+           exec->bytes == tensor->bytes;
+}
+
 static double host_now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -173,9 +218,13 @@ static void emit_telemetry(q38_forward_cuda_context *context,
         subsystem_for_stage(context->current_stage), context->current_layer,
         context->current_stage ? context->current_stage : "backend", name,
         tensor ? tensor->type : 0, rows, cols, bytes, hit, miss, upload_bytes,
+        bytes,
+        (kernel_ms > 0.0f || wall_ms > 0.0) ? cols * sizeof(float) : 0,
+        (kernel_ms > 0.0f || wall_ms > 0.0) ? rows * sizeof(float) : 0,
+        (kernel_ms > 0.0f || wall_ms > 0.0) ? rows * sizeof(float) : 0,
         upload_ms, kernel_ms,
         (float)fmax(0.0, wall_ms - (double)upload_ms - (double)kernel_ms),
-        allocations, syncs
+        allocations, syncs, syncs
     };
     context->telemetry_observer(&record, context->telemetry_observer_user);
 }
@@ -199,21 +248,30 @@ extern "C" bool q38_forward_cuda_expert_backend(
         return fail(error, error_len, "unsupported CUDA routed expert geometry");
     const size_t gate_row_bytes = (size_t)(gate_up->bytes / gate_rows);
     const size_t down_row_bytes = (size_t)(down->bytes / down_rows);
-    const void *gate_data = q38_gguf_tensor_data(model, gate_up);
-    const void *down_data = q38_gguf_tensor_data(model, down);
     const size_t gate_bytes = 1280u * gate_row_bytes;
     const size_t down_bytes = 640u * down_row_bytes;
-    if (!gate_data || !down_data)
+    q38_exec_tensor *gate_exec = exec_tensor_for(context, model, gate_up);
+    q38_exec_tensor *down_exec = exec_tensor_for(context, model, down);
+    const bool use_persistent =
+        context->all_non_ple_resident &&
+        exec_tensor_is_resident(gate_exec, gate_up) &&
+        exec_tensor_is_resident(down_exec, down);
+    if (context->exec_strict && !use_persistent)
+        return fail(error, error_len,
+                    "Q38_EXEC_STRICT: routed expert tensor is not resident");
+    const void *gate_data = use_persistent ? NULL :
+        q38_gguf_tensor_data(model, gate_up);
+    const void *down_data = use_persistent ? NULL :
+        q38_gguf_tensor_data(model, down);
+    if (!use_persistent) context->gguf_name_lookup_in_decode += 2;
+    if (!use_persistent && (!gate_data || !down_data))
         return fail(error, error_len, "invalid CUDA routed expert payload");
-    persistent_tensor *gate_resident = persistent_find(context, gate_data);
-    persistent_tensor *down_resident = persistent_find(context, down_data);
-    const bool use_persistent = context->all_non_ple_resident &&
-        gate_resident && down_resident &&
-        gate_resident->bytes >= (size_t)gate_up->bytes &&
-        down_resident->bytes >= (size_t)down->bytes;
     if (context->all_non_ple_resident) {
         if (use_persistent) ++context->persistent_hits;
-        else ++context->persistent_misses;
+        else {
+            ++context->persistent_misses;
+            ++context->non_ple_residency_miss;
+        }
     }
     const double host_started = host_now_ms();
     cudaEvent_t upload_start = NULL, upload_stop = NULL;
@@ -251,15 +309,17 @@ extern "C" bool q38_forward_cuda_expert_backend(
                        context->allocation_observer_user,
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA routed expert allocation failed");
-    const unsigned char *gate_src =
-        (const unsigned char *)gate_data + expert * 1280u * gate_row_bytes;
-    const unsigned char *down_src =
-        (const unsigned char *)down_data + expert * 640u * down_row_bytes;
+    const unsigned char *gate_src = gate_data
+        ? (const unsigned char *)gate_data + expert * 1280u * gate_row_bytes
+        : NULL;
+    const unsigned char *down_src = down_data
+        ? (const unsigned char *)down_data + expert * 640u * down_row_bytes
+        : NULL;
     void *gate_storage = use_persistent
-        ? (unsigned char *)gate_resident->device + expert * 1280u * gate_row_bytes
+        ? (unsigned char *)gate_exec->ptr + expert * 1280u * gate_row_bytes
         : context->device_weights;
     void *down_storage = use_persistent
-        ? (unsigned char *)down_resident->device + expert * 640u * down_row_bytes
+        ? (unsigned char *)down_exec->ptr + expert * 640u * down_row_bytes
         : context->device_aux;
     if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
         (!use_persistent &&
@@ -271,6 +331,8 @@ extern "C" bool q38_forward_cuda_expert_backend(
         cudaMemcpyAsync(context->device_input, input, 2560u * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert upload failed");
+    if (!use_persistent)
+        context->non_ple_upload_bytes_per_token += gate_bytes + down_bytes;
     if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert execution failed");
     const bool launched = (gate_up->type == 10
@@ -325,6 +387,7 @@ q38_forward_cuda_context_create(char *error, size_t error_len) {
         fail(error, error_len, "CUDA forward context allocation failed");
         return NULL;
     }
+    context->exec_strict = getenv("Q38_EXEC_STRICT") != NULL;
     if (cudaStreamCreate(&context->stream) != cudaSuccess) {
         free(context);
         fail(error, error_len, "CUDA forward stream creation failed");
@@ -369,10 +432,31 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     persistent_tensor *entries =
         (persistent_tensor *)calloc(count ? count : 1, sizeof(*entries));
     if (!entries) return fail(error, error_len, "all-non-PLE residency index allocation failed");
+    context->exec_tensors = (q38_exec_tensor *)calloc(
+        model->n_tensors ? model->n_tensors : 1, sizeof(*context->exec_tensors));
+    if (!context->exec_tensors) {
+        free(entries);
+        return fail(error, error_len,
+                    "execution tensor descriptor allocation failed");
+    }
+    context->exec_model = model;
+    context->exec_tensor_count = (size_t)model->n_tensors;
     size_t at = 0;
     size_t loaded_bytes = 0;
     for (uint64_t i = 0; i < model->n_tensors; ++i) {
         const q38_tensor *tensor = &model->tensors[i];
+        q38_exec_tensor *exec = &context->exec_tensors[i];
+        size_t exec_rows = 0, exec_cols = 0;
+        (void)tensor_shape(tensor, &exec_rows, &exec_cols);
+        exec->bytes = tensor->bytes;
+        exec->rows = (uint32_t)exec_rows;
+        exec->cols = (uint32_t)exec_cols;
+        exec->qtype = tensor->type;
+        exec->tensor_id = (uint32_t)i;
+        exec->gguf_offset = tensor->abs_offset;
+        exec->name = tensor->name.ptr;
+        exec->storage = is_ple_tensor(tensor)
+            ? Q38_STORAGE_FILE_BACKED_PLE : Q38_STORAGE_RESIDENT;
         if (is_ple_tensor(tensor) || !tensor->bytes) continue;
         const void *host = q38_gguf_tensor_data(model, tensor);
         bool duplicate = false;
@@ -412,6 +496,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         }
         entries[at].host = host;
         entries[at].bytes = (size_t)tensor->bytes;
+        exec->ptr = entries[at].device;
         ++at;
         loaded_bytes += (size_t)tensor->bytes;
         if (cudaStreamSynchronize(context->stream) != cudaSuccess) {
@@ -467,6 +552,9 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         at == context->persistent_expected_tensors &&
         total == context->persistent_expected_bytes &&
         context->persistent_ple_entries == 0;
+    if (!context->persistent_coverage_ok && context->exec_strict)
+        return fail(error, error_len,
+                    "Q38_EXEC_STRICT: incomplete non-PLE execution descriptors");
     return true;
 }
 
@@ -476,6 +564,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_weights);
     cudaFree(context->device_input);
     cudaFree(context->device_output);
+    cudaFree(context->device_argmax);
     cudaFree(context->device_aux);
     cudaFree(context->device_moe_mid);
     if (!context->lm_head_uses_persistent)
@@ -483,6 +572,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     for (size_t i = 0; i < context->persistent_count; ++i)
         cudaFree(context->persistent[i].device);
     free(context->persistent);
+    free(context->exec_tensors);
     if (context->stream) cudaStreamDestroy(context->stream);
     free(context);
 }
@@ -562,6 +652,12 @@ extern "C" void q38_forward_cuda_get_residency_stats(
         ? context->persistent_failure : NULL;
     stats->persistent_loaded_bytes = context->persistent_loaded_bytes;
     stats->persistent_loaded_tensors = context->persistent_loaded_tensors;
+    stats->exec_strict = context->exec_strict;
+    stats->resident_lookup_in_decode = context->resident_lookup_in_decode;
+    stats->gguf_name_lookup_in_decode = context->gguf_name_lookup_in_decode;
+    stats->non_ple_residency_miss = context->non_ple_residency_miss;
+    stats->non_ple_upload_bytes_per_token =
+        context->non_ple_upload_bytes_per_token;
 }
 
 extern "C" void *
@@ -614,10 +710,20 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         actual_cols != cols || tensor->bytes % rows != 0)
         return fail(error, error_len, "invalid CUDA forward matvec geometry");
     const size_t row_bytes = (size_t)(tensor->bytes / rows);
-    const void *data = q38_gguf_tensor_data(model, tensor);
-    if (!data || !row_bytes || row > SIZE_MAX / row_bytes)
+    if (!row_bytes || row > SIZE_MAX / row_bytes)
         return fail(error, error_len, "invalid CUDA forward tensor payload");
-    const void *row_data = (const unsigned char *)data + row * row_bytes;
+    q38_exec_tensor *exec = exec_tensor_for(context, model, tensor);
+    const bool use_persistent = context->all_non_ple_resident &&
+        exec_tensor_is_resident(exec, tensor);
+    if (context->exec_strict && !use_persistent && !is_ple_tensor(tensor))
+        return fail(error, error_len,
+                    "Q38_EXEC_STRICT: matvec tensor is not resident");
+    const void *data = use_persistent ? NULL :
+        q38_gguf_tensor_data(model, tensor);
+    if (!use_persistent && !data)
+        return fail(error, error_len, "invalid CUDA forward tensor payload");
+    const void *row_data = data
+        ? (const unsigned char *)data + row * row_bytes : NULL;
 
     size_t weight_bytes = row_bytes;
     if (tensor->type != 0 && tensor->type != 8 && tensor->type != 10 &&
@@ -625,11 +731,12 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         return fail(error, error_len, "unsupported CUDA forward matvec type");
     if (cols > SIZE_MAX / sizeof(float))
         return fail(error, error_len, "CUDA forward matvec size overflow");
-    if (!ensure_buffer(&context->device_weights,
-                       &context->device_weights_bytes, weight_bytes,
-                       context->allocation_observer,
-                       context->allocation_observer_user,
-                       &context->cuda_allocations) ||
+    if ((!use_persistent &&
+         !ensure_buffer(&context->device_weights,
+                        &context->device_weights_bytes, weight_bytes,
+                        context->allocation_observer,
+                        context->allocation_observer_user,
+                        &context->cuda_allocations)) ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements,
                        cols * sizeof(float), context->allocation_observer,
@@ -641,12 +748,10 @@ extern "C" bool q38_forward_cuda_matvec_backend(
                        context->allocation_observer_user,
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA forward matvec allocation failed");
-    persistent_tensor *resident = persistent_find(context, data);
-    if (context->all_non_ple_resident && resident &&
-        resident->bytes == (size_t)tensor->bytes) {
+    if (use_persistent) {
         ++context->persistent_hits;
         const void *weight_storage =
-            (const unsigned char *)resident->device + row * row_bytes;
+            (const unsigned char *)exec->ptr + row * row_bytes;
         bool launched = false;
         if (tensor->type == 30)
             launched = q38_cuda_bf16_matvec(
@@ -670,13 +775,19 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         ++context->cuda_synchronizations;
         return true;
     }
-    if (context->all_non_ple_resident) ++context->persistent_misses;
+    if (context->all_non_ple_resident) {
+        ++context->persistent_misses;
+        if (!is_ple_tensor(tensor)) ++context->non_ple_residency_miss;
+    }
 
     if (cudaMemcpyAsync(context->device_weights, row_data, weight_bytes,
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
         cudaMemcpyAsync(context->device_input, input, cols * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA forward matvec upload failed");
+    if (!is_ple_tensor(tensor))
+        context->non_ple_upload_bytes_per_token += weight_bytes;
+    if (!is_ple_tensor(tensor)) ++context->gguf_name_lookup_in_decode;
 
     bool launched = false;
     if (tensor->type == 30) {
@@ -718,8 +829,7 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         !tensor_shape(tensor, &actual_rows, &actual_cols) ||
         actual_rows != rows || actual_cols != cols)
         return fail(error, error_len, "invalid CUDA forward matrix geometry");
-    const void *data = q38_gguf_tensor_data(model, tensor);
-    if (!data || !tensor->bytes || rows > SIZE_MAX / sizeof(float) ||
+    if (!tensor->bytes || rows > SIZE_MAX / sizeof(float) ||
         cols > SIZE_MAX / sizeof(float))
         return fail(error, error_len, "invalid CUDA forward matrix payload");
     const double host_started = host_now_ms();
@@ -731,18 +841,30 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         cudaEventCreate(&kernel_stop) != cudaSuccess)
         return fail(error, error_len, "CUDA telemetry event allocation failed");
     const uint64_t allocation_before = context->cuda_allocations;
+    q38_exec_tensor *exec = exec_tensor_for(context, model, tensor);
+    const bool use_exec_resident = context->all_non_ple_resident &&
+        exec_tensor_is_resident(exec, tensor);
+    const void *data = use_exec_resident ? NULL :
+        q38_gguf_tensor_data(model, tensor);
+    if (!use_exec_resident) ++context->gguf_name_lookup_in_decode;
+    if (context->exec_strict && !use_exec_resident && !is_ple_tensor(tensor))
+        return fail(error, error_len,
+                    "Q38_EXEC_STRICT: matrix tensor is not resident");
+    if (!use_exec_resident && !data)
+        return fail(error, error_len, "invalid CUDA forward matrix payload");
     const bool use_resident_lm_head =
         is_lm_head_tensor(tensor) &&
         context->lm_head_resident && context->lm_head_host_data == data &&
         context->lm_head_device_weights_bytes == tensor->bytes;
-    persistent_tensor *persistent_weight = persistent_find(context, data);
-    const bool use_persistent_weight = context->all_non_ple_resident &&
-        persistent_weight && persistent_weight->bytes == (size_t)tensor->bytes;
+    const bool use_persistent_weight = use_exec_resident;
     if (use_resident_lm_head || use_persistent_weight)
         ++context->resident_hits;
     else {
         ++context->resident_misses;
-        if (context->all_non_ple_resident) ++context->persistent_misses;
+        if (context->all_non_ple_resident) {
+            ++context->persistent_misses;
+            if (!is_ple_tensor(tensor)) ++context->non_ple_residency_miss;
+        }
     }
     if (use_persistent_weight) ++context->persistent_hits;
     if ((!use_resident_lm_head && !use_persistent_weight &&
@@ -775,10 +897,13 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         return fail(error, error_len, "CUDA matrix timing failed");
     if (!use_resident_lm_head && !use_persistent_weight)
         context->matrix_upload_bytes += tensor->bytes;
+    if (!use_resident_lm_head && !use_persistent_weight &&
+        !is_ple_tensor(tensor))
+        context->non_ple_upload_bytes_per_token += tensor->bytes;
     bool launched = false;
     void *weight_storage = use_resident_lm_head
                                ? context->lm_head_device_weights
-                               : use_persistent_weight ? persistent_weight->device
+                               : use_persistent_weight ? (void *)exec->ptr
                                : context->device_weights;
     if (tensor->type == 30) {
         launched = q38_cuda_bf16_matvec(
@@ -810,6 +935,7 @@ extern "C" bool q38_forward_cuda_matrix_backend(
                                "CUDA forward matrix download failed")
                         : false;
     ++context->cuda_synchronizations;
+    context->device_output_elements = rows;
     float upload_ms = event_elapsed(upload_start, upload_stop);
     float kernel_ms = event_elapsed(kernel_start, kernel_stop);
     emit_telemetry(context, tensor, rows, cols, (size_t)tensor->bytes,
@@ -823,4 +949,31 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
     return true;
+}
+
+extern "C" bool q38_forward_cuda_greedy_argmax(
+    q38_forward_cuda_context *context, uint32_t *token, char *error,
+    size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!context || !token || !context->device_output ||
+        context->device_output_elements == 0)
+        return fail(error, error_len, "CUDA greedy argmax result is unavailable");
+    if (!ensure_buffer((void **)&context->device_argmax,
+                       &context->device_argmax_bytes,
+                       sizeof(*context->device_argmax),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
+        return fail(error, error_len, "CUDA greedy argmax allocation failed");
+    const bool launched = q38_argmax_cuda(
+        context->device_output, 1, context->device_output_elements,
+        context->device_argmax, context->stream, error, error_len);
+    bool ok = launched &&
+        cudaMemcpyAsync(token, context->device_argmax, sizeof(*token),
+                        cudaMemcpyDeviceToHost, context->stream) == cudaSuccess &&
+        cudaStreamSynchronize(context->stream) == cudaSuccess;
+    if (!ok && (!error || !error_len || !error[0]))
+        fail(error, error_len, "CUDA greedy argmax execution failed");
+    if (ok) ++context->cuda_synchronizations;
+    return ok;
 }

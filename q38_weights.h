@@ -9,6 +9,7 @@
 #include "q38_model_config.h"
 #include "q38_ple.h"
 #include "q38_qsa.h"
+#include "q38_residency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -78,7 +79,7 @@ typedef struct {
     q38_qsa_weights qsa;
 } q38_layer_weights;
 
-typedef struct {
+typedef struct q38_weights {
     q38_tensor *token_embd;
     q38_layer_weights layer[Q38_MODEL_LAYERS];
     q38_tensor *output;
@@ -87,12 +88,14 @@ typedef struct {
     uint32_t bound_layers;
     uint32_t bound_tensor_count;
     bool quantized;
+    q38_model_residency residency;
 } q38_weights;
 
 /* Bind a runtime-only subset containing layers 0..max_layer, without forward
  * execution or persistent dequantized storage. */
 bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
                              q38_weights *out, char *error, size_t error_len);
+void q38_weights_release(q38_weights *weights);
 
 /* Validate that every tensor required by the complete execution graph is
  * bound before a forward state or activation is allocated. */

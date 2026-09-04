@@ -803,6 +803,7 @@ cleanup:
     free(logits);
     if (cuda) q38_forward_cuda_context_destroy(cuda);
     if (state.initialized) q38_forward_state_destroy(&state);
+    q38_weights_release(&weights);
     q38_token_batch_free(&prompt);
     q38_tokenizer_destroy(&tokenizer);
     q38_gguf_close(model);

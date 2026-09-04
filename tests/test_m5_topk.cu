@@ -33,7 +33,20 @@ int main() {
             std::fprintf(stderr, "top-k mismatch at %zu\n", i);
             return 1;
         }
+    uint32_t *argmax = nullptr;
+    if (cudaMalloc(&argmax, 2 * sizeof(*argmax)) != cudaSuccess ||
+        !q38_argmax_cuda(scores, 2, 8, argmax, 0, error, sizeof(error)) ||
+        cudaDeviceSynchronize() != cudaSuccess)
+        return 1;
+    uint32_t actual_argmax[2];
+    cudaMemcpy(actual_argmax, argmax, sizeof(actual_argmax),
+               cudaMemcpyDeviceToHost);
+    if (actual_argmax[0] != 1 || actual_argmax[1] != 2) {
+        std::fprintf(stderr, "argmax tie-breaking mismatch\n");
+        return 1;
+    }
     cudaFree(scores); cudaFree(indices);
+    cudaFree(argmax);
     std::puts("test_m5_topk: deterministic scalar/CUDA top-k passed");
     return 0;
 }

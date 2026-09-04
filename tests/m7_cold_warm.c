@@ -180,6 +180,7 @@ int main(int argc, char **argv) {
         stages s = {0};
         q38_profile_destroy(&profile);
         q38_profile_init(&profile);
+        q38_profile_set_token_count(&profile, 1);
         stage_profile = &profile;
         q38_forward_cuda_set_telemetry_observer(cuda, telemetry_observer, &profile);
         q38_forward_diagnostics d;

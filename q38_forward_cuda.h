@@ -24,11 +24,16 @@ typedef struct q38_forward_cuda_telemetry {
     bool resident_hit;
     bool resident_miss;
     size_t upload_bytes;
+    size_t weight_bytes;
+    size_t activation_read_bytes;
+    size_t activation_write_bytes;
+    size_t d2h_bytes;
     float upload_ms;
     float kernel_ms;
     float backend_overhead_ms;
     uint64_t allocation_count;
     uint64_t sync_count;
+    uint64_t host_syncs;
 } q38_forward_cuda_telemetry;
 typedef void (*q38_forward_cuda_telemetry_observer)(
     const q38_forward_cuda_telemetry *telemetry, void *user);
@@ -56,6 +61,11 @@ typedef struct {
     const char *persistent_failure;
     size_t persistent_loaded_bytes;
     uint64_t persistent_loaded_tensors;
+    bool exec_strict;
+    uint64_t resident_lookup_in_decode;
+    uint64_t gguf_name_lookup_in_decode;
+    uint64_t non_ple_residency_miss;
+    size_t non_ple_upload_bytes_per_token;
 } q38_forward_cuda_residency_stats;
 
 q38_forward_cuda_context *q38_forward_cuda_context_create(char *error,
@@ -93,6 +103,11 @@ bool q38_forward_cuda_matrix_backend(
     const q38_gguf *model, const q38_tensor *tensor, const float *input,
     size_t rows, size_t cols, float *output, void *user, char *error,
     size_t error_len);
+
+/* Reduce the most recent device-side matrix result without downloading it. */
+bool q38_forward_cuda_greedy_argmax(q38_forward_cuda_context *context,
+                                    uint32_t *token, char *error,
+                                    size_t error_len);
 
 bool q38_forward_cuda_expert_backend(
     const q38_gguf *model, const q38_tensor *gate_up,

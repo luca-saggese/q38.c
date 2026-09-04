@@ -197,6 +197,7 @@ int main(int argc, char **argv) {
     q38_memory_tracker_init(&tracker);
     q38_memory_capture(&tracker, "before_forward", model->size, model->size, 0, &before);
     q38_profile_init(&profile);
+    q38_profile_set_token_count(&profile, 1);
     profile_context context = {.profile = &profile};
     q38_forward_diagnostics diagnostics;
     memset(&diagnostics, 0, sizeof(diagnostics));

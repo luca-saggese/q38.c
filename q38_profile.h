@@ -23,6 +23,15 @@ typedef enum {
 } q38_profile_subsystem;
 
 typedef struct {
+    uint64_t weight_bytes;
+    uint64_t activation_read_bytes;
+    uint64_t activation_write_bytes;
+    uint64_t d2h_bytes;
+    uint64_t host_syncs;
+    double kernel_ms;
+} q38_bandwidth_account;
+
+typedef struct {
     const char *name;
     uint64_t callback_count;
     uint64_t kernel_launches;
@@ -36,6 +45,8 @@ typedef struct {
     double upload_ms;
     double kernel_ms;
     double backend_overhead_ms;
+    q38_bandwidth_account bandwidth;
+    double effective_weight_gbps;
 } q38_profile_record;
 
 typedef struct {
@@ -50,11 +61,16 @@ typedef struct {
     bool resident_hit;
     bool resident_miss;
     size_t upload_bytes;
+    size_t weight_bytes;
+    size_t activation_read_bytes;
+    size_t activation_write_bytes;
+    size_t d2h_bytes;
     double upload_ms;
     double kernel_ms;
     double backend_overhead_ms;
     uint64_t allocation_count;
     uint64_t sync_count;
+    uint64_t host_syncs;
 } q38_profile_telemetry_record;
 
 typedef struct {
@@ -64,6 +80,13 @@ typedef struct {
     uint64_t cuda_synchronizations;
     uint64_t allocation_count;
     uint64_t allocation_bytes;
+    size_t token_count;
+    q38_bandwidth_account bandwidth;
+    double effective_weight_gbps;
+    double weight_bytes_per_token;
+    double kernel_ms_per_token;
+    double host_syncs_per_token;
+    double d2h_bytes_per_token;
     size_t telemetry_count;
     q38_profile_telemetry_record telemetry[4096];
 } q38_profile;
@@ -80,6 +103,7 @@ void q38_profile_record_allocation(q38_profile *profile,
                                   q38_profile_subsystem subsystem,
                                   size_t bytes);
 void q38_profile_record_runtime_allocation(q38_profile *profile, size_t bytes);
+void q38_profile_set_token_count(q38_profile *profile, size_t token_count);
 void q38_profile_record_cuda_telemetry(
     q38_profile *profile, const q38_forward_cuda_telemetry *telemetry);
 bool q38_profile_json(const q38_profile *profile, char *buffer,

@@ -390,7 +390,8 @@ def main() -> None:
             "layer": 0,
             "width": logits.numel(),
             "stats": stats(logits),
-            "top": top_k(logits),
+            "top": top_k(logits, 20),
+            "target_logit": float(logits[int(tokens[-1])]),
         }
     )
     report = {

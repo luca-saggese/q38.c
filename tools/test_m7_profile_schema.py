@@ -15,6 +15,12 @@ SUBSYSTEM_RECORD_FIELDS = (
     "allocation_count",
     "allocation_bytes",
     "elapsed_ms",
+    "weight_bytes",
+    "activation_read_bytes",
+    "activation_write_bytes",
+    "d2h_bytes",
+    "host_syncs",
+    "effective_weight_gbps",
 )
 BENCH_FIELDS = (
     "format",
@@ -69,6 +75,18 @@ PROFILE_NUMERIC_FIELDS = (
 )
 TELEMETRY_FIELDS = (
     "version",
+    "token_count",
+    "weight_bytes",
+    "activation_read_bytes",
+    "activation_write_bytes",
+    "kernel_ms",
+    "effective_weight_gbps",
+    "host_syncs",
+    "d2h_bytes",
+    "weight_bytes_per_token",
+    "kernel_ms_per_token",
+    "host_syncs_per_token",
+    "d2h_bytes_per_token",
     "cuda_elapsed_ms",
     "cuda_synchronizations",
     "allocation_count",
@@ -78,8 +96,9 @@ TELEMETRY_FIELDS = (
 TELEMETRY_RECORD_FIELDS = (
     "subsystem", "layer", "logical_stage", "tensor_name", "qtype",
     "rows", "cols", "bytes", "resident_hit", "resident_miss",
-    "upload_bytes", "upload_ms", "kernel_ms", "backend_overhead_ms",
-    "allocation_count", "sync_count",
+    "upload_bytes", "weight_bytes", "activation_read_bytes",
+    "activation_write_bytes", "d2h_bytes", "upload_ms", "kernel_ms",
+    "backend_overhead_ms", "allocation_count", "sync_count", "host_syncs",
 )
 
 
@@ -95,10 +114,17 @@ def nonnegative(value, label):
 
 
 def check_telemetry(telemetry, label):
-    require_fields(telemetry, TELEMETRY_FIELDS, label)
-    if telemetry["version"] != 1:
-        raise AssertionError(f"{label}.version must be 1")
-    for field in TELEMETRY_FIELDS[1:5]:
+    require_fields(telemetry, ("version", "cuda_elapsed_ms",
+                               "cuda_synchronizations", "allocation_count",
+                               "allocation_bytes", "subsystems"), label)
+    if telemetry["version"] not in (1, 2):
+        raise AssertionError(f"{label}.version must be 1 or 2")
+    numeric = ["cuda_elapsed_ms", "cuda_synchronizations",
+               "allocation_count", "allocation_bytes"]
+    if telemetry["version"] == 2:
+        require_fields(telemetry, TELEMETRY_FIELDS[1:-1], label)
+        numeric += list(TELEMETRY_FIELDS[1:-1])
+    for field in numeric:
         nonnegative(telemetry[field], f"{label}.{field}")
     records = telemetry["subsystems"]
     if not isinstance(records, list):
@@ -106,11 +132,24 @@ def check_telemetry(telemetry, label):
     if [record.get("name") for record in records] != list(SUBSYSTEMS):
         raise AssertionError(f"{label}.subsystems names do not match M7 schema")
     for index, record in enumerate(records):
-        require_fields(record, SUBSYSTEM_RECORD_FIELDS, f"{label}.subsystems[{index}]")
-        for field in SUBSYSTEM_RECORD_FIELDS[1:]:
+        base_fields = ("name", "callbacks", "kernel_launches",
+                       "synchronizations", "allocation_count",
+                       "allocation_bytes", "elapsed_ms")
+        require_fields(record, base_fields, f"{label}.subsystems[{index}]")
+        for field in base_fields[1:]:
             nonnegative(record[field], f"{label}.subsystems[{index}].{field}")
+        if telemetry["version"] == 2:
+            for field in ("weight_bytes", "activation_read_bytes",
+                          "activation_write_bytes", "d2h_bytes", "host_syncs",
+                          "effective_weight_gbps"):
+                nonnegative(record[field], f"{label}.subsystems[{index}].{field}")
     for index, record in enumerate(telemetry.get("records", [])):
-        require_fields(record, TELEMETRY_RECORD_FIELDS, f"{label}.records[{index}]")
+        fields = TELEMETRY_RECORD_FIELDS if telemetry["version"] == 2 else (
+            "subsystem", "layer", "logical_stage", "tensor_name", "qtype",
+            "rows", "cols", "bytes", "resident_hit", "resident_miss",
+            "upload_bytes", "upload_ms", "kernel_ms",
+            "backend_overhead_ms", "allocation_count", "sync_count")
+        require_fields(record, fields, f"{label}.records[{index}]")
         for field in ("layer", "qtype", "rows", "cols", "bytes",
                       "upload_bytes", "upload_ms", "kernel_ms",
                       "backend_overhead_ms", "allocation_count", "sync_count"):
