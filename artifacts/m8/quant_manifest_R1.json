@@ -58,7 +58,7 @@
       "include": true,
       "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.mlp\\.experts\\.gate_up_proj$",
       "quant_type": "Q4_K",
-      "rationale": "M8 R1 isolated ablation: Use the donor Q2_K path for deterministic bring-up and broad kernel compatibility."
+      "rationale": "M8 R1 isolated ablation: raise routed gate/up projection storage from Q2_K to Q4_K while preserving all non-expert classes."
     },
     {
       "class": "routed_expert",
@@ -69,7 +69,7 @@
       "layout_transform": "transpose_last_two_axes",
       "pattern": "^model\\.language_model\\.layers\\.[0-9]+\\.mlp\\.experts\\.down_proj$",
       "quant_type": "Q4_K",
-      "rationale": "M8 R1 isolated ablation: Use Q2-class storage while keeping projection policy explicit."
+      "rationale": "M8 R1 isolated ablation: raise routed down projection storage from Q2_K to Q4_K while preserving the explicit transposed layout."
     },
     {
       "class": "router",
