@@ -1,51 +1,55 @@
 {
-  "baseline": {
-    "artifact": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
-    "first_token_ms": 16896.086058,
-    "median_decode_ms": 1430.038249,
-    "peak_cuda_allocated_bytes": 3739639808,
-    "peak_rss_bytes": 12984197120,
-    "tokens": [
-      11,
-      353,
-      2688,
-      264,
-      1496,
-      2812,
-      3712,
-      10756
-    ]
+  "format": "q38-m8-final-bench-v4",
+  "status": "benchmark_pass_quality_pending",
+  "methodology": {
+    "runs": 6,
+    "cold_runs": 1,
+    "warm_runs": 5,
+    "same_process": true,
+    "semantic_state_reset": true,
+    "all_non_ple_resident": true,
+    "ple_policy": "file-backed mmap with bounded staging/cache",
+    "stable_device_pointers": true
   },
-  "corpus": "artifacts/m8/quality_corpus.jsonl",
-  "delta": {
-    "first_token_ms_percent": -16.87835011144331,
-    "median_decode_ms_percent": 30.301343778952305
+  "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+  "resident_non_ple_bytes": 77777442560,
+  "resident_non_ple_tensors": 1157,
+  "resident_expected_non_ple_bytes": 77777442560,
+  "resident_coverage_ok": true,
+  "cold_ms": 2302.542412,
+  "warm_ms": [
+    1122.081084,
+    1118.171611,
+    1109.613203,
+    1121.318767,
+    1119.002021
+  ],
+  "warm_median_ms": 1119.002021,
+  "warm_p95_ms": 1122.081084,
+  "warm_non_ple_upload_bytes": 0,
+  "warm_non_ple_residency_misses": 0,
+  "warm_ple_upload_bytes": 34816000,
+  "warm_ple_residency_misses": 2,
+  "peak_unified_bytes_observed": 129711443968,
+  "peak_rss_bytes": 53072662528,
+  "min_mem_available_bytes": 45165522944,
+  "cuda_total_bytes": 130596646912,
+  "min_cuda_free_bytes": 885202944,
+  "subsystem_warm_median_ms": {
+    "gdn": 22.3593273,
+    "qsa": 311.982978,
+    "moe": 2171.53822,
+    "ple": 0.990980983,
+    "lm_head": 5.20727301
   },
-  "format": "q38-m8-final-bench-v3",
-  "greedy_eval": "artifacts/m8/final_greedy_eval.json",
-  "q4_kernel": {
-    "command": "make m8-q4-kernel",
-    "status": "pass"
+  "correctness": {
+    "all_runs_completed": true,
+    "nan_inf": 0,
+    "fallback": 0,
+    "argmax": 11,
+    "stable_device_pointers": true
   },
-  "r1": {
-    "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
-    "first_token_ms": 14044.305498,
-    "median_decode_ms": 1863.359055,
-    "peak_cuda_allocated_bytes": 3624833024,
-    "peak_rss_bytes": 15005958144,
-    "tokens": [
-      11,
-      353,
-      2688,
-      264,
-      1496,
-      2812,
-      3712,
-      10756
-    ]
-  },
-  "r1_cold_warm": "artifacts/m8/R1_memory_bench.json",
-  "raw_runs": "artifacts/m8/r1_bench_runs/",
-  "reason": "Real R1 runs are process-isolated because the same-process M7 harness could not be rebuilt in the pre-existing CUDA merge-conflicted worktree.",
-  "status": "conditional"
+  "raw_runs": "artifacts/m8/R1_same_process_cold_warm.jsonl",
+  "residency_telemetry": "artifacts/m7/all_non_ple_residency_progress.jsonl",
+  "comparison_note": "The prior 14.816 s process-isolated R1 result is not the M8 benchmark. With the repaired same-process all-non-PLE resident path, warm latency is approximately 1.119 s."
 }

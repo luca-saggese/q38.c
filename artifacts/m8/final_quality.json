@@ -37,7 +37,7 @@
       "qsa_selected_id_stability"
     ],
     "minimum_records": 32,
-    "reason": "Current native build cannot be rebuilt because unrelated q38_forward CUDA files contain unresolved merge markers; no paired full-vector BF16/R1 records are claimed.",
+    "reason": "The native runtime and same-process residency path are repaired; no paired full-vector BF16/reference and R1 records are present, so no numeric quality metrics are claimed.",
     "schema": "paired JSONL: finite logits, router_top10, qsa_selected",
     "status": "implemented-not-run",
     "tool": "tools/q38_eval.py"
