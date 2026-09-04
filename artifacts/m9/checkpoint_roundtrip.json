@@ -1,0 +1,11 @@
+{
+  "format": "q38-m9-checkpoint-roundtrip-v1",
+  "status": "pass",
+  "commands": [
+    "make m9-checkpoint",
+    "./tests/test_m7_replay"
+  ],
+  "validated": ["snapshot roundtrip", "version rejection", "layout rejection", "trace record/verify"],
+  "semantic_state_only": true,
+  "reconstructible_cache_policy": true
+}

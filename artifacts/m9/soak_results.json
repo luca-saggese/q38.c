@@ -1,0 +1,5 @@
+{
+  "format": "q38-m9-soak-v1",
+  "status": "not-run",
+  "reason": "No HTTP worker/server harness exists; sustained multi-request soak was not fabricated."
+}

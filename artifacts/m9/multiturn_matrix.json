@@ -1,0 +1,7 @@
+{
+  "format": "q38-m9-multiturn-v1",
+  "status": "partial",
+  "commands": ["./tests/test_m4_session", "./tests/test_m6_session_contamination", "./tests/test_m7_replay"],
+  "passed": ["EOS/reset boundaries", "QSA clone isolation", "snapshot restore"],
+  "not_measured": ["full-model segmented-vs-serialized generation", "server session reuse"]
+}

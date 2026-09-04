@@ -1,0 +1,5 @@
+{
+  "format": "q38-m9-worker-fault-recovery-v1",
+  "status": "not-implemented",
+  "reason": "No q38 worker/supervisor process model exists in the repository; CUDA fatal recovery must terminate and recreate a worker rather than reuse the context."
+}

@@ -1,0 +1,5 @@
+{
+  "format": "q38-m9-memory-soak-v1",
+  "status": "not-run",
+  "reason": "M9 server soak and long-duration RSS plateau instrumentation are not implemented."
+}

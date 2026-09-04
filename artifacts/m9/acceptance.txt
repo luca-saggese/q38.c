@@ -1,0 +1,14 @@
+M9 acceptance status
+
+PASS
+- M9A session reset/clone boundaries pass existing tests.
+- Versioned checkpoint snapshot roundtrip, malformed version/layout rejection,
+  and deterministic trace verification pass.
+
+NOT COMPLETE
+- Public checkpoint-at-K/rewind-to-N orchestration is not implemented.
+- No q38 single-worker HTTP server, worker supervisor, fatal CUDA recovery, or
+  sustained-load/memory-soak harness exists.
+- MTP remains DISABLED; no proposal/verification semantics or Q4 losslessness
+  result is claimed.
+- M9 is conditional and not marked complete.
