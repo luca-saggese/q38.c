@@ -23,6 +23,9 @@ transposed down-projection layout is preserved.
 The full R1 artifact is now materialized at 132,212,799,456 bytes without
 deleting preserved models. The available evaluator provides exact greedy
 comparison only; perplexity/NLL/KL/layer-logit/task metrics remain uncomputed.
+The 132 GB binary is retained in the workspace and recorded by
+`R1_full_sha256.txt`; it is intentionally not added to Git because doing so
+would duplicate the large artifact in repository storage.
 The CLI also lacks long-context startup/prefill peak instrumentation. M5-C12
 still fails its existing native/reference comparison, and M3/M1 full acceptance
 requires the user-deleted obsolete layers0-3 fixture. M8 therefore remains
