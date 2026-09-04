@@ -6,7 +6,8 @@ PASS
 - Q4_K scalar/CUDA routed-expert parity passes on GB10.
 - Full R1 CUDA generation passes for one and eight tokens with no NaN/Inf; paired
   four-record frozen-corpus greedy comparison is exact (zero token changes).
-- M0, M1 validation/block gates, M2, M4, independent M6, and M7 gates pass.
+- M0, M1 validation/block gates, direct M3 probes, M2, M4, independent M6, and
+  M7 gates pass.
 - Reproducibility checksums and performance/memory reports are refreshed.
 
 NOT COMPLETE / BLOCKERS
@@ -16,7 +17,7 @@ NOT COMPLETE / BLOCKERS
   only real one/eight-token CUDA memory/performance runs are recorded.
 - M5-C12 fails the existing native/reference comparison at index 2560
   (-0.0039879242 vs -0.0011472413); chained M6 acceptance is consequently blocked.
-- M3 audit/M1 acceptance require the user-deleted obsolete layers0-3 GGUF and were
-  not recreated because preserving user cleanup was required.
+- The Makefile M3 audit/M1 acceptance targets still require the user-deleted
+  obsolete layers0-3 GGUF; equivalent direct M3/full-R1 binding checks pass.
 - Full M0-M7 sweep remains opt-in (M7_RUN_FULL=1). M8 is therefore conditional,
   not honestly marked complete.

@@ -4,6 +4,7 @@ PASS
   make m0-acceptance
   make m1-validate m1-quant-block (inventory, manifest, donor block checks)
   make m2-acceptance
+  direct M3 GR/GDN/state/chunk probes and test_weights against full R1 layers 0..3
   make m4-acceptance
   independent M6 binaries: test_m6_moe_binding, test_m6_moe_ref,
     test_m6_moe_cuda, test_m6_dispatch, test_m6_ubatch, test_m6_forward_api
@@ -16,8 +17,8 @@ PASS
 BLOCKED/FAILED
   make m1-acceptance was not run: user-deleted M1 layers0-3 GGUF would require
     recreating a large obsolete artifact; preserved full M7 and M2 GGUF were not touched.
-  make m3-acceptance/m3-audit requires that deleted layers0-3 GGUF and therefore
-    remains blocked by the explicit user cleanup.
+  make m3-acceptance/m3-audit still names the deleted layers0-3 GGUF and cannot
+    run unchanged; equivalent direct M3 probes and full-R1 binding checks pass.
   make m5-acceptance fails at M5-C12 native/reference mismatch at index 2560
     (-0.0039879242 vs -0.0011472413); this pre-existing baseline issue was not changed.
   M6 chained acceptance remains blocked by M5, although independent M6 tests pass.
