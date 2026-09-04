@@ -1,9 +1,17 @@
 {
+  "actual_conversion": {
+    "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+    "artifact_bytes": 132212799456,
+    "artifact_sha256": "55f18ad578bddacb2e270d4546b2f491503f9ec53e22270e2688de4103174c27",
+    "preserved_models": true,
+    "status": "pass"
+  },
   "disk_free_bytes": 168055828480,
   "estimated_tensor_bytes": 132212663320,
   "format": "q38_runtime_conversion_plan_v1",
   "headroom_target_bytes": 115964116992,
   "max_layer": 47,
+  "note": "The M1 108 GiB pressure warning remains; full conversion succeeded after authorized cleanup.",
   "quantized": true,
   "reason": "estimated payload exceeds the M1 108 GiB pressure target",
   "source_bytes": 353887799320,

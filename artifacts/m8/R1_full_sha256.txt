@@ -1,0 +1,1 @@
+55f18ad578bddacb2e270d4546b2f491503f9ec53e22270e2688de4103174c27  artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf
