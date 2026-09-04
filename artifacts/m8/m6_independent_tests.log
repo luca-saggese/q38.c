@@ -1,6 +1,0 @@
-test_m6_moe_binding: routed/router/shared tensor domains bound strictly
-test_m6_moe_ref: deterministic router top-10 and normalization passed
-test_m6_moe_cuda: naive router projection passed
-test_m6_dispatch: stable weighted routed/shared combine passed
-test_m6_ubatch: router/route buffer tail fuzz passed
-test_m6_forward_api: complete forward/decode API validation passed

@@ -43,3 +43,11 @@ tools/__pycache__/
 .*.swp
 .DS_Store
 .venv-m6
+
+# Per-run M7/M8 diagnostics stay local; committed artifacts are summaries,
+# manifests, audits, and reproducible acceptance reports.
+artifacts/m7/*.jsonl
+artifacts/m7/candidates_fp32/
+artifacts/m8/*.log
+artifacts/m8/*.stderr
+artifacts/m8/*.exit
