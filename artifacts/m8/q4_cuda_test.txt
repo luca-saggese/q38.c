@@ -1,0 +1,5 @@
+q38: nvcc arch flags: -gencode arch=compute_121a,code=sm_121a
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -c -o q38_moe_cuda.o q38_moe_cuda.cu
+/usr/local/cuda/bin/nvcc -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -I. -o tests/test_m8_q4_moe_cuda tests/test_m8_q4_moe_cuda.cu \
+	q38_moe_cuda.o q38_moe_ref.o q38_quant.o -L/usr/local/cuda/targets/sbsa-linux/lib -L/usr/local/cuda/lib64 -lcudart -lm
+test_m8_q4_moe_cuda: Q4_K expert CUDA/reference parity passed

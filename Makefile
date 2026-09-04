@@ -79,7 +79,7 @@ M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 	m6-stateful-sequence-oracle \
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
 	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-schema m7-gates \
-	m7-profile-forward m7-residency-footprint m7-acceptance
+	m7-profile-forward m7-residency-footprint m7-acceptance m8-q4-kernel
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
@@ -771,7 +771,7 @@ m6-c02: m6-c01 $(TEST_DIR)/test_m6_moe_ref
 	@./$(TEST_DIR)/test_m6_moe_ref
 	@printf '%s\n' '{"gate":"M6-C02","oracle":"scalar router projection, softmax, deterministic top-10","status":"pass"}' > artifacts/m6/router_goldens.json
 
-q38_moe_cuda.o: q38_moe_cuda.cu q38_moe_cuda.h q38_moe_ref.h
+q38_moe_cuda.o: q38_moe_cuda.cu q38_moe_cuda.h q38_moe_ref.h q38_quant.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
 	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_moe_cuda.cu
 
@@ -779,6 +779,15 @@ $(TEST_DIR)/test_m6_moe_cuda: $(TEST_DIR)/test_m6_moe_cuda.cu \
 		q38_moe_cuda.o q38_moe_cuda.h q38_moe_ref.h
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m6_moe_cuda.cu \
 		q38_moe_cuda.o $(CUDA_LDLIBS) -lm
+
+$(TEST_DIR)/test_m8_q4_moe_cuda: $(TEST_DIR)/test_m8_q4_moe_cuda.cu \
+		q38_moe_cuda.o q38_moe_ref.o q38_quant.o q38_moe_cuda.h \
+		q38_moe_ref.h q38_quant.h
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_m8_q4_moe_cuda.cu \
+		q38_moe_cuda.o q38_moe_ref.o q38_quant.o $(CUDA_LDLIBS) -lm
+
+m8-q4-kernel: $(TEST_DIR)/test_m8_q4_moe_cuda
+	@./$(TEST_DIR)/test_m8_q4_moe_cuda
 
 m6-c03: m6-c02 $(TEST_DIR)/test_m6_moe_cuda
 	@./$(TEST_DIR)/test_m6_moe_cuda
@@ -1123,9 +1132,10 @@ $(TEST_DIR)/test_m2_matvec: $(TEST_DIR)/test_m2_matvec.cu \
 		q38_cuda_primitives.o q38_quant.o q38_oracle.o $(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_m2_embedding: $(TEST_DIR)/test_m2_embedding.c \
-		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o \
+		q38_weights.h q38_ple.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_embedding.c q38_weights.o \
-		q38_gguf.o q38_model_config.o q38_ple.o
+		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
 
 $(TEST_DIR)/test_m2_lm_head: $(TEST_DIR)/test_m2_lm_head.cu \
 		q38_cuda_primitives.o q38_oracle.o q38_weights.o q38_gguf.o \
@@ -1135,14 +1145,16 @@ $(TEST_DIR)/test_m2_lm_head: $(TEST_DIR)/test_m2_lm_head.cu \
 		q38_model_config.o q38_ple.o q38_qsa.o $(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_m2_memory: $(TEST_DIR)/test_m2_memory.c \
-		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o \
+		q38_weights.h q38_ple.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m2_memory.c q38_weights.o \
-		q38_gguf.o q38_model_config.o q38_ple.o
+		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
 
 $(TEST_DIR)/test_m3_gr_binding: $(TEST_DIR)/test_m3_gr_binding.c \
-		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o \
+		q38_weights.h q38_ple.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gr_binding.c q38_weights.o \
-		q38_gguf.o q38_model_config.o q38_ple.o
+		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
 
 q38_gr_ref.o: q38_gr_ref.c q38_gr_ref.h
 	$(CC) $(CFLAGS) -c -o $@ q38_gr_ref.c
@@ -1161,9 +1173,10 @@ $(TEST_DIR)/test_m3_gr_cuda: $(TEST_DIR)/test_m3_gr_cuda.cu q38_gr.o \
 		q38_gr.o q38_gr_ref.o q38_oracle.o $(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_m3_gdn_binding: $(TEST_DIR)/test_m3_gdn_binding.c \
-		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_weights.h q38_ple.h
+		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o \
+		q38_weights.h q38_ple.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gdn_binding.c q38_weights.o \
-		q38_gguf.o q38_model_config.o q38_ple.o
+		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
 
 q38_state.o: q38_state.c q38_state.h
 	$(CC) $(CFLAGS) -c -o $@ q38_state.c

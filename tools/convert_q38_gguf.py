@@ -221,11 +221,14 @@ def write_subset(model_dir, inventory_path, output_path, max_layer, revision,
             "headroom_target_bytes": 108 * 1024 ** 3,
             "disk_free_bytes": disk_free,
             "status": "pass" if estimate <= gate else "blocked",
-            "reason": (
-                "estimated payload exceeds the M1 108 GiB pressure target"
-                if estimate > 108 * 1024 ** 3 else
-                "local filesystem is too small for the runtime artifact"
-                if estimate > disk_free else ""),
+            "reason": "; ".join(
+                message for message in (
+                    "estimated payload exceeds the M1 108 GiB pressure target"
+                    if estimate > 108 * 1024 ** 3 else "",
+                    "local filesystem is too small for the runtime artifact"
+                    if estimate > disk_free else "",
+                ) if message
+            ),
         }
         with open(plan_output, "w", encoding="utf-8") as stream:
             json.dump(plan, stream, indent=2, sort_keys=True)

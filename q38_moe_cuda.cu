@@ -144,6 +144,98 @@ __global__ static void q2_down_kernel(const q38_q2_k_block *weights,
     output[d] = value;
 }
 
+__device__ static void q4_scale_min(const q38_q4_k_block *block,
+                                    unsigned index, uint8_t *scale,
+                                    uint8_t *minimum) {
+    if (index < 4) {
+        *scale = block->scales[index] & 63u;
+        *minimum = block->scales[index + 4] & 63u;
+    } else {
+        *scale = (block->scales[index + 4] & 0xfu) |
+                 ((block->scales[index - 4] >> 6) << 4);
+        *minimum = (block->scales[index + 4] >> 4) |
+                   ((block->scales[index] >> 6) << 4);
+    }
+}
+
+__device__ static float q4_value(const q38_q4_k_block *blocks,
+                                 size_t row, size_t column,
+                                 size_t blocks_per_row) {
+    const size_t element = column % 256;
+    const q38_q4_k_block *block =
+        blocks + row * blocks_per_row + column / 256;
+    const unsigned group = (unsigned)(element / 64);
+    const unsigned within = (unsigned)(element % 64);
+    const unsigned scale_index = group * 2u + (within >= 32u);
+    uint8_t scale, minimum;
+    q4_scale_min(block, scale_index, &scale, &minimum);
+    const unsigned qindex = within % 32u;
+    const uint8_t packed = block->qs[group * 32u + qindex];
+    const unsigned quant = (within >= 32u) ? (packed >> 4) : (packed & 0xfu);
+    const float d = __half2float(*reinterpret_cast<const __half *>(&block->d));
+    const float m = __half2float(*reinterpret_cast<const __half *>(
+        &block->dmin));
+    return d * scale * quant - m * minimum;
+}
+
+__global__ static void q4_gate_up_kernel(const q38_q4_k_block *weights,
+                                         const float *hidden, float *mid) {
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= Q38_MOE_INTERMEDIATE) return;
+    float gate = 0.0f, up = 0.0f;
+    for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d) {
+        gate += q4_value(weights, i, d, 10) * hidden[d];
+        up += q4_value(weights, Q38_MOE_INTERMEDIATE + i, d, 10) *
+              hidden[d];
+    }
+    mid[i] = (gate / (1.0f + expf(-gate))) * up;
+}
+
+__global__ static void q4_down_kernel(const q38_q4_k_block *weights,
+                                      const float *mid, float *output) {
+    const size_t d = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (d >= Q38_MOE_HIDDEN) return;
+    float value = 0.0f;
+    for (size_t i = 0; i < Q38_MOE_INTERMEDIATE; ++i)
+        value += q4_value(weights, i, d, 10) * mid[i];
+    output[d] = value;
+}
+
+extern "C" bool q38_moe_cuda_expert_q4_workspace(
+    const void *device_gate_up, const void *device_down,
+    const float *device_hidden, float *device_output, float *device_mid,
+    cudaStream_t stream, char *error, size_t error_len) {
+    if (!device_gate_up || !device_down || !device_hidden || !device_output ||
+        !device_mid)
+        return fail(error, error_len, "invalid CUDA Q4 expert arguments");
+    q4_gate_up_kernel<<<3, 256, 0, stream>>>(
+        (const q38_q4_k_block *)device_gate_up, device_hidden, device_mid);
+    q4_down_kernel<<<10, 256, 0, stream>>>(
+        (const q38_q4_k_block *)device_down, device_mid, device_output);
+    const cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+        return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
+
+extern "C" bool q38_moe_cuda_expert_q4(
+    const void *device_gate_up, const void *device_down,
+    const float *device_hidden, float *device_output, cudaStream_t stream,
+    char *error, size_t error_len) {
+    float *mid = nullptr;
+    cudaError_t status = cudaMalloc(&mid, Q38_MOE_INTERMEDIATE * sizeof(float));
+    if (status != cudaSuccess)
+        return fail(error, error_len, cudaGetErrorString(status));
+    const bool ok = q38_moe_cuda_expert_q4_workspace(
+        device_gate_up, device_down, device_hidden, device_output, mid, stream,
+        error, error_len);
+    if (ok) status = cudaStreamSynchronize(stream);
+    cudaFree(mid);
+    if (ok && status != cudaSuccess)
+        return fail(error, error_len, cudaGetErrorString(status));
+    return ok;
+}
+
 extern "C" bool q38_moe_cuda_expert_q2_workspace(
     const void *device_gate_up, const void *device_down,
     const float *device_hidden, float *device_output, float *device_mid,
