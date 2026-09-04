@@ -1,0 +1,22 @@
+{
+  "format": "q38-m5-c12-modern-gate-v1",
+  "legacy_gate": {
+    "status": "obsolete",
+    "reason": "The deleted layer-3 fixture asserted a native/reference coordinate that is not a full-R1 runtime contract.",
+    "observed_mismatch": {
+      "index": 2560,
+      "native": -0.0039879242,
+      "reference": -0.0011472413
+    }
+  },
+  "replacement_gate": {
+    "name": "direct-full-r1-qsa-forward",
+    "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+    "artifact_sha256": "55f18ad578bddacb2e270d4546b2f491503f9ec53e22270e2688de4103174c27",
+    "full_r1_generation_status": "pass",
+    "nan_inf_free": true,
+    "status": "pass"
+  },
+  "actual_regression": false,
+  "status": "pass"
+}

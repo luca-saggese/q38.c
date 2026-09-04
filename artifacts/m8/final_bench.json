@@ -21,7 +21,7 @@
     "first_token_ms_percent": -16.87835011144331,
     "median_decode_ms_percent": 30.301343778952305
   },
-  "format": "q38-m8-final-bench-v2",
+  "format": "q38-m8-final-bench-v3",
   "greedy_eval": "artifacts/m8/final_greedy_eval.json",
   "q4_kernel": {
     "command": "make m8-q4-kernel",
@@ -44,5 +44,8 @@
       10756
     ]
   },
+  "r1_cold_warm": "artifacts/m8/R1_memory_bench.json",
+  "raw_runs": "artifacts/m8/r1_bench_runs/",
+  "reason": "Real R1 runs are process-isolated because the same-process M7 harness could not be rebuilt in the pre-existing CUDA merge-conflicted worktree.",
   "status": "conditional"
 }

@@ -1,4 +1,32 @@
-{"id": "stateful_sequence_oracle_2", "source_artifact": "artifacts/m6/stateful_sequence_oracle_2.json", "source_sha256": "24ad568b9b49cb96c88e328ef652cfbd7f4d025c239c093ec96a07363fb3f1f6", "text": "Hello, I", "token_ids": [9419, 11, 353]}
-{"id": "stateful_sequence_oracle_4", "source_artifact": "artifacts/m6/stateful_sequence_oracle_4.json", "source_sha256": "3ec546fd17e181eeec2df341cb77955728933f8fc3c05f7de6d58abf1e41d72c", "text": "Hello, I'm a", "token_ids": [9419, 11, 353, 2688, 264]}
-{"id": "stateful_sequence_oracle_8", "source_artifact": "artifacts/m6/stateful_sequence_oracle_8.json", "source_sha256": "96e50345ecf518856d99d6c92ec1327766d4139de2398cd83af5f16f8184e1c2", "text": "Hello, I'm a beginner programmer who's", "token_ids": [9419, 11, 353, 2688, 264, 47308, 46194, 852, 579]}
-{"id": "stateful_sequence_oracle_resume_probe", "source_artifact": "artifacts/m6/stateful_sequence_oracle_resume_probe.json", "source_sha256": "be2b2c8102ecbc44be199832da7697ec1489eb39b7ed18503eeb89b543c7090a", "text": "Hello", "token_ids": [9419]}
+{"id": "m8-seq-0000", "source": "deterministic LCG token probe; no generated output", "token_ids": [209763]}
+{"id": "m8-seq-0001", "source": "deterministic LCG token probe; no generated output", "token_ids": [200550, 30605]}
+{"id": "m8-seq-0002", "source": "deterministic LCG token probe; no generated output", "token_ids": [67464, 161607, 227322]}
+{"id": "m8-seq-0003", "source": "deterministic LCG token probe; no generated output", "token_ids": [124689, 123708, 181099, 89038]}
+{"id": "m8-seq-0004", "source": "deterministic LCG token probe; no generated output", "token_ids": [230613, 103472, 134095, 161506, 237273]}
+{"id": "m8-seq-0005", "source": "deterministic LCG token probe; no generated output", "token_ids": [107620, 173683, 75062, 58653, 9688, 37207]}
+{"id": "m8-seq-0006", "source": "deterministic LCG token probe; no generated output", "token_ids": [198346, 51105, 65676, 13435, 67998, 104037, 223360]}
+{"id": "m8-seq-0007", "source": "deterministic LCG token probe; no generated output", "token_ids": [176607, 79282, 235881, 99764, 164227, 20742, 4269, 217640]}
+{"id": "m8-seq-0008", "source": "deterministic LCG token probe; no generated output", "token_ids": [73063]}
+{"id": "m8-seq-0009", "source": "deterministic LCG token probe; no generated output", "token_ids": [10650, 5169]}
+{"id": "m8-seq-0010", "source": "deterministic LCG token probe; no generated output", "token_ids": [151004, 103819, 162158]}
+{"id": "m8-seq-0011", "source": "deterministic LCG token probe; no generated output", "token_ids": [215029, 169680, 231919, 153730]}
+{"id": "m8-seq-0012", "source": "deterministic LCG token probe; no generated output", "token_ids": [206329, 184068, 76947, 106198, 74301]}
+{"id": "m8-seq-0013", "source": "deterministic LCG token probe; no generated output", "token_ids": [126072, 44407, 36458, 66241, 234284, 243867]}
+{"id": "m8-seq-0014", "source": "deterministic LCG token probe; no generated output", "token_ids": [92990, 222085, 120096, 133119, 121682, 161417, 211540]}
+{"id": "m8-seq-0015", "source": "deterministic LCG token probe; no generated output", "token_ids": [201635, 88742, 195533, 23752, 229255, 140090, 233809, 110204]}
+{"id": "m8-seq-0016", "source": "deterministic LCG token probe; no generated output", "token_ids": [122283]}
+{"id": "m8-seq-0017", "source": "deterministic LCG token probe; no generated output", "token_ids": [198926, 57621]}
+{"id": "m8-seq-0018", "source": "deterministic LCG token probe; no generated output", "token_ids": [127856, 230415, 29730]}
+{"id": "m8-seq-0019", "source": "deterministic LCG token probe; no generated output", "token_ids": [152857, 27556, 154291, 105590]}
+{"id": "m8-seq-0020", "source": "deterministic LCG token probe; no generated output", "token_ids": [80221, 215320, 242071, 96266, 217569]}
+{"id": "m8-seq-0021", "source": "deterministic LCG token probe; no generated output", "token_ids": [116172, 221371, 240862, 116389, 230336, 148511]}
+{"id": "m8-seq-0022", "source": "deterministic LCG token probe; no generated output", "token_ids": [5874, 110505, 221940, 171971, 197190, 181485, 111976]}
+{"id": "m8-seq-0023", "source": "deterministic LCG token probe; no generated output", "token_ids": [203175, 229594, 171633, 23836, 203211, 90798, 101429, 82960]}
+{"id": "m8-seq-0024", "source": "deterministic LCG token probe; no generated output", "token_ids": [106031]}
+{"id": "m8-seq-0025", "source": "deterministic LCG token probe; no generated output", "token_ids": [6594, 229945]}
+{"id": "m8-seq-0026", "source": "deterministic LCG token probe; no generated output", "token_ids": [128068, 44755, 29718]}
+{"id": "m8-seq-0027", "source": "deterministic LCG token probe; no generated output", "token_ids": [219773, 75704, 44471, 195498]}
+{"id": "m8-seq-0028", "source": "deterministic LCG token probe; no generated output", "token_ids": [211713, 113772, 229083, 27262, 181189]}
+{"id": "m8-seq-0029", "source": "deterministic LCG token probe; no generated output", "token_ids": [61024, 22079, 60562, 42185, 13716, 236003]}
+{"id": "m8-seq-0030", "source": "deterministic LCG token probe; no generated output", "token_ids": [156646, 113677, 160776, 206791, 239226, 82321, 214460]}
+{"id": "m8-seq-0031", "source": "deterministic LCG token probe; no generated output", "token_ids": [164331, 206926, 10069, 173232, 189007, 64866, 165721, 245476]}

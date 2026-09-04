@@ -7,7 +7,7 @@
     "peak_internal_bytes": 0,
     "peak_rss_bytes": 12984197120
   },
-  "format": "q38-m8-final-memory-v2",
+  "format": "q38-m8-final-memory-v3",
   "gates": {
     "prefill_max_bytes": 124554051584,
     "startup_max_bytes": 120259084288,
@@ -21,6 +21,7 @@
     "peak_internal_bytes": 0,
     "peak_rss_bytes": 15005958144
   },
+  "r1_cold_warm": "artifacts/m8/R1_memory_bench.json",
   "r1_mapped_plan": {
     "cuda_allocated_bytes": 0,
     "cuda_free_bytes": 1941286912,
@@ -31,6 +32,13 @@
     "peak_internal_bytes": 0,
     "phase": "gguf_mapped",
     "rss_bytes": 103067648
+  },
+  "required_telemetry": {
+    "cuda_unified_peak_bytes": null,
+    "mem_available_bytes": null,
+    "resident_misses": null,
+    "resident_non_ple_bytes": null,
+    "upload_bytes_per_token": null
   },
   "solver_projection": {
     "gates": {
@@ -46,5 +54,5 @@
     "projected_peak_bytes": 77777578696
   },
   "status": "conditional",
-  "status_note": "Full R1 one-token and 8-token CUDA runs completed without NaN/Inf; long-context startup/prefill peak instrumentation is not available in this CLI."
+  "status_note": "Required persistent-residency telemetry is not exposed by the available CLI; no values are inferred from file size or workspace allocation."
 }

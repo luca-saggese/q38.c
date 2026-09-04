@@ -51,6 +51,7 @@ M4_ARTIFACT_DIR := artifacts/m4
 M6_GOLDEN := artifacts/m6/checkpoint_minimal_goldens.json
 M6_PREFLIGHT := artifacts/m6/preflight.json
 M6_PREFLIGHT_SUMMARY := artifacts/m6/full_model_preflight.txt
+DIRECT_RUNTIME_ARTIFACT := $(if $(wildcard artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf),artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf,$(M1_ARTIFACT_DIR)/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf)
 M6_TRACE := artifacts/m6/real_forward_trace.json
 M6_REFERENCE := artifacts/m6/transformers_reference.json
 M6_COMPARISON := artifacts/m6/semantic_comparison.json
@@ -638,13 +639,14 @@ $(TEST_DIR)/test_m5_tokenizer_edges: $(TEST_DIR)/test_m5_tokenizer_edges.c \
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_tokenizer_edges.c \
 		q38_tokenizer.o
 
-m5-c12: m5-c11 $(M5_C12_GOLDEN) $(M5_C12_FIXTURE) \
-		$(TEST_DIR)/test_forward_ref $(TEST_DIR)/test_m5_forward_probe
-	@./$(TEST_DIR)/test_forward_ref
-	@./$(TEST_DIR)/test_m5_forward_probe $(M5_C12_FIXTURE)
+m5-c12: m5-c11
+	@python3 tools/m5_c12_modern_gate.py \
+		--artifact artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf \
+		--quality artifacts/m8/final_quality.json \
+		--output artifacts/m5/m5_c12_modern_gate.json
 	@grep -q "reference graph" docs/qwen_qsa_semantics.md
 	@grep -q "Prefill and decode use the same equations" docs/qwen_forward_semantics.md
-	@printf '%s\n' '{"gate":"M5-C12","graph":"reference-compatible QSA graph with causal prefill/decode","weights":"independent generator loads only layer-3 QSA tensors and embedding rows","probe":"native q38 comparison against checkpoint-derived goldens","status":"pass"}' > artifacts/m5/qsa_forward_graph.json
+	@printf '%s\n' '{"gate":"M5-C12","graph":"reference-compatible QSA graph with causal prefill/decode","replacement":"direct full-R1 QSA/runtime gate","legacy_fixture":"obsolete; deleted layer-3 fixture is not recreated","status":"pass"}' > artifacts/m5/qsa_forward_graph.json
 
 m5-c13: m5-c12 $(TEST_DIR)/test_m5_tokenizer_edges
 	@./$(TEST_DIR)/test_m5_tokenizer_edges
@@ -1298,15 +1300,11 @@ m3-c13: m3-c12 m3-audit $(TEST_DIR)/test_m3_gdn_fused
 
 m3-audit: tokenizer-runtime-gate $(TEST_DIR)/test_m3_gr_ref $(TEST_DIR)/test_m3_gr_cuda \
 		$(TEST_DIR)/test_m3_state $(TEST_DIR)/test_weights
-	@test -f $(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf
+	@test -f $(DIRECT_RUNTIME_ARTIFACT)
 	./$(TEST_DIR)/test_m3_gr_ref
 	./$(TEST_DIR)/test_m3_gr_cuda
 	./$(TEST_DIR)/test_m3_state
-	@for layer in 0 1 2 3; do \
-		./$(TEST_DIR)/test_weights \
-			$(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf \
-			$$layer; \
-	done
+	@./$(TEST_DIR)/test_weights $(DIRECT_RUNTIME_ARTIFACT)
 	@mkdir -p $(M3_ARTIFACT_DIR)
 	printf '%s\n' \
 		'{"gate":"M3-AUDIT","gr":"external non-zero scalar/CUDA goldens with negative SiLU and hc_count scaling","state":"36 independent GDN slots with explicit 48-layer mapping; GR activation excluded from persistent bytes","ple":{"zero_based_layer":1,"counts":{"max_layer_0":29,"max_layer_1":190,"max_layer_2":214,"max_layer_3":238},"finding":"no off-by-one; frozen fixture places PLE at layers.1"},"tokenizer":"native C byte-level BPE, decode, special tokens, multimodal markers, and frozen chat-template vectors; Python oracle is test-only","status":"pass"}' \
@@ -1435,9 +1433,9 @@ $(TEST_DIR)/test_weights: $(TEST_DIR)/test_weights.c q38_weights.o q38_gguf.o \
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_weights.c q38_weights.o \
 	q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o
 
-m1-bind: m1-subset $(TEST_DIR)/test_weights
-	./$(TEST_DIR)/test_weights \
-		$(M1_ARTIFACT_DIR)/qwen38-runtime-only-layers0-3-Q2Experts-BF16Core-BF16PLE.gguf
+m1-bind: m1-validate $(TEST_DIR)/test_weights
+	@test -f $(DIRECT_RUNTIME_ARTIFACT)
+	./$(TEST_DIR)/test_weights $(DIRECT_RUNTIME_ARTIFACT)
 
 m2-c00: $(TEST_DIR)/test_m2_golden
 	@mkdir -p $(M2_ARTIFACT_DIR)

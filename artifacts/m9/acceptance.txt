@@ -1,14 +1,6 @@
-M9 acceptance status
+M9 acceptance status: SUSPENDED
 
-PASS
-- M9A session reset/clone boundaries pass existing tests.
-- Versioned checkpoint snapshot roundtrip, malformed version/layout rejection,
-  and deterministic trace verification pass.
-
-NOT COMPLETE
-- Checkpoint restore plus caller-owned deterministic replay orchestration passes.
-- No q38 single-worker HTTP server, worker supervisor, fatal CUDA recovery, or
-  sustained-load/memory-soak harness exists.
-- MTP remains DISABLED; no proposal/verification semantics or Q4 losslessness
-  result is claimed.
-- M9 is conditional and not marked complete.
+M9 work is intentionally paused while M8 evidence is completed. No M9
+commands, benchmarks, server, soak, or MTP work were started for this closure.
+Existing exploratory artifacts are retained for provenance only; they are not
+acceptance evidence and M9 is not marked complete.

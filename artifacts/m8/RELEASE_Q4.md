@@ -18,15 +18,26 @@ transposed down-projection layout is preserved.
   `full_regression.txt` for exact status.
 - Memory solver calibration is inventory-backed and within 5% for M7 R0.
 
-## Explicit blockers
+## Evidence and blockers
 
-The full R1 artifact is now materialized at 132,212,799,456 bytes without
-deleting preserved models. The available evaluator provides exact greedy
-comparison only; perplexity/NLL/KL/layer-logit/task metrics remain uncomputed.
-The 132 GB binary is retained in the workspace and recorded by
-`R1_full_sha256.txt`; it is intentionally not added to Git because doing so
-would duplicate the large artifact in repository storage.
-The CLI also lacks long-context startup/prefill peak instrumentation. M5-C12
-still fails its existing native/reference comparison, and M3/M1 full acceptance
-requires the user-deleted obsolete layers0-3 fixture. M8 therefore remains
-conditional rather than being marked complete.
+The full R1 artifact is materialized at 132,212,799,456 bytes without deleting
+preserved models. Its checksum is recorded in `R1_checksums.txt`; the binary is
+retained in the workspace and intentionally not added to Git.
+
+`tools/q38_eval.py` is now a deterministic paired evaluator for at least 32
+records. It reports argmax agreement, top-k overlap, logit error, KL,
+router-top-10 stability, and QSA selected-ID stability. The frozen 32-sequence
+corpus is ready, but paired finite BF16-reference/full-R1 vectors are not
+available, so no quality metrics are claimed.
+
+Six real R1 CLI runs are recorded in `r1_bench_runs/` and aggregated in
+`R1_memory_bench.json`. The existing CLI does not expose persistent non-PLE
+residency, unified peak, MemAvailable, upload bytes/token, or residency misses;
+those fields remain null. The same-process M7 harness could not be rebuilt
+because unrelated CUDA files contain unresolved merge markers.
+
+The deleted layer-3 M5-C12 fixture is classified obsolete and replaced by a
+direct full-R1 gate (`artifacts/m5/m5_c12_modern_gate.json`). M1/M3 no longer
+recreate that fixture. M9 is suspended and was not started. M8 remains
+conditional until paired quality vectors and required residency telemetry are
+available.

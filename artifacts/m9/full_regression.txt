@@ -1,4 +1,6 @@
-M9 hardening regression (real commands, 2026-09-04)
+M9 exploratory regression (historical; M9 now suspended)
+
+No M9 commands were started during the M8 closure.
 
 PASS
   make m9-checkpoint

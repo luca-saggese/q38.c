@@ -1,78 +1,51 @@
 {
-  "artifact_bytes": 4126298944,
-  "artifact_sha256": "9c0dbd43a5e9078785d307047c10c1810186b59b334a452c777e91b646893f44",
-  "conversion_plan": {
-    "disk_free_bytes": 87304052736,
-    "estimated_tensor_bytes": 4126295488,
-    "format": "q38_runtime_conversion_plan_v1",
-    "headroom_target_bytes": 115964116992,
-    "max_layer": 0,
-    "quantized": true,
-    "reason": "",
-    "source_bytes": 7743882688,
-    "status": "pass",
-    "tensor_count": 29
+  "format": "q38-m8-r1-cold-warm-v1",
+  "artifact": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+  "runs": 6,
+  "cold_runs": 1,
+  "warm_runs": 5,
+  "method": {
+    "runtime_api": "q38 --generate",
+    "prompt": "Hello",
+    "max_tokens": 1,
+    "cold_definition": "first process invocation",
+    "warm_definition": "subsequent process invocations",
+    "m7_same_process": false,
+    "note": "The repository is in a pre-existing CUDA merge-conflict state, so the same-process M7 harness could not be rebuilt. These are real R1 runs, not a same-process M7 claim."
   },
-  "format": "q38-m8-r1-memory-v1",
-  "full_recipe_projection": {
-    "gates": {
-      "prefill": "pass",
-      "prefill_max_bytes": 124554051584,
-      "startup": "pass",
-      "startup_max_bytes": 120259084288,
-      "steady_state": "pass",
-      "steady_state_preferred_bytes": 115964116992
-    },
-    "projected_peak_bytes": 77777578696,
-    "source": "memory_solver_R1.json"
+  "cold": {
+    "wall_ms": 23434.189792,
+    "peak_cuda_allocated_bytes": 13603848192,
+    "peak_rss_bytes": 11294580736
   },
-  "quant_audit_classes": {
-    "embedding": {
-      "BF16": {
-        "bytes": 1271398400,
-        "tensors": 1
-      }
-    },
-    "gdn": {
-      "BF16": {
-        "bytes": 115917248,
-        "tensors": 9
-      }
-    },
-    "gr": {
-      "BF16": {
-        "bytes": 39546880,
-        "tensors": 11
-      }
-    },
-    "output": {
-      "BF16": {
-        "bytes": 1271398400,
-        "tensors": 1
-      }
-    },
-    "routed_expert": {
-      "Q4_K": {
-        "bytes": 1415577600,
-        "tensors": 2
-      }
-    },
-    "router": {
-      "BF16": {
-        "bytes": 2621440,
-        "tensors": 1
-      }
-    },
-    "shared_expert": {
-      "BF16": {
-        "bytes": 9835520,
-        "tensors": 4
-      }
-    }
+  "warm": {
+    "wall_ms": [
+      16422.26064,
+      16667.506326,
+      14778.472423,
+      14815.800655,
+      14653.622638
+    ],
+    "median_ms": 14815.800655,
+    "p95_ms": 16667.506326
   },
-  "quant_audit_status": "pass",
-  "reason": "Only deterministic file conversion and audit were run; runtime peak and quality gates remain open.",
-  "recipe": "R1",
-  "scope": "controlled max-layer=0 conversion; not a full Spark startup/prefill benchmark",
-  "status": "measured_partial"
+  "observed": {
+    "peak_cuda_allocated_bytes": 13603848192,
+    "peak_rss_bytes": 11294580736,
+    "cuda_total_bytes": 130596646912
+  },
+  "required_m7_telemetry": {
+    "resident_non_ple_bytes": null,
+    "warm_median_ms": 14815.800655,
+    "warm_p95_ms": 16667.506326,
+    "cold_ms": 23434.189792,
+    "cuda_unified_peak_bytes": null,
+    "rss_bytes": 11294580736,
+    "mem_available_bytes": null,
+    "upload_bytes_per_token": null,
+    "resident_misses": null,
+    "status": "not-computed",
+    "reason": "The existing --generate JSON API exposes workspace allocation and RSS only; it does not expose persistent non-PLE residency, MemAvailable, upload counters, or misses."
+  },
+  "status": "conditional"
 }

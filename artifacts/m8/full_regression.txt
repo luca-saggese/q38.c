@@ -15,18 +15,25 @@ PASS
   paired 4-record frozen-corpus greedy comparison: exact match, zero token changes
 
 BLOCKED/FAILED
-  make m1-acceptance was not run: user-deleted M1 layers0-3 GGUF would require
-    recreating a large obsolete artifact; preserved full M7 and M2 GGUF were not touched.
-  make m3-acceptance/m3-audit still names the deleted layers0-3 GGUF and cannot
-    run unchanged; equivalent direct M3 probes and full-R1 binding checks pass.
-  make m5-acceptance fails at M5-C12 native/reference mismatch at index 2560
-    (-0.0039879242 vs -0.0011472413); this pre-existing baseline issue was not changed.
-  M6 chained acceptance remains blocked by M5, although independent M6 tests pass.
+  make m1-acceptance/m3-audit could not be rebuilt in this worktree because
+    unrelated q38_forward CUDA files contain unresolved merge markers; their
+    recipes now use the available full runtime artifact and do not recreate
+    the deleted layers0-3 fixture.
+  M5-C12's old fixture coordinate mismatch (index 2560,
+    -0.0039879242 vs -0.0011472413) is classified obsolete, not an actual
+    regression; the direct full-R1 replacement passes in
+    artifacts/m5/m5_c12_modern_gate.json.
+  M6 chained acceptance was not rerun; independent M6 tests remain recorded.
   Full M0-M7 sweep remains opt-in in the Makefile (M7_RUN_FULL=1).
 
 QUALITY/MEMORY LIMITS
   Full R1 now materialized: 132212799456 bytes; audit and runtime generation pass.
   q38_eval greedy comparison passes, but perplexity/NLL/KL/layer-logit metrics are
   not computed by the available evaluator; no stronger quality claim is made.
-  Long-context Spark startup/prefill peak instrumentation is unavailable; one/8-token
-  CUDA smoke memory/performance results are recorded in final_memory.json/final_bench.json.
+  A deterministic 32-sequence corpus and paired evaluator are implemented,
+  but full BF16-reference/R1 vectors are unavailable, so argmax/top-k/logit/KL/
+  router/QSA quality metrics remain not-computed.
+  Long-context Spark startup/prefill peak instrumentation is unavailable.
+  Six real process-isolated R1 runs are recorded in R1_memory_bench.json;
+  persistent non-PLE residency, unified peak, MemAvailable, upload bytes/token,
+  and residency misses remain explicitly unavailable.

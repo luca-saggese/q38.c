@@ -5,15 +5,18 @@
   "candidate_sha256": "787ed6a51644ec1860158ecef2066f5623f9827a9d6c9e69cef3c88e2d205464",
   "changed_records": 0,
   "corpus": {
-    "sha256": "3893f2e9804977e72079e7342b9f8c9d92fbd451fbfac59d604ab31760eaf639",
+    "sha256": "b6a97c9af746c7d51815e8e34dc8e44744131d8ed1391ce366896d2561b8acc7",
     "status": "provided"
   },
   "exact_matches": 4,
-  "format": "q38-m8-eval-v1",
+  "format": "q38-m8-eval-v2",
+  "minimum_quality_records": 32,
   "missing_baseline": [],
   "missing_candidate": [],
-  "quality_metrics": "not-computed",
-  "reason": "Token comparison is not perplexity, KL, NLL, or task quality.",
+  "quality_metrics": null,
+  "quality_metrics_reason": "paired full logits/router_top10/qsa_selected fields are required for at least 32 records",
+  "quality_metrics_status": "not-computed",
+  "reason": "Metrics are computed only from paired finite vectors and exact runtime/reference route and QSA observations.",
   "records": 4,
   "status": "pass",
   "token_changes": 0

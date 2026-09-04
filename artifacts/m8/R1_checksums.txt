@@ -1,2 +1,2 @@
-9c0dbd43a5e9078785d307047c10c1810186b59b334a452c777e91b646893f44  artifacts/m8/qwen38-runtime-layers0-R1-Q4Experts-BF16Core-BF16PLE.gguf
-b1194458095d986df55f207ac8633becc8e64a99624a4f9c1670db74a82b246b  artifacts/m8/quant_manifest_R1.json
+55f18ad578bddacb2e270d4546b2f491503f9ec53e22270e2688de4103174c27  artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf
+03be415ed336f1b4fbe3a39c6e541fb4c51c2d5ba08d6533bd1d46e2a09f2077  artifacts/m8/quant_manifest_R1.json

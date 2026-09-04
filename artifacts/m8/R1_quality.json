@@ -15,11 +15,26 @@
   },
   "corpus": {
     "manifest": "artifacts/m8/quality_corpus_manifest.json",
-    "records": 4,
-    "sha256": "a249a82d0a5df5ed7920ee6bb402d2cecbb03a55088a35387527fa910b040b7d",
+    "records": 32,
+    "sha256": "b6a97c9af746c7d51815e8e34dc8e44744131d8ed1391ce366896d2561b8acc7",
     "status": "frozen-diagnostic"
   },
-  "format": "q38-m8-final-quality-v2",
+  "evaluator": {
+    "metrics": [
+      "argmax_agreement",
+      "top_k_overlap",
+      "logit_error",
+      "kl",
+      "router_top10_stability",
+      "qsa_selected_id_stability"
+    ],
+    "minimum_records": 32,
+    "reason": "Current native build cannot be rebuilt because unrelated q38_forward CUDA files contain unresolved merge markers; no paired full-vector BF16/R1 records are claimed.",
+    "schema": "paired JSONL: finite logits, router_top10, qsa_selected",
+    "status": "implemented-not-run",
+    "tool": "tools/q38_eval.py"
+  },
+  "format": "q38-m8-final-quality-v3",
   "full_r1_generation": {
     "artifact": "artifacts/m8/R1_full_quality_run.json",
     "generated_ids": [
@@ -40,12 +55,13 @@
     "nll_delta": "not-computed",
     "perplexity": "not-computed"
   },
-  "metrics_note": "Perplexity/NLL/KL/layer-logit metrics remain not-computed because tools/q38_eval.py only compares generated-token records.",
+  "metrics_note": "The evaluator now computes deterministic paired metrics when >=32 complete runtime/reference records are supplied. No numeric quality metrics are claimed until those records exist.",
   "reason": "Full R1 generation and paired greedy comparison completed. Perplexity/NLL/KL/layer-logit/task metrics remain unavailable in the provided evaluator.",
   "recipe": "R1 selective routed-expert Q4_K / core BF16 / PLE Q2-class",
   "regression": {
-    "m5_status": "failed_m5_c12_native_reference_mismatch",
-    "m6_status": "independent_tests_pass_chained_acceptance_blocked_by_m5"
+    "m5_replacement": "artifacts/m5/m5_c12_modern_gate.json",
+    "m5_status": "obsolete_fixture_gate_replaced",
+    "m6_status": "independent_tests_pass; chained acceptance depends on replacement gate"
   },
   "status": "conditional"
 }
