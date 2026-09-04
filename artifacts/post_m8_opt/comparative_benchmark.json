@@ -1,0 +1,144 @@
+{
+  "format": "q38-post-m8-comparative-benchmark-v1",
+  "status": "measured_with_limitations",
+  "model": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+  "methodology": {
+    "runs": 6,
+    "cold_runs": 1,
+    "warm_runs": 5,
+    "same_process_per_case": true,
+    "semantic_state_reset": true,
+    "all_non_ple_resident": true,
+    "ple_policy": "file-backed mmap with bounded staging/cache",
+    "subsystem_timers": "non-additive; timer scopes can overlap wall time"
+  },
+  "cases": {
+    "A_pre_descriptor": {
+      "source": "artifacts/m8/final_bench.json",
+      "cold_ms": 2302.542412,
+      "warm_runs_ms": [1122.081084, 1118.171611, 1109.613203, 1121.318767, 1119.002021],
+      "warm_median_ms": 1119.002021,
+      "warm_p95_ms": 1122.081084,
+      "tok_per_s": 0.893653,
+      "resident_non_ple_bytes": 77777442560,
+      "warm_upload_bytes": 0,
+      "warm_residency_misses": 0,
+      "argmax": 11,
+      "correctness": "pass",
+      "kernel_launches_per_token": null,
+      "host_syncs_per_token": null,
+      "full_vocab_d2h_bytes_per_token": null,
+      "effective_weight_gbps": null,
+      "breakdown": {
+        "gdn_ms": 22.3593273,
+        "qsa_ms": 311.982978,
+        "moe_ms": 2171.53822,
+        "ple_ms": 0.990980983,
+        "lm_head_ms": 5.20727301,
+        "argmax_ms": null,
+        "backend_overhead_ms": null,
+        "timer_scope": "non-additive"
+      }
+    },
+    "B_descriptor": {
+      "source": "artifacts/post_m8_opt/descriptor.stdout",
+      "cold_ms": 1644.013964,
+      "warm_runs_ms": [1126.297567, 1124.856307, 1129.398758, 1127.493865, 1127.724912],
+      "warm_median_ms": 1127.493865,
+      "warm_p95_ms": 1127.724912,
+      "tok_per_s": 0.886923,
+      "speedup_vs_A": 0.992458,
+      "resident_non_ple_bytes": 77777442560,
+      "warm_upload_bytes": 0,
+      "warm_residency_misses": 0,
+      "kernel_launches_per_token": 3648,
+      "host_syncs_per_token": 1145,
+      "full_vocab_d2h_bytes_per_token": 1267011840,
+      "gpu_argmax_ms": null,
+      "total_weight_bytes_touched_per_token": 8680325120,
+      "effective_weight_gbps": 11.5395762,
+      "peak_cuda_unified_bytes": null,
+      "rss_bytes": null,
+      "mem_available_min_bytes": null,
+      "argmax": 11,
+      "correctness": "pass",
+      "breakdown": {
+        "gdn_ms": 22.3501851,
+        "qsa_ms": 314.302058,
+        "moe_ms": 2182.12203,
+        "ple_ms": 1.12235498,
+        "lm_head_ms": 5.395998,
+        "argmax_ms": null,
+        "backend_overhead_ms": null,
+        "timer_scope": "non-additive"
+      }
+    },
+    "C_descriptor_strict": {
+      "source": "artifacts/post_m8_opt/descriptor_strict.stdout",
+      "cold_ms": 2405.686117,
+      "warm_runs_ms": [1438.751134, 1134.122938, 1129.342249, 1125.606093, 1126.852038],
+      "warm_median_ms": 1129.342249,
+      "warm_p95_ms": 1438.751134,
+      "tok_per_s": 0.885471,
+      "speedup_vs_A": 0.990844,
+      "resident_non_ple_bytes": 77777442560,
+      "warm_upload_bytes": 0,
+      "warm_residency_misses": 0,
+      "kernel_launches_per_token": 3648,
+      "host_syncs_per_token": 1145,
+      "full_vocab_d2h_bytes_per_token": 1267011840,
+      "gpu_argmax_ms": null,
+      "total_weight_bytes_touched_per_token": 8680325120,
+      "effective_weight_gbps": 8.26836526,
+      "peak_cuda_unified_bytes": null,
+      "rss_bytes": null,
+      "mem_available_min_bytes": null,
+      "argmax": 11,
+      "correctness": "pass",
+      "breakdown": {
+        "gdn_ms": 22.8806211,
+        "qsa_ms": 314.787557,
+        "moe_ms": 2191.7938,
+        "ple_ms": 0.995667994,
+        "lm_head_ms": 5.37984699,
+        "argmax_ms": null,
+        "backend_overhead_ms": null,
+        "timer_scope": "non-additive"
+      }
+    }
+  },
+  "summary": [
+    {"version": "pre-descriptor", "ms_per_token": 1119.002021, "tok_per_s": 0.893653, "speedup": 1.0},
+    {"version": "descriptor", "ms_per_token": 1127.493865, "tok_per_s": 0.886923, "speedup": 0.992458},
+    {"version": "descriptor strict", "ms_per_token": 1129.342249, "tok_per_s": 0.885471, "speedup": 0.990844}
+  ],
+  "microbenchmarks": {
+    "lm_head_bf16_gemv": {
+      "source": "artifacts/post_m8_opt/lm_head_gemv.jsonl",
+      "geometry": "248320x2560",
+      "qtype": "BF16",
+      "matrix_bytes": 1271398400,
+      "best_threads": 256,
+      "kernel_median_ms": 5.061856,
+      "kernel_p95_ms": 5.355136,
+      "effective_gbps": 251.172387,
+      "correctness_max_abs": 7.4505806e-09
+    },
+    "routed_expert_q4_gemv": {
+      "source": "artifacts/post_m8_opt/routed_expert_q4_gemv.txt",
+      "geometry": "synthetic Q4_K parity fixture; 2x intermediate gate/up plus down",
+      "qtype": "Q4_K",
+      "matrix_bytes": null,
+      "kernel_median_ms": null,
+      "kernel_p95_ms": null,
+      "effective_gbps": null,
+      "correctness": "CUDA/reference parity passed"
+    }
+  },
+  "decision": {
+    "descriptor_end_to_end_gain": false,
+    "strict_gain": false,
+    "interpretation": "The descriptor path is an architectural simplification and does not show a measured warm end-to-end speedup in this harness.",
+    "next_step": "Do not apply further optimization based on this benchmark alone. Integrate GPU argmax into the benchmark harness and add a real routed-expert Q4 GEMV timing fixture before the next ROI decision."
+  }
+}

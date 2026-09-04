@@ -1,0 +1,1 @@
+test_m8_q4_moe_cuda: Q4_K expert CUDA/reference parity passed
