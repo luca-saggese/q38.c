@@ -56,6 +56,41 @@ typedef struct {
     char error[256];
 } capture_context;
 
+static void residency_telemetry(
+    const q38_forward_cuda_telemetry *telemetry, void *user) {
+    (void)user;
+    if (!telemetry || (!telemetry->non_ple_residency_miss &&
+                       !telemetry->ple_file_backed_access))
+        return;
+    printf("{\"residency_event\":{\"layer\":%u,\"tensor_id\":%u,"
+           "\"tensor_name\":\"%s\",\"subsystem\":\"%s\","
+           "\"operation\":\"%s\",\"fallback_path\":\"%s\","
+           "\"qtype\":%u,\"rows\":%zu,\"cols\":%zu,\"bytes\":%zu,"
+           "\"resident_lookup\":\"%s\",\"upload_bytes\":%zu}}\n",
+           telemetry->layer, telemetry->tensor_id,
+           telemetry->tensor_name ? telemetry->tensor_name : "",
+           telemetry->subsystem ? telemetry->subsystem : "unknown",
+           telemetry->operation ? telemetry->operation : "unknown",
+           telemetry->fallback_path ? telemetry->fallback_path : "none",
+           telemetry->qtype, telemetry->rows, telemetry->cols,
+           telemetry->bytes,
+           telemetry->ple_file_backed_access ? "file_backed" :
+               telemetry->resident_hit ? "hit" : "miss",
+           telemetry->ple_file_backed_access
+               ? telemetry->ple_file_bytes : telemetry->upload_bytes);
+    fflush(stdout);
+}
+
+static void backend_context_trace(uint32_t layer, const char *logical_stage,
+                                  const q38_tensor *tensor, size_t rows,
+                                  size_t cols, void *user) {
+    (void)tensor;
+    (void)rows;
+    (void)cols;
+    q38_forward_cuda_set_stage_context(
+        (q38_forward_cuda_context *)user, layer, logical_stage);
+}
+
 static double now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -357,7 +392,12 @@ static void status(worker *w) {
            "\",\"workspace_pointer_fingerprint\":\"%016" PRIx64
            "\",\"cuda_allocations\":%" PRIu64
            ",\"weight_upload_bytes\":%zu,\"residency_misses\":%" PRIu64
-           ",\"persistent_ple_entries\":%" PRIu64 ",\"tokenizer\":\"%s\"}}\n",
+           ",\"non_ple_residency_miss\":%" PRIu64
+           ",\"non_ple_upload_bytes\":%zu"
+           ",\"ple_file_backed_accesses\":%" PRIu64
+           ",\"ple_file_bytes\":%zu"
+           ",\"persistent_ple_entries\":%" PRIu64
+           ",\"tokenizer\":\"%s\"}}\n",
            (uintptr_t)w->model->map, (uintptr_t)&w->weights,
            (uintptr_t)&w->state, (uintptr_t)&w->tokenizer_state,
            stats.all_non_ple_resident ? "true" : "false",
@@ -366,6 +406,9 @@ static void status(worker *w) {
            stats.cuda_context_identity, stats.cuda_stream_identity,
            stats.workspace_pointer_fingerprint, stats.cuda_allocations,
            stats.matrix_upload_bytes, stats.resident_misses,
+           stats.non_ple_residency_miss,
+           stats.non_ple_upload_bytes_per_token,
+           stats.ple_file_backed_accesses, stats.ple_file_bytes,
            stats.persistent_ple_entries, w->tokenizer);
     fflush(stdout);
 }
@@ -474,9 +517,12 @@ static bool run_forward_tokens(worker *w, const uint32_t *tokens,
     q38_forward_state_reset(&w->state);
     q38_forward_diagnostics diagnostics = {0};
     q38_forward_qsa_timing qsa_timing = {0};
+    diagnostics.backend_context = backend_context_trace;
+    diagnostics.trace_user = w->cuda;
     diagnostics.qsa_timing = &qsa_timing;
     diagnostics.qsa_qkv_backend = q38_forward_cuda_qsa_qkv_backend;
     diagnostics.qsa_qkv_backend_user = w->cuda;
+    const double started = now_ms();
     const bool ok = q38_forward_full_with_matrix_moe_layer_backend(
         w->model, &w->weights, &w->state, tokens, token_count, logits, VOCAB,
         &diagnostics, q38_forward_cuda_matvec_backend,
@@ -488,10 +534,27 @@ static bool run_forward_tokens(worker *w, const uint32_t *tokens,
     else
         printf("{\"run_forward\":{\"token\":%u,\"argmax\":%zu,"
                "\"logits_hash\":\"%016" PRIx64
-               "\",\"qkv_ms\":%.6f}}\n", tokens[token_count - 1],
+               "\",\"wall_ms\":%.6f,\"qsa_total_ms\":%.6f,"
+               "\"qkv_ms\":%.6f,\"indexer_ms\":%.6f,\"score_ms\":%.6f,"
+               "\"topk_ms\":%.6f,\"kv_gather_ms\":%.6f,"
+               "\"attention_ms\":%.6f,\"state_update_ms\":%.6f,"
+               "\"qsa_allocations\":%" PRIu64
+               ",\"qsa_kernel_launches\":%" PRIu64
+               ",\"qsa_host_syncs\":%" PRIu64
+               ",\"qsa_h2d_bytes\":%" PRIu64
+               ",\"qsa_d2h_bytes\":%" PRIu64
+               ",\"qsa_residency_misses\":%" PRIu64 "}}\n",
+               tokens[token_count - 1],
                argmax(logits + (token_count - 1) * VOCAB, VOCAB),
                hash_floats(logits + (token_count - 1) * VOCAB, VOCAB),
-               qsa_timing.qkv_projection_ms);
+               now_ms() - started, qsa_timing.total_ms,
+               qsa_timing.qkv_projection_ms,
+               qsa_timing.indexer_compression_ms, qsa_timing.score_ms,
+               qsa_timing.exact_top_k_ms, qsa_timing.selected_kv_gather_ms,
+               qsa_timing.attention_ms, qsa_timing.state_update_ms,
+               qsa_timing.allocations, qsa_timing.kernel_launches,
+               qsa_timing.host_syncs, qsa_timing.h2d_bytes,
+               qsa_timing.d2h_bytes, qsa_timing.residency_misses);
     free(logits);
     fflush(stdout);
     return ok;
@@ -562,6 +625,8 @@ int main(int argc, char **argv) {
         q38_gguf_close(w.model);
         return 1;
     }
+    q38_forward_cuda_set_telemetry_observer(
+        w.cuda, residency_telemetry, NULL);
     if (tokenizer[0]) {
         if (!q38_tokenizer_init(&w.tokenizer_state, tokenizer, NULL, error,
                                 sizeof(error))) {

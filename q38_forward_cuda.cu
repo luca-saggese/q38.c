@@ -99,6 +99,8 @@ struct q38_forward_cuda_context {
     uint64_t gguf_name_lookup_in_decode;
     uint64_t non_ple_residency_miss;
     size_t non_ple_upload_bytes_per_token;
+    uint64_t ple_file_backed_accesses;
+    size_t ple_file_bytes;
     float gpu_argmax_kernel_ms;
     q38_forward_cuda_residency_progress_observer progress_observer;
     void *progress_observer_user;
@@ -172,6 +174,16 @@ static void copy_tensor_name(const q38_tensor *tensor, char *out,
     out[n] = '\0';
 }
 
+static uint32_t tensor_id_for(const q38_forward_cuda_context *context,
+                              const q38_gguf *model,
+                              const q38_tensor *tensor) {
+    if (!context || !model || !tensor || model != context->exec_model ||
+        !context->exec_tensors || tensor < model->tensors ||
+        tensor >= model->tensors + model->n_tensors)
+        return UINT32_MAX;
+    return context->exec_tensors[tensor - model->tensors].tensor_id;
+}
+
 static bool is_ple_tensor(const q38_tensor *tensor) {
     if (!tensor || !tensor->name.ptr) return false;
     const char *name = tensor->name.ptr;
@@ -234,18 +246,33 @@ static float event_elapsed(cudaEvent_t start, cudaEvent_t stop) {
 }
 
 static void emit_telemetry(q38_forward_cuda_context *context,
-                           const q38_tensor *tensor, size_t rows, size_t cols,
+                           const q38_gguf *model, const q38_tensor *tensor,
+                           size_t rows, size_t cols,
                            size_t bytes, bool hit, bool miss,
                            size_t upload_bytes, float upload_ms,
                            float kernel_ms, double wall_ms,
-                           uint64_t allocations, uint64_t syncs) {
-    if (!context || !context->telemetry_observer) return;
+                           uint64_t allocations, uint64_t syncs,
+                           const char *operation,
+                           const char *fallback_path) {
+    if (!context) return;
+    const bool ple = is_ple_tensor(tensor);
+    if (ple && (miss || upload_bytes)) {
+        ++context->ple_file_backed_accesses;
+        context->ple_file_bytes += upload_bytes;
+    }
+    if (!context->telemetry_observer) return;
     char name[128];
     copy_tensor_name(tensor, name, sizeof(name));
     q38_forward_cuda_telemetry record = {
         subsystem_for_stage(context->current_stage), context->current_layer,
-        context->current_stage ? context->current_stage : "backend", name,
-        tensor ? tensor->type : 0, rows, cols, bytes, hit, miss, upload_bytes,
+        context->current_stage ? context->current_stage : "backend",
+        operation ? operation : "unknown",
+        fallback_path ? fallback_path : "none",
+        name, tensor_id_for(context, model, tensor),
+        tensor ? tensor->type : 0, rows, cols, bytes,
+        ple ? false : hit, ple ? false : miss, ple ? false : miss,
+        ple && (miss || upload_bytes), ple ? 0 : upload_bytes,
+        ple ? upload_bytes : 0,
         bytes,
         (kernel_ms > 0.0f || wall_ms > 0.0) ? cols * sizeof(float) : 0,
         (kernel_ms > 0.0f || wall_ms > 0.0) ? rows * sizeof(float) : 0,
@@ -417,16 +444,19 @@ extern "C" bool q38_forward_cuda_expert_backend(
         context->q2_down_total_kernel_ms +=
             event_elapsed(down_start, down_stop);
     }
-    emit_telemetry(context, gate_up, gate_rows, gate_cols, gate_bytes,
+    emit_telemetry(context, model, gate_up, gate_rows, gate_cols, gate_bytes,
 
                    use_persistent, !use_persistent, use_persistent ? 0 : gate_bytes,
                    event_elapsed(upload_start, upload_stop),
                    event_elapsed(kernel_start, kernel_stop),
                    expert_wall_ms,
-                   context->cuda_allocations - allocation_before, 1);
-    emit_telemetry(context, down, down_rows, down_cols, down_bytes,
-                   use_persistent, !use_persistent, use_persistent ? 0 : down_bytes, 0.0f, 0.0f, 0.0,
-                   0, 0);
+               context->cuda_allocations - allocation_before, 1,
+               "routed_expert", use_persistent
+                   ? "resident_exec_tensor" : "gguf_host_upload");
+    emit_telemetry(context, model, down, down_rows, down_cols, down_bytes,
+               use_persistent, !use_persistent, use_persistent ? 0 : down_bytes, 0.0f, 0.0f, 0.0,
+               0, 0, "routed_expert", use_persistent
+                   ? "resident_exec_tensor" : "gguf_host_upload");
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
     if (gate_start) cudaEventDestroy(gate_start);
@@ -906,6 +936,8 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->non_ple_residency_miss = context->non_ple_residency_miss;
     stats->non_ple_upload_bytes_per_token =
         context->non_ple_upload_bytes_per_token;
+    stats->ple_file_backed_accesses = context->ple_file_backed_accesses;
+    stats->ple_file_bytes = context->ple_file_bytes;
     stats->gpu_argmax_kernel_ms = context->gpu_argmax_kernel_ms;
     stats->routed_layers_executed = context->routed_layers_executed;
     stats->selected_experts_total = context->selected_experts_total;
@@ -1070,6 +1102,9 @@ extern "C" bool q38_forward_cuda_matvec_backend(
             cudaStreamSynchronize(context->stream) != cudaSuccess)
             return fail(error, error_len, "CUDA resident matvec execution failed");
         ++context->cuda_synchronizations;
+        emit_telemetry(context, model, tensor, 1, cols, weight_bytes, true,
+                       false, 0, 0.0f, 0.0f, 0.0, 0, 1,
+                       "matvec", "resident_exec_tensor");
         return true;
     }
     if (context->all_non_ple_resident) {
@@ -1111,6 +1146,9 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         return launched ? fail(error, error_len,
                                "CUDA forward matvec download failed")
                         : false;
+    emit_telemetry(context, model, tensor, 1, cols, weight_bytes, false,
+                   true, weight_bytes, 0.0f, 0.0f, 0.0, 0, 1,
+                   "matvec", "gguf_host_upload");
     return true;
 }
 
@@ -1235,14 +1273,16 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     context->device_output_elements = rows;
     float upload_ms = event_elapsed(upload_start, upload_stop);
     float kernel_ms = event_elapsed(kernel_start, kernel_stop);
-    emit_telemetry(context, tensor, rows, cols, (size_t)tensor->bytes,
+    emit_telemetry(context, model, tensor, rows, cols, (size_t)tensor->bytes,
 
                    use_resident_lm_head || use_persistent_weight,
                    !(use_resident_lm_head || use_persistent_weight),
                    (use_resident_lm_head || use_persistent_weight) ? 0 :
                        (size_t)tensor->bytes,
                    upload_ms, kernel_ms, host_now_ms() - host_started,
-                   context->cuda_allocations - allocation_before, 1);
+                   context->cuda_allocations - allocation_before, 1,
+                   "matrix", use_resident_lm_head || use_persistent_weight
+                       ? "resident_exec_tensor" : "gguf_host_upload");
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
     return true;

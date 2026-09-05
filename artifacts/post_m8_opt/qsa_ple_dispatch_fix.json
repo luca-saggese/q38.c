@@ -1,0 +1,54 @@
+{
+  "track": "qsa_q2_ple_dispatch_accounting",
+  "model": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+  "worker": {
+    "persistent": true,
+    "resident_non_ple_bytes": 49465890560,
+    "resident_non_ple_tensors": 1157,
+    "persistent_ple_entries": 0,
+    "cuda_allocations": 9
+  },
+  "validation": {
+    "token": 9419,
+    "argmax": 11,
+    "logits_hash": "79c6fcf9088a4a46",
+    "qkv_fixture_pass": true,
+    "qkv_hashes": {
+      "Q": "4a5c5cdfa8140f4e",
+      "K": "19df136cec773369",
+      "V": "b032db19de69cb76"
+    },
+    "qkv_first_mismatch": {
+      "Q": 18446744073709551615,
+      "K": 18446744073709551615,
+      "V": 18446744073709551615
+    },
+    "nan_inf": 0,
+    "fallback": 0
+  },
+  "residency": {
+    "non_ple_residency_miss": 0,
+    "non_ple_upload_bytes": 0,
+    "ple_file_backed_accesses": 12800,
+    "ple_file_bytes": 34816000,
+    "weight_upload_bytes": 0
+  },
+  "timing": {
+    "warm_wall_ms": 465.649551,
+    "qsa_total_ms": 118.155269,
+    "qkv_projection_ms": 8.596844,
+    "indexer_compression_ms": 9.972372,
+    "score_ms": 0.003424,
+    "exact_top_k_ms": 0.002016,
+    "selected_kv_gather_ms": 0.054994,
+    "attention_ms": 99.407363,
+    "state_update_ms": 0.044257,
+    "qsa_allocations": 420,
+    "qsa_kernel_launches": 36,
+    "qsa_host_syncs": 12,
+    "qsa_h2d_bytes": 122880,
+    "qsa_d2h_bytes": 638976,
+    "qsa_residency_misses": 0
+  },
+  "interpretation": "PLE remains file-backed by design. Its 34816000 bytes are accounted as file-backed accesses, not non-PLE residency uploads."
+}
