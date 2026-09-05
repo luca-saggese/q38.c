@@ -1345,6 +1345,87 @@ static bool full_u64_vector(const q38_gguf *model, const q38_tensor *tensor,
     return true;
 }
 
+static bool full_ple_hash_config(const q38_gguf *model,
+                                 const q38_layer_weights *layer,
+                                 q38_ple_hash_config *hash, char *error,
+                                 size_t error_len) {
+    q38_tensor *multipliers = full_named_ple(layer, "layer_multipliers");
+    q38_tensor *offsets = full_named_ple(layer, "ngram_heads_offsets");
+    q38_tensor *vocab_sizes = full_named_ple(layer, "ngram_heads_vocab_sizes");
+    if (!multipliers || !offsets || !vocab_sizes)
+        return full_fail(error, error_len, "PLE hash metadata is incomplete");
+    uint64_t mult[3], offs[16], sizes[16];
+    if (!full_u64_vector(model, multipliers, mult, 3, error, error_len) ||
+        !full_u64_vector(model, offsets, offs, 16, error, error_len) ||
+        !full_u64_vector(model, vocab_sizes, sizes, 16, error, error_len))
+        return false;
+    memset(hash, 0, sizeof(*hash));
+    hash->ngram_size = 3;
+    hash->heads_per_ngram = 8;
+    memcpy(hash->multipliers, mult, sizeof(mult));
+    for (size_t i = 0; i < 16; ++i) {
+        if (offs[i] > UINT32_MAX || sizes[i] > UINT32_MAX)
+            return full_fail(error, error_len,
+                             "PLE metadata exceeds uint32 row range");
+        hash->head_offsets[i] = (uint32_t)offs[i];
+        hash->head_vocab_sizes[i] = (uint32_t)sizes[i];
+    }
+    return true;
+}
+
+bool q38_forward_state_prefetch_ple(
+    const q38_weights *weights, q38_forward_state *state,
+    const uint32_t *tokens, size_t token_count, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!weights || !state || !tokens || !token_count || !state->ple_scheduler)
+        return false;
+    if (!weights->layer[1].ple_store.model)
+        return false;
+    q38_ple_hash_config hash;
+    if (!full_ple_hash_config(weights->layer[1].ple_store.model,
+                              &weights->layer[1], &hash, error, error_len))
+        return false;
+    if (token_count > SIZE_MAX / Q38_PLE_MAX_HEADS ||
+        token_count * Q38_PLE_MAX_HEADS > SIZE_MAX / sizeof(uint64_t))
+        return full_fail(error, error_len, "PLE scheduler row count overflows");
+    uint64_t *rows = (uint64_t *)malloc(
+        token_count * Q38_PLE_MAX_HEADS * sizeof(*rows));
+    if (!rows) return full_fail(error, error_len,
+                                "PLE scheduler row allocation failed");
+    q38_ngram_history history = state->token_history;
+    size_t count = 0;
+    for (size_t t = 0; t < token_count; ++t) {
+        uint32_t ids[Q38_PLE_MAX_HEADS];
+        if (!q38_ple_ngram_ids_ref(&hash, &history, tokens[t],
+                                   state->eos_token, ids, Q38_PLE_MAX_HEADS,
+                                   error, error_len)) {
+            free(rows);
+            return false;
+        }
+        for (size_t h = 0; h < Q38_PLE_MAX_HEADS; ++h)
+            rows[count++] = ids[h];
+        q38_ngram_history_append(&history, tokens[t], state->eos_token);
+    }
+    const bool ok = q38_ple_scheduler_submit(state->ple_scheduler, rows, count,
+                                             error, error_len);
+    free(rows);
+    return ok;
+}
+
+bool q38_forward_state_wait_ple(q38_forward_state *state,
+                                char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!state) return full_fail(error, error_len, "PLE state is null");
+    return !state->ple_scheduler ||
+           q38_ple_scheduler_wait(state->ple_scheduler, error, error_len);
+}
+
+bool q38_forward_state_get_ple_prefetch_stats(
+    const q38_forward_state *state, q38_ple_scheduler_stats *stats) {
+    return state && state->ple_scheduler &&
+           q38_ple_scheduler_get_stats(state->ple_scheduler, stats);
+}
+
 static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                      q38_forward_state *state, const uint32_t *tokens,
                      const float *hidden, size_t token_count, float *after,
@@ -1358,32 +1439,17 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
     q38_tensor *norm_query = full_named_ple(layer, ".ple.norm_query.weight");
     q38_tensor *norm_conv = full_named_ple(layer, ".ple.norm_conv.weight");
     q38_tensor *conv = full_named_ple(layer, ".ple.conv1d.weight");
-    q38_tensor *multipliers = full_named_ple(layer, "layer_multipliers");
-    q38_tensor *offsets = full_named_ple(layer, "ngram_heads_offsets");
-    q38_tensor *vocab_sizes = full_named_ple(layer, "ngram_heads_vocab_sizes");
     if (!key_proj || !value_proj || !norm_key || !norm_query || !norm_conv ||
-        !conv || !multipliers || !offsets || !vocab_sizes ||
-        !layer->ple_store.model)
+        !conv || !layer->ple_store.model)
         return full_fail(error, error_len, "PLE tensor set is incomplete");
     if (!full_boundary_trace(1, "hidden_before_ple", hidden, token_count,
                              width, diagnostics, error, error_len))
         return false;
-    uint64_t mult[3], offs[16], sizes[16];
-    if (!full_u64_vector(model, multipliers, mult, 3, error, error_len) ||
-        !full_u64_vector(model, offsets, offs, 16, error, error_len) ||
-        !full_u64_vector(model, vocab_sizes, sizes, 16, error, error_len))
-        return false;
     q38_ple_hash_config hash;
-    memset(&hash, 0, sizeof(hash));
-    hash.ngram_size = 3;
-    hash.heads_per_ngram = 8;
-    memcpy(hash.multipliers, mult, sizeof(mult));
-    for (size_t i = 0; i < 16; ++i) {
-        if (offs[i] > UINT32_MAX || sizes[i] > UINT32_MAX) return full_fail(
-            error, error_len, "PLE metadata exceeds uint32 row range");
-        hash.head_offsets[i] = (uint32_t)offs[i];
-        hash.head_vocab_sizes[i] = (uint32_t)sizes[i];
-    }
+    if (!full_ple_hash_config(model, layer, &hash, error, error_len))
+        return false;
+    if (!q38_forward_state_wait_ple(state, error, error_len))
+        return false;
     float *embedding = calloc(token_count * emb_width, sizeof(float));
     float *key = calloc(token_count * width, sizeof(float));
     float *value = calloc(token_count * Q38_GR_HIDDEN, sizeof(float));
@@ -1579,12 +1645,19 @@ bool q38_forward_state_init(q38_forward_state *state,
     }
     state->eos_token = eos_token;
     q38_ngram_history_reset(&state->token_history);
+    {
+        char scheduler_error[128];
+        state->ple_scheduler = q38_ple_scheduler_create(
+            &weights->layer[1].ple_store, scheduler_error,
+            sizeof(scheduler_error));
+    }
     state->initialized = true;
     return true;
 }
 
 void q38_forward_state_reset(q38_forward_state *state) {
     if (!state) return;
+    q38_ple_scheduler_reset(state->ple_scheduler);
     q38_state_reset(&state->storage);
     for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
         q38_qsa_state_reset(&state->qsa[i]);
@@ -1596,6 +1669,7 @@ void q38_forward_state_reset(q38_forward_state *state) {
 
 void q38_forward_state_destroy(q38_forward_state *state) {
     if (!state) return;
+    q38_ple_scheduler_destroy(state->ple_scheduler);
     for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
         q38_qsa_state_destroy(&state->qsa[i]);
     q38_state_free(&state->storage);
@@ -1787,6 +1861,12 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
     if (token_count > SIZE_MAX / (4u * Q38_GR_HIDDEN) ||
         token_count > SIZE_MAX / Q38_FULL_QSA_SELECTED_STRIDE)
         return full_fail(error, error_len, "full forward token count overflows");
+    {
+        char scheduler_error[128];
+        (void)q38_forward_state_prefetch_ple(
+            weights, state, tokens, token_count, scheduler_error,
+            sizeof(scheduler_error));
+    }
     full_diagnostics = diagnostics;
     full_backend_rows = 0;
     full_scalar_rows = 0;

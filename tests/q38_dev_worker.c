@@ -531,7 +531,13 @@ static bool run_forward_tokens(worker *w, const uint32_t *tokens,
         sizeof(error));
     if (!ok)
         fprintf(stderr, "RUN_FORWARD error=%s\n", error);
-    else
+    else {
+        q38_ple_scheduler_stats ple = {0};
+        const bool have_ple =
+            q38_forward_state_get_ple_prefetch_stats(&w->state, &ple);
+        const double decoder_available_ms =
+            have_ple && ple.consume_ms > ple.start_ms
+                ? ple.consume_ms - ple.start_ms : 0.0;
         printf("{\"run_forward\":{\"token\":%u,\"argmax\":%zu,"
                "\"logits_hash\":\"%016" PRIx64
                "\",\"wall_ms\":%.6f,\"qsa_total_ms\":%.6f,"
@@ -543,7 +549,20 @@ static bool run_forward_tokens(worker *w, const uint32_t *tokens,
                ",\"qsa_host_syncs\":%" PRIu64
                ",\"qsa_h2d_bytes\":%" PRIu64
                ",\"qsa_d2h_bytes\":%" PRIu64
-               ",\"qsa_residency_misses\":%" PRIu64 "}}\n",
+               ",\"qsa_residency_misses\":%" PRIu64
+               ",\"ple_logical_accesses\":%" PRIu64
+               ",\"ple_unique_rows\":%" PRIu64
+               ",\"ple_unique_physical_blocks\":%" PRIu64
+               ",\"ple_file_read_ops\":%" PRIu64
+               ",\"ple_logical_bytes\":%" PRIu64
+               ",\"ple_physical_bytes\":%" PRIu64
+               ",\"ple_cache_hits\":%" PRIu64
+               ",\"ple_cache_misses\":%" PRIu64
+               ",\"ple_start_ms\":%.6f,\"ple_ready_ms\":%.6f"
+               ",\"ple_consume_ms\":%.6f,\"ple_elapsed_ms\":%.6f"
+               ",\"ple_overlap_ms\":%.6f"
+               ",\"ple_wait_at_injection_ms\":%.6f"
+               ",\"decoder_compute_available_for_overlap_ms\":%.6f}}\n",
                tokens[token_count - 1],
                argmax(logits + (token_count - 1) * VOCAB, VOCAB),
                hash_floats(logits + (token_count - 1) * VOCAB, VOCAB),
@@ -554,7 +573,23 @@ static bool run_forward_tokens(worker *w, const uint32_t *tokens,
                qsa_timing.attention_ms, qsa_timing.state_update_ms,
                qsa_timing.allocations, qsa_timing.kernel_launches,
                qsa_timing.host_syncs, qsa_timing.h2d_bytes,
-               qsa_timing.d2h_bytes, qsa_timing.residency_misses);
+               qsa_timing.d2h_bytes, qsa_timing.residency_misses,
+               have_ple ? ple.logical_accesses : 0,
+               have_ple ? ple.unique_rows : 0,
+               have_ple ? ple.unique_physical_blocks : 0,
+               have_ple ? ple.file_read_ops : 0,
+               have_ple ? ple.logical_bytes : 0,
+               have_ple ? ple.physical_bytes : 0,
+               have_ple ? ple.cache_hits : 0,
+               have_ple ? ple.cache_misses : 0,
+               have_ple ? ple.start_ms : 0.0,
+               have_ple ? ple.ready_ms : 0.0,
+               have_ple ? ple.consume_ms : 0.0,
+               have_ple ? ple.elapsed_ms : 0.0,
+               have_ple ? ple.overlap_ms : 0.0,
+               have_ple ? ple.wait_ms : 0.0,
+               decoder_available_ms);
+    }
     free(logits);
     fflush(stdout);
     return ok;

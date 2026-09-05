@@ -2,6 +2,7 @@
 #define Q38_FORWARD_H
 
 #include "q38_qsa.h"
+#include "q38_ple_prefetch.h"
 #include "q38_moe_ref.h"
 #include "q38_session.h"
 #include "q38_state.h"
@@ -110,6 +111,7 @@ typedef struct {
     size_t ple_history_elements;
     uint32_t eos_token;
     bool initialized;
+    q38_ple_scheduler *ple_scheduler;
 } q38_forward_state;
 
 typedef struct q38_moe_trace {
@@ -224,6 +226,17 @@ bool q38_forward_state_init(q38_forward_state *state,
                             char *error, size_t error_len);
 void q38_forward_state_reset(q38_forward_state *state);
 void q38_forward_state_destroy(q38_forward_state *state);
+
+/* Queue file-backed PLE rows for the supplied token sequence.  The sequence
+ * is interpreted against the currently committed token history; callers may
+ * ignore a false return and use the synchronous PLE path. */
+bool q38_forward_state_prefetch_ple(
+    const q38_weights *weights, q38_forward_state *state,
+    const uint32_t *tokens, size_t token_count, char *error, size_t error_len);
+bool q38_forward_state_wait_ple(q38_forward_state *state,
+                                char *error, size_t error_len);
+bool q38_forward_state_get_ple_prefetch_stats(
+    const q38_forward_state *state, q38_ple_scheduler_stats *stats);
 
 /*
  * Execute the complete text graph against the file-backed GGUF tensors.

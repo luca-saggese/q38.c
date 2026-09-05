@@ -5,7 +5,7 @@
 # ./q38 plus the M0 test binaries.
 
 CC ?= cc
-CFLAGS ?= -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I.
+CFLAGS ?= -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -pthread
 MODEL_DIR ?= /home/lvx/q38model
 
 # --- CUDA toolchain -----------------------------------------------------
@@ -26,12 +26,12 @@ CUDA_ARCH ?= sm_121
 NVCC_ARCH_FLAGS := -gencode arch=compute_121a,code=sm_121a
 NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math $(NVCC_ARCH_FLAGS)
 
-CUDA_LDLIBS ?= -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart
+CUDA_LDLIBS ?= -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart -Xcompiler -pthread
 
 # --- Objects ------------------------------------------------------------
 # CUDA kernels are compiled by nvcc; host runtime objects use cc.
 C_OBJS := q38.o q38_gguf.o q38_memory.o q38_platform.o \
-	q38_tokenizer.o q38_decode.o q38_forward.o q38_moe.o q38_weights.o \
+	q38_tokenizer.o q38_decode.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 	q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o \
 	q38_profile.o q38_residency.o
@@ -148,6 +148,9 @@ q38_ple_stage.o: q38_ple_stage.cu q38_ple_stage.h
 q38_ple.o: q38_ple.c q38_ple.h q38_gguf.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple.c
 
+q38_ple_prefetch.o: q38_ple_prefetch.c q38_ple_prefetch.h q38_ple.h
+	$(CC) $(CFLAGS) -c -o $@ q38_ple_prefetch.c
+
 q38_ple_cache.o: q38_ple_cache.c q38_ple_cache.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple_cache.c
 
@@ -242,13 +245,13 @@ m7-gates: m7-replay m7-profile m7-profile-schema
 	@$(M6_PYTHON) tools/m7_check_gates.py
 
 $(TEST_DIR)/m7_profile_forward: $(TEST_DIR)/m7_profile_forward.c \
-		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o \
+		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o q38_ple_prefetch.o \
 		q38_moe.o q38_weights.o q38_model_config.o q38_ple.o q38_qsa.o \
 		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
 		q38_gr_ref.o q38_profile.o q38_cuda.o q38_forward_cuda.o \
 		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_profile_forward.c \
-		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o \
+		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o q38_ple_prefetch.o \
 		q38_moe.o q38_weights.o q38_model_config.o q38_ple.o q38_qsa.o \
 		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
 		q38_gr_ref.o q38_profile.o q38_cuda.o q38_forward_cuda.o \
@@ -277,13 +280,13 @@ m7-read-ceiling: $(TEST_DIR)/gb10_read_bw_probe
 	@./$(TEST_DIR)/gb10_read_bw_probe
 
 $(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_profile.o \
 		q38_forward_cuda.o q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o \
 		q38_qsa_cuda.o q38_profile_cuda.o q38_residency.o q38_topk_cuda.o
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_cold_warm.c \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_profile.o q38_forward_cuda.o \
 		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
@@ -291,14 +294,14 @@ $(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
 		$(CUDA_LDLIBS) -lm
 
 $(TEST_DIR)/test_qsa_qkv_direct: $(TEST_DIR)/test_qsa_qkv_direct.c \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o \
 		q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 		q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
 		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
 		q38_state.o q38_session.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
 		q38_rope_ref.o
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_qsa_qkv_direct.c \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o \
 		q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 		q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
 		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
@@ -306,14 +309,14 @@ $(TEST_DIR)/test_qsa_qkv_direct: $(TEST_DIR)/test_qsa_qkv_direct.c \
 		q38_rope_ref.o $(CUDA_LDLIBS) -lm
 
 q38_dev_worker: $(TEST_DIR)/q38_dev_worker.c \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o \
 		q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 		q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
 		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
 		q38_state.o q38_session.o q38_tokenizer.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
 		q38_rope_ref.o
 	$(NVCC) $(NVCCFLAGS) -cudart shared -I. -o $@ $(TEST_DIR)/q38_dev_worker.c \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o \
 		q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 		q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
 		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
@@ -486,10 +489,7 @@ $(TEST_DIR)/test_m4_ple_prefetch: $(TEST_DIR)/test_m4_ple_prefetch.c \
 		q38_ple_prefetch.o q38_ple.o q38_gguf.o \
 		q38_ple_prefetch.h q38_ple.h q38_gguf.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m4_ple_prefetch.c \
-		q38_ple_prefetch.o q38_ple.o q38_gguf.o
-
-q38_ple_prefetch.o: q38_ple_prefetch.c q38_ple_prefetch.h q38_ple.h
-	$(CC) $(CFLAGS) -c -o $@ q38_ple_prefetch.c
+		q38_ple_prefetch.o q38_ple.o q38_gguf.o -pthread
 
 m4-c11: m4-c10 $(TEST_DIR)/test_m4_ple_prefetch
 	@mkdir -p $(M4_ARTIFACT_DIR)
@@ -647,23 +647,24 @@ m5-c11: m5-c10 $(TEST_DIR)/test_m5_integrated_forward
 
 $(TEST_DIR)/test_m5_integrated_forward: \
 		$(TEST_DIR)/test_m5_integrated_forward.c q38_ple_ref.o \
-		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_forward.o q38_ple_prefetch.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
 		q38_model_config.o q38_ple.o q38_state.o q38_gdn_ref.o q38_gr_ref.o
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_integrated_forward.c \
-		q38_ple_ref.o q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o \
+		q38_ple_ref.o q38_forward.o q38_ple_prefetch.o q38_qsa.o q38_gguf.o q38_moe.o \
 		q38_weights.o q38_model_config.o q38_ple.o q38_state.o \
 		q38_session.o q38_quant.o q38_gdn_ref.o q38_gr_ref.o -lm
 
-q38_forward.o: q38_forward.c q38_forward.h q38_qsa.h q38_weights.h \
-		q38_gdn_ref.h q38_gr_ref.h q38_moe.h q38_ple_ref.h q38_quant.h
+q38_forward.o: q38_forward.c q38_forward.h q38_ple_prefetch.h q38_qsa.h \
+		q38_weights.h q38_gdn_ref.h q38_gr_ref.h q38_moe.h q38_ple_ref.h \
+		q38_quant.h
 	$(CC) $(CFLAGS) -c -o $@ q38_forward.c
 
 $(TEST_DIR)/test_forward_ref: $(TEST_DIR)/test_forward_ref.c \
-		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_forward.o q38_ple_prefetch.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
 		q38_model_config.o q38_ple.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_forward.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_forward_ref.c \
-		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_forward.o q38_ple_prefetch.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
 		q38_model_config.o q38_ple.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
@@ -677,11 +678,11 @@ $(M5_C12_GOLDEN) $(M5_C12_FIXTURE): tools/generate_m5_c12_goldens.py \
 		--output $(M5_C12_GOLDEN) --fixture $(M5_C12_FIXTURE)
 
 $(TEST_DIR)/test_m5_forward_probe: $(TEST_DIR)/test_m5_forward_probe.c \
-		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_forward.o q38_ple_prefetch.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
 		q38_model_config.o q38_ple.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_forward.h q38_qsa.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m5_forward_probe.c \
-		q38_forward.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
+		q38_forward.o q38_ple_prefetch.o q38_qsa.o q38_gguf.o q38_moe.o q38_weights.o \
 		q38_model_config.o q38_ple.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
@@ -845,14 +846,14 @@ m8-q4-kernel: $(TEST_DIR)/test_m8_q4_moe_cuda
 
 $(TEST_DIR)/m8_routed_expert_q4_bench: \
 		$(TEST_DIR)/m8_routed_expert_q4_bench.cu \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
 		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
 		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
 		q38_topk_cuda.o
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
 		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
@@ -861,14 +862,14 @@ $(TEST_DIR)/m8_routed_expert_q4_bench: \
 
 $(TEST_DIR)/m8_single_expert_device_parity: \
 		$(TEST_DIR)/m8_single_expert_device_parity.cu \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
 		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
 		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
 		q38_topk_cuda.o
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< \
-		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
 		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
@@ -901,11 +902,11 @@ m9-rewind: $(TEST_DIR)/test_m9_rewind_replay
 
 $(TEST_DIR)/test_m9_state_equivalence: \
 		$(TEST_DIR)/test_m9_state_equivalence.c q38_decode.o q38_replay.o \
-		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_memory.o q38_residency.o
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m9_state_equivalence.c \
-		q38_decode.o q38_replay.o q38_forward.o q38_moe.o q38_weights.o \
+		q38_decode.o q38_replay.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o \
 		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o q38_state.o \
 		q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
 		q38_memory.o q38_residency.o -lm
@@ -939,20 +940,20 @@ $(TEST_DIR)/test_m6_dispatch: $(TEST_DIR)/test_m6_dispatch.c \
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_dispatch.c q38_moe_ref.o -lm
 
 $(TEST_DIR)/test_m6_forward_api: $(TEST_DIR)/test_m6_forward_api.c \
-		q38_forward.o q38_decode.o q38_moe.o q38_weights.o \
+		q38_forward.o q38_ple_prefetch.o q38_decode.o q38_moe.o q38_weights.o \
 		q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o q38_state.o \
 		q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_forward_api.c \
-		q38_forward.o q38_decode.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_forward.o q38_ple_prefetch.o q38_decode.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
 $(TEST_DIR)/m6_decode: $(TEST_DIR)/m6_decode.c q38_decode.o \
-		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m6_decode.c q38_decode.o \
-		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
@@ -962,40 +963,40 @@ $(TEST_DIR)/test_m6_ple_grouped_norm: $(TEST_DIR)/test_m6_ple_grouped_norm.c \
 		q38_ple_ref.o q38_quant.o q38_session.o -lm
 
 $(TEST_DIR)/m6_real_forward: $(TEST_DIR)/m6_real_forward.c \
-		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m6_real_forward.c \
-		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
 $(TEST_DIR)/m8_r1_quality: $(TEST_DIR)/m8_r1_quality.c \
-		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_residency.o
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m8_r1_quality.c \
-		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_residency.o -lm
 
 $(TEST_DIR)/m6_decode_trace: $(TEST_DIR)/m6_decode_trace.c \
-		q38_decode.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_decode.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m6_decode_trace.c \
-		q38_decode.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_decode.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
 
 $(TEST_DIR)/m6_decode_gpu: $(TEST_DIR)/m6_decode.c \
-		q38_decode.o q38_forward_cuda.o q38_forward.o q38_moe.o \
+		q38_decode.o q38_forward_cuda.o q38_forward.o q38_ple_prefetch.o q38_moe.o \
 		q38_weights.o q38_gguf.o q38_model_config.o q38_ple.o q38_qsa.o \
 		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
 		q38_gr_ref.o q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o
 	$(NVCC) $(NVCCFLAGS) -DQ38_DECODE_CUDA -I. -o $@ \
 		$(TEST_DIR)/m6_decode.c q38_decode.o q38_forward_cuda.o \
-		q38_forward.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
+		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
 		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
 		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_cuda_primitives.o \
 		q38_gdn.o q38_moe_cuda.o $(CUDA_LDLIBS) -lm
@@ -1023,12 +1024,12 @@ $(TEST_DIR)/m6_real_forward_gpu.o: $(TEST_DIR)/m6_real_forward_gpu.c \
 	$(CC) $(CFLAGS) -c -o $@ $(TEST_DIR)/m6_real_forward_gpu.c
 
 $(TEST_DIR)/m6_real_forward_gpu: $(TEST_DIR)/m6_real_forward_gpu.o \
-		q38_forward_cuda.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_forward_cuda.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
 		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o
 	$(NVCC) $(NVCCFLAGS) -o $@ $(TEST_DIR)/m6_real_forward_gpu.o \
-		q38_forward_cuda.o q38_forward.o q38_moe.o q38_weights.o q38_gguf.o \
+		q38_forward_cuda.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
 		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o $(CUDA_LDLIBS) -lm

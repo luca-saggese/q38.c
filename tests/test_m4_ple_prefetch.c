@@ -14,7 +14,7 @@ int main(void) {
         fprintf(stderr, "mmap failed\n");
         return 1;
     }
-    q38_gguf model = {.map = mapping, .size = size};
+    q38_gguf model = {.fd = -1, .map = mapping, .size = size};
     q38_tensor tensor = {.abs_offset = 0, .bytes = size};
     q38_ple_store store = {
         .tensor = &tensor,
@@ -45,7 +45,37 @@ int main(void) {
         munmap(mapping, size);
         return 1;
     }
+    q38_ple_scheduler *scheduler =
+        q38_ple_scheduler_create(&store, error, sizeof(error));
+    if (!scheduler) {
+        fprintf(stderr, "scheduler creation failed: %s\n", error);
+        munmap(mapping, size);
+        return 1;
+    }
+    uint64_t duplicate_rows[] = {1, 0, 1};
+    if (!q38_ple_scheduler_submit(scheduler, duplicate_rows, 3, error,
+                                  sizeof(error)) ||
+        !q38_ple_scheduler_wait(scheduler, error, sizeof(error))) {
+        fprintf(stderr, "scheduler execution failed: %s\n", error);
+        q38_ple_scheduler_destroy(scheduler);
+        munmap(mapping, size);
+        return 1;
+    }
+    q38_ple_scheduler_stats scheduler_stats;
+    if (!q38_ple_scheduler_get_stats(scheduler, &scheduler_stats) ||
+        scheduler_stats.logical_accesses != 3 ||
+        scheduler_stats.unique_rows != 2 ||
+        scheduler_stats.unique_physical_blocks != 1 ||
+        scheduler_stats.logical_bytes != 3 * page ||
+        scheduler_stats.file_read_ops != 0 ||
+        scheduler_stats.physical_bytes != 0) {
+        fprintf(stderr, "scheduler telemetry/coalescing mismatch\n");
+        q38_ple_scheduler_destroy(scheduler);
+        munmap(mapping, size);
+        return 1;
+    }
+    q38_ple_scheduler_destroy(scheduler);
     munmap(mapping, size);
-    puts("test_m4_ple_prefetch: disabled-by-default advisory prefetch passed");
+    puts("test_m4_ple_prefetch: advisory and async scheduler prefetch passed");
     return 0;
 }
