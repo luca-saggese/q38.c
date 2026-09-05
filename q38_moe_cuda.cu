@@ -383,6 +383,27 @@ extern "C" bool q38_moe_cuda_q2_down(
     return true;
 }
 
+__global__ static void q2_weighted_accum_kernel(
+    float *accum, const float *expert, float weight) {
+    const unsigned d = blockIdx.x * blockDim.x + threadIdx.x;
+    if (d >= Q38_MOE_HIDDEN) return;
+    accum[d] = __fadd_rn(accum[d], __fmul_rn(weight, expert[d]));
+}
+
+extern "C" bool q38_moe_cuda_accumulate_weighted(
+    float *device_accum, const float *device_expert, float weight,
+    cudaStream_t stream, char *error, size_t error_len) {
+    if (!device_accum || !device_expert)
+        return fail(error, error_len,
+                    "invalid CUDA MoE accumulation arguments");
+    q2_weighted_accum_kernel<<<10, 256, 0, stream>>>(
+        device_accum, device_expert, weight);
+    const cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+        return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
+
 __global__ static void shared_kernel(const float *hidden, size_t tokens,
                                      const float *gate_proj, const float *up_proj,
                                      const float *down_proj,

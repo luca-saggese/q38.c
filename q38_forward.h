@@ -2,6 +2,7 @@
 #define Q38_FORWARD_H
 
 #include "q38_qsa.h"
+#include "q38_moe_ref.h"
 #include "q38_session.h"
 #include "q38_state.h"
 #include "q38_weights.h"
@@ -211,6 +212,22 @@ typedef bool (*q38_forward_expert_backend)(
     const q38_gguf *model, const q38_tensor *gate_up,
     const q38_tensor *down, size_t expert, const float *input, float *output,
     void *user, char *error, size_t error_len);
+
+typedef bool (*q38_forward_moe_layer_backend)(
+    const q38_gguf *model, const q38_tensor *gate_up,
+    const q38_tensor *down, const q38_moe_route10 *route,
+    const float *host_input, float *host_output, void *user, char *error,
+    size_t error_len);
+
+bool q38_forward_full_with_matrix_moe_layer_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend row_backend,
+    q38_forward_matrix_backend matrix_backend,
+    q38_forward_expert_backend expert_backend,
+    q38_forward_moe_layer_backend moe_layer_backend,
+    void *backend_user, char *error, size_t error_len);
 
 bool q38_forward_full_with_matrix_backend(
     const q38_gguf *model, const q38_weights *weights,

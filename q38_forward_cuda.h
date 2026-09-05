@@ -134,6 +134,11 @@ bool q38_forward_cuda_expert_backend(
     const q38_gguf *model, const q38_tensor *gate_up,
     const q38_tensor *down, size_t expert, const float *input, float *output,
     void *user, char *error, size_t error_len);
+bool q38_forward_cuda_moe_layer_q2_backend(
+    const q38_gguf *model, const q38_tensor *gate_up,
+    const q38_tensor *down, const q38_moe_route10 *route,
+    const float *host_input, float *host_output, void *user, char *error,
+    size_t error_len);
 
 #ifdef __cplusplus
 }

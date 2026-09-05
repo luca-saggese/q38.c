@@ -342,6 +342,7 @@ static bool full_fail(char *error, size_t error_len, const char *message) {
 static q38_forward_matvec_backend full_backend;
 static q38_forward_matrix_backend full_matrix_backend;
 static q38_forward_expert_backend full_expert_backend;
+static q38_forward_moe_layer_backend full_moe_layer_backend;
 static void *full_backend_user;
 static bool full_backend_strict;
 static uint64_t full_backend_rows;
@@ -1097,7 +1098,12 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         const double activation_started = full_now_ms();
         memset(output + t * Q38_GR_HIDDEN, 0,
                Q38_GR_HIDDEN * sizeof(float));
-        for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
+        if (full_moe_layer_backend) {
+            if (!full_moe_layer_backend(
+                    model, weights.routed_gate_up, weights.routed_down, &route,
+                    x, routed, full_backend_user, error, error_len))
+                goto fail;
+        } else for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
             const size_t e = route.expert[k];
             if (!full_expert_backend) {
                 for (size_t i = 0; i < 640; ++i) {
@@ -1140,6 +1146,9 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
             for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
                 output[t * Q38_GR_HIDDEN + d] += route.weight[k] * routed[d];
         }
+        if (full_moe_layer_backend)
+            memcpy(output + t * Q38_GR_HIDDEN, routed,
+                   Q38_GR_HIDDEN * sizeof(float));
         if (!full_boundary_trace(layer_number, "routed_output",
                                  output + t * Q38_GR_HIDDEN, 1,
                                  Q38_GR_HIDDEN, diagnostics, error,
@@ -1778,28 +1787,47 @@ bool q38_forward_full_with_matrix_backend(
     q38_forward_matrix_backend matrix_backend,
     q38_forward_expert_backend expert_backend, void *backend_user,
     char *error, size_t error_len) {
+    return q38_forward_full_with_matrix_moe_layer_backend(
+        model, weights, state, tokens, token_count, logits, logits_stride,
+        diagnostics, backend, matrix_backend, expert_backend, NULL,
+        backend_user, error, error_len);
+}
+
+bool q38_forward_full_with_matrix_moe_layer_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend backend,
+    q38_forward_matrix_backend matrix_backend,
+    q38_forward_expert_backend expert_backend,
+    q38_forward_moe_layer_backend moe_layer_backend,
+    void *backend_user, char *error, size_t error_len) {
     const q38_forward_matvec_backend previous_backend = full_backend;
     const q38_forward_matrix_backend previous_matrix_backend =
         full_matrix_backend;
     const q38_forward_expert_backend previous_expert_backend =
         full_expert_backend;
+    const q38_forward_moe_layer_backend previous_moe_layer_backend =
+        full_moe_layer_backend;
     void *const previous_user = full_backend_user;
     const bool previous_strict = full_backend_strict;
     full_backend = backend;
     full_matrix_backend = matrix_backend;
     full_expert_backend = expert_backend;
+    full_moe_layer_backend = moe_layer_backend;
     full_backend_user = backend_user;
     const char *strict = getenv("Q38_PERF_STRICT");
     const bool previous_perf_strict = full_perf_strict;
     full_perf_strict = strict && strict[0] != '\0' && strcmp(strict, "0") != 0;
     full_backend_strict = backend != NULL || matrix_backend != NULL ||
-                          expert_backend != NULL;
+                          expert_backend != NULL || moe_layer_backend != NULL;
     const bool ok = q38_forward_full(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, error, error_len);
     full_backend = previous_backend;
     full_matrix_backend = previous_matrix_backend;
     full_expert_backend = previous_expert_backend;
+    full_moe_layer_backend = previous_moe_layer_backend;
     full_backend_user = previous_user;
     full_backend_strict = previous_strict;
     full_perf_strict = previous_perf_strict;

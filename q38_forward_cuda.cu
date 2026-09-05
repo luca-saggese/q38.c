@@ -49,6 +49,8 @@ struct q38_forward_cuda_context {
     size_t device_aux_bytes;
     float *device_moe_mid;
     size_t device_moe_mid_bytes;
+    float *device_moe_accum;
+    size_t device_moe_accum_bytes;
     void *lm_head_device_weights;
     size_t lm_head_device_weights_bytes;
     const void *lm_head_host_data;
@@ -424,10 +426,115 @@ extern "C" bool q38_forward_cuda_expert_backend(
     return true;
 }
 
+extern "C" bool q38_forward_cuda_moe_layer_q2_backend(
+    const q38_gguf *model, const q38_tensor *gate_up,
+    const q38_tensor *down, const q38_moe_route10 *route,
+    const float *host_input, float *host_output, void *user, char *error,
+    size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    size_t gate_rows, gate_cols, down_rows, down_cols;
+    if (!context || !model || !gate_up || !down || !route ||
+        !host_input || !host_output ||
+        gate_up->type != Q38_QUANT_Q2_K ||
+        down->type != Q38_QUANT_Q2_K ||
+        !tensor_shape(gate_up, &gate_rows, &gate_cols) ||
+        !tensor_shape(down, &down_rows, &down_cols) ||
+        gate_cols != 2560 || down_cols != 2560 ||
+        gate_rows % 1280 != 0 || down_rows % 640 != 0)
+        return fail(error, error_len, "unsupported CUDA Q2 MoE layer geometry");
+
+    q38_exec_tensor *gate_exec = exec_tensor_for(context, model, gate_up);
+    q38_exec_tensor *down_exec = exec_tensor_for(context, model, down);
+    if (!exec_tensor_is_resident(gate_exec, gate_up) ||
+        !exec_tensor_is_resident(down_exec, down))
+        return fail(error, error_len,
+                    "Q38 Q2 MoE layer requires resident expert weights");
+
+    const size_t gate_row_bytes = (size_t)(gate_up->bytes / gate_rows);
+    const size_t down_row_bytes = (size_t)(down->bytes / down_rows);
+    if (!ensure_buffer((void **)&context->device_input,
+                       &context->device_input_elements,
+                       Q38_MOE_HIDDEN * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&context->device_output,
+                       &context->device_output_bytes,
+                       Q38_MOE_HIDDEN * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&context->device_moe_mid,
+                       &context->device_moe_mid_bytes,
+                       Q38_MOE_INTERMEDIATE * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&context->device_moe_accum,
+                       &context->device_moe_accum_bytes,
+                       Q38_MOE_HIDDEN * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
+        return fail(error, error_len, "CUDA Q2 MoE layer allocation failed");
+
+    const double started = host_now_ms();
+    if (cudaMemcpyAsync(context->device_input, host_input,
+                        Q38_MOE_HIDDEN * sizeof(float),
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaMemsetAsync(context->device_moe_accum, 0,
+                        Q38_MOE_HIDDEN * sizeof(float),
+                        context->stream) != cudaSuccess)
+        return fail(error, error_len, "CUDA Q2 MoE layer upload failed");
+
+    for (unsigned k = 0; k < Q38_MOE_TOP_K; ++k) {
+        const unsigned e = route->expert[k];
+        if (e >= gate_rows / 1280 || e >= down_rows / 640)
+            return fail(error, error_len, "invalid Q2 routed expert ID");
+        const void *gate_e =
+            (const unsigned char *)gate_exec->ptr +
+            (size_t)e * 1280u * gate_row_bytes;
+        const void *down_e =
+            (const unsigned char *)down_exec->ptr +
+            (size_t)e * 640u * down_row_bytes;
+        if (!q38_moe_cuda_q2_gate_up(
+                gate_e, context->device_input, context->device_moe_mid,
+                context->stream, error, error_len) ||
+            !q38_moe_cuda_q2_down(
+                down_e, context->device_moe_mid, context->device_output,
+                context->stream, error, error_len) ||
+            !q38_moe_cuda_accumulate_weighted(
+                context->device_moe_accum, context->device_output,
+                route->weight[k], context->stream, error, error_len))
+            return false;
+    }
+
+    if (cudaMemcpyAsync(host_output, context->device_moe_accum,
+                        Q38_MOE_HIDDEN * sizeof(float),
+                        cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "CUDA Q2 MoE layer execution failed");
+
+    ++context->cuda_synchronizations;
+    ++context->expert_host_sync_count;
+    context->expert_backend_total_wall_ms += host_now_ms() - started;
+    context->expert_H2D_bytes += Q38_MOE_HIDDEN * sizeof(float);
+    context->expert_D2H_bytes += Q38_MOE_HIDDEN * sizeof(float);
+    context->q2_gate_up_fast_calls += Q38_MOE_TOP_K;
+    context->q2_down_calls += Q38_MOE_TOP_K;
+    context->persistent_hits += 2;
+    if (context->current_layer < Q38_MODEL_LAYERS)
+        context->expert_fast_calls_by_layer[context->current_layer] +=
+            Q38_MOE_TOP_K;
+    return true;
+}
+
 static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes,
                           q38_forward_cuda_allocation_observer observer,
                           void *observer_user, uint64_t *allocation_count) {
-    if (*capacity >= bytes) return true;
+    if (*buffer && *capacity >= bytes) return true;
     if (*buffer) cudaFree(*buffer);
     *buffer = NULL;
     *capacity = 0;
@@ -627,6 +734,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_argmax);
     cudaFree(context->device_aux);
     cudaFree(context->device_moe_mid);
+    cudaFree(context->device_moe_accum);
     if (!context->lm_head_uses_persistent)
         cudaFree(context->lm_head_device_weights);
     for (size_t i = 0; i < context->persistent_count; ++i)

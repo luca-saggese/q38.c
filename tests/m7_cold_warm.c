@@ -208,6 +208,14 @@ static size_t argmax(const float *x, size_t n) {
     return best;
 }
 
+static uint64_t logits_hash(const float *x, size_t n) {
+    const unsigned char *bytes = (const unsigned char *)x;
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (size_t i = 0; i < n * sizeof(float); ++i)
+        hash = (hash ^ bytes[i]) * UINT64_C(1099511628211);
+    return hash;
+}
+
 int main(int argc, char **argv) {
     const char *path = argc > 1 ? argv[1] :
         "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf";
@@ -258,6 +266,9 @@ int main(int argc, char **argv) {
     hidden_capture = fopen("artifacts/post_m8_opt/shared_hidden_layer0.bin", "wb");
     if (!hidden_capture) return 1;
     const uint32_t token = 9419;
+    const bool use_layer_backend =
+        !getenv("Q38_Q2_LAYER_BACKEND") ||
+        strcmp(getenv("Q38_Q2_LAYER_BACKEND"), "0") != 0;
     const bool diagnostic_only = getenv("Q38_Q2_DIAGNOSTIC") != NULL;
     const int run_count = diagnostic_only ? 2 : 6;
     for (int run = 1; run <= run_count; ++run) {
@@ -284,10 +295,21 @@ int main(int argc, char **argv) {
             q38_forward_cuda_get_expert_layer_calls(
                 cuda, layer, &before_fast[layer], &before_legacy[layer]);
         double start = now_ms();
-        bool ok = q38_forward_full_with_matrix_backend(
-            model, &weights, &state, &token, 1, logits, 248320, &d,
-            q38_forward_cuda_matvec_backend, q38_forward_cuda_matrix_backend,
-            q38_forward_cuda_expert_backend, cuda, error, sizeof(error));
+        bool ok;
+        if (use_layer_backend)
+            ok = q38_forward_full_with_matrix_moe_layer_backend(
+                model, &weights, &state, &token, 1, logits, 248320, &d,
+                q38_forward_cuda_matvec_backend,
+                q38_forward_cuda_matrix_backend,
+                q38_forward_cuda_expert_backend,
+                q38_forward_cuda_moe_layer_q2_backend, cuda, error,
+                sizeof(error));
+        else
+            ok = q38_forward_full_with_matrix_backend(
+                model, &weights, &state, &token, 1, logits, 248320, &d,
+                q38_forward_cuda_matvec_backend,
+                q38_forward_cuda_matrix_backend,
+                q38_forward_cuda_expert_backend, cuda, error, sizeof(error));
         sample_memory();
         uint32_t gpu_argmax_token = 0;
         float gpu_argmax_ms = 0.0f;
@@ -377,7 +399,8 @@ int main(int argc, char **argv) {
                "\"gpu_argmax_token\":%u,\"gpu_argmax_ok\":%s,"
                "\"peak_cuda_bytes\":%zu,\"peak_rss_bytes\":%lu,"
                "\"mem_available_min_bytes\":%lu,"
-               "\"correctness\":%s,\"stable_device_pointer\":%s}\n",
+               "\"correctness\":%s,\"stable_device_pointer\":%s,"
+               "\"logits_hash\":\"%016" PRIx64 "\"}\n",
                run, run == 1 ? "true" : "false",
                after.all_non_ple_resident ? "true" : "false",
                after.persistent_resident_bytes, after.persistent_resident_tensors,
@@ -398,7 +421,8 @@ int main(int argc, char **argv) {
                gpu_argmax_token, gpu_argmax_ok ? "true" : "false",
                peak_cuda_bytes, peak_rss_bytes, min_mem_available_bytes,
                ok ? "true" : "false",
-               after.lm_head_device_pointer ? "true" : "false");
+               after.lm_head_device_pointer ? "true" : "false",
+               logits_hash(logits, 248320));
         fprintf(artifact,
                 "{\"run\":%d,\"cold\":%s,\"all_non_ple_resident\":%s,"
                 "\"persistent_resident_bytes\":%zu,\"persistent_resident_tensors\":%" PRIu64 ","
