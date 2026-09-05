@@ -1,0 +1,19 @@
+{
+  "requested_label": "128",
+  "prompt_tokens": 206,
+  "generated_tokens": 1,
+  "prefill_ms": 244710.757679,
+  "nan_inf": {
+    "present": false,
+    "nan_count": 0,
+    "inf_count": 0
+  },
+  "fallback": {
+    "used": false,
+    "backend_rows": 449112960,
+    "scalar_rows": 0,
+    "backend_declines": 0
+  },
+  "non_ple_upload_bytes": 0,
+  "non_ple_residency_misses": 0
+}

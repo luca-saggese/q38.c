@@ -14,7 +14,7 @@ extern "C" {
  * q38 — Qwen3.8-Flash-Next / DGX Spark prototype runtime skeleton.
  *
  * The CLI exposes platform probe, GGUF inspection, memory planning, and a
- * minimal CUDA generation smoke wrapper. The only supported target is GB10 /
+ * functional CUDA generation runtime. The only supported target is GB10 /
  * SM 12.1 CUDA on Linux aarch64. Anything else is refused explicitly, never
  * silently degraded.
  * ========================================================================= */
@@ -35,6 +35,7 @@ typedef struct {
     const char *tokenizer_path;
     const char *prompt;
     size_t max_tokens;
+    uint32_t ctx_size;
     int context_hint;     /* KV context size hint (bytes/none, informational) */
     int prefill_hint;     /* prefill chunk hint (informational)               */
     bool inspect;         /* --inspect */

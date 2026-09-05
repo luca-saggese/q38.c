@@ -460,7 +460,9 @@ static void full_backend_context(const q38_tensor *tensor, size_t rows,
     if (full_diagnostics && full_diagnostics->backend_context)
         full_diagnostics->backend_context(full_current_layer, stage, tensor,
                                           rows, cols,
-                                          full_diagnostics->trace_user);
+                                          full_diagnostics->backend_context_user
+                                              ? full_diagnostics->backend_context_user
+                                              : full_diagnostics->trace_user);
 }
 
 static double full_now_ms(void) {

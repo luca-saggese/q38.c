@@ -12,6 +12,7 @@
 #include "q38_platform.h"
 #include "q38_decode.h"
 #include "q38_forward_cuda.h"
+#include "q38_session.h"
 #include "q38_tokenizer.h"
 #include "q38_weights.h"
 
@@ -32,12 +33,13 @@ static void usage(FILE *fp) {
         "  --inspect <model.gguf>     Print GGUF metadata and tensor summary\n"
         "  --list-tensors <model.gguf> List individual tensors\n"
         "  --memory-plan <model.gguf> Dry-run memory plan (no allocation)\n"
-        "  --generate <model.gguf>    CUDA greedy text-generation smoke path\n"
+        "  --generate <model.gguf>    CUDA greedy session generation\n"
         "\n"
         "options:\n"
         "  --tokenizer <model-dir>    Native tokenizer assets (for --generate)\n"
         "  --prompt <text>            Prompt (for --generate)\n"
-        "  --max-tokens <n>           Generated tokens, 1..32 (default: 16)\n"
+        "  --ctx <n>                  Session context capacity (default: 8192)\n"
+        "  --max-tokens <n>           Maximum generated tokens (default: 256)\n"
         "  --disable-ple              Omit PLE output while retaining PLE state\n"
         "  --json                     Machine-readable output\n"
         "  --verbose                  Extra diagnostics\n");
@@ -245,9 +247,11 @@ static int cmd_memory_plan(const q38_options *opt) {
 
 typedef struct {
     double started_ms;
+    double prefill_ms;
     double last_generated_ms;
     double first_token_ms;
-    double per_token_ms[32];
+    double *per_token_ms;
+    size_t per_token_capacity;
     size_t generated_seen;
     size_t prompt_seen;
     size_t nan_count;
@@ -270,6 +274,8 @@ typedef struct {
     uint32_t prompt_final_argmax;
     size_t generated_emit_seen;
     size_t generated_consume_seen;
+    uint64_t non_ple_upload_bytes;
+    uint64_t non_ple_residency_misses;
     uint32_t first_consume_input;
     uint32_t first_consume_argmax;
     uint64_t first_consume_committed_tokens;
@@ -302,6 +308,17 @@ typedef struct {
     bool latest_final_hidden_valid;
     q38_memory_tracker memory;
 } q38_generate_evidence;
+
+static void generate_cuda_telemetry(
+    const q38_forward_cuda_telemetry *telemetry, void *opaque) {
+    q38_generate_evidence *evidence = opaque;
+    if (!evidence || !telemetry) return;
+    if (telemetry->non_ple_residency_miss &&
+        !telemetry->ple_file_backed_access)
+        evidence->non_ple_residency_misses++;
+    if (!telemetry->ple_file_backed_access)
+        evidence->non_ple_upload_bytes += telemetry->upload_bytes;
+}
 
 static uint64_t cli_hash_bytes(const void *data, size_t bytes) {
     const unsigned char *p = (const unsigned char *)data;
@@ -435,7 +452,7 @@ static bool generate_trace(const q38_decode_step *step, void *opaque,
         const double now = monotonic_ms();
         const double elapsed = now - evidence->started_ms;
         if (!evidence->generated_seen) evidence->first_token_ms = elapsed;
-        if (evidence->generated_seen < 32)
+        if (evidence->generated_seen < evidence->per_token_capacity)
             evidence->per_token_ms[evidence->generated_seen] =
                 evidence->generated_seen ? now - evidence->last_generated_ms
                                          : elapsed;
@@ -523,6 +540,61 @@ static bool generate_boundary_trace(uint32_t layer, const char *boundary,
     return true;
 }
 
+static int compare_double(const void *left, const void *right) {
+    const double a = *(const double *)left;
+    const double b = *(const double *)right;
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+static double percentile_sorted(const double *values, size_t count,
+                                double percentile) {
+    if (!values || !count) return 0.0;
+    if (count == 1) return values[0];
+    const double index = percentile * (double)(count - 1);
+    const size_t lower = (size_t)index;
+    const size_t upper = lower + (lower + 1 < count ? 1 : 0);
+    return values[lower] +
+           (values[upper] - values[lower]) * (index - (double)lower);
+}
+
+static double decode_median_ms(const q38_generate_evidence *evidence) {
+    if (!evidence || evidence->generated_seen <= 1 ||
+        evidence->generated_seen > evidence->per_token_capacity)
+        return 0.0;
+    const size_t count = evidence->generated_seen - 1;
+    double *copy = (double *)malloc(count * sizeof(*copy));
+    if (!copy) return 0.0;
+    memcpy(copy, evidence->per_token_ms + 1, count * sizeof(*copy));
+    qsort(copy, count, sizeof(*copy), compare_double);
+    const double result = percentile_sorted(copy, count, 0.5);
+    free(copy);
+    return result;
+}
+
+static double decode_p95_ms(const q38_generate_evidence *evidence) {
+    if (!evidence || evidence->generated_seen <= 1 ||
+        evidence->generated_seen > evidence->per_token_capacity)
+        return 0.0;
+    const size_t count = evidence->generated_seen - 1;
+    double *copy = (double *)malloc(count * sizeof(*copy));
+    if (!copy) return 0.0;
+    memcpy(copy, evidence->per_token_ms + 1, count * sizeof(*copy));
+    qsort(copy, count, sizeof(*copy), compare_double);
+    const double result = percentile_sorted(copy, count, 0.95);
+    free(copy);
+    return result;
+}
+
+static void stream_piece(uint32_t token, const char *piece, size_t len,
+                         void *userdata) {
+    (void)token;
+    (void)userdata;
+    if (piece && len) {
+        fwrite(piece, 1, len, stdout);
+        fflush(stdout);
+    }
+}
+
 static void json_string(const char *text) {
     putchar('"');
     for (const unsigned char *p = (const unsigned char *)(text ? text : "");
@@ -550,11 +622,11 @@ static void print_ids_json(const uint32_t *ids, size_t count) {
     putchar(']');
 }
 
-static int cmd_generate(const q38_options *opt) {
+static int cmd_generate_legacy(const q38_options *opt) {
     if (!opt->model_path || !opt->tokenizer_path || !opt->prompt ||
-        !opt->prompt[0] || opt->max_tokens < 1 || opt->max_tokens > 32) {
+        !opt->prompt[0] || !opt->max_tokens) {
         fprintf(stderr, "q38: --generate requires --tokenizer, --prompt, and "
-                        "--max-tokens in 1..32\n");
+                        "a positive --max-tokens value\n");
         return 2;
     }
 
@@ -810,6 +882,275 @@ cleanup:
     return rc;
 }
 
+static int cmd_generate(const q38_options *opt) {
+    if (!opt->model_path || !opt->tokenizer_path || !opt->prompt ||
+        !opt->prompt[0] || !opt->max_tokens || !opt->ctx_size) {
+        fprintf(stderr, "q38: --generate requires --tokenizer, --prompt, "
+                        "--ctx, and --max-tokens\n");
+        return 2;
+    }
+
+    char error[256] = {0};
+    q38_platform_info platform;
+    char reason[256];
+    if (q38_platform_probe(&platform, reason, sizeof(reason)) != 0) {
+        fprintf(stderr, "q38: CUDA runtime unavailable: %s\n", reason);
+        return 1;
+    }
+
+    q38_runtime runtime = {0};
+    q38_session session = {0};
+    q38_token_batch prompt = {0};
+    q38_generate_evidence evidence = {0};
+    bool session_initialized = false;
+    uint32_t *generated = NULL;
+    float *logits = NULL;
+    char *generated_text = NULL;
+    size_t generated_text_len = 0;
+    size_t generated_count = 0;
+    int rc = 1;
+
+    if (!q38_runtime_init(&runtime, opt->model_path, opt->tokenizer_path,
+                          error, sizeof(error)) ||
+        !q38_tokenizer_encode(&runtime.tokenizer, opt->prompt, false, &prompt,
+                              error, sizeof(error)) ||
+        !prompt.token_count) {
+        if (!error[0])
+            snprintf(error, sizeof(error), "prompt encoded to zero tokens");
+        fprintf(stderr, "q38: runtime/tokenizer: %s\n", error);
+        goto cleanup;
+    }
+    if (!q38_session_create(&session, &runtime, opt->ctx_size, error,
+                            sizeof(error))) {
+        fprintf(stderr, "q38: session: %s\n", error);
+        goto cleanup;
+    }
+    session_initialized = true;
+    if (prompt.token_count > opt->ctx_size) {
+        fprintf(stderr, "q38: prompt has %u tokens but --ctx is %u\n",
+                prompt.token_count, opt->ctx_size);
+        goto cleanup;
+    }
+
+    const size_t remaining = (size_t)opt->ctx_size - prompt.token_count;
+    const size_t generation_limit = opt->max_tokens < remaining
+        ? opt->max_tokens : remaining;
+    generated = calloc(generation_limit ? generation_limit : 1,
+                       sizeof(*generated));
+    logits = calloc(Q38_DECODE_VOCAB_SIZE, sizeof(*logits));
+    evidence.per_token_capacity = generation_limit;
+    evidence.per_token_ms = generation_limit
+        ? calloc(generation_limit, sizeof(*evidence.per_token_ms)) : NULL;
+    if (!generated || !logits ||
+        (generation_limit && !evidence.per_token_ms)) {
+        fprintf(stderr, "q38: generation/timing buffer allocation failed\n");
+        goto cleanup;
+    }
+
+    evidence.started_ms = monotonic_ms();
+    evidence.initial_cuda_free = platform.cuda_free_bytes;
+    evidence.min_cuda_free = platform.cuda_free_bytes;
+    evidence.cuda_total = platform.cuda_total_bytes;
+    evidence.model_bytes = runtime.model->size;
+    evidence.prompt_count = prompt.token_count;
+    evidence.target_forward_index = prompt.token_count;
+    q38_memory_tracker_init(&evidence.memory);
+    sample_generate_memory(&evidence, runtime.model->size);
+    q38_forward_cuda_set_telemetry_observer(
+        runtime.cuda, generate_cuda_telemetry, &evidence);
+
+    q38_forward_diagnostics diagnostics;
+    memset(&diagnostics, 0, sizeof(diagnostics));
+    diagnostics.stage_trace = generate_stage_trace;
+    diagnostics.boundary_trace = generate_boundary_trace;
+    diagnostics.trace_user = &evidence;
+    diagnostics.disable_ple = opt->disable_ple;
+    size_t step_index = 0;
+    uint32_t next_token = runtime.tokenizer.eos_id;
+    const double prefill_started = monotonic_ms();
+    if (!q38_session_prefill(
+            &session, prompt.tokens, prompt.token_count, logits,
+            Q38_DECODE_VOCAB_SIZE, &next_token, &diagnostics, generate_trace,
+            &evidence, &step_index, error, sizeof(error))) {
+        fprintf(stderr, "q38: prefill: %s\n", error);
+        goto cleanup;
+    }
+    evidence.prefill_ms = monotonic_ms() - prefill_started;
+
+    if (!opt->json && generation_limit) {
+        fputs("stream: ", stdout);
+        fflush(stdout);
+    }
+    if (generation_limit) {
+        generated[0] = next_token;
+        generated_count = 1;
+        if (!q38_session_emit(&session, logits, next_token, generate_trace,
+                              &evidence, &step_index, error, sizeof(error)) ||
+            (!opt->json &&
+             !q38_session_stream_token(&session, next_token, stream_piece,
+                                        NULL, error, sizeof(error)))) {
+            fprintf(stderr, "q38: first token emission: %s\n", error);
+            goto cleanup;
+        }
+        while (generated_count < generation_limit &&
+               generated[generated_count - 1] !=
+                   q38_session_eos_token(&session)) {
+            const uint32_t input = generated[generated_count - 1];
+            if (!q38_session_eval(
+                    &session, input, logits, Q38_DECODE_VOCAB_SIZE,
+                    &next_token, &diagnostics,
+                    Q38_DECODE_TRACE_GENERATED_CONSUME, next_token, input,
+                    generate_trace, &evidence, &step_index, error,
+                    sizeof(error))) {
+                fprintf(stderr, "q38: decode: %s\n", error);
+                goto cleanup;
+            }
+            generated[generated_count++] = next_token;
+            if (!opt->json &&
+                !q38_session_stream_token(&session, next_token, stream_piece,
+                                           NULL, error, sizeof(error))) {
+                fprintf(stderr, "q38: token streaming: %s\n", error);
+                goto cleanup;
+            }
+        }
+        if (!opt->json) putchar('\n');
+    }
+
+    if (prompt.token_count == 5 && prompt.tokens[0] == 17 &&
+        prompt.tokens[1] == 478 && prompt.tokens[2] == 220 &&
+        prompt.tokens[3] == 17 && prompt.tokens[4] == 283 &&
+        opt->max_tokens == 2 && generated_count == 2) {
+        const uint32_t expected_next = opt->disable_ple ? 19u : 20u;
+        if (evidence.prompt_seen != 5 ||
+            evidence.prompt_final_argmax != 220 ||
+            evidence.generated_emit_seen != 1 ||
+            evidence.generated_consume_seen != 1 ||
+            generated[0] != 220 ||
+            evidence.first_consume_input != 220 ||
+            evidence.first_consume_argmax != expected_next ||
+            evidence.first_consume_committed_tokens != 6 ||
+            evidence.prefix4_logits_hash == evidence.prompt_final_logits_hash) {
+            fprintf(stderr, "q38: canonical decode protocol assertion failed\n");
+            goto cleanup;
+        }
+    }
+
+    sample_generate_memory(&evidence, runtime.model->size);
+    if (generated_count) {
+        if (!q38_tokenizer_decode(&runtime.tokenizer, generated,
+                                  generated_count, &generated_text,
+                                  &generated_text_len, error, sizeof(error))) {
+            fprintf(stderr, "q38: generated decode: %s\n", error);
+            goto cleanup;
+        }
+    } else {
+        generated_text = strdup("");
+        if (!generated_text) {
+            fprintf(stderr, "q38: generated text allocation failed\n");
+            goto cleanup;
+        }
+    }
+
+    const uint64_t peak_cuda_allocated =
+        evidence.initial_cuda_free > evidence.min_cuda_free
+        ? evidence.initial_cuda_free - evidence.min_cuda_free : 0;
+    const bool nan_inf = evidence.nan_count != 0 || evidence.inf_count != 0;
+    const double prefill_tps = evidence.prefill_ms > 0.0
+        ? (double)prompt.token_count * 1000.0 / evidence.prefill_ms : 0.0;
+    const double decode_median = decode_median_ms(&evidence);
+    const double decode_p95 = decode_p95_ms(&evidence);
+    const double generation_tps = decode_median > 0.0
+        ? 1000.0 / decode_median : 0.0;
+
+    if (opt->json) {
+        printf("{\"format\":\"q38-functional-runtime-v1\",\"prompt\":");
+        json_string(opt->prompt);
+        printf(",\"ctx_size\":%u,\"prompt_ids\":", opt->ctx_size);
+        print_ids_json(prompt.tokens, prompt.token_count);
+        printf(",\"generated_ids\":");
+        print_ids_json(generated, generated_count);
+        printf(",\"prompt_tokens\":%u,\"generated_tokens\":%zu,"
+               "\"prefill_ms\":%.6f,\"prefill_tps\":%.6f,"
+               "\"ttft_ms\":%.6f,\"decode_median_ms\":%.6f,"
+               "\"decode_p95_ms\":%.6f,\"generation_tps\":%.6f,"
+               "\"ple_wait_at_injection_ms\":%.6f,"
+               "\"non_ple_upload_bytes\":%" PRIu64
+               ",\"non_ple_residency_misses\":%" PRIu64,
+               prompt.token_count, generated_count, evidence.prefill_ms,
+               prefill_tps, evidence.first_token_ms, decode_median,
+               decode_p95, generation_tps,
+               session.ple_wait_at_injection_ms,
+               evidence.non_ple_upload_bytes,
+               evidence.non_ple_residency_misses);
+        printf(",\"generated_text\":");
+        json_string(generated_text);
+        printf(",\"timing_ms\":{\"first_token\":%.6f,\"per_token\":[",
+               evidence.first_token_ms);
+        for (size_t i = 0; i < generated_count; ++i)
+            printf("%s%.6f", i ? "," : "", evidence.per_token_ms[i]);
+        printf("]},\"memory\":{\"cuda_total_bytes\":%" PRIu64
+               ",\"cuda_free_initial_bytes\":%" PRIu64
+               ",\"cuda_free_min_bytes\":%" PRIu64
+               ",\"peak_cuda_allocated_bytes\":%" PRIu64
+               ",\"peak_rss_bytes\":%" PRIu64
+               ",\"peak_internal_bytes\":%" PRIu64
+               "},\"nan_inf\":{\"present\":%s,\"nan_count\":%zu,"
+               "\"inf_count\":%zu},\"fallback\":{\"used\":%s,"
+               "\"backend_rows\":%" PRIu64 ",\"scalar_rows\":%" PRIu64
+               ",\"backend_declines\":%" PRIu64 "}}\n",
+               evidence.cuda_total, evidence.initial_cuda_free,
+               evidence.min_cuda_free, peak_cuda_allocated,
+               evidence.peak_rss, evidence.memory.peak_internal_bytes,
+               nan_inf ? "true" : "false", evidence.nan_count,
+               evidence.inf_count, evidence.fallback ? "true" : "false",
+               evidence.backend_rows, evidence.scalar_rows,
+               evidence.backend_declines);
+    } else {
+        printf("prompt tokens:       %u\n", prompt.token_count);
+        printf("generated tokens:    %zu\n", generated_count);
+        printf("prompt ids: ");
+        for (size_t i = 0; i < prompt.token_count; ++i)
+            printf("%s%u", i ? " " : "", prompt.tokens[i]);
+        printf("\ngenerated ids: ");
+        for (size_t i = 0; i < generated_count; ++i)
+            printf("%s%u", i ? " " : "", generated[i]);
+        printf("\ngenerated text: %s\n"
+               "prefill:            %.3f ms\n"
+               "prefill speed:      %.3f tok/s\n"
+               "TTFT:               %.3f ms\n"
+               "decode median:      %.3f ms/token\n"
+               "decode p95:         %.3f ms/token\n"
+               "generation speed:   %.3f tok/s\n"
+               "PLE wait-at-injection: %.3f ms\n"
+               "non-PLE upload:     %" PRIu64 " bytes\n"
+               "non-PLE misses:     %" PRIu64 "\n"
+               "peak CUDA allocated: %" PRIu64 " bytes\n"
+               "NaN/Inf:            %s (nan=%zu inf=%zu)\n"
+               "fallback:           %s (backend_rows=%" PRIu64
+               ", scalar_rows=%" PRIu64 ", declines=%" PRIu64 ")\n",
+               generated_text, evidence.prefill_ms, prefill_tps,
+               evidence.first_token_ms, decode_median, decode_p95,
+               generation_tps, session.ple_wait_at_injection_ms,
+               evidence.non_ple_upload_bytes,
+               evidence.non_ple_residency_misses, peak_cuda_allocated,
+               nan_inf ? "present" : "none", evidence.nan_count,
+               evidence.inf_count, evidence.fallback ? "used" : "none",
+               evidence.backend_rows, evidence.scalar_rows,
+               evidence.backend_declines);
+    }
+    rc = 0;
+
+cleanup:
+    free(generated_text);
+    free(evidence.per_token_ms);
+    free(generated);
+    free(logits);
+    q38_token_batch_free(&prompt);
+    if (session_initialized) q38_session_destroy(&session);
+    q38_runtime_destroy(&runtime);
+    return rc;
+}
+
 int main(int argc, char **argv) {
     q38_options opt;
     memset(&opt, 0, sizeof(opt));
@@ -843,6 +1184,9 @@ int main(int argc, char **argv) {
             if (i + 1 < argc) opt.prompt = argv[++i];
         } else if (strcmp(a, "--max-tokens") == 0) {
             if (i + 1 < argc) opt.max_tokens = (size_t)strtoul(argv[++i], NULL, 10);
+        } else if (strcmp(a, "--ctx") == 0) {
+            if (i + 1 < argc)
+                opt.ctx_size = (uint32_t)strtoul(argv[++i], NULL, 10);
         } else if (strcmp(a, "--disable-ple") == 0) {
             opt.disable_ple = true;
         } else if (strcmp(a, "--json") == 0) {
@@ -864,7 +1208,9 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (mode == Q38_MODE_GENERATE && opt.max_tokens == 0)
-        opt.max_tokens = 16;
+        opt.max_tokens = 256;
+    if (mode == Q38_MODE_GENERATE && opt.ctx_size == 0)
+        opt.ctx_size = 8192;
 
     int rc;
     switch (mode) {

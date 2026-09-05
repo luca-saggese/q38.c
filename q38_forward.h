@@ -4,7 +4,7 @@
 #include "q38_qsa.h"
 #include "q38_ple_prefetch.h"
 #include "q38_moe_ref.h"
-#include "q38_session.h"
+#include "q38_session_types.h"
 #include "q38_state.h"
 #include "q38_weights.h"
 
@@ -209,6 +209,7 @@ typedef struct {
     q38_forward_boundary_trace boundary_trace;
     q38_forward_stage_trace stage_trace;
     q38_forward_backend_context_trace backend_context;
+    void *backend_context_user;
     q38_forward_qsa_timing *qsa_timing;
     q38_forward_qsa_qkv_backend qsa_qkv_backend;
     void *qsa_qkv_backend_user;
