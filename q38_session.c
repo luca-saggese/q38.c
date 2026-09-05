@@ -5,11 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool fail(char *error, size_t error_len, const char *message) {
-    if (error && error_len) snprintf(error, error_len, "%s", message);
-    return false;
-}
-
+#ifndef Q38_SESSION_RUNTIME
 void q38_ngram_history_reset(q38_ngram_history *history) {
     if (!history) return;
     history->prev_token_1 = 0;
@@ -45,6 +41,13 @@ void q38_ngram_history_context(const q38_ngram_history *history,
     }
     context[1] = history->prev_token_1;
     context[2] = history->have_prev_2 ? history->prev_token_2 : eos_token;
+}
+
+#else
+
+static bool fail(char *error, size_t error_len, const char *message) {
+    if (error && error_len) snprintf(error, error_len, "%s", message);
+    return false;
 }
 
 static void runtime_zero(q38_runtime *runtime) {
@@ -259,3 +262,5 @@ size_t q38_session_context_remaining(const q38_session *session) {
     if (!session || session->position >= session->ctx_size) return 0;
     return (size_t)session->ctx_size - (size_t)session->position;
 }
+
+#endif
