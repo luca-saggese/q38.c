@@ -88,6 +88,13 @@ static void rope(float *x, size_t n, size_t rotary, size_t position,
     }
 }
 
+static double qsa_now_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    return (double)ts.tv_sec * 1000.0 +
+           (double)ts.tv_nsec / 1000000.0;
+}
+
 static bool project(const q38_forward_matrix *matrix, const float *input,
                     size_t tokens, float *output) {
     if (!matrix_ok(matrix, matrix->rows, matrix->cols)) return false;
@@ -116,7 +123,8 @@ bool q38_forward_qsa_state_init(q38_qsa_state *state,
 static size_t select_prefix(const q38_forward_qsa_weights *w,
                             const float *index_keys, size_t visible,
                             const float *query, size_t query_position,
-                            uint32_t *selected, size_t stride) {
+                            uint32_t *selected, size_t stride,
+                            q38_forward_qsa_timing *timing) {
     const size_t complete = visible / w->ratio;
     const size_t group_budget = w->budget / w->ratio;
     const size_t groups = complete < group_budget ? complete : group_budget;
@@ -125,6 +133,7 @@ static size_t select_prefix(const q38_forward_qsa_weights *w,
         groups * w->ratio > stride ||
         tail > stride - groups * w->ratio)
         return 0;
+    const double score_started = qsa_now_ms();
     float *scores = (float *)calloc(complete, sizeof(float));
     size_t *order = (size_t *)malloc(complete * sizeof(size_t));
     if ((complete && (!scores || !order))) {
@@ -153,6 +162,8 @@ static size_t select_prefix(const q38_forward_qsa_weights *w,
         scores[g] = total / sqrtf((float)w->index_dim);
         order[g] = g;
     }
+    const double score_elapsed = qsa_now_ms() - score_started;
+    const double top_k_started = qsa_now_ms();
     for (size_t candidate = 1; candidate < complete; ++candidate) {
         size_t at = candidate;
         while (at > 0) {
@@ -173,17 +184,25 @@ static size_t select_prefix(const q38_forward_qsa_weights *w,
     for (size_t i = complete * w->ratio; i < visible; ++i)
         selected[out++] = (uint32_t)i;
     free(scores); free(order);
+    if (timing) {
+        timing->score_ms += score_elapsed;
+        timing->exact_top_k_ms += qsa_now_ms() - top_k_started;
+        timing->allocations += 2;
+        timing->allocations +=
+            (uint64_t)complete * (uint64_t)w->index_heads;
+    }
     (void)query_position;
     return out;
 }
 
-bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
-                         q38_qsa_state *state, const float *hidden,
-                         size_t token_count, float *output,
-                         uint32_t *selected, size_t selected_stride,
-                         size_t *selected_counts, char *error,
-                         size_t error_len) {
+static bool q38_forward_qsa_ref_impl(
+    const q38_forward_qsa_weights *w, q38_qsa_state *state,
+    const float *hidden, size_t token_count, float *output,
+    uint32_t *selected, size_t selected_stride, size_t *selected_counts,
+    q38_forward_qsa_timing *timing, char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
+    if (timing) memset(timing, 0, sizeof(*timing));
+    const double total_started = qsa_now_ms();
     if (!w || !state || !hidden || !token_count || !output || !selected ||
         !selected_counts || !selected_stride || !w->hidden || !w->query_heads ||
         !w->kv_heads || !w->head_dim || !w->index_heads || !w->index_dim ||
@@ -197,6 +216,7 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
         !w->q_norm || !w->k_norm || !w->index_q_norm || !w->index_k_norm ||
         w->rotary_dims > w->head_dim || w->rotary_dims % 2)
         return fail(error, error_len, "invalid forward QSA arguments");
+    const double allocation_started = qsa_now_ms();
     memset(output, 0, token_count * w->hidden * sizeof(*output));
     const size_t q_rows = w->query_heads * w->head_dim * 2;
     const size_t k_rows = w->kv_heads * w->head_dim;
@@ -218,14 +238,23 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
         free(attention);
         return fail(error, error_len, "forward activation allocation failed");
     }
+    if (timing) timing->allocations += 8;
+    const double qkv_started = qsa_now_ms();
     if (!project(&w->q_proj, hidden, token_count, qfull) ||
         !project(&w->k_proj, hidden, token_count, keys) ||
-        !project(&w->v_proj, hidden, token_count, values) ||
-        !project(&w->index_qk_proj, hidden, token_count, index)) {
+        !project(&w->v_proj, hidden, token_count, values)) {
         free(qfull); free(keys); free(values); free(index); free(raw_index); free(queries);
         free(indexq);
         free(attention);
         return fail(error, error_len, "forward projection failed");
+    }
+    if (timing) timing->qkv_projection_ms = qsa_now_ms() - qkv_started;
+    const double indexer_started = qsa_now_ms();
+    if (!project(&w->index_qk_proj, hidden, token_count, index)) {
+        free(qfull); free(keys); free(values); free(index); free(raw_index); free(queries);
+        free(indexq);
+        free(attention);
+        return fail(error, error_len, "forward index projection failed");
     }
     for (size_t t = 0; t < token_count; ++t) {
         const size_t position = base_position + t;
@@ -255,29 +284,35 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
                index + t * index_rows + w->index_heads * w->index_dim,
                w->index_dim * sizeof(float));
     }
+    if (timing)
+        timing->indexer_compression_ms = qsa_now_ms() - indexer_started;
+    const double state_started = qsa_now_ms();
     if (!q38_qsa_state_append(state, keys, values, raw_index, token_count,
                               error, error_len)) {
         free(qfull); free(keys); free(values); free(index); free(raw_index); free(queries);
         free(indexq);
         return false;
     }
+    if (timing) timing->state_update_ms += qsa_now_ms() - state_started;
     for (size_t t = 0; t < token_count; ++t) {
         const size_t visible = state->position - token_count + t + 1;
         const size_t count = select_prefix(w, (const float *)state->index_k.data,
                                            visible, indexq + t * w->index_heads *
                                            w->index_dim, state->position,
                                            selected + t * selected_stride,
-                                           selected_stride);
+                                           selected_stride, timing);
         if (!count || count > selected_stride)
             return fail(error, error_len, "forward QSA selection failed");
         selected_counts[t] = count;
         for (size_t h = 0; h < w->query_heads; ++h) {
             const size_t kvh = h / (w->query_heads / w->kv_heads);
             float max_score = -INFINITY;
+            const double gather_started = qsa_now_ms();
             float *numerator = calloc(w->head_dim, sizeof(float));
             float denom = 0.0f;
             if (!numerator)
                 return fail(error, error_len, "forward attention allocation failed");
+            if (timing) timing->allocations++;
             for (size_t j = 0; j < count; ++j) {
                 const size_t row = selected[t * selected_stride + j];
                 float score = 0.0f;
@@ -288,6 +323,10 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
                 score /= sqrtf((float)w->head_dim);
                 if (score > max_score) max_score = score;
             }
+            if (timing)
+                timing->selected_kv_gather_ms +=
+                    qsa_now_ms() - gather_started;
+            const double attention_started = qsa_now_ms();
             for (size_t j = 0; j < count; ++j) {
                 const size_t row = selected[t * selected_stride + j];
                 const float *q = queries + (t * w->query_heads + h) * w->head_dim;
@@ -311,9 +350,12 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
                 attention[t * attention_width + h * w->head_dim + d] =
                     numerator[d] / denom * gate;
                 }
+            if (timing)
+                timing->attention_ms += qsa_now_ms() - attention_started;
             free(numerator);
         }
         float *projected = output + t * w->hidden;
+        const double output_started = qsa_now_ms();
         float *tmp = calloc(w->query_heads * w->head_dim, sizeof(float));
         if (!tmp) return fail(error, error_len, "forward output allocation failed");
         memcpy(tmp, attention + t * attention_width,
@@ -324,10 +366,44 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *w,
                 projected[r] += matrix_at(&w->o_proj, r, c) * tmp[c];
         }
         free(tmp);
+        if (timing) {
+            timing->allocations++;
+            timing->attention_ms += qsa_now_ms() - output_started;
+        }
     }
+    const double cleanup_started = qsa_now_ms();
     free(qfull); free(keys); free(values); free(index); free(raw_index);
     free(queries); free(indexq); free(attention);
+    if (timing) {
+        timing->allocation_cleanup_ms =
+            (qkv_started - allocation_started) +
+            (qsa_now_ms() - cleanup_started);
+        timing->total_ms = qsa_now_ms() - total_started;
+    }
     return true;
+}
+
+bool q38_forward_qsa_ref(const q38_forward_qsa_weights *weights,
+                         q38_qsa_state *state, const float *hidden,
+                         size_t token_count, float *output,
+                         uint32_t *selected, size_t selected_stride,
+                         size_t *selected_counts, char *error,
+                         size_t error_len) {
+    return q38_forward_qsa_ref_impl(
+        weights, state, hidden, token_count, output, selected,
+        selected_stride, selected_counts, NULL, error, error_len);
+}
+
+bool q38_forward_qsa_ref_timed(
+    const q38_forward_qsa_weights *weights, q38_qsa_state *state,
+    const float *hidden, size_t token_count, float *output,
+    uint32_t *selected, size_t selected_stride, size_t *selected_counts,
+    q38_forward_qsa_timing *timing, char *error, size_t error_len) {
+    if (!timing)
+        return fail(error, error_len, "QSA timing output is null");
+    return q38_forward_qsa_ref_impl(
+        weights, state, hidden, token_count, output, selected,
+        selected_stride, selected_counts, timing, error, error_len);
 }
 
 /* The complete graph below intentionally keeps tensor payloads in the GGUF
@@ -1547,27 +1623,57 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
         return false;
     }
     const double qsa_started = full_now_ms();
-    bool ok = q38_forward_qsa_ref(
+    q38_forward_qsa_timing timing;
+    bool ok = q38_forward_qsa_ref_timed(
         &w, qsa_state, input, tokens, output, selected,
-        Q38_FULL_QSA_SELECTED_STRIDE, counts, error, error_len);
+        Q38_FULL_QSA_SELECTED_STRIDE, counts, &timing, error, error_len);
     const double qsa_elapsed = full_now_ms() - qsa_started;
-    if (ok && !full_emit_stage(diagnostics, "qsa_attention", 0, 0, 0,
-                               0.0, error, error_len))
-        ok = false;
     if (ok) {
         const char *const stages[] = {
             "qsa_qkv", "qsa_indexer_compression", "qsa_score", "qsa_top_k",
-            "qsa_gather", "qsa_attention", "qsa_state_update"
+            "qsa_gather", "qsa_attention", "qsa_state_update",
+            "qsa_allocation_cleanup"
         };
-        static const double fractions[] = {0.15, 0.15, 0.10, 0.10,
-                                           0.10, 0.30, 0.10};
+        double values[] = {
+            timing.qkv_projection_ms,
+            timing.indexer_compression_ms,
+            timing.score_ms,
+            timing.exact_top_k_ms,
+            timing.selected_kv_gather_ms,
+            timing.attention_ms,
+            timing.state_update_ms,
+            timing.allocation_cleanup_ms,
+        };
+        double sum = 0.0;
+        for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i)
+            sum += values[i];
+        timing.state_update_ms += qsa_elapsed - sum;
+        values[6] = timing.state_update_ms;
         for (size_t i = 0; i < sizeof(stages) / sizeof(stages[0]); ++i)
             if (!full_emit_stage(diagnostics, stages[i], 0, 0, 0,
-                                 qsa_elapsed * fractions[i],
+                                 values[i],
                                  error, error_len)) {
                 ok = false;
                 break;
             }
+        if (diagnostics && diagnostics->qsa_timing) {
+            q38_forward_qsa_timing *total = diagnostics->qsa_timing;
+            total->total_ms += qsa_elapsed;
+            total->qkv_projection_ms += values[0];
+            total->indexer_compression_ms += values[1];
+            total->score_ms += values[2];
+            total->exact_top_k_ms += values[3];
+            total->selected_kv_gather_ms += values[4];
+            total->attention_ms += values[5];
+            total->state_update_ms += values[6];
+            total->allocation_cleanup_ms += values[7];
+            total->allocations += timing.allocations;
+            total->kernel_launches += timing.kernel_launches;
+            total->host_syncs += timing.host_syncs;
+            total->h2d_bytes += timing.h2d_bytes;
+            total->d2h_bytes += timing.d2h_bytes;
+            total->residency_misses += timing.residency_misses;
+        }
     }
     if (ok && diagnostics && diagnostics->qsa_trace)
         for (size_t t = 0; t < tokens; ++t)

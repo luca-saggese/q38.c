@@ -59,6 +59,24 @@ bool q38_forward_qsa_state_init(q38_qsa_state *state,
                                 const q38_forward_qsa_weights *weights,
                                 char *error, size_t error_len);
 
+typedef struct {
+    double total_ms;
+    double qkv_projection_ms;
+    double indexer_compression_ms;
+    double score_ms;
+    double exact_top_k_ms;
+    double selected_kv_gather_ms;
+    double attention_ms;
+    double state_update_ms;
+    double allocation_cleanup_ms;
+    uint64_t allocations;
+    uint64_t kernel_launches;
+    uint64_t host_syncs;
+    uint64_t h2d_bytes;
+    uint64_t d2h_bytes;
+    uint64_t residency_misses;
+} q38_forward_qsa_timing;
+
 /*
  * Run a text-only QSA layer.  Matrices are output-by-input and may point
  * directly into a read-only GGUF mmap.  The graph appends all projections
@@ -70,6 +88,12 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *weights,
                          uint32_t *selected, size_t selected_stride,
                          size_t *selected_counts, char *error,
                          size_t error_len);
+
+bool q38_forward_qsa_ref_timed(
+    const q38_forward_qsa_weights *weights, q38_qsa_state *state,
+    const float *hidden, size_t token_count, float *output,
+    uint32_t *selected, size_t selected_stride, size_t *selected_counts,
+    q38_forward_qsa_timing *timing, char *error, size_t error_len);
 
 typedef struct {
     q38_state_storage storage;
@@ -176,6 +200,7 @@ typedef struct {
     q38_forward_boundary_trace boundary_trace;
     q38_forward_stage_trace stage_trace;
     q38_forward_backend_context_trace backend_context;
+    q38_forward_qsa_timing *qsa_timing;
 } q38_forward_diagnostics;
 
 /* Optional diagnostic row-matvec backend.  It is strict when installed via

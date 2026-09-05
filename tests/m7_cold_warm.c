@@ -28,8 +28,23 @@ typedef struct {
     double moe_shared_up, moe_shared_down, moe_routed_gate_up;
     double moe_routed_down, moe_activation_reduction;
     double qsa_qkv, qsa_indexer_compression, qsa_score, qsa_top_k;
-    double qsa_gather, qsa_attention, qsa_state_update;
+    double qsa_gather, qsa_attention, qsa_state_update, qsa_allocation_cleanup;
+    double gr;
 } stages;
+
+typedef struct {
+    double gr, gdn, qsa_total;
+    double qsa_qkv, qsa_indexer_compression, qsa_score, qsa_top_k;
+    double qsa_gather, qsa_attention, qsa_state_update, qsa_allocation_cleanup;
+    double moe_total, moe_router, moe_gate_up, moe_down, moe_weighted_reduce;
+    double ple, lm_head, gpu_argmax, accounted, unattributed, wall;
+    uint64_t kernel_launches, host_syncs, h2d_bytes, d2h_bytes;
+    uint64_t qsa_allocations, qsa_kernel_launches, qsa_host_syncs;
+    uint64_t qsa_h2d_bytes, qsa_d2h_bytes, qsa_residency_misses;
+    uint64_t qsa_selected_ids_hash, qsa_selected_ids_count;
+    uint64_t nan_inf_count;
+    bool qsa_selected_ids_exact;
+} exclusive_profile;
 
 static q38_forward_cuda_context *backend_cuda;
 static q38_profile *stage_profile;
@@ -151,6 +166,26 @@ static void telemetry_observer(const q38_forward_cuda_telemetry *telemetry,
 }
 
 static size_t routed_selected[Q38_MODEL_LAYERS];
+static uint64_t qsa_selected_ids_hash;
+static uint64_t qsa_selected_ids_count;
+
+static bool qsa_trace(uint32_t layer, const uint32_t *selected, size_t count,
+                      void *user, char *error, size_t error_len) {
+    (void)user;
+    (void)error;
+    (void)error_len;
+    if (!selected && count) return false;
+    qsa_selected_ids_hash ^= layer;
+    qsa_selected_ids_hash *= 1099511628211ULL;
+    qsa_selected_ids_hash ^= count;
+    qsa_selected_ids_hash *= 1099511628211ULL;
+    for (size_t i = 0; i < count; ++i) {
+        qsa_selected_ids_hash ^= selected[i];
+        qsa_selected_ids_hash *= 1099511628211ULL;
+    }
+    qsa_selected_ids_count += count;
+    return true;
+}
 
 static bool route_trace(uint32_t layer, const uint16_t *experts,
                         const float *weights, size_t count, void *user,
@@ -176,6 +211,7 @@ static bool stage_trace(const q38_forward_stage_usage *u, void *user,
     }
     double *dst = NULL;
     if (strstr(u->name, "lm_head")) dst = &s->lm_head;
+    else if (strstr(u->name, "gr_")) dst = &s->gr;
     else if (strstr(u->name, "gdn")) dst = &s->gdn;
     else if (strstr(u->name, "moe_router")) dst = &s->moe_router;
     else if (strstr(u->name, "moe_routed_expert")) dst = &s->moe_routed_expert;
@@ -193,6 +229,8 @@ static bool stage_trace(const q38_forward_stage_usage *u, void *user,
     else if (strstr(u->name, "qsa_gather")) dst = &s->qsa_gather;
     else if (strstr(u->name, "qsa_attention")) dst = &s->qsa_attention;
     else if (strstr(u->name, "qsa_state_update")) dst = &s->qsa_state_update;
+    else if (strstr(u->name, "qsa_allocation_cleanup"))
+        dst = &s->qsa_allocation_cleanup;
     if (u->name && strstr(u->name, "qsa")) s->qsa += u->elapsed_ms;
     else if (strstr(u->name, "ple")) dst = &s->ple;
     if (dst) *dst += u->elapsed_ms;
@@ -200,6 +238,60 @@ static bool stage_trace(const q38_forward_stage_usage *u, void *user,
         !q38_profile_stage_trace(u, stage_profile, error, error_len))
         return false;
     return true;
+}
+
+static double profile_median(double *values, size_t count) {
+    for (size_t i = 1; i < count; ++i) {
+        double value = values[i];
+        size_t j = i;
+        while (j && values[j - 1] > value) {
+            values[j] = values[j - 1];
+            --j;
+        }
+        values[j] = value;
+    }
+    return values[count / 2];
+}
+
+static void print_exclusive_profile(const exclusive_profile *p) {
+    printf("{\"q2_exclusive_profile\":{\"wall_ms\":%.6f,"
+           "\"accounted_ms\":%.6f,\"unattributed_ms\":%.6f,"
+           "\"GR_ms\":%.6f,\"GDN_ms\":%.6f,\"QSA_total_ms\":%.6f,"
+           "\"QSA_QKV_ms\":%.6f,\"QSA_indexer_compression_ms\":%.6f,"
+           "\"QSA_score_ms\":%.6f,\"QSA_exact_top_k_ms\":%.6f,"
+           "\"QSA_KV_gather_ms\":%.6f,\"QSA_attention_ms\":%.6f,"
+           "\"QSA_state_update_ms\":%.6f,"
+           "\"QSA_allocation_cleanup_ms\":%.6f,\"MoE_total_ms\":%.6f,"
+           "\"MoE_router_ms\":%.6f,\"MoE_gate_up_ms\":%.6f,"
+           "\"MoE_down_ms\":%.6f,\"MoE_weighted_reduction_ms\":%.6f,"
+           "\"PLE_ms\":%.6f,\"LM_head_ms\":%.6f,\"GPU_argmax_ms\":%.6f,"
+           "\"kernel_launches_per_token\":%" PRIu64
+           ",\"host_syncs_per_token\":%" PRIu64
+           ",\"H2D_bytes_per_token\":%" PRIu64
+           ",\"D2H_bytes_per_token\":%" PRIu64
+           ",\"QSA_allocations_per_token\":%" PRIu64
+           ",\"QSA_kernel_launches_per_token\":%" PRIu64
+           ",\"QSA_host_syncs_per_token\":%" PRIu64
+           ",\"QSA_H2D_bytes_per_token\":%" PRIu64
+           ",\"QSA_D2H_bytes_per_token\":%" PRIu64
+           ",\"QSA_residency_misses\":%" PRIu64
+           ",\"QSA_selected_ids_hash\":%" PRIu64
+           ",\"QSA_selected_ids_count\":%" PRIu64
+           ",\"NaN_Inf_count\":%" PRIu64
+           ",\"QSA_selected_ids_exact\":%s}}\n",
+           p->wall, p->accounted, p->unattributed, p->gr, p->gdn,
+           p->qsa_total, p->qsa_qkv, p->qsa_indexer_compression,
+           p->qsa_score, p->qsa_top_k, p->qsa_gather, p->qsa_attention,
+           p->qsa_state_update, p->qsa_allocation_cleanup, p->moe_total,
+           p->moe_router, p->moe_gate_up,
+           p->moe_down, p->moe_weighted_reduce, p->ple, p->lm_head,
+           p->gpu_argmax, p->kernel_launches, p->host_syncs,
+           p->h2d_bytes, p->d2h_bytes, p->qsa_allocations,
+           p->qsa_kernel_launches, p->qsa_host_syncs, p->qsa_h2d_bytes,
+           p->qsa_d2h_bytes, p->qsa_residency_misses,
+           p->qsa_selected_ids_hash, p->qsa_selected_ids_count,
+           p->nan_inf_count,
+           p->qsa_selected_ids_exact ? "true" : "false");
 }
 
 static size_t argmax(const float *x, size_t n) {
@@ -265,6 +357,13 @@ int main(int argc, char **argv) {
     if (!artifact) return 1;
     hidden_capture = fopen("artifacts/post_m8_opt/shared_hidden_layer0.bin", "wb");
     if (!hidden_capture) return 1;
+    FILE *exclusive_artifact = fopen(
+        "artifacts/post_m8_opt/q2_exclusive_profile.jsonl", "w");
+    if (!exclusive_artifact) return 1;
+    double warm_values[5][8] = {{0}};
+    size_t warm_count = 0;
+    uint64_t cold_qsa_selected_ids_hash = 0;
+    uint64_t cold_qsa_selected_ids_count = 0;
     const uint32_t token = 9419;
     const bool use_layer_backend =
         !getenv("Q38_Q2_LAYER_BACKEND") ||
@@ -274,6 +373,8 @@ int main(int argc, char **argv) {
     for (int run = 1; run <= run_count; ++run) {
         stages s = {0};
         memset(routed_selected, 0, sizeof(routed_selected));
+        qsa_selected_ids_hash = 1469598103934665603ULL;
+        qsa_selected_ids_count = 0;
         q38_profile_destroy(&profile);
         q38_profile_init(&profile);
         q38_profile_set_token_count(&profile, 1);
@@ -285,6 +386,9 @@ int main(int argc, char **argv) {
         d.backend_context = backend_context;
         d.moe_trace = capture_moe_hidden;
         d.route_trace = route_trace;
+        d.qsa_trace = qsa_trace;
+        q38_forward_qsa_timing qsa_timing = {0};
+        d.qsa_timing = &qsa_timing;
         d.trace_user = &s;
         float *logits = run == 1 ? logits1 : logits2;
         q38_forward_cuda_residency_stats before, after;
@@ -320,6 +424,132 @@ int main(int argc, char **argv) {
         gpu_argmax_ms = argmax_stats.gpu_argmax_kernel_ms;
         double wall = now_ms() - start;
         q38_forward_cuda_get_residency_stats(cuda, &after);
+        if (run == 1) {
+            cold_qsa_selected_ids_hash = qsa_selected_ids_hash;
+            cold_qsa_selected_ids_count = qsa_selected_ids_count;
+        }
+        uint64_t nan_inf_count = 0;
+        for (size_t i = 0; i < 248320; ++i)
+            if (!isfinite(logits[i])) ++nan_inf_count;
+        exclusive_profile exclusive = {0};
+        exclusive.wall = wall;
+        exclusive.gr = s.gr;
+        exclusive.gdn = s.gdn;
+        exclusive.qsa_total = qsa_timing.total_ms;
+        exclusive.qsa_qkv = s.qsa_qkv;
+        exclusive.qsa_indexer_compression = s.qsa_indexer_compression;
+        exclusive.qsa_score = s.qsa_score;
+        exclusive.qsa_top_k = s.qsa_top_k;
+        exclusive.qsa_gather = s.qsa_gather;
+        exclusive.qsa_attention = s.qsa_attention;
+        exclusive.qsa_state_update = s.qsa_state_update;
+        exclusive.qsa_allocation_cleanup = s.qsa_allocation_cleanup;
+        exclusive.moe_router = s.moe_router;
+        exclusive.moe_gate_up =
+            after.q2_gate_up_fast_total_kernel_ms -
+            before.q2_gate_up_fast_total_kernel_ms;
+        exclusive.moe_down =
+            after.q2_down_total_kernel_ms - before.q2_down_total_kernel_ms;
+        exclusive.moe_weighted_reduce =
+            after.q2_weighted_reduce_total_kernel_ms -
+            before.q2_weighted_reduce_total_kernel_ms;
+        /*
+         * The activation/reduction stage begins before routed execution and
+         * ends after the shared expert, so it already includes the layer
+         * backend and shared matvec work.
+         */
+        exclusive.moe_total =
+            exclusive.moe_router + s.moe_activation_reduction;
+        exclusive.ple = s.ple;
+        exclusive.lm_head = s.lm_head;
+        exclusive.gpu_argmax = gpu_argmax_ms;
+        exclusive.qsa_allocations = qsa_timing.allocations;
+        exclusive.qsa_kernel_launches = qsa_timing.kernel_launches;
+        exclusive.qsa_host_syncs = qsa_timing.host_syncs;
+        exclusive.qsa_h2d_bytes = qsa_timing.h2d_bytes;
+        exclusive.qsa_d2h_bytes = qsa_timing.d2h_bytes;
+        exclusive.qsa_residency_misses = qsa_timing.residency_misses;
+        exclusive.qsa_selected_ids_hash = qsa_selected_ids_hash;
+        exclusive.qsa_selected_ids_count = qsa_selected_ids_count;
+        exclusive.nan_inf_count = nan_inf_count;
+        exclusive.qsa_selected_ids_exact =
+            run == 1 ||
+            (qsa_selected_ids_hash == cold_qsa_selected_ids_hash &&
+             qsa_selected_ids_count == cold_qsa_selected_ids_count);
+        exclusive.accounted = exclusive.gr + exclusive.gdn +
+            exclusive.qsa_total + exclusive.moe_total + exclusive.ple +
+            exclusive.lm_head + exclusive.gpu_argmax;
+        exclusive.unattributed = exclusive.wall - exclusive.accounted;
+        for (size_t i = 0; i < Q38_PROFILE_SUBSYSTEM_COUNT; ++i)
+            exclusive.kernel_launches += profile.subsystem[i].kernel_launches;
+        exclusive.kernel_launches +=
+            after.expert_kernel_launches - before.expert_kernel_launches;
+        exclusive.host_syncs = profile.bandwidth.host_syncs +
+            after.expert_host_sync_count - before.expert_host_sync_count;
+        for (size_t i = 0; i < Q38_PROFILE_SUBSYSTEM_COUNT; ++i)
+            exclusive.h2d_bytes += profile.subsystem[i].upload_bytes;
+        exclusive.h2d_bytes += after.expert_H2D_bytes - before.expert_H2D_bytes;
+        exclusive.d2h_bytes = profile.bandwidth.d2h_bytes +
+            after.expert_D2H_bytes - before.expert_D2H_bytes;
+        print_exclusive_profile(&exclusive);
+        fprintf(exclusive_artifact,
+                "{\"run\":%d,\"cold\":%s,\"wall_ms\":%.6f,"
+                "\"accounted_ms\":%.6f,\"unattributed_ms\":%.6f,"
+                "\"GR_ms\":%.6f,\"GDN_ms\":%.6f,\"QSA_total_ms\":%.6f,"
+                "\"QSA_QKV_ms\":%.6f,\"QSA_indexer_compression_ms\":%.6f,"
+                "\"QSA_score_ms\":%.6f,\"QSA_exact_top_k_ms\":%.6f,"
+                "\"QSA_KV_gather_ms\":%.6f,\"QSA_attention_ms\":%.6f,"
+                "\"QSA_state_update_ms\":%.6f,"
+                "\"QSA_allocation_cleanup_ms\":%.6f,\"MoE_total_ms\":%.6f,"
+                "\"MoE_router_ms\":%.6f,\"MoE_gate_up_ms\":%.6f,"
+                "\"MoE_down_ms\":%.6f,\"MoE_weighted_reduction_ms\":%.6f,"
+                "\"PLE_ms\":%.6f,\"LM_head_ms\":%.6f,"
+                "\"GPU_argmax_ms\":%.6f,\"kernel_launches_per_token\":%" PRIu64
+                ",\"host_syncs_per_token\":%" PRIu64
+                ",\"H2D_bytes_per_token\":%" PRIu64
+                ",\"D2H_bytes_per_token\":%" PRIu64
+                ",\"QSA_allocations_per_token\":%" PRIu64
+                ",\"QSA_kernel_launches_per_token\":%" PRIu64
+                ",\"QSA_host_syncs_per_token\":%" PRIu64
+                ",\"QSA_H2D_bytes_per_token\":%" PRIu64
+                ",\"QSA_D2H_bytes_per_token\":%" PRIu64
+                ",\"QSA_residency_misses\":%" PRIu64
+                ",\"QSA_selected_ids_hash\":%" PRIu64
+                ",\"QSA_selected_ids_count\":%" PRIu64
+                ",\"NaN_Inf_count\":%" PRIu64
+                ",\"QSA_selected_ids_exact\":%s}\n",
+                run, run == 1 ? "true" : "false", exclusive.wall,
+                exclusive.accounted, exclusive.unattributed, exclusive.gr,
+                exclusive.gdn, exclusive.qsa_total, exclusive.qsa_qkv,
+                exclusive.qsa_indexer_compression, exclusive.qsa_score,
+                exclusive.qsa_top_k, exclusive.qsa_gather,
+                exclusive.qsa_attention, exclusive.qsa_state_update,
+                exclusive.qsa_allocation_cleanup, exclusive.moe_total,
+                exclusive.moe_router,
+                exclusive.moe_gate_up, exclusive.moe_down,
+                exclusive.moe_weighted_reduce, exclusive.ple,
+                exclusive.lm_head, exclusive.gpu_argmax,
+                exclusive.kernel_launches, exclusive.host_syncs,
+                exclusive.h2d_bytes, exclusive.d2h_bytes,
+                exclusive.qsa_allocations, exclusive.qsa_kernel_launches,
+                exclusive.qsa_host_syncs, exclusive.qsa_h2d_bytes,
+                exclusive.qsa_d2h_bytes, exclusive.qsa_residency_misses,
+                exclusive.qsa_selected_ids_hash,
+                exclusive.qsa_selected_ids_count,
+                exclusive.nan_inf_count,
+                exclusive.qsa_selected_ids_exact ? "true" : "false");
+        fflush(exclusive_artifact);
+        if (run != 1 && warm_count < 5) {
+            warm_values[warm_count][0] = exclusive.gr;
+            warm_values[warm_count][1] = exclusive.gdn;
+            warm_values[warm_count][2] = exclusive.qsa_total;
+            warm_values[warm_count][3] = exclusive.moe_total;
+            warm_values[warm_count][4] = exclusive.ple;
+            warm_values[warm_count][5] = exclusive.lm_head;
+            warm_values[warm_count][6] = exclusive.gpu_argmax;
+            warm_values[warm_count][7] = exclusive.unattributed;
+            ++warm_count;
+        }
         if (run == 2) {
             printf("{\"q2_expert_diagnostic\":{"
                    "\"routed_layers_executed\":%" PRIu64
@@ -468,8 +698,40 @@ int main(int argc, char **argv) {
         fprintf(stderr, "cold/warm logits mismatch\n");
         return 1;
     }
+    if (warm_count) {
+        struct {
+            const char *name;
+            double value;
+        } sorted[8] = {
+            {"GR", 0}, {"GDN", 0}, {"QSA", 0}, {"MoE", 0},
+            {"PLE", 0}, {"LM-head", 0}, {"GPU argmax", 0},
+            {"other/backend/unattributed", 0}
+        };
+        for (size_t i = 0; i < 8; ++i) {
+            double values[5] = {0};
+            for (size_t r = 0; r < warm_count; ++r)
+                values[r] = warm_values[r][i];
+            sorted[i].value = profile_median(values, warm_count);
+        }
+        for (size_t i = 1; i < 8; ++i) {
+            const char *name = sorted[i].name;
+            double value = sorted[i].value;
+            size_t j = i;
+            while (j && sorted[j - 1].value < value) {
+                sorted[j] = sorted[j - 1];
+                --j;
+            }
+            sorted[j].name = name;
+            sorted[j].value = value;
+        }
+        for (size_t i = 0; i < 8; ++i)
+            printf("{\"q2_exclusive_rank\":%zu,\"subsystem\":\"%s\","
+                   "\"median_warm_ms\":%.6f}\n",
+                   i + 1, sorted[i].name, sorted[i].value);
+    }
     free(logits1); free(logits2);
     fclose(artifact);
+    fclose(exclusive_artifact);
     q38_forward_state_destroy(&state);
     q38_profile_destroy(&profile);
     q38_forward_cuda_context_destroy(cuda);
