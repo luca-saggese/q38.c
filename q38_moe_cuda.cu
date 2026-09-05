@@ -134,6 +134,47 @@ __global__ static void q2_gate_up_kernel(const q38_q2_k_block *weights,
     mid[i] = (g / (1.0f + expf(-g))) * u;
 }
 
+__device__ static float q2_dot_row_warp(
+    const q38_q2_k_block *weights, const float *hidden, size_t row,
+    unsigned lane) {
+    float sum = 0.0f;
+    for (unsigned block = 0; block < 10; ++block) {
+        const q38_q2_k_block *q = weights + row * 10u + block;
+        for (unsigned element = lane; element < 256; element += 32u) {
+            const unsigned half = element >> 7;
+            const unsigned within = element & 127u;
+            const unsigned group = within >> 4;
+            const unsigned l = within & 15u;
+            const unsigned shift = (group >> 1) << 1;
+            const uint8_t scale = q->scales[half * 8u + group];
+            const unsigned qindex = half * 32u + (group & 1u) * 16u + l;
+            const float d = __half2float(
+                *reinterpret_cast<const __half *>(&q->d));
+            const float m = __half2float(
+                *reinterpret_cast<const __half *>(&q->dmin));
+            const float value =
+                d * (scale & 0xfu) * ((q->qs[qindex] >> shift) & 3u) -
+                m * (scale >> 4);
+            sum += value * hidden[block * 256u + element];
+        }
+    }
+    for (unsigned offset = 16; offset; offset >>= 1)
+        sum += __shfl_down_sync(0xffffffffu, sum, offset);
+    return sum;
+}
+
+__global__ static void q2_gate_up_candidate_kernel(
+    const q38_q2_k_block *weights, const float *hidden, float *mid) {
+    const unsigned lane = threadIdx.x & 31u;
+    const size_t row = ((size_t)blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+    if (row >= Q38_MOE_INTERMEDIATE) return;
+    const float gate = q2_dot_row_warp(weights, hidden, row, lane);
+    const float up = q2_dot_row_warp(
+        weights, hidden, Q38_MOE_INTERMEDIATE + row, lane);
+    if (lane == 0)
+        mid[row] = (gate / (1.0f + expf(-gate))) * up;
+}
+
 __global__ static void q2_down_kernel(const q38_q2_k_block *weights,
                                       const float *mid, float *output) {
     size_t d = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -143,6 +184,11 @@ __global__ static void q2_down_kernel(const q38_q2_k_block *weights,
         value += q2_value(weights, i, d, 10) * mid[i];
     output[d] = value;
 }
+
+extern "C" bool q38_moe_cuda_q2_gate_up_candidate(
+    const void *device_gate_up, const float *device_hidden,
+    float *device_mid, unsigned threads_per_block, cudaStream_t stream,
+    char *error, size_t error_len);
 
 __device__ static void q4_scale_min(const q38_q4_k_block *block,
                                     unsigned index, uint8_t *scale,
@@ -300,7 +346,23 @@ extern "C" bool q38_moe_cuda_q2_gate_up(
     float *device_mid, cudaStream_t stream, char *error, size_t error_len) {
     if (!device_gate_up || !device_hidden || !device_mid)
         return fail(error, error_len, "invalid CUDA Q2 gate/up arguments");
-    q2_gate_up_kernel<<<3, 256, 0, stream>>>(
+    return q38_moe_cuda_q2_gate_up_candidate(
+        device_gate_up, device_hidden, device_mid, 128, stream, error,
+        error_len);
+}
+
+extern "C" bool q38_moe_cuda_q2_gate_up_candidate(
+    const void *device_gate_up, const float *device_hidden,
+    float *device_mid, unsigned threads_per_block, cudaStream_t stream,
+    char *error, size_t error_len) {
+    if (!device_gate_up || !device_hidden || !device_mid ||
+        (threads_per_block != 128 && threads_per_block != 256 &&
+         threads_per_block != 512))
+        return fail(error, error_len, "invalid Q2 candidate geometry");
+    const unsigned warps_per_block = threads_per_block / 32u;
+    const unsigned blocks =
+        (Q38_MOE_INTERMEDIATE + warps_per_block - 1u) / warps_per_block;
+    q2_gate_up_candidate_kernel<<<blocks, threads_per_block, 0, stream>>>(
         (const q38_q2_k_block *)device_gate_up, device_hidden, device_mid);
     const cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess)

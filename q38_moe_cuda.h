@@ -56,6 +56,11 @@ bool q38_moe_cuda_q2_gate_up(
     const void *device_gate_up, const float *device_hidden,
     float *device_mid, cudaStream_t stream, char *error, size_t error_len);
 
+bool q38_moe_cuda_q2_gate_up_candidate(
+    const void *device_gate_up, const float *device_hidden,
+    float *device_mid, unsigned threads_per_block, cudaStream_t stream,
+    char *error, size_t error_len);
+
 bool q38_moe_cuda_q2_down(
     const void *device_down, const float *device_mid,
     float *device_output, cudaStream_t stream, char *error, size_t error_len);

@@ -824,6 +824,22 @@ $(TEST_DIR)/m8_routed_expert_q4_bench: \
 		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
 		q38_topk_cuda.o $(CUDA_LDLIBS) -lm
 
+$(TEST_DIR)/m8_single_expert_device_parity: \
+		$(TEST_DIR)/m8_single_expert_device_parity.cu \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
+		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
+		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
+		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
+		q38_topk_cuda.o
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
+		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
+		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
+		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
+		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
+		q38_topk_cuda.o $(CUDA_LDLIBS) -lm
+
 m8-routed-expert-q4-bench: $(TEST_DIR)/m8_routed_expert_q4_bench
 	@mkdir -p artifacts/post_m8_opt
 	@./$(TEST_DIR)/m8_routed_expert_q4_bench $(DIRECT_RUNTIME_ARTIFACT) \

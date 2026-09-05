@@ -97,7 +97,7 @@ static bool run_gate_up(const void *weights, uint32_t qtype,
             return fail(error);
     }
     if (cudaStreamSynchronize(stream) != cudaSuccess) return fail("gate/up warmup failed");
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 20; ++i) {
         cudaEventRecord(start, stream);
         const bool ok = qtype == Q38_QUANT_Q2_K
             ? q38_moe_cuda_q2_gate_up(weights, hidden, mid, stream, error,
@@ -126,7 +126,7 @@ static bool run_down(const void *weights, uint32_t qtype,
     if (!warm_ok)
         return fail(error);
     if (cudaStreamSynchronize(stream) != cudaSuccess) return fail("down warmup failed");
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 20; ++i) {
         cudaEventRecord(start, stream);
         const bool ok = qtype == Q38_QUANT_Q2_K
             ? q38_moe_cuda_q2_down(weights, mid, output, stream, error,
@@ -134,6 +134,28 @@ static bool run_down(const void *weights, uint32_t qtype,
             : q38_moe_cuda_q4_down(weights, mid, output, stream, error,
                                    sizeof(error));
         if (!ok)
+            return fail(error);
+        cudaEventRecord(stop, stream);
+        cudaEventSynchronize(stop);
+        samples->push_back(event_ms(start, stop));
+    }
+    return true;
+}
+
+static bool run_q2_candidate(const void *weights, const float *hidden,
+                             float *mid, unsigned threads, cudaStream_t stream,
+                             cudaEvent_t start, cudaEvent_t stop,
+                             std::vector<double> *samples) {
+    char error[256];
+    if (!q38_moe_cuda_q2_gate_up_candidate(
+            weights, hidden, mid, threads, stream, error, sizeof(error)))
+        return fail(error);
+    if (cudaStreamSynchronize(stream) != cudaSuccess)
+        return fail("Q2 candidate warmup failed");
+    for (int i = 0; i < 20; ++i) {
+        cudaEventRecord(start, stream);
+        if (!q38_moe_cuda_q2_gate_up_candidate(
+                weights, hidden, mid, threads, stream, error, sizeof(error)))
             return fail(error);
         cudaEventRecord(stop, stream);
         cudaEventSynchronize(stop);
@@ -276,6 +298,31 @@ int main(int argc, char **argv) {
                                 std::fabs(actual_output[i] - expected_output[i]));
     summarize(&gate_samples);
     summarize(&down_samples);
+    if (qtype == Q38_QUANT_Q2_K) {
+        for (unsigned threads : {128u, 256u, 512u}) {
+            std::vector<double> candidate_samples;
+            if (!run_q2_candidate(device_gate, device_hidden, device_mid,
+                                  threads, stream, start, stop,
+                                  &candidate_samples))
+                return 1;
+            std::vector<float> candidate_mid(expected_mid.size());
+            cudaMemcpy(candidate_mid.data(), device_mid,
+                       candidate_mid.size() * sizeof(float),
+                       cudaMemcpyDeviceToHost);
+            float candidate_error = 0.0f;
+            for (size_t i = 0; i < candidate_mid.size(); ++i)
+                candidate_error = std::max(
+                    candidate_error,
+                    std::fabs(candidate_mid[i] - expected_mid[i]));
+            summarize(&candidate_samples);
+            std::printf(
+                "{\"q2_candidate\":{\"threads\":%u,\"median_ms\":%.6f,"
+                "\"p95_ms\":%.6f,\"effective_GBps\":%.6f,"
+                "\"correctness_max_abs\":%.9g}}\n",
+                threads, candidate_samples[10], candidate_samples[19],
+                gate_bytes / (candidate_samples[10] * 1e6), candidate_error);
+        }
+    }
     const double gate_bytes_per_call = (double)gate_bytes;
     const double down_bytes_per_call = (double)down_bytes;
     std::printf(
@@ -291,11 +338,11 @@ int main(int argc, char **argv) {
         path, capture.layer, qtype == Q38_QUANT_Q2_K ? "Q2_K" : "Q4_K",
         (size_t)(2 * Q38_MOE_INTERMEDIATE),
         (size_t)Q38_MOE_HIDDEN,
-        (unsigned long long)gate_bytes, gate_samples[5], gate_samples[9],
-        gate_bytes_per_call / (gate_samples[5] * 1e6),
+        (unsigned long long)gate_bytes, gate_samples[10], gate_samples[19],
+        gate_bytes_per_call / (gate_samples[10] * 1e6),
         mid_error, (size_t)Q38_MOE_HIDDEN, (size_t)Q38_MOE_INTERMEDIATE,
-        (unsigned long long)down_bytes, down_samples[5], down_samples[9],
-        down_bytes_per_call / (down_samples[5] * 1e6),
+        (unsigned long long)down_bytes, down_samples[10], down_samples[19],
+        down_bytes_per_call / (down_samples[10] * 1e6),
         output_error, capture.layer);
 
     cudaFree(device_gate); cudaFree(device_down); cudaFree(device_hidden);
