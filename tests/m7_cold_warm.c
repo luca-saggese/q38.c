@@ -150,6 +150,23 @@ static void telemetry_observer(const q38_forward_cuda_telemetry *telemetry,
     q38_profile_record_cuda_telemetry((q38_profile *)user, telemetry);
 }
 
+static size_t routed_selected[Q38_MODEL_LAYERS];
+
+static bool route_trace(uint32_t layer, const uint16_t *experts,
+                        const float *weights, size_t count, void *user,
+                        char *error, size_t error_len) {
+    (void)experts;
+    (void)weights;
+    (void)user;
+    (void)error;
+    (void)error_len;
+    if (layer < Q38_MODEL_LAYERS) {
+        routed_selected[layer] = count;
+        q38_forward_cuda_record_route(backend_cuda, layer, count);
+    }
+    return true;
+}
+
 static bool stage_trace(const q38_forward_stage_usage *u, void *user,
                         char *error, size_t error_len) {
     stages *s = (stages *)user;
@@ -241,8 +258,11 @@ int main(int argc, char **argv) {
     hidden_capture = fopen("artifacts/post_m8_opt/shared_hidden_layer0.bin", "wb");
     if (!hidden_capture) return 1;
     const uint32_t token = 9419;
-    for (int run = 1; run <= 6; ++run) {
+    const bool diagnostic_only = getenv("Q38_Q2_DIAGNOSTIC") != NULL;
+    const int run_count = diagnostic_only ? 2 : 6;
+    for (int run = 1; run <= run_count; ++run) {
         stages s = {0};
+        memset(routed_selected, 0, sizeof(routed_selected));
         q38_profile_destroy(&profile);
         q38_profile_init(&profile);
         q38_profile_set_token_count(&profile, 1);
@@ -253,10 +273,16 @@ int main(int argc, char **argv) {
         d.stage_trace = stage_trace;
         d.backend_context = backend_context;
         d.moe_trace = capture_moe_hidden;
+        d.route_trace = route_trace;
         d.trace_user = &s;
         float *logits = run == 1 ? logits1 : logits2;
         q38_forward_cuda_residency_stats before, after;
         q38_forward_cuda_get_residency_stats(cuda, &before);
+        uint64_t before_fast[Q38_MODEL_LAYERS] = {0};
+        uint64_t before_legacy[Q38_MODEL_LAYERS] = {0};
+        for (uint32_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer)
+            q38_forward_cuda_get_expert_layer_calls(
+                cuda, layer, &before_fast[layer], &before_legacy[layer]);
         double start = now_ms();
         bool ok = q38_forward_full_with_matrix_backend(
             model, &weights, &state, &token, 1, logits, 248320, &d,
@@ -272,6 +298,56 @@ int main(int argc, char **argv) {
         gpu_argmax_ms = argmax_stats.gpu_argmax_kernel_ms;
         double wall = now_ms() - start;
         q38_forward_cuda_get_residency_stats(cuda, &after);
+        if (run == 2) {
+            printf("{\"q2_expert_diagnostic\":{"
+                   "\"routed_layers_executed\":%" PRIu64
+                   ",\"selected_experts_total\":%" PRIu64
+                   ",\"q2_gate_up_fast_calls\":%" PRIu64
+                   ",\"q2_gate_up_legacy_calls\":%" PRIu64
+                   ",\"q2_gate_up_fallback_calls\":%" PRIu64
+                   ",\"q2_down_calls\":%" PRIu64
+                   ",\"q2_gate_up_fast_total_kernel_ms\":%.6f"
+                   ",\"q2_gate_up_legacy_total_kernel_ms\":%.6f"
+                   ",\"q2_down_total_kernel_ms\":%.6f"
+                   ",\"expert_backend_total_wall_ms\":%.6f"
+                   ",\"expert_host_sync_count\":%" PRIu64
+                   ",\"expert_H2D_bytes\":%" PRIu64
+                   ",\"expert_D2H_bytes\":%" PRIu64 "}}\n",
+                   after.routed_layers_executed -
+                       before.routed_layers_executed,
+                   after.selected_experts_total -
+                       before.selected_experts_total,
+                   after.q2_gate_up_fast_calls -
+                       before.q2_gate_up_fast_calls,
+                   after.q2_gate_up_legacy_calls -
+                       before.q2_gate_up_legacy_calls,
+                   after.q2_gate_up_fallback_calls -
+                       before.q2_gate_up_fallback_calls,
+                   after.q2_down_calls - before.q2_down_calls,
+                   after.q2_gate_up_fast_total_kernel_ms -
+                       before.q2_gate_up_fast_total_kernel_ms,
+                   after.q2_gate_up_legacy_total_kernel_ms -
+                       before.q2_gate_up_legacy_total_kernel_ms,
+                   after.q2_down_total_kernel_ms -
+                       before.q2_down_total_kernel_ms,
+                   after.expert_backend_total_wall_ms -
+                       before.expert_backend_total_wall_ms,
+                   after.expert_host_sync_count - before.expert_host_sync_count,
+                   after.expert_H2D_bytes - before.expert_H2D_bytes,
+                   after.expert_D2H_bytes - before.expert_D2H_bytes);
+            for (uint32_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
+                uint64_t fast = 0, legacy = 0;
+                q38_forward_cuda_get_expert_layer_calls(
+                    cuda, layer, &fast, &legacy);
+                fast -= before_fast[layer];
+                legacy -= before_legacy[layer];
+                if (routed_selected[layer] || fast || legacy)
+                    printf("{\"layer\":%u,\"selected_count\":%zu,"
+                           "\"fast_gate_up_calls\":%" PRIu64
+                           ",\"legacy_gate_up_calls\":%" PRIu64 "}\n",
+                           layer, routed_selected[layer], fast, legacy);
+            }
+        }
         size_t best = argmax(logits, 248320);
         char *telemetry = calloc(8 * 1024 * 1024, 1);
         if (!telemetry || !q38_profile_json(&profile, telemetry, 8 * 1024 * 1024)) {

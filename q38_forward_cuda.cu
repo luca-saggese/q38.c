@@ -92,6 +92,21 @@ struct q38_forward_cuda_context {
     float gpu_argmax_kernel_ms;
     q38_forward_cuda_residency_progress_observer progress_observer;
     void *progress_observer_user;
+    uint64_t routed_layers_executed;
+    uint64_t selected_experts_total;
+    uint64_t q2_gate_up_fast_calls;
+    uint64_t q2_gate_up_legacy_calls;
+    uint64_t q2_gate_up_fallback_calls;
+    uint64_t q2_down_calls;
+    double q2_gate_up_fast_total_kernel_ms;
+    double q2_gate_up_legacy_total_kernel_ms;
+    double q2_down_total_kernel_ms;
+    double expert_backend_total_wall_ms;
+    uint64_t expert_host_sync_count;
+    uint64_t expert_H2D_bytes;
+    uint64_t expert_D2H_bytes;
+    uint64_t expert_fast_calls_by_layer[Q38_MODEL_LAYERS];
+    uint64_t expert_legacy_calls_by_layer[Q38_MODEL_LAYERS];
 };
 
 static bool fail(char *error, size_t error_len, const char *message) {
@@ -277,11 +292,19 @@ extern "C" bool q38_forward_cuda_expert_backend(
     const double host_started = host_now_ms();
     cudaEvent_t upload_start = NULL, upload_stop = NULL;
     cudaEvent_t kernel_start = NULL, kernel_stop = NULL;
+    cudaEvent_t gate_start = NULL, gate_stop = NULL;
+    cudaEvent_t down_start = NULL, down_stop = NULL;
     if (cudaEventCreate(&upload_start) != cudaSuccess ||
         cudaEventCreate(&upload_stop) != cudaSuccess ||
         cudaEventCreate(&kernel_start) != cudaSuccess ||
         cudaEventCreate(&kernel_stop) != cudaSuccess)
         return fail(error, error_len, "CUDA telemetry event allocation failed");
+    if (gate_up->type == Q38_QUANT_Q2_K &&
+        (cudaEventCreate(&gate_start) != cudaSuccess ||
+         cudaEventCreate(&gate_stop) != cudaSuccess ||
+         cudaEventCreate(&down_start) != cudaSuccess ||
+         cudaEventCreate(&down_stop) != cudaSuccess))
+        return fail(error, error_len, "CUDA expert event allocation failed");
     const uint64_t allocation_before = context->cuda_allocations;
     if ((!use_persistent &&
         !ensure_buffer(&context->device_weights, &context->device_weights_bytes,
@@ -336,12 +359,29 @@ extern "C" bool q38_forward_cuda_expert_backend(
         context->non_ple_upload_bytes_per_token += gate_bytes + down_bytes;
     if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert execution failed");
-    const bool launched = (gate_up->type == 10
-        ? q38_moe_cuda_expert_q2_workspace
-        : q38_moe_cuda_expert_q4_workspace)(
+    bool launched;
+    if (gate_up->type == Q38_QUANT_Q2_K) {
+        if (cudaEventRecord(gate_start, context->stream) != cudaSuccess ||
+            !q38_moe_cuda_q2_gate_up(
+                gate_storage, context->device_input, context->device_moe_mid,
+                context->stream, error, error_len) ||
+            cudaEventRecord(gate_stop, context->stream) != cudaSuccess ||
+            cudaEventRecord(down_start, context->stream) != cudaSuccess ||
+            !q38_moe_cuda_q2_down(
+                down_storage, context->device_moe_mid, context->device_output,
+                context->stream, error, error_len) ||
+            cudaEventRecord(down_stop, context->stream) != cudaSuccess) {
+            ++context->q2_gate_up_fallback_calls;
+            launched = false;
+        } else {
+            launched = true;
+        }
+    } else {
+        launched = q38_moe_cuda_expert_q4_workspace(
             gate_storage, down_storage, context->device_input,
             context->device_output, context->device_moe_mid, context->stream,
             error, error_len);
+    }
     if (!launched)
         return false;
     if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess ||
@@ -350,18 +390,37 @@ extern "C" bool q38_forward_cuda_expert_backend(
         cudaStreamSynchronize(context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert execution failed");
     ++context->cuda_synchronizations;
+    const double expert_wall_ms = host_now_ms() - host_started;
+    context->expert_backend_total_wall_ms += expert_wall_ms;
+    ++context->expert_host_sync_count;
+    context->expert_H2D_bytes += 2560u * sizeof(float);
+    context->expert_D2H_bytes += 2560u * sizeof(float);
+    if (gate_up->type == Q38_QUANT_Q2_K) {
+        ++context->q2_gate_up_fast_calls;
+        ++context->q2_down_calls;
+        if (context->current_layer < Q38_MODEL_LAYERS)
+            ++context->expert_fast_calls_by_layer[context->current_layer];
+        context->q2_gate_up_fast_total_kernel_ms +=
+            event_elapsed(gate_start, gate_stop);
+        context->q2_down_total_kernel_ms +=
+            event_elapsed(down_start, down_stop);
+    }
     emit_telemetry(context, gate_up, gate_rows, gate_cols, gate_bytes,
 
                    use_persistent, !use_persistent, use_persistent ? 0 : gate_bytes,
                    event_elapsed(upload_start, upload_stop),
                    event_elapsed(kernel_start, kernel_stop),
-                   host_now_ms() - host_started,
+                   expert_wall_ms,
                    context->cuda_allocations - allocation_before, 1);
     emit_telemetry(context, down, down_rows, down_cols, down_bytes,
                    use_persistent, !use_persistent, use_persistent ? 0 : down_bytes, 0.0f, 0.0f, 0.0,
                    0, 0);
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    if (gate_start) cudaEventDestroy(gate_start);
+    if (gate_stop) cudaEventDestroy(gate_stop);
+    if (down_start) cudaEventDestroy(down_start);
+    if (down_stop) cudaEventDestroy(down_stop);
     return true;
 }
 
@@ -660,6 +719,46 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->non_ple_upload_bytes_per_token =
         context->non_ple_upload_bytes_per_token;
     stats->gpu_argmax_kernel_ms = context->gpu_argmax_kernel_ms;
+    stats->routed_layers_executed = context->routed_layers_executed;
+    stats->selected_experts_total = context->selected_experts_total;
+    stats->q2_gate_up_fast_calls = context->q2_gate_up_fast_calls;
+    stats->q2_gate_up_legacy_calls = context->q2_gate_up_legacy_calls;
+    stats->q2_gate_up_fallback_calls = context->q2_gate_up_fallback_calls;
+    stats->q2_down_calls = context->q2_down_calls;
+    stats->q2_gate_up_fast_total_kernel_ms =
+        context->q2_gate_up_fast_total_kernel_ms;
+    stats->q2_gate_up_legacy_total_kernel_ms =
+        context->q2_gate_up_legacy_total_kernel_ms;
+    stats->q2_down_total_kernel_ms = context->q2_down_total_kernel_ms;
+    stats->expert_backend_total_wall_ms =
+        context->expert_backend_total_wall_ms;
+    stats->expert_host_sync_count = context->expert_host_sync_count;
+    stats->expert_H2D_bytes = context->expert_H2D_bytes;
+    stats->expert_D2H_bytes = context->expert_D2H_bytes;
+    memcpy(stats->expert_fast_calls_by_layer,
+           context->expert_fast_calls_by_layer,
+           sizeof(stats->expert_fast_calls_by_layer));
+    memcpy(stats->expert_legacy_calls_by_layer,
+           context->expert_legacy_calls_by_layer,
+           sizeof(stats->expert_legacy_calls_by_layer));
+}
+
+extern "C" void q38_forward_cuda_record_route(
+    q38_forward_cuda_context *context, uint32_t layer, size_t selected_count) {
+    if (!context || layer >= Q38_MODEL_LAYERS) return;
+    ++context->routed_layers_executed;
+    context->selected_experts_total += selected_count;
+}
+
+extern "C" void q38_forward_cuda_get_expert_layer_calls(
+    const q38_forward_cuda_context *context, uint32_t layer,
+    uint64_t *fast_calls, uint64_t *legacy_calls) {
+    if (fast_calls) *fast_calls = 0;
+    if (legacy_calls) *legacy_calls = 0;
+    if (!context || layer >= Q38_MODEL_LAYERS) return;
+    if (fast_calls) *fast_calls = context->expert_fast_calls_by_layer[layer];
+    if (legacy_calls)
+        *legacy_calls = context->expert_legacy_calls_by_layer[layer];
 }
 
 extern "C" void *

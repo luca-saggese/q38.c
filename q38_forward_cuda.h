@@ -67,6 +67,21 @@ typedef struct {
     uint64_t non_ple_residency_miss;
     size_t non_ple_upload_bytes_per_token;
     float gpu_argmax_kernel_ms;
+    uint64_t routed_layers_executed;
+    uint64_t selected_experts_total;
+    uint64_t q2_gate_up_fast_calls;
+    uint64_t q2_gate_up_legacy_calls;
+    uint64_t q2_gate_up_fallback_calls;
+    uint64_t q2_down_calls;
+    double q2_gate_up_fast_total_kernel_ms;
+    double q2_gate_up_legacy_total_kernel_ms;
+    double q2_down_total_kernel_ms;
+    double expert_backend_total_wall_ms;
+    uint64_t expert_host_sync_count;
+    uint64_t expert_H2D_bytes;
+    uint64_t expert_D2H_bytes;
+    uint64_t expert_fast_calls_by_layer[Q38_MODEL_LAYERS];
+    uint64_t expert_legacy_calls_by_layer[Q38_MODEL_LAYERS];
 } q38_forward_cuda_residency_stats;
 
 q38_forward_cuda_context *q38_forward_cuda_context_create(char *error,
@@ -94,6 +109,11 @@ bool q38_forward_cuda_prepare_lm_head(
 void q38_forward_cuda_get_residency_stats(
     const q38_forward_cuda_context *context,
     q38_forward_cuda_residency_stats *stats);
+void q38_forward_cuda_record_route(
+    q38_forward_cuda_context *context, uint32_t layer, size_t selected_count);
+void q38_forward_cuda_get_expert_layer_calls(
+    const q38_forward_cuda_context *context, uint32_t layer,
+    uint64_t *fast_calls, uint64_t *legacy_calls);
 
 bool q38_forward_cuda_matvec_backend(
     const q38_gguf *model, const q38_tensor *tensor, size_t row,
