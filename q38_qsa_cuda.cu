@@ -23,9 +23,12 @@ __global__ static void project_kernel(const uint16_t *weights, size_t rows,
     const size_t token = index / rows;
     const size_t row = index % rows;
     float sum = 0.0f;
-    for (size_t col = 0; col < cols; ++col)
-        sum += bf16_to_float(weights[row * cols + col]) *
-               input[token * cols + col];
+    for (size_t col = 0; col < cols; ++col) {
+        const float product = __fmul_rn(
+            bf16_to_float(weights[row * cols + col]),
+            input[token * cols + col]);
+        sum = __fadd_rn(sum, product);
+    }
     output[index] = sum;
 }
 

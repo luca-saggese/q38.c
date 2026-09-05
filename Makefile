@@ -35,7 +35,7 @@ C_OBJS := q38.o q38_gguf.o q38_memory.o q38_platform.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
 	q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o \
 	q38_profile.o q38_residency.o
-CUDA_OBJS := q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
+CUDA_OBJS := q38_cuda.o q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o
 Q38_OBJS := $(C_OBJS) $(CUDA_OBJS) q38_topk_cuda.o
 
@@ -168,9 +168,14 @@ q38_cuda_primitives.o: q38_cuda_primitives.cu q38_cuda_primitives.h q38_quant.h
 	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_cuda_primitives.cu
 
 q38_forward_cuda.o: q38_forward_cuda.cu q38_forward_cuda.h \
-		q38_forward.h q38_cuda_primitives.h q38_gdn.h
+		q38_forward.h q38_cuda_primitives.h q38_gdn.h q38_qsa_cuda.h \
+		q38_qsa_candidate.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
 	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_forward_cuda.cu
+
+libq38_qsa_candidate.so: q38_qsa_candidate.cu q38_qsa_candidate.h
+	$(NVCC) $(NVCCFLAGS) -cudart shared -Xcompiler -fPIC -shared -o $@ \
+		q38_qsa_candidate.cu $(CUDA_LDLIBS)
 
 # --- Executable -----------------------------------------------------------
 q38: $(Q38_OBJS)
@@ -276,14 +281,44 @@ $(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_profile.o \
 		q38_forward_cuda.o q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o \
-		q38_profile_cuda.o q38_residency.o q38_topk_cuda.o
+		q38_qsa_cuda.o q38_profile_cuda.o q38_residency.o q38_topk_cuda.o
 	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_cold_warm.c \
 		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o q38_ple.o \
 		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
 		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_profile.o q38_forward_cuda.o \
 		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
-		q38_residency.o q38_topk_cuda.o \
+		q38_qsa_cuda.o q38_residency.o q38_topk_cuda.o \
 		$(CUDA_LDLIBS) -lm
+
+$(TEST_DIR)/test_qsa_qkv_direct: $(TEST_DIR)/test_qsa_qkv_direct.c \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o \
+		q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
+		q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
+		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
+		q38_state.o q38_session.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
+		q38_rope_ref.o
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/test_qsa_qkv_direct.c \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o \
+		q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
+		q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
+		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
+		q38_state.o q38_session.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
+		q38_rope_ref.o $(CUDA_LDLIBS) -lm
+
+q38_dev_worker: $(TEST_DIR)/q38_dev_worker.c \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o \
+		q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
+		q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
+		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
+		q38_state.o q38_session.o q38_tokenizer.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
+		q38_rope_ref.o
+	$(NVCC) $(NVCCFLAGS) -cudart shared -I. -o $@ $(TEST_DIR)/q38_dev_worker.c \
+		q38_gguf.o q38_forward.o q38_weights.o q38_model_config.o \
+		q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
+		q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
+		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
+		q38_state.o q38_session.o q38_tokenizer.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
+		q38_rope_ref.o $(CUDA_LDLIBS) -ldl -lm
 
 m7-cold-warm: $(TEST_DIR)/m7_cold_warm
 	@./$(TEST_DIR)/m7_cold_warm $(M7_MODEL)

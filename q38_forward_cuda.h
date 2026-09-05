@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "q38_forward.h"
+#include "q38_qsa_candidate.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,6 +51,10 @@ typedef struct {
     bool all_non_ple_resident;
     size_t persistent_resident_bytes;
     uint64_t persistent_resident_tensors;
+    uint64_t persistent_pointer_fingerprint;
+    uint64_t cuda_context_identity;
+    uint64_t cuda_stream_identity;
+    uint64_t workspace_pointer_fingerprint;
     uint64_t persistent_hits;
     uint64_t persistent_misses;
     size_t persistent_expected_bytes;
@@ -76,8 +81,10 @@ typedef struct {
     double q2_gate_up_fast_total_kernel_ms;
     double q2_gate_up_legacy_total_kernel_ms;
     double q2_down_total_kernel_ms;
+    double q2_weighted_reduce_total_kernel_ms;
     double expert_backend_total_wall_ms;
     uint64_t expert_host_sync_count;
+    uint64_t expert_kernel_launches;
     uint64_t expert_H2D_bytes;
     uint64_t expert_D2H_bytes;
     uint64_t expert_fast_calls_by_layer[Q38_MODEL_LAYERS];
@@ -109,6 +116,8 @@ bool q38_forward_cuda_prepare_lm_head(
 void q38_forward_cuda_get_residency_stats(
     const q38_forward_cuda_context *context,
     q38_forward_cuda_residency_stats *stats);
+void q38_forward_cuda_set_qsa_candidate(
+    q38_forward_cuda_context *context, q38_qsa_candidate_fn candidate);
 void q38_forward_cuda_record_route(
     q38_forward_cuda_context *context, uint32_t layer, size_t selected_count);
 void q38_forward_cuda_get_expert_layer_calls(
@@ -124,6 +133,13 @@ bool q38_forward_cuda_matrix_backend(
     const q38_gguf *model, const q38_tensor *tensor, const float *input,
     size_t rows, size_t cols, float *output, void *user, char *error,
     size_t error_len);
+
+bool q38_forward_cuda_qsa_qkv_backend(
+    const q38_gguf *model, const q38_tensor *q_proj,
+    const q38_tensor *k_proj, const q38_tensor *v_proj,
+    const float *host_input, size_t token_count, float *host_q,
+    float *host_k, float *host_v, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len);
 
 /* Reduce the most recent device-side matrix result without downloading it. */
 bool q38_forward_cuda_greedy_argmax(q38_forward_cuda_context *context,

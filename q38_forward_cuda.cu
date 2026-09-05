@@ -3,6 +3,7 @@
 #include "q38_cuda_primitives.h"
 #include "q38_gdn.h"
 #include "q38_moe_cuda.h"
+#include "q38_qsa_cuda.h"
 #include "q38_topk_cuda.h"
 
 #include <cuda_runtime.h>
@@ -51,6 +52,12 @@ struct q38_forward_cuda_context {
     size_t device_moe_mid_bytes;
     float *device_moe_accum;
     size_t device_moe_accum_bytes;
+    float *device_qsa_input;
+    size_t device_qsa_input_bytes;
+    float *device_qsa_output;
+    size_t device_qsa_output_bytes;
+    float *host_qsa_output;
+    size_t host_qsa_output_bytes;
     void *lm_head_device_weights;
     size_t lm_head_device_weights_bytes;
     const void *lm_head_host_data;
@@ -62,6 +69,7 @@ struct q38_forward_cuda_context {
     uint64_t cuda_allocations;
     uint64_t cuda_synchronizations;
     cudaStream_t stream;
+    q38_qsa_candidate_fn qsa_candidate;
     q38_forward_cuda_allocation_observer allocation_observer;
     void *allocation_observer_user;
     q38_forward_cuda_telemetry_observer telemetry_observer;
@@ -103,8 +111,10 @@ struct q38_forward_cuda_context {
     double q2_gate_up_fast_total_kernel_ms;
     double q2_gate_up_legacy_total_kernel_ms;
     double q2_down_total_kernel_ms;
+    double q2_weighted_reduce_total_kernel_ms;
     double expert_backend_total_wall_ms;
     uint64_t expert_host_sync_count;
+    uint64_t expert_kernel_launches;
     uint64_t expert_H2D_bytes;
     uint64_t expert_D2H_bytes;
     uint64_t expert_fast_calls_by_layer[Q38_MODEL_LAYERS];
@@ -481,6 +491,21 @@ extern "C" bool q38_forward_cuda_moe_layer_q2_backend(
         return fail(error, error_len, "CUDA Q2 MoE layer allocation failed");
 
     const double started = host_now_ms();
+    cudaEvent_t gate_start[Q38_MOE_TOP_K] = {};
+    cudaEvent_t gate_stop[Q38_MOE_TOP_K] = {};
+    cudaEvent_t down_start[Q38_MOE_TOP_K] = {};
+    cudaEvent_t down_stop[Q38_MOE_TOP_K] = {};
+    cudaEvent_t reduce_start[Q38_MOE_TOP_K] = {};
+    cudaEvent_t reduce_stop[Q38_MOE_TOP_K] = {};
+    for (unsigned k = 0; k < Q38_MOE_TOP_K; ++k) {
+        if (cudaEventCreate(&gate_start[k]) != cudaSuccess ||
+            cudaEventCreate(&gate_stop[k]) != cudaSuccess ||
+            cudaEventCreate(&down_start[k]) != cudaSuccess ||
+            cudaEventCreate(&down_stop[k]) != cudaSuccess ||
+            cudaEventCreate(&reduce_start[k]) != cudaSuccess ||
+            cudaEventCreate(&reduce_stop[k]) != cudaSuccess)
+            return fail(error, error_len, "CUDA Q2 MoE profiling event allocation failed");
+    }
     if (cudaMemcpyAsync(context->device_input, host_input,
                         Q38_MOE_HIDDEN * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
@@ -499,16 +524,23 @@ extern "C" bool q38_forward_cuda_moe_layer_q2_backend(
         const void *down_e =
             (const unsigned char *)down_exec->ptr +
             (size_t)e * 640u * down_row_bytes;
-        if (!q38_moe_cuda_q2_gate_up(
+        if (cudaEventRecord(gate_start[k], context->stream) != cudaSuccess ||
+            !q38_moe_cuda_q2_gate_up(
                 gate_e, context->device_input, context->device_moe_mid,
                 context->stream, error, error_len) ||
+            cudaEventRecord(gate_stop[k], context->stream) != cudaSuccess ||
+            cudaEventRecord(down_start[k], context->stream) != cudaSuccess ||
             !q38_moe_cuda_q2_down(
                 down_e, context->device_moe_mid, context->device_output,
                 context->stream, error, error_len) ||
+            cudaEventRecord(down_stop[k], context->stream) != cudaSuccess ||
+            cudaEventRecord(reduce_start[k], context->stream) != cudaSuccess ||
             !q38_moe_cuda_accumulate_weighted(
                 context->device_moe_accum, context->device_output,
                 route->weight[k], context->stream, error, error_len))
             return false;
+        if (cudaEventRecord(reduce_stop[k], context->stream) != cudaSuccess)
+            return fail(error, error_len, "CUDA Q2 MoE reduction event failed");
     }
 
     if (cudaMemcpyAsync(host_output, context->device_moe_accum,
@@ -524,10 +556,25 @@ extern "C" bool q38_forward_cuda_moe_layer_q2_backend(
     context->expert_D2H_bytes += Q38_MOE_HIDDEN * sizeof(float);
     context->q2_gate_up_fast_calls += Q38_MOE_TOP_K;
     context->q2_down_calls += Q38_MOE_TOP_K;
+    context->expert_kernel_launches += 3u * Q38_MOE_TOP_K;
     context->persistent_hits += 2;
     if (context->current_layer < Q38_MODEL_LAYERS)
         context->expert_fast_calls_by_layer[context->current_layer] +=
             Q38_MOE_TOP_K;
+    for (unsigned k = 0; k < Q38_MOE_TOP_K; ++k) {
+        context->q2_gate_up_fast_total_kernel_ms +=
+            event_elapsed(gate_start[k], gate_stop[k]);
+        context->q2_down_total_kernel_ms +=
+            event_elapsed(down_start[k], down_stop[k]);
+        context->q2_weighted_reduce_total_kernel_ms +=
+            event_elapsed(reduce_start[k], reduce_stop[k]);
+        cudaEventDestroy(gate_start[k]);
+        cudaEventDestroy(gate_stop[k]);
+        cudaEventDestroy(down_start[k]);
+        cudaEventDestroy(down_stop[k]);
+        cudaEventDestroy(reduce_start[k]);
+        cudaEventDestroy(reduce_stop[k]);
+    }
     return true;
 }
 
@@ -735,6 +782,9 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_aux);
     cudaFree(context->device_moe_mid);
     cudaFree(context->device_moe_accum);
+    cudaFree(context->device_qsa_input);
+    cudaFree(context->device_qsa_output);
+    free(context->host_qsa_output);
     if (!context->lm_head_uses_persistent)
         cudaFree(context->lm_head_device_weights);
     for (size_t i = 0; i < context->persistent_count; ++i)
@@ -808,6 +858,36 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->all_non_ple_resident = context->all_non_ple_resident;
     stats->persistent_resident_bytes = context->persistent_bytes;
     stats->persistent_resident_tensors = context->persistent_count;
+    uint64_t pointer_hash = UINT64_C(1469598103934665603);
+    for (size_t i = 0; i < context->persistent_count; ++i) {
+        const uintptr_t pointer = (uintptr_t)context->persistent[i].device;
+        for (size_t byte = 0; byte < sizeof(pointer); ++byte)
+            pointer_hash = (pointer_hash ^
+                            (uint8_t)(pointer >> (byte * 8))) *
+                           UINT64_C(1099511628211);
+    }
+    stats->persistent_pointer_fingerprint = pointer_hash;
+    stats->cuda_context_identity = (uint64_t)(uintptr_t)context;
+    stats->cuda_stream_identity = (uint64_t)(uintptr_t)context->stream;
+    uint64_t workspace_hash = UINT64_C(1469598103934665603);
+    const uintptr_t workspace_pointers[] = {
+        (uintptr_t)context->device_input,
+        (uintptr_t)context->device_output,
+        (uintptr_t)context->device_moe_mid,
+        (uintptr_t)context->device_moe_accum,
+        (uintptr_t)context->device_qsa_input,
+        (uintptr_t)context->device_qsa_output,
+        (uintptr_t)context->host_qsa_output,
+    };
+    for (size_t i = 0; i < sizeof(workspace_pointers) /
+                           sizeof(workspace_pointers[0]); ++i) {
+        for (size_t byte = 0; byte < sizeof(workspace_pointers[i]); ++byte)
+            workspace_hash =
+                (workspace_hash ^
+                 (uint8_t)(workspace_pointers[i] >> (byte * 8))) *
+                UINT64_C(1099511628211);
+    }
+    stats->workspace_pointer_fingerprint = workspace_hash;
     stats->persistent_hits = context->persistent_hits;
     stats->persistent_misses = context->persistent_misses;
     stats->persistent_expected_bytes = context->persistent_expected_bytes;
@@ -838,9 +918,12 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->q2_gate_up_legacy_total_kernel_ms =
         context->q2_gate_up_legacy_total_kernel_ms;
     stats->q2_down_total_kernel_ms = context->q2_down_total_kernel_ms;
+    stats->q2_weighted_reduce_total_kernel_ms =
+        context->q2_weighted_reduce_total_kernel_ms;
     stats->expert_backend_total_wall_ms =
         context->expert_backend_total_wall_ms;
     stats->expert_host_sync_count = context->expert_host_sync_count;
+    stats->expert_kernel_launches = context->expert_kernel_launches;
     stats->expert_H2D_bytes = context->expert_H2D_bytes;
     stats->expert_D2H_bytes = context->expert_D2H_bytes;
     memcpy(stats->expert_fast_calls_by_layer,
@@ -849,6 +932,11 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     memcpy(stats->expert_legacy_calls_by_layer,
            context->expert_legacy_calls_by_layer,
            sizeof(stats->expert_legacy_calls_by_layer));
+}
+
+extern "C" void q38_forward_cuda_set_qsa_candidate(
+    q38_forward_cuda_context *context, q38_qsa_candidate_fn candidate) {
+    if (context) context->qsa_candidate = candidate;
 }
 
 extern "C" void q38_forward_cuda_record_route(
@@ -1157,6 +1245,107 @@ extern "C" bool q38_forward_cuda_matrix_backend(
                    context->cuda_allocations - allocation_before, 1);
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_qsa_qkv_backend(
+    const q38_gguf *model, const q38_tensor *q_proj,
+    const q38_tensor *k_proj, const q38_tensor *v_proj,
+    const float *host_input, size_t token_count, float *host_q,
+    float *host_k, float *host_v, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    size_t q_rows, q_cols, k_rows, k_cols, v_rows, v_cols;
+    if (!context || !model || !q_proj || !k_proj || !v_proj ||
+        !host_input || !token_count || !host_q || !host_k || !host_v ||
+        !timing || !tensor_shape(q_proj, &q_rows, &q_cols) ||
+        !tensor_shape(k_proj, &k_rows, &k_cols) ||
+        !tensor_shape(v_proj, &v_rows, &v_cols) ||
+        q_rows != 12288 || k_rows != 512 || v_rows != 512 ||
+        q_cols != 2560 || k_cols != 2560 || v_cols != 2560 ||
+        q_proj->type != 30 || k_proj->type != 30 || v_proj->type != 30)
+        return fail(error, error_len, "invalid resident QSA QKV geometry");
+    if (token_count > SIZE_MAX / q_rows ||
+        token_count > SIZE_MAX / k_rows ||
+        token_count > SIZE_MAX / v_rows ||
+        token_count * q_rows > SIZE_MAX - token_count * k_rows ||
+        token_count * (q_rows + k_rows) >
+            SIZE_MAX - token_count * v_rows)
+        return fail(error, error_len, "QSA QKV size overflow");
+
+    q38_exec_tensor *q_exec = exec_tensor_for(context, model, q_proj);
+    q38_exec_tensor *k_exec = exec_tensor_for(context, model, k_proj);
+    q38_exec_tensor *v_exec = exec_tensor_for(context, model, v_proj);
+    if (!exec_tensor_is_resident(q_exec, q_proj) ||
+        !exec_tensor_is_resident(k_exec, k_proj) ||
+        !exec_tensor_is_resident(v_exec, v_proj))
+        return fail(error, error_len,
+                    "QSA QKV tensor is not resident on the CUDA path");
+
+    const size_t q_elements = token_count * q_rows;
+    const size_t k_elements = token_count * k_rows;
+    const size_t v_elements = token_count * v_rows;
+    const size_t output_elements = q_elements + k_elements + v_elements;
+    const size_t input_bytes = token_count * q_cols * sizeof(float);
+    const size_t output_bytes = output_elements * sizeof(float);
+    const uint64_t allocations_before = context->cuda_allocations;
+    const double started = host_now_ms();
+    if (!ensure_buffer((void **)&context->device_qsa_input,
+                       &context->device_qsa_input_bytes, input_bytes,
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&context->device_qsa_output,
+                       &context->device_qsa_output_bytes, output_bytes,
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
+        return fail(error, error_len, "QSA QKV CUDA workspace allocation failed");
+    if (context->host_qsa_output_bytes < output_bytes) {
+        float *grown = (float *)realloc(context->host_qsa_output, output_bytes);
+        if (!grown)
+            return fail(error, error_len,
+                        "QSA QKV host staging allocation failed");
+        context->host_qsa_output = grown;
+        context->host_qsa_output_bytes = output_bytes;
+        ++timing->allocations;
+    }
+    float *device_q = context->device_qsa_output;
+    float *device_k = device_q + q_elements;
+    float *device_v = device_k + k_elements;
+    if (cudaMemcpyAsync(context->device_qsa_input, host_input, input_bytes,
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        (context->qsa_candidate
+             ? context->qsa_candidate(
+                   q_exec->ptr, k_exec->ptr, v_exec->ptr,
+                   context->device_qsa_input, device_q, device_k, device_v,
+                   token_count, q_cols, (void *)context->stream) != 0
+             : q38_qsa_cuda_project_main(
+                   (const uint16_t *)q_exec->ptr, q_rows,
+                   (const uint16_t *)k_exec->ptr, k_rows,
+                   (const uint16_t *)v_exec->ptr, v_rows, q_cols,
+                   context->device_qsa_input, token_count, device_q, device_k,
+                   device_v, context->stream, error, error_len)) ||
+        cudaMemcpyAsync(context->host_qsa_output, context->device_qsa_output,
+                        output_bytes, cudaMemcpyDeviceToHost,
+                        context->stream) != cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "QSA QKV CUDA execution failed");
+
+    memcpy(host_q, context->host_qsa_output, q_elements * sizeof(float));
+    memcpy(host_k, context->host_qsa_output + q_elements,
+           k_elements * sizeof(float));
+    memcpy(host_v, context->host_qsa_output + q_elements + k_elements,
+           v_elements * sizeof(float));
+    timing->qkv_projection_ms += host_now_ms() - started;
+    timing->allocations += context->cuda_allocations - allocations_before;
+    timing->kernel_launches += 3;
+    timing->host_syncs++;
+    timing->h2d_bytes += input_bytes;
+    timing->d2h_bytes += output_bytes;
+    ++context->persistent_hits;
     return true;
 }
 

@@ -77,6 +77,13 @@ typedef struct {
     uint64_t residency_misses;
 } q38_forward_qsa_timing;
 
+typedef bool (*q38_forward_qsa_qkv_backend)(
+    const q38_gguf *model, const q38_tensor *q_proj,
+    const q38_tensor *k_proj, const q38_tensor *v_proj,
+    const float *host_input, size_t token_count, float *host_q,
+    float *host_k, float *host_v, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len);
+
 /*
  * Run a text-only QSA layer.  Matrices are output-by-input and may point
  * directly into a read-only GGUF mmap.  The graph appends all projections
@@ -201,6 +208,8 @@ typedef struct {
     q38_forward_stage_trace stage_trace;
     q38_forward_backend_context_trace backend_context;
     q38_forward_qsa_timing *qsa_timing;
+    q38_forward_qsa_qkv_backend qsa_qkv_backend;
+    void *qsa_qkv_backend_user;
 } q38_forward_diagnostics;
 
 /* Optional diagnostic row-matvec backend.  It is strict when installed via

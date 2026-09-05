@@ -1,0 +1,58 @@
+{
+  "scope": "QSA Q2 QKV projection only",
+  "model": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+  "layer": 3,
+  "worker": {
+    "all_non_ple_resident": true,
+    "resident_non_ple_bytes": 49465890560,
+    "resident_non_ple_tensors": 1157,
+    "persistent_ple_entries": 0,
+    "weight_upload_bytes": 0,
+    "residency_misses": 0,
+    "cuda_allocations_after_lazy_init": 2
+  },
+  "baseline": {
+    "qkv_ms_observed": "~1.20",
+    "bench_fixture_ms_20": 1.261780,
+    "kernel_launches": 3,
+    "host_syncs": 1,
+    "H2D_bytes": 10240,
+    "D2H_bytes": 53248
+  },
+  "candidate": {
+    "implementation": "one warp per projection output with warp-cooperative loads and canonical ordered accumulation",
+    "qkv_ms_observed_range": [
+      0.680373,
+      0.911703
+    ],
+    "bench_fixture_ms_20": 0.759091,
+    "kernel_launches": 3,
+    "host_syncs": 1,
+    "H2D_bytes": 10240,
+    "D2H_bytes": 53248
+  },
+  "correctness": {
+    "fixture_pass": true,
+    "Q": {
+      "first_mismatch": null,
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "ref_hash": "4a5c5cdfa8140f4e",
+      "candidate_hash": "4a5c5cdfa8140f4e"
+    },
+    "K": {
+      "first_mismatch": null,
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "ref_hash": "19df136cec773369",
+      "candidate_hash": "19df136cec773369"
+    },
+    "V": {
+      "first_mismatch": null,
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "ref_hash": "b032db19de69cb76",
+      "candidate_hash": "b032db19de69cb76"
+    }
+  }
+}

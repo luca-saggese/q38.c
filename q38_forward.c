@@ -195,10 +195,17 @@ static size_t select_prefix(const q38_forward_qsa_weights *w,
     return out;
 }
 
+typedef struct {
+    float *qfull;
+    float *keys;
+    float *values;
+} q38_qsa_precomputed_qkv;
+
 static bool q38_forward_qsa_ref_impl(
     const q38_forward_qsa_weights *w, q38_qsa_state *state,
     const float *hidden, size_t token_count, float *output,
     uint32_t *selected, size_t selected_stride, size_t *selected_counts,
+    const q38_qsa_precomputed_qkv *precomputed,
     q38_forward_qsa_timing *timing, char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
     if (timing) memset(timing, 0, sizeof(*timing));
@@ -222,9 +229,12 @@ static bool q38_forward_qsa_ref_impl(
     const size_t k_rows = w->kv_heads * w->head_dim;
     const size_t index_rows = (w->index_heads + 1) * w->index_dim;
     const size_t attention_width = w->query_heads * w->head_dim;
-    float *qfull = calloc(token_count * q_rows, sizeof(float));
-    float *keys = calloc(token_count * k_rows, sizeof(float));
-    float *values = calloc(token_count * k_rows, sizeof(float));
+    float *qfull = precomputed ? precomputed->qfull :
+        calloc(token_count * q_rows, sizeof(float));
+    float *keys = precomputed ? precomputed->keys :
+        calloc(token_count * k_rows, sizeof(float));
+    float *values = precomputed ? precomputed->values :
+        calloc(token_count * k_rows, sizeof(float));
     float *index = calloc(token_count * index_rows, sizeof(float));
     float *raw_index = calloc(token_count * w->index_dim, sizeof(float));
     float *queries = calloc(token_count * w->query_heads * w->head_dim, sizeof(float));
@@ -233,25 +243,36 @@ static bool q38_forward_qsa_ref_impl(
     const size_t base_position = state->position;
     if (!qfull || !keys || !values || !index || !raw_index || !queries ||
         !indexq || !attention) {
-        free(qfull); free(keys); free(values); free(index); free(raw_index); free(queries);
+        if (!precomputed) {
+            free(qfull); free(keys); free(values);
+        }
+        free(index); free(raw_index); free(queries);
         free(indexq);
         free(attention);
         return fail(error, error_len, "forward activation allocation failed");
     }
-    if (timing) timing->allocations += 8;
+    if (timing) timing->allocations += precomputed ? 5 : 8;
     const double qkv_started = qsa_now_ms();
-    if (!project(&w->q_proj, hidden, token_count, qfull) ||
-        !project(&w->k_proj, hidden, token_count, keys) ||
-        !project(&w->v_proj, hidden, token_count, values)) {
-        free(qfull); free(keys); free(values); free(index); free(raw_index); free(queries);
+    if (!precomputed &&
+        (!project(&w->q_proj, hidden, token_count, qfull) ||
+         !project(&w->k_proj, hidden, token_count, keys) ||
+         !project(&w->v_proj, hidden, token_count, values))) {
+        if (!precomputed) {
+            free(qfull); free(keys); free(values);
+        }
+        free(index); free(raw_index); free(queries);
         free(indexq);
         free(attention);
         return fail(error, error_len, "forward projection failed");
     }
-    if (timing) timing->qkv_projection_ms = qsa_now_ms() - qkv_started;
+    if (timing && !precomputed)
+        timing->qkv_projection_ms = qsa_now_ms() - qkv_started;
     const double indexer_started = qsa_now_ms();
     if (!project(&w->index_qk_proj, hidden, token_count, index)) {
-        free(qfull); free(keys); free(values); free(index); free(raw_index); free(queries);
+        if (!precomputed) {
+            free(qfull); free(keys); free(values);
+        }
+        free(index); free(raw_index); free(queries);
         free(indexq);
         free(attention);
         return fail(error, error_len, "forward index projection failed");
@@ -289,7 +310,10 @@ static bool q38_forward_qsa_ref_impl(
     const double state_started = qsa_now_ms();
     if (!q38_qsa_state_append(state, keys, values, raw_index, token_count,
                               error, error_len)) {
-        free(qfull); free(keys); free(values); free(index); free(raw_index); free(queries);
+        if (!precomputed) {
+            free(qfull); free(keys); free(values);
+        }
+        free(index); free(raw_index); free(queries);
         free(indexq);
         return false;
     }
@@ -372,7 +396,10 @@ static bool q38_forward_qsa_ref_impl(
         }
     }
     const double cleanup_started = qsa_now_ms();
-    free(qfull); free(keys); free(values); free(index); free(raw_index);
+    if (!precomputed) {
+        free(qfull); free(keys); free(values);
+    }
+    free(index); free(raw_index);
     free(queries); free(indexq); free(attention);
     if (timing) {
         timing->allocation_cleanup_ms =
@@ -391,7 +418,7 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *weights,
                          size_t error_len) {
     return q38_forward_qsa_ref_impl(
         weights, state, hidden, token_count, output, selected,
-        selected_stride, selected_counts, NULL, error, error_len);
+        selected_stride, selected_counts, NULL, NULL, error, error_len);
 }
 
 bool q38_forward_qsa_ref_timed(
@@ -403,7 +430,7 @@ bool q38_forward_qsa_ref_timed(
         return fail(error, error_len, "QSA timing output is null");
     return q38_forward_qsa_ref_impl(
         weights, state, hidden, token_count, output, selected,
-        selected_stride, selected_counts, timing, error, error_len);
+        selected_stride, selected_counts, NULL, timing, error, error_len);
 }
 
 /* The complete graph below intentionally keeps tensor payloads in the GGUF
@@ -768,7 +795,8 @@ static bool full_boundary_trace(uint32_t layer, const char *boundary,
                                 q38_forward_diagnostics *diagnostics,
                                 char *error, size_t error_len) {
     if (!diagnostics || !diagnostics->boundary_trace ||
-        (layer != 1 && layer != 9 && layer != UINT32_MAX))
+        (layer != 1 && layer != 9 && layer != UINT32_MAX &&
+         !getenv("Q38_TRACE_ALL_QSA")))
         return true;
     return diagnostics->boundary_trace(
         layer, boundary, values, token_count, width,
@@ -1623,11 +1651,61 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
         return false;
     }
     const double qsa_started = full_now_ms();
+    q38_forward_qsa_timing qkv_timing = {0};
+    q38_qsa_precomputed_qkv precomputed = {0};
+    const q38_qsa_precomputed_qkv *precomputed_ptr = NULL;
+    if (diagnostics && diagnostics->qsa_qkv_backend) {
+        const double allocation_started = full_now_ms();
+        precomputed.qfull = calloc(tokens * rows[0], sizeof(float));
+        precomputed.keys = calloc(tokens * rows[1], sizeof(float));
+        precomputed.values = calloc(tokens * rows[2], sizeof(float));
+        if (!precomputed.qfull || !precomputed.keys || !precomputed.values) {
+            free(precomputed.qfull);
+            free(precomputed.keys);
+            free(precomputed.values);
+            free((void *)w.q_norm); free((void *)w.k_norm);
+            free((void *)w.index_q_norm); free((void *)w.index_k_norm);
+            return full_fail(error, error_len, "QSA QKV host buffer allocation failed");
+        }
+        qkv_timing.allocations = 3;
+        qkv_timing.allocation_cleanup_ms =
+            full_now_ms() - allocation_started;
+        if (!diagnostics->qsa_qkv_backend(
+                model, layer->qsa.q_proj, layer->qsa.k_proj,
+                layer->qsa.v_proj, input, tokens, precomputed.qfull,
+                precomputed.keys, precomputed.values, &qkv_timing,
+                diagnostics->qsa_qkv_backend_user, error, error_len)) {
+            free(precomputed.qfull);
+            free(precomputed.keys);
+            free(precomputed.values);
+            free((void *)w.q_norm); free((void *)w.k_norm);
+            free((void *)w.index_q_norm); free((void *)w.index_k_norm);
+            return false;
+        }
+        precomputed_ptr = &precomputed;
+    }
     q38_forward_qsa_timing timing;
-    bool ok = q38_forward_qsa_ref_timed(
+    bool ok = q38_forward_qsa_ref_impl(
         &w, qsa_state, input, tokens, output, selected,
-        Q38_FULL_QSA_SELECTED_STRIDE, counts, &timing, error, error_len);
+        Q38_FULL_QSA_SELECTED_STRIDE, counts, precomputed_ptr, &timing,
+        error, error_len);
+    if (precomputed_ptr) {
+        timing.qkv_projection_ms = qkv_timing.qkv_projection_ms;
+        timing.allocations += qkv_timing.allocations;
+        timing.kernel_launches += qkv_timing.kernel_launches;
+        timing.host_syncs += qkv_timing.host_syncs;
+        timing.h2d_bytes += qkv_timing.h2d_bytes;
+        timing.d2h_bytes += qkv_timing.d2h_bytes;
+        timing.residency_misses += qkv_timing.residency_misses;
+        timing.allocation_cleanup_ms += qkv_timing.allocation_cleanup_ms;
+        const double cleanup_started = full_now_ms();
+        free(precomputed.qfull);
+        free(precomputed.keys);
+        free(precomputed.values);
+        timing.allocation_cleanup_ms += full_now_ms() - cleanup_started;
+    }
     const double qsa_elapsed = full_now_ms() - qsa_started;
+    timing.total_ms = qsa_elapsed;
     if (ok) {
         const char *const stages[] = {
             "qsa_qkv", "qsa_indexer_compression", "qsa_score", "qsa_top_k",
