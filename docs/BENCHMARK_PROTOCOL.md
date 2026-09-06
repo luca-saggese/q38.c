@@ -14,6 +14,9 @@ Reference 0 is immutable:
 - Decode artifact: `artifacts/perf/reference_0/q2_decode_reference_0.json`
 - Prefill artifact: `artifacts/perf/reference_0/q2_prefill_reference_0.json`
 
+Each immutable JSON artifact contains the matching uppercase `REF_ID` field;
+that identifier must never be reused for a current or candidate result.
+
 The canonical entry points are:
 
 ```sh
