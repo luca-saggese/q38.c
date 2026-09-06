@@ -1894,6 +1894,9 @@ extern "C" bool q38_forward_cuda_gdn_layer_backend(
         !ensure((void **)&context->device_gdn_gated,
                 &context->device_gdn_gated_bytes,
                 Q38_GDN_Z_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_output,
+                &context->device_output_bytes,
+                Q38_GR_HIDDEN * sizeof(float)) ||
         !ensure((void **)&context->device_gdn_state,
                 &context->device_gdn_state_bytes, state_bytes) ||
         !ensure((void **)&context->device_gdn_history,
@@ -1950,13 +1953,13 @@ extern "C" bool q38_forward_cuda_gdn_layer_backend(
         !q38_cuda_gdn_project(
             Q38_GDN_WEIGHT_BF16, exec[8]->ptr, Q38_GR_HIDDEN,
             Q38_GDN_Z_CHANNELS, context->device_gdn_gated, 1,
-            context->device_gdn_gated, context->stream, cuda_error,
+            context->device_output, context->stream, cuda_error,
             sizeof(cuda_error))) {
         return fail(error, error_len,
                     cuda_error[0] ? cuda_error : "GDN-C3 launch failed");
     }
     context->gdn_c3_launches += 3;
-    if (cudaMemcpyAsync(output, context->device_gdn_gated,
+    if (cudaMemcpyAsync(output, context->device_output,
                         Q38_GR_HIDDEN * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
         cudaStreamSynchronize(context->stream) != cudaSuccess)

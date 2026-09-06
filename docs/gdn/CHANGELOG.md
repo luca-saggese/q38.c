@@ -52,3 +52,6 @@
   early/middle/late fixtures, exceeding the 10% promotion gate.
 - Correctness remains green for captured output, independent CPU oracle,
   next recurrent state, and next convolution history; NaN/Inf count is zero.
+- Routed the production output projection into a dedicated 2560-element
+  workspace instead of aliasing the 6144-element gated input. This removes an
+  unsafe in-place BF16 matvec race that could corrupt decode output.
