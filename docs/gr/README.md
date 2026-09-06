@@ -13,6 +13,9 @@ optimization history.
   `artifacts/perf/subsystems/gr_reference.json`.
 - GR-C1 has passed the model-free projection gates; no full-chain speedup has
   been claimed or used to modify Reference 0.
+- GR-C2 was measured and rejected by the 10% isolated-wall gate.
+- GR-C3 has passed the model-free bundle gates and is promoted only for
+  `gr_read_up`; no full-chain speedup has been claimed.
 
 The full-chain Reference 0 benchmark must not be rerun for a GR candidate
 until the candidate passes all isolated gates.
@@ -47,6 +50,8 @@ tests/gr/
   gr_extract_fixtures.c   compact BF16-to-F32 fixture extractor
   gr_bench.cu             isolated CUDA baseline benchmark
   gr_c1_bench.cu          generic-vs-cooperative BF16 projection benchmark
+  gr_c2_bench.cu          C1 bundle breakdown and branch-fusion candidate
+  gr_c3_bench.cu          gr_read_up geometry benchmark
   test_m3_gr_ref.c        historical scalar smoke/golden test
   test_m3_gr_cuda.cu      historical CUDA golden test
   test_m3_gr_binding.c    production tensor binding test
@@ -71,17 +76,23 @@ edit
   -> make gr-fixtures
   -> make gr-bench
   -> make gr-c1-bench when changing projection dispatch
+  -> make gr-c2-bench using the existing fixture pack only
+  -> make gr-c3-bench using the existing fixture pack only
   -> inspect correctness and decomposition
   -> only then consider a full-chain benchmark
 ```
 
 The isolated benchmark uses 100 warmup iterations and 1000 measured
-iterations. It reports kernel-only and end-to-end call timing, kernel
-launches, explicit host synchronizations, transfer bytes, logical bytes read,
-effective read bandwidth, and a diagnostic decomposition of normalization,
-down projection, up projection, branch merge, and injection. Decomposition
-spans are non-additive diagnostics and must not be mistaken for a second wall
-clock.
+iterations. The C1 bundle benchmark reports median and p95 for
+`gr_read_down`, `gr_read_up`, `gr_write_inject`, normalization, low-rank/gate
+compute, branch preparation, branch merge, elementwise activation/gating,
+residual/writeback, CUDA dispatch, host sync/wait, memcpy, and other. Its
+exclusive accounting explains at least 97% of the measured host wall; H2D and
+D2H are explicitly outside the measured window.
+
+`gr-c2-bench` and `gr-c3-bench` do not regenerate fixtures or open the GGUF.
+They use only `tests/fixtures/gr/`, so candidate iteration does not load the
+model.
 
 ## Promotion gates
 

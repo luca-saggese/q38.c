@@ -53,7 +53,8 @@ TEST_BINS := \
 	q38-server-real \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	check-perf-artifacts test-steering test-steering-cuda \
-	gr-fixtures gr-bench test-gr
+	gr-fixtures gr-bench gr-c1-bench gr-c2-bench gr-c3-bench \
+	gr-c3-bundle test-gr
 
 all: q38
 
@@ -215,6 +216,20 @@ tests/gr/gr_c1_bench: tests/gr/gr_c1_bench.o q38_cuda_primitives.o
 tests/gr/gr_c1_bench.o: tests/gr/gr_c1_bench.cu q38_cuda_primitives.h
 	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
 
+tests/gr/gr_c2_bench: tests/gr/gr_c2_bench.o q38_cuda_primitives.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
+
+tests/gr/gr_c2_bench.o: tests/gr/gr_c2_bench.cu q38_cuda_primitives.h \
+		q38_gr_ref.h
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
+tests/gr/gr_c3_bench: tests/gr/gr_c3_bench.o q38_cuda_primitives.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
+
+tests/gr/gr_c3_bench.o: tests/gr/gr_c3_bench.cu q38_cuda_primitives.h \
+		q38_gr_ref.h
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
 gr-fixtures: tests/gr/gr_extract_fixtures
 	@mkdir -p $(GR_FIXTURE_DIR)
 	@./tests/gr/gr_extract_fixtures \
@@ -227,6 +242,21 @@ gr-bench: tests/gr/gr_bench gr-fixtures
 gr-c1-bench: tests/gr/gr_c1_bench gr-fixtures
 	@mkdir -p artifacts/perf/subsystems
 	@./tests/gr/gr_c1_bench "$(GR_FIXTURE_DIR)" "$(GR_C1_ARTIFACT)"
+
+gr-c2-bench: tests/gr/gr_c2_bench
+	@mkdir -p artifacts/perf/subsystems
+	@./tests/gr/gr_c2_bench "$(GR_FIXTURE_DIR)" \
+		"artifacts/perf/subsystems/gr_c2_bundle.json"
+
+gr-c3-bench: tests/gr/gr_c3_bench
+	@mkdir -p artifacts/perf/subsystems
+	@./tests/gr/gr_c3_bench "$(GR_FIXTURE_DIR)" \
+		"artifacts/perf/subsystems/gr_c3_up_geometry.json"
+
+gr-c3-bundle: tests/gr/gr_c2_bench
+	@mkdir -p artifacts/perf/subsystems
+	@Q38_GR_C3=1 ./tests/gr/gr_c2_bench "$(GR_FIXTURE_DIR)" \
+		"artifacts/perf/subsystems/gr_c3_bundle.json"
 
 test-gr: tests/gr/test_m3_gr_ref tests/gr/test_m3_gr_binding \
 		tests/gr/test_m3_gr_cuda gr-bench gr-c1-bench

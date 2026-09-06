@@ -81,6 +81,94 @@ The summed projection component improves from approximately `1385.7 us` to
 full-chain speedup claim. The canonical full-chain benchmark and Reference 0
 remain unchanged.
 
+## 2026-09-06 — GR-C2 (not promoted)
+
+- **Hypothesis:** the four branch reads paid for separate branch-preparation
+  and merge launches even though they share the same normalized input and
+  token structure.
+- **Isolated command:**
+  `./tests/gr/gr_c2_bench tests/fixtures/gr artifacts/perf/subsystems/gr_c2_bundle.json`
+- **Measurement:** C1 was remeasured as the baseline with the three
+  cooperative BF16 projections already active. C2 fused sigmoid branch
+  preparation and branch merge into one standalone launch.
+- **Artifact:** `artifacts/perf/subsystems/gr_c2_bundle.json`.
+- **Correctness:** early/middle/late all passed; maximum input error was
+  `3.28e-5`, maximum updated error was `4.77e-6`, and NaN/Inf was zero.
+- **Traffic/sync:** H2D/D2H remained outside the measurement window; C1 and
+  C2 both used one final synchronization. C2 reduced launches from 9 to 8.
+
+### C1 bundle breakdown and ordering
+
+The artifact contains per-fixture median and p95 values. The accounting is
+exclusive: GPU stage spans, CUDA timeline gaps, and host wait outside the GPU
+timeline sum to the measured host wall.
+
+| Rank | Substage | Median |
+|---:|---|---:|
+| 1 | `gr_read_up` | ~32.0 us |
+| 2 | `gr_read_down` | ~13.54 us |
+| 3 | `normalization` | ~9.2 us |
+| 4 | `CUDA dispatch` | ~8.6 us |
+| 5 | `gr_write_inject` | ~5.15 us |
+| 6 | `host sync/wait` | ~4.5 us |
+| 7 | `low-rank/gate compute` | ~3.3 us |
+| 8 | `branch merge` | ~3.3 us |
+| 9 | `elementwise activation/gating` | ~3.2 us |
+| 10 | `residual/writeback` | ~3.1 us |
+| 11 | `branch preparation` | ~3.1 us |
+
+### C2 bundle result
+
+| Fixture | C1 wall median | C2 wall median | Improvement |
+|---|---:|---:|---:|
+| early | 89.33 us | 84.78 us | 5.09% |
+| middle | 88.83 us | 85.04 us | 4.27% |
+| late | 88.82 us | 84.70 us | 4.63% |
+
+C2 is **not promoted** because it does not reach the structural-candidate
+10% isolated-wall gate. The new dominant remains `gr_read_up`; no production
+runtime change was made for C2.
+
+## 2026-09-06 — GR-C3 (promoted)
+
+- **Hypothesis:** `gr_read_up` has shape `[10240, 320]`; the 128-thread
+  cooperative BF16 geometry is better matched to this projection than the
+  256-thread default.
+- **Isolated stage command:**
+  `./tests/gr/gr_c3_bench tests/fixtures/gr artifacts/perf/subsystems/gr_c3_up_geometry.json`
+- **Bundle command:**
+  `make gr-c3-bundle`
+- **Artifacts:**
+  `artifacts/perf/subsystems/gr_c3_up_geometry.json`,
+  `artifacts/perf/subsystems/gr_c3_bundle.json`.
+- **Production change:** only the GR `gr_read_up` BF16 dispatch selects
+  `q38_cuda_bf16_matvec_configured(..., 128, ...)`; `gr_read_down` and
+  `gr_write_inject` remain at 256 threads.
+- **Correctness:** all early/middle/late stage and bundle fixtures passed;
+  maximum input error was `3.28e-5`, maximum updated error was `4.77e-6`,
+  stage maximum absolute error was `1.83e-4`, and NaN/Inf was zero.
+- **Traffic/sync:** H2D/D2H remained outside the measurement window. Bundle
+  launch count stayed at 9 and explicit synchronization stayed at 1.
+
+### C3 isolated geometry
+
+| Geometry | `gr_read_up` median | Improvement vs 256 |
+|---:|---:|---:|
+| 128 threads | 20.83 us | 32.96% |
+| 256 threads | 31.07 us | baseline |
+| 512 threads | 57.66 us | -85.6% |
+
+### C3 bundle result
+
+| Fixture | C1 wall median | C3 wall median | Improvement |
+|---|---:|---:|---:|
+| early | 89.36 us | 78.59 us | 12.05% |
+| middle | 88.86 us | 79.07 us | 11.02% |
+| late | 88.94 us | 78.96 us | 11.23% |
+
+C3 is promoted to the production GR dispatch. No full inference, model load,
+Reference 0 rerun, or change to MoE/GDN/QSA was performed.
+
 ## Candidate entry template
 
 ```text
