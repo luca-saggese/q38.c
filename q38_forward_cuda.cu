@@ -6,6 +6,7 @@
 #include "q38_qsa_cuda.h"
 #include "q38_topk_cuda.h"
 
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
 #include <math.h>
@@ -243,6 +244,70 @@ static double host_now_ms(void) {
 static float event_elapsed(cudaEvent_t start, cudaEvent_t stop) {
     float ms = 0.0f;
     return cudaEventElapsedTime(&ms, start, stop) == cudaSuccess ? ms : 0.0f;
+}
+
+__device__ static float batch_q2_value(
+    const q38_q2_k_block *weights, size_t row, size_t column,
+    size_t blocks_per_row) {
+    const size_t element = column % 256;
+    const q38_q2_k_block *block =
+        weights + row * blocks_per_row + column / 256;
+    const size_t half = element / 128;
+    const size_t within = element % 128;
+    const size_t group = within / 16;
+    const size_t l = within % 16;
+    const unsigned shift = (unsigned)((group / 2) * 2);
+    const uint8_t scale = block->scales[half * 8 + group];
+    const size_t qindex = half * 32 + (group & 1) * 16 + l;
+    const float d = __half2float(*reinterpret_cast<const __half *>(&block->d));
+    const float m =
+        __half2float(*reinterpret_cast<const __half *>(&block->dmin));
+    return d * (scale & 0xf) * ((block->qs[qindex] >> shift) & 3) -
+           m * ((scale >> 4) & 0xf);
+}
+
+struct q38_q8_0_block {
+    uint16_t d;
+    int8_t qs[32];
+};
+
+__device__ static float batch_weight_value(
+    uint32_t type, const void *weights, size_t row, size_t column,
+    size_t cols) {
+    if (type == 30) {
+        const uint16_t *values = (const uint16_t *)weights;
+        const uint16_t bits = values[row * cols + column];
+        return __int_as_float((int)((uint32_t)bits << 16));
+    }
+    if (type == 0)
+        return ((const float *)weights)[row * cols + column];
+    if (type == 10)
+        return batch_q2_value((const q38_q2_k_block *)weights, row, column,
+                              cols / 256);
+    if (type == 8) {
+        const q38_q8_0_block *blocks =
+            (const q38_q8_0_block *)weights;
+        const q38_q8_0_block *block =
+            blocks + row * (cols / 32) + column / 32;
+        return __half2float(*reinterpret_cast<const __half *>(&block->d)) *
+               (float)block->qs[column % 32];
+    }
+    return 0.0f;
+}
+
+__global__ static void matrix_batch_kernel(
+    uint32_t type, const void *weights, const float *input,
+    size_t token_count, size_t rows, size_t cols, float *output) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t total = token_count * rows;
+    if (index >= total) return;
+    const size_t token = index / rows;
+    const size_t row = index % rows;
+    float sum = 0.0f;
+    for (size_t column = 0; column < cols; ++column)
+        sum += batch_weight_value(type, weights, row, column, cols) *
+               input[token * cols + column];
+    output[index] = sum;
 }
 
 static void emit_telemetry(q38_forward_cuda_context *context,
@@ -1283,6 +1348,98 @@ extern "C" bool q38_forward_cuda_matrix_backend(
                    context->cuda_allocations - allocation_before, 1,
                    "matrix", use_resident_lm_head || use_persistent_weight
                        ? "resident_exec_tensor" : "gguf_host_upload");
+    cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+    cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_matrix_batch_backend(
+    const q38_gguf *model, const q38_tensor *tensor, const float *input,
+    size_t token_count, size_t rows, size_t cols, float *output, void *user,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    size_t actual_rows, actual_cols;
+    if (!context || !model || !tensor || !input || !output || !token_count ||
+        !tensor_shape(tensor, &actual_rows, &actual_cols) ||
+        actual_rows != rows || actual_cols != cols ||
+        (tensor->type != 0 && tensor->type != 8 &&
+         tensor->type != 10 && tensor->type != 30))
+        return fail(error, error_len,
+                    "invalid CUDA batched matrix geometry");
+    if (token_count > SIZE_MAX / cols ||
+        token_count * cols > SIZE_MAX / sizeof(float) ||
+        token_count > SIZE_MAX / rows ||
+        token_count * rows > SIZE_MAX / sizeof(float))
+        return fail(error, error_len, "CUDA batched matrix size overflow");
+    q38_exec_tensor *exec = exec_tensor_for(context, model, tensor);
+    const bool resident = context->all_non_ple_resident &&
+        exec_tensor_is_resident(exec, tensor);
+    if (!resident)
+        return fail(error, error_len,
+                    "Q38 batched matrix requires resident weights");
+    const size_t input_bytes = token_count * cols * sizeof(float);
+    const size_t output_bytes = token_count * rows * sizeof(float);
+    if (!ensure_buffer((void **)&context->device_input,
+                       &context->device_input_elements, input_bytes,
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&context->device_output,
+                       &context->device_output_bytes, output_bytes,
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
+        return fail(error, error_len,
+                    "CUDA batched matrix workspace allocation failed");
+    cudaEvent_t upload_start = NULL, upload_stop = NULL;
+    cudaEvent_t kernel_start = NULL, kernel_stop = NULL;
+    if (cudaEventCreate(&upload_start) != cudaSuccess ||
+        cudaEventCreate(&upload_stop) != cudaSuccess ||
+        cudaEventCreate(&kernel_start) != cudaSuccess ||
+        cudaEventCreate(&kernel_stop) != cudaSuccess) {
+        if (upload_start) cudaEventDestroy(upload_start);
+        if (upload_stop) cudaEventDestroy(upload_stop);
+        if (kernel_start) cudaEventDestroy(kernel_start);
+        if (kernel_stop) cudaEventDestroy(kernel_stop);
+        return fail(error, error_len,
+                    "CUDA batched matrix telemetry event allocation failed");
+    }
+    const double started = host_now_ms();
+    if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(context->device_input, input, input_bytes,
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
+        cudaEventRecord(kernel_start, context->stream) != cudaSuccess) {
+        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        return fail(error, error_len, "CUDA batched matrix upload failed");
+    }
+    const unsigned blocks = (unsigned)((token_count * rows + 255u) / 256u);
+    matrix_batch_kernel<<<blocks, 256, 0, context->stream>>>(
+        tensor->type, exec->ptr, context->device_input, token_count, rows,
+        cols, context->device_output);
+    if (cudaGetLastError() != cudaSuccess ||
+        cudaEventRecord(kernel_stop, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(output, context->device_output, output_bytes,
+                        cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        {
+            cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+            cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+            return fail(error, error_len,
+                        "CUDA batched matrix execution failed");
+        }
+    ++context->cuda_synchronizations;
+    context->device_output_elements = token_count * rows;
+    ++context->persistent_hits;
+    const float upload_ms = event_elapsed(upload_start, upload_stop);
+    const float kernel_ms = event_elapsed(kernel_start, kernel_stop);
+    emit_telemetry(context, model, tensor, token_count * rows, cols,
+                   (size_t)tensor->bytes, true, false, 0, upload_ms, kernel_ms,
+                   host_now_ms() - started, 0, 1, "matrix_batch",
+                   "resident_exec_tensor");
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
     return true;

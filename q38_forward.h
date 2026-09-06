@@ -26,7 +26,12 @@ typedef struct {
     size_t rows;
     size_t cols;
     q38_forward_dtype dtype;
+    const q38_tensor *tensor;
 } q38_forward_matrix;
+
+typedef bool (*q38_forward_qsa_matrix_batch_backend)(
+    const q38_forward_matrix *matrix, const float *input, size_t token_count,
+    float *output, void *user, char *error, size_t error_len);
 
 bool q38_forward_matrix_from_tensor(const q38_gguf *model,
                                     const q38_tensor *tensor, size_t rows,
@@ -53,6 +58,8 @@ typedef struct {
     size_t budget;
     float rope_theta;
     size_t rotary_dims;
+    q38_forward_qsa_matrix_batch_backend matrix_batch_backend;
+    void *matrix_batch_user;
 } q38_forward_qsa_weights;
 
 /* Allocate cache rows for the dynamic reference graph. */
@@ -256,6 +263,11 @@ typedef bool (*q38_forward_matrix_backend)(
     size_t rows, size_t cols, float *output, void *user, char *error,
     size_t error_len);
 
+typedef bool (*q38_forward_matrix_batch_backend)(
+    const q38_gguf *model, const q38_tensor *tensor, const float *input,
+    size_t token_count, size_t rows, size_t cols, float *output, void *user,
+    char *error, size_t error_len);
+
 typedef bool (*q38_forward_expert_backend)(
     const q38_gguf *model, const q38_tensor *gate_up,
     const q38_tensor *down, size_t expert, const float *input, float *output,
@@ -273,6 +285,17 @@ bool q38_forward_full_with_matrix_moe_layer_backend(
     float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
     q38_forward_matvec_backend row_backend,
     q38_forward_matrix_backend matrix_backend,
+    q38_forward_expert_backend expert_backend,
+    q38_forward_moe_layer_backend moe_layer_backend,
+    void *backend_user, char *error, size_t error_len);
+
+bool q38_forward_full_with_matrix_batch_moe_layer_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend backend,
+    q38_forward_matrix_backend matrix_backend,
+    q38_forward_matrix_batch_backend matrix_batch_backend,
     q38_forward_expert_backend expert_backend,
     q38_forward_moe_layer_backend moe_layer_backend,
     void *backend_user, char *error, size_t error_len);

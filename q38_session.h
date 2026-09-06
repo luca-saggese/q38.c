@@ -54,6 +54,17 @@ bool q38_session_prefill(
     float *logits, size_t logits_stride, uint32_t *next_token,
     q38_forward_diagnostics *diagnostics, q38_decode_trace trace,
     void *trace_user, size_t *step_index, char *error, size_t error_len);
+bool q38_session_prefill_reference(
+    q38_session *session, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, uint32_t *next_token,
+    q38_forward_diagnostics *diagnostics, q38_decode_trace trace,
+    void *trace_user, size_t *step_index, char *error, size_t error_len);
+bool q38_session_prefill_chunked(
+    q38_session *session, const uint32_t *tokens, size_t token_count,
+    size_t chunk_size, float *logits, size_t logits_stride,
+    uint32_t *next_token, q38_forward_diagnostics *diagnostics,
+    q38_decode_trace trace, void *trace_user, size_t *step_index,
+    char *error, size_t error_len);
 
 bool q38_session_eval(
     q38_session *session, uint32_t token, float *logits,

@@ -1,6 +1,7 @@
 #include "q38_session.h"
 #include "q38_forward_cuda.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -202,7 +203,7 @@ bool q38_session_eval(
     return append_history(session, token, error, error_len);
 }
 
-bool q38_session_prefill(
+bool q38_session_prefill_reference(
     q38_session *session, const uint32_t *tokens, size_t token_count,
     float *logits, size_t logits_stride, uint32_t *next_token,
     q38_forward_diagnostics *diagnostics, q38_decode_trace trace,
@@ -223,6 +224,105 @@ bool q38_session_prefill(
             return false;
     }
     return true;
+}
+
+bool q38_session_prefill(
+    q38_session *session, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, uint32_t *next_token,
+    q38_forward_diagnostics *diagnostics, q38_decode_trace trace,
+    void *trace_user, size_t *step_index, char *error, size_t error_len) {
+    return q38_session_prefill_reference(
+        session, tokens, token_count, logits, logits_stride, next_token,
+        diagnostics, trace, trace_user, step_index, error, error_len);
+}
+
+static bool session_argmax(const float *logits, size_t count,
+                           uint32_t *token, char *error, size_t error_len) {
+    if (!logits || !count || !token)
+        return fail(error, error_len, "invalid prefill logits");
+    size_t best = 0;
+    float best_value = logits[0];
+    if (!isfinite(best_value))
+        return fail(error, error_len, "prefill logits contain NaN/Inf");
+    for (size_t i = 1; i < count; ++i) {
+        if (!isfinite(logits[i]))
+            return fail(error, error_len, "prefill logits contain NaN/Inf");
+        if (logits[i] > best_value) {
+            best = i;
+            best_value = logits[i];
+        }
+    }
+    *token = (uint32_t)best;
+    return true;
+}
+
+bool q38_session_prefill_chunked(
+    q38_session *session, const uint32_t *tokens, size_t token_count,
+    size_t chunk_size, float *logits, size_t logits_stride,
+    uint32_t *next_token, q38_forward_diagnostics *diagnostics,
+    q38_decode_trace trace, void *trace_user, size_t *step_index,
+    char *error, size_t error_len) {
+    (void)trace;
+    (void)trace_user;
+    if (error && error_len) error[0] = '\0';
+    if (!session || !tokens || !token_count || !chunk_size || !logits ||
+        logits_stride < Q38_DECODE_VOCAB_SIZE || !next_token || !step_index)
+        return fail(error, error_len, "invalid chunked prefill arguments");
+    if (token_count > session->ctx_size)
+        return fail(error, error_len, "prompt exceeds session context");
+    q38_session_reset(session);
+    const size_t max_chunk = chunk_size < token_count ? chunk_size : token_count;
+    if (max_chunk > SIZE_MAX / Q38_DECODE_VOCAB_SIZE ||
+        max_chunk * Q38_DECODE_VOCAB_SIZE > SIZE_MAX / sizeof(float))
+        return fail(error, error_len, "chunked prefill logits overflow");
+    float *chunk_logits = calloc(
+        max_chunk * Q38_DECODE_VOCAB_SIZE, sizeof(float));
+    if (!chunk_logits)
+        return fail(error, error_len, "chunked prefill logits allocation failed");
+    if (diagnostics) {
+        diagnostics->backend_context = runtime_backend_context;
+        diagnostics->backend_context_user = session->runtime->cuda;
+        /*
+         * Let the layer-major graph project Q/K/V through the same batched
+         * matrix backend as the other resident projections.  The legacy
+         * standalone QSA QKV path remains available to decode/reference
+         * callers, but its large-token launch is not the chunked path.
+         */
+        diagnostics->qsa_qkv_backend = NULL;
+        diagnostics->qsa_qkv_backend_user = NULL;
+    }
+    size_t offset = 0;
+    while (offset < token_count) {
+        const size_t count = (token_count - offset) < max_chunk
+            ? token_count - offset : max_chunk;
+        if (!q38_forward_full_with_matrix_batch_moe_layer_backend(
+                session->runtime->model, &session->runtime->weights,
+                &session->state, tokens + offset, count, chunk_logits,
+                Q38_DECODE_VOCAB_SIZE, diagnostics,
+                q38_forward_cuda_matvec_backend,
+                q38_forward_cuda_matrix_backend,
+                q38_forward_cuda_matrix_batch_backend,
+                q38_forward_cuda_expert_backend,
+                q38_forward_cuda_moe_layer_q2_backend,
+                session->runtime->cuda, error, error_len)) {
+            free(chunk_logits);
+            return false;
+        }
+        for (size_t i = 0; i < count; ++i)
+            if (!append_history(session, tokens[offset + i], error,
+                                error_len)) {
+                free(chunk_logits);
+                return false;
+            }
+        memcpy(logits, chunk_logits + (count - 1) * Q38_DECODE_VOCAB_SIZE,
+               Q38_DECODE_VOCAB_SIZE * sizeof(float));
+        offset += count;
+        (*step_index) += count;
+    }
+    const bool ok = session_argmax(
+        logits, Q38_DECODE_VOCAB_SIZE, next_token, error, error_len);
+    free(chunk_logits);
+    return ok;
 }
 
 bool q38_session_emit(

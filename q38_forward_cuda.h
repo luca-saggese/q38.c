@@ -141,6 +141,10 @@ bool q38_forward_cuda_matrix_backend(
     const q38_gguf *model, const q38_tensor *tensor, const float *input,
     size_t rows, size_t cols, float *output, void *user, char *error,
     size_t error_len);
+bool q38_forward_cuda_matrix_batch_backend(
+    const q38_gguf *model, const q38_tensor *tensor, const float *input,
+    size_t token_count, size_t rows, size_t cols, float *output, void *user,
+    char *error, size_t error_len);
 
 bool q38_forward_cuda_qsa_qkv_backend(
     const q38_gguf *model, const q38_tensor *q_proj,

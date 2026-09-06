@@ -39,6 +39,8 @@ static void usage(FILE *fp) {
         "  --tokenizer <model-dir>    Native tokenizer assets (for --generate)\n"
         "  --prompt <text>            Prompt (for --generate)\n"
         "  --ctx <n>                  Session context capacity (default: 8192)\n"
+        "  --prefill-chunk <n>        CUDA prefill chunk size (default: 128)\n"
+        "  --prefill-reference        Use serial prefill oracle\n"
         "  --max-tokens <n>           Maximum generated tokens (default: 256)\n"
         "  --disable-ple              Omit PLE output while retaining PLE state\n"
         "  --json                     Machine-readable output\n"
@@ -246,6 +248,18 @@ static int cmd_memory_plan(const q38_options *opt) {
 }
 
 typedef struct {
+    char name[64];
+    uint32_t layer;
+    uint64_t calls;
+    uint64_t backend_rows;
+    uint64_t scalar_rows;
+    uint64_t backend_declines;
+    double elapsed_ms;
+} q38_stage_account;
+
+enum { Q38_STAGE_ACCOUNT_CAPACITY = 2048 };
+
+typedef struct {
     double started_ms;
     double prefill_ms;
     double last_generated_ms;
@@ -276,6 +290,20 @@ typedef struct {
     size_t generated_consume_seen;
     uint64_t non_ple_upload_bytes;
     uint64_t non_ple_residency_misses;
+    q38_stage_account stages[Q38_STAGE_ACCOUNT_CAPACITY];
+    size_t stage_count;
+    double stage_accounted_ms;
+    uint64_t telemetry_callbacks;
+    uint64_t telemetry_allocations;
+    uint64_t telemetry_syncs;
+    uint64_t telemetry_h2d_bytes;
+    uint64_t telemetry_d2h_bytes;
+    uint64_t telemetry_upload_bytes;
+    double telemetry_kernel_ms;
+    double telemetry_backend_overhead_ms;
+    double telemetry_upload_ms;
+    double telemetry_host_wait_gpu_ms;
+    uint64_t telemetry_dispatches;
     uint32_t first_consume_input;
     uint32_t first_consume_argmax;
     uint64_t first_consume_committed_tokens;
@@ -309,10 +337,38 @@ typedef struct {
     q38_memory_tracker memory;
 } q38_generate_evidence;
 
+static q38_stage_account *generate_stage_account(
+    q38_generate_evidence *evidence, const char *name, uint32_t layer) {
+    if (!evidence || !name) return NULL;
+    for (size_t i = 0; i < evidence->stage_count; ++i)
+        if (evidence->stages[i].layer == layer &&
+            strcmp(evidence->stages[i].name, name) == 0)
+            return &evidence->stages[i];
+    if (evidence->stage_count >= Q38_STAGE_ACCOUNT_CAPACITY) return NULL;
+    q38_stage_account *account = &evidence->stages[evidence->stage_count++];
+    memset(account, 0, sizeof(*account));
+    snprintf(account->name, sizeof(account->name), "%s", name);
+    account->layer = layer;
+    return account;
+}
+
 static void generate_cuda_telemetry(
     const q38_forward_cuda_telemetry *telemetry, void *opaque) {
     q38_generate_evidence *evidence = opaque;
     if (!evidence || !telemetry) return;
+    evidence->telemetry_callbacks++;
+    evidence->telemetry_dispatches++;
+    evidence->telemetry_allocations += telemetry->allocation_count;
+    evidence->telemetry_syncs += telemetry->sync_count;
+    evidence->telemetry_upload_bytes += telemetry->upload_bytes;
+    evidence->telemetry_h2d_bytes +=
+        telemetry->upload_bytes + telemetry->activation_read_bytes;
+    evidence->telemetry_d2h_bytes += telemetry->d2h_bytes;
+    evidence->telemetry_kernel_ms += telemetry->kernel_ms;
+    evidence->telemetry_backend_overhead_ms +=
+        telemetry->backend_overhead_ms;
+    evidence->telemetry_upload_ms += telemetry->upload_ms;
+    evidence->telemetry_host_wait_gpu_ms += telemetry->backend_overhead_ms;
     if (telemetry->non_ple_residency_miss &&
         !telemetry->ple_file_backed_access)
         evidence->non_ple_residency_misses++;
@@ -414,7 +470,75 @@ static bool generate_stage_trace(const q38_forward_stage_usage *usage,
     evidence->backend_declines += usage->backend_declines;
     evidence->fallback |= usage->scalar_rows != 0 ||
                           usage->backend_declines != 0;
+    q38_stage_account *account = generate_stage_account(
+        evidence, usage->logical_stage ? usage->logical_stage : "unknown",
+        usage->layer);
+    if (account) {
+        account->calls++;
+        account->backend_rows += usage->backend_rows;
+        account->scalar_rows += usage->scalar_rows;
+        account->backend_declines += usage->backend_declines;
+        account->elapsed_ms += usage->elapsed_ms;
+        evidence->stage_accounted_ms += usage->elapsed_ms;
+    }
     return true;
+}
+
+static double generate_observed_forward_ms(
+    const q38_generate_evidence *evidence) {
+    if (!evidence) return 0.0;
+    if (!evidence->generated_seen) return evidence->prefill_ms;
+    double total = evidence->first_token_ms;
+    for (size_t i = 1; i < evidence->generated_seen &&
+                       i < evidence->per_token_capacity; ++i)
+        total += evidence->per_token_ms[i];
+    return total;
+}
+
+static void print_generate_instrumentation_json(
+    const q38_generate_evidence *evidence) {
+    if (!evidence) {
+        printf("\"instrumentation\":null");
+        return;
+    }
+    const double observed = generate_observed_forward_ms(evidence);
+    const double unattributed = observed > evidence->stage_accounted_ms
+        ? observed - evidence->stage_accounted_ms : 0.0;
+    const double cpu_stage_ms = evidence->stage_accounted_ms >
+        evidence->telemetry_kernel_ms + evidence->telemetry_host_wait_gpu_ms
+        ? evidence->stage_accounted_ms - evidence->telemetry_kernel_ms -
+          evidence->telemetry_host_wait_gpu_ms : 0.0;
+    printf("\"instrumentation\":{\"observed_forward_ms\":%.6f,"
+           "\"stage_accounted_ms\":%.6f,\"unattributed_ms\":%.6f,"
+           "\"gpu_busy_ms\":%.6f,"
+           "\"cpu_waiting_on_gpu_estimate_ms\":%.6f,"
+           "\"cpu_stage_orchestration_estimate_ms\":%.6f,"
+           "\"cuda\":{\"telemetry_callbacks\":%" PRIu64
+           ",\"backend_dispatches\":%" PRIu64 ",\"kernel_ms\":%.6f,"
+           "\"backend_overhead_ms\":%.6f,\"upload_ms\":%.6f,"
+           "\"h2d_bytes\":%" PRIu64 ",\"d2h_bytes\":%" PRIu64
+           ",\"syncs\":%" PRIu64 ",\"allocations\":%" PRIu64
+           ",\"weight_upload_bytes\":%" PRIu64 "},\"stages\":[",
+           observed, evidence->stage_accounted_ms, unattributed,
+           evidence->telemetry_kernel_ms,
+           evidence->telemetry_host_wait_gpu_ms, cpu_stage_ms,
+           evidence->telemetry_callbacks, evidence->telemetry_dispatches,
+           evidence->telemetry_kernel_ms,
+           evidence->telemetry_backend_overhead_ms,
+           evidence->telemetry_upload_ms, evidence->telemetry_h2d_bytes,
+           evidence->telemetry_d2h_bytes, evidence->telemetry_syncs,
+           evidence->telemetry_allocations,
+           evidence->telemetry_upload_bytes);
+    for (size_t i = 0; i < evidence->stage_count; ++i) {
+        const q38_stage_account *stage = &evidence->stages[i];
+        printf("%s{\"layer\":%u,\"name\":\"%s\",\"calls\":%" PRIu64
+               ",\"elapsed_ms\":%.6f,\"backend_rows\":%" PRIu64
+               ",\"scalar_rows\":%" PRIu64 ",\"backend_declines\":%" PRIu64
+               "}", i ? "," : "", stage->layer, stage->name, stage->calls,
+               stage->elapsed_ms, stage->backend_rows, stage->scalar_rows,
+               stage->backend_declines);
+    }
+    printf("]}");
 }
 
 static bool generate_trace(const q38_decode_step *step, void *opaque,
@@ -837,7 +961,7 @@ static int cmd_generate_legacy(const q38_options *opt) {
                "},\"nan_inf\":{\"present\":%s,\"nan_count\":%zu,"
                "\"inf_count\":%zu},\"fallback\":{\"used\":%s,"
                "\"backend_rows\":%" PRIu64 ",\"scalar_rows\":%" PRIu64
-               ",\"backend_declines\":%" PRIu64 "}}\n",
+               ",\"backend_declines\":%" PRIu64 "},",
                evidence.cuda_total, evidence.initial_cuda_free,
                evidence.min_cuda_free, peak_cuda_allocated,
                evidence.peak_rss, evidence.memory.peak_internal_bytes,
@@ -845,6 +969,8 @@ static int cmd_generate_legacy(const q38_options *opt) {
                evidence.inf_count, evidence.fallback ? "true" : "false",
                evidence.backend_rows, evidence.scalar_rows,
                evidence.backend_declines);
+        print_generate_instrumentation_json(&evidence);
+        puts("}");
     } else {
         printf("prompt ids: ");
         for (size_t i = 0; i < prompt.token_count; ++i)
@@ -968,10 +1094,16 @@ static int cmd_generate(const q38_options *opt) {
     size_t step_index = 0;
     uint32_t next_token = runtime.tokenizer.eos_id;
     const double prefill_started = monotonic_ms();
-    if (!q38_session_prefill(
-            &session, prompt.tokens, prompt.token_count, logits,
-            Q38_DECODE_VOCAB_SIZE, &next_token, &diagnostics, generate_trace,
-            &evidence, &step_index, error, sizeof(error))) {
+    const bool prefill_ok = opt->prefill_reference
+        ? q38_session_prefill_reference(
+              &session, prompt.tokens, prompt.token_count, logits,
+              Q38_DECODE_VOCAB_SIZE, &next_token, &diagnostics,
+              generate_trace, &evidence, &step_index, error, sizeof(error))
+        : q38_session_prefill_chunked(
+              &session, prompt.tokens, prompt.token_count, opt->prefill_chunk,
+              logits, Q38_DECODE_VOCAB_SIZE, &next_token, &diagnostics,
+              generate_trace, &evidence, &step_index, error, sizeof(error));
+    if (!prefill_ok) {
         fprintf(stderr, "q38: prefill: %s\n", error);
         goto cleanup;
     }
@@ -1063,7 +1195,10 @@ static int cmd_generate(const q38_options *opt) {
         ? 1000.0 / decode_median : 0.0;
 
     if (opt->json) {
-        printf("{\"format\":\"q38-functional-runtime-v1\",\"prompt\":");
+        printf("{\"format\":\"q38-functional-runtime-v1\",\"prefill_path\":%s,"
+               "\"prefill_chunk\":%zu,\"prompt\":",
+               opt->prefill_reference ? "\"reference\"" : "\"chunked\"",
+               opt->prefill_chunk);
         json_string(opt->prompt);
         printf(",\"ctx_size\":%u,\"prompt_ids\":", opt->ctx_size);
         print_ids_json(prompt.tokens, prompt.token_count);
@@ -1097,7 +1232,7 @@ static int cmd_generate(const q38_options *opt) {
                "},\"nan_inf\":{\"present\":%s,\"nan_count\":%zu,"
                "\"inf_count\":%zu},\"fallback\":{\"used\":%s,"
                "\"backend_rows\":%" PRIu64 ",\"scalar_rows\":%" PRIu64
-               ",\"backend_declines\":%" PRIu64 "}}\n",
+               ",\"backend_declines\":%" PRIu64 "},",
                evidence.cuda_total, evidence.initial_cuda_free,
                evidence.min_cuda_free, peak_cuda_allocated,
                evidence.peak_rss, evidence.memory.peak_internal_bytes,
@@ -1105,6 +1240,8 @@ static int cmd_generate(const q38_options *opt) {
                evidence.inf_count, evidence.fallback ? "true" : "false",
                evidence.backend_rows, evidence.scalar_rows,
                evidence.backend_declines);
+        print_generate_instrumentation_json(&evidence);
+        puts("}");
     } else {
         printf("prompt tokens:       %u\n", prompt.token_count);
         printf("generated tokens:    %zu\n", generated_count);
@@ -1187,6 +1324,11 @@ int main(int argc, char **argv) {
         } else if (strcmp(a, "--ctx") == 0) {
             if (i + 1 < argc)
                 opt.ctx_size = (uint32_t)strtoul(argv[++i], NULL, 10);
+        } else if (strcmp(a, "--prefill-chunk") == 0) {
+            if (i + 1 < argc)
+                opt.prefill_chunk = (size_t)strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(a, "--prefill-reference") == 0) {
+            opt.prefill_reference = true;
         } else if (strcmp(a, "--disable-ple") == 0) {
             opt.disable_ple = true;
         } else if (strcmp(a, "--json") == 0) {
@@ -1211,6 +1353,8 @@ int main(int argc, char **argv) {
         opt.max_tokens = 256;
     if (mode == Q38_MODE_GENERATE && opt.ctx_size == 0)
         opt.ctx_size = 8192;
+    if (mode == Q38_MODE_GENERATE && opt.prefill_chunk == 0)
+        opt.prefill_chunk = 128;
 
     int rc;
     switch (mode) {

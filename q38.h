@@ -35,6 +35,7 @@ typedef struct {
     const char *tokenizer_path;
     const char *prompt;
     size_t max_tokens;
+    size_t prefill_chunk;
     uint32_t ctx_size;
     int context_hint;     /* KV context size hint (bytes/none, informational) */
     int prefill_hint;     /* prefill chunk hint (informational)               */
@@ -43,6 +44,7 @@ typedef struct {
     bool memory_plan;     /* --memory-plan */
     bool platform;        /* --platform */
     bool disable_ple;     /* --disable-ple diagnostic */
+    bool prefill_reference;
     bool json;            /* --json */
     bool verbose;         /* --verbose */
 } q38_options;

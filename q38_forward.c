@@ -34,7 +34,8 @@ bool q38_forward_matrix_from_tensor(const q38_gguf *model,
     if (!data) return fail(error, error_len, "tensor payload is outside mmap");
     *out = (q38_forward_matrix){data, rows, cols,
                                 tensor->type == 30 ? Q38_FORWARD_BF16
-                                                   : Q38_FORWARD_F32};
+                                                   : Q38_FORWARD_F32,
+                                tensor};
     return true;
 }
 
@@ -96,8 +97,13 @@ static double qsa_now_ms(void) {
 }
 
 static bool project(const q38_forward_matrix *matrix, const float *input,
-                    size_t tokens, float *output) {
+                    size_t tokens, float *output,
+                    q38_forward_qsa_matrix_batch_backend backend,
+                    void *backend_user, char *error, size_t error_len) {
     if (!matrix_ok(matrix, matrix->rows, matrix->cols)) return false;
+    if (backend && backend(matrix, input, tokens, output, backend_user,
+                           error, error_len))
+        return true;
     for (size_t t = 0; t < tokens; ++t)
         for (size_t r = 0; r < matrix->rows; ++r) {
             float sum = 0.0f;
@@ -254,9 +260,15 @@ static bool q38_forward_qsa_ref_impl(
     if (timing) timing->allocations += precomputed ? 5 : 8;
     const double qkv_started = qsa_now_ms();
     if (!precomputed &&
-        (!project(&w->q_proj, hidden, token_count, qfull) ||
-         !project(&w->k_proj, hidden, token_count, keys) ||
-         !project(&w->v_proj, hidden, token_count, values))) {
+        (!project(&w->q_proj, hidden, token_count, qfull,
+                  w->matrix_batch_backend, w->matrix_batch_user, error,
+                  error_len) ||
+         !project(&w->k_proj, hidden, token_count, keys,
+                  w->matrix_batch_backend, w->matrix_batch_user, error,
+                  error_len) ||
+         !project(&w->v_proj, hidden, token_count, values,
+                  w->matrix_batch_backend, w->matrix_batch_user, error,
+                  error_len))) {
         if (!precomputed) {
             free(qfull); free(keys); free(values);
         }
@@ -268,7 +280,9 @@ static bool q38_forward_qsa_ref_impl(
     if (timing && !precomputed)
         timing->qkv_projection_ms = qsa_now_ms() - qkv_started;
     const double indexer_started = qsa_now_ms();
-    if (!project(&w->index_qk_proj, hidden, token_count, index)) {
+    if (!project(&w->index_qk_proj, hidden, token_count, index,
+                 w->matrix_batch_backend, w->matrix_batch_user, error,
+                 error_len)) {
         if (!precomputed) {
             free(qfull); free(keys); free(values);
         }
@@ -378,20 +392,23 @@ static bool q38_forward_qsa_ref_impl(
                 timing->attention_ms += qsa_now_ms() - attention_started;
             free(numerator);
         }
-        float *projected = output + t * w->hidden;
         const double output_started = qsa_now_ms();
-        float *tmp = calloc(w->query_heads * w->head_dim, sizeof(float));
-        if (!tmp) return fail(error, error_len, "forward output allocation failed");
-        memcpy(tmp, attention + t * attention_width,
-               attention_width * sizeof(float));
-        for (size_t r = 0; r < w->o_proj.rows; ++r) {
-            projected[r] = 0.0f;
-            for (size_t c = 0; c < w->o_proj.cols; ++c)
-                projected[r] += matrix_at(&w->o_proj, r, c) * tmp[c];
+        if (w->matrix_batch_backend &&
+            !w->matrix_batch_backend(
+                &w->o_proj, attention + t * attention_width, 1,
+                output + t * w->hidden, w->matrix_batch_user, error,
+                error_len))
+            return false;
+        if (!w->matrix_batch_backend) {
+            float *projected = output + t * w->hidden;
+            for (size_t r = 0; r < w->o_proj.rows; ++r) {
+                projected[r] = 0.0f;
+                for (size_t c = 0; c < w->o_proj.cols; ++c)
+                    projected[r] += matrix_at(&w->o_proj, r, c) *
+                                     attention[t * attention_width + c];
+            }
         }
-        free(tmp);
         if (timing) {
-            timing->allocations++;
             timing->attention_ms += qsa_now_ms() - output_started;
         }
     }
@@ -444,6 +461,7 @@ static bool full_fail(char *error, size_t error_len, const char *message) {
 
 static q38_forward_matvec_backend full_backend;
 static q38_forward_matrix_backend full_matrix_backend;
+static q38_forward_matrix_batch_backend full_matrix_batch_backend;
 static q38_forward_expert_backend full_expert_backend;
 static q38_forward_moe_layer_backend full_moe_layer_backend;
 static void *full_backend_user;
@@ -725,6 +743,7 @@ static bool full_matvec(const q38_gguf *model, const q38_tensor *tensor,
                                    rows, 0, 0, full_now_ms() - started,
                                    error, error_len);
         }
+
         ++full_backend_declines;
         if (error && error_len && error[0] != '\0') return false;
         if (full_backend_strict)
@@ -744,6 +763,55 @@ static bool full_matvec(const q38_gguf *model, const q38_tensor *tensor,
         full_backend_rows - backend_before, full_scalar_rows - scalar_before,
         full_backend_declines - declines_before, full_now_ms() - started,
         error, error_len);
+}
+
+static bool full_matvec_batch(
+    const q38_gguf *model, const q38_tensor *tensor, const float *input,
+    size_t tokens, size_t rows, size_t cols, float *output, float *scratch,
+    char *error, size_t error_len, const char *stage) {
+    if (!tokens || !rows || !cols || !input || !output)
+        return full_fail(error, error_len, "invalid batched matvec arguments");
+    if (full_matrix_batch_backend && !full_is_file_backed_ple(tensor)) {
+        full_backend_context(tensor, rows, cols,
+                             stage ? stage : "matvec_batch");
+        const double started = full_now_ms();
+        if (full_matrix_batch_backend(
+                model, tensor, input, tokens, rows, cols, output,
+                full_backend_user, error, error_len)) {
+            full_backend_rows += tokens * rows;
+            return full_emit_stage(
+                full_diagnostics, stage ? stage : "matvec_batch",
+                (uint64_t)tokens * rows, 0, 0, full_now_ms() - started,
+                error, error_len);
+        }
+        ++full_backend_declines;
+        if (error && error_len && error[0] != '\0') return false;
+        if (full_backend_strict)
+            return full_fail(error, error_len,
+                             "CUDA batched matrix backend declined");
+    }
+    for (size_t t = 0; t < tokens; ++t)
+        if (!full_matvec(model, tensor, input + t * cols, rows, cols,
+                         output + t * rows, scratch, error, error_len, stage))
+            return false;
+    return true;
+}
+
+typedef struct {
+    const q38_gguf *model;
+    q38_forward_matrix_batch_backend backend;
+    void *user;
+} full_qsa_batch_user;
+
+static bool full_qsa_matrix_batch(
+    const q38_forward_matrix *matrix, const float *input,
+    size_t token_count, float *output, void *opaque, char *error,
+    size_t error_len) {
+    full_qsa_batch_user *user = (full_qsa_batch_user *)opaque;
+    return user && user->backend && matrix && matrix->tensor &&
+           user->backend(user->model, matrix->tensor, input, token_count,
+                         matrix->rows, matrix->cols, output, user->user,
+                         error, error_len);
 }
 
 static void full_rms(float *x, const float *weight, size_t n, bool one_plus) {
@@ -820,6 +888,13 @@ static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
                          float *normed, float *down, float *up, float *scratch,
                          char *error, size_t error_len) {
     const size_t width = 4u * Q38_GR_HIDDEN;
+    float *down_batch = calloc(tokens * 320u, sizeof(float));
+    float *up_batch = calloc(tokens * width, sizeof(float));
+    if (!down_batch || !up_batch) {
+        free(down_batch);
+        free(up_batch);
+        return full_fail(error, error_len, "GR batched activation allocation failed");
+    }
     for (size_t t = 0; t < tokens; ++t) {
         memset(input + t * Q38_GR_HIDDEN, 0,
                Q38_GR_HIDDEN * sizeof(float));
@@ -834,16 +909,24 @@ static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
             full_rms(normed + t * width + s * Q38_GR_HIDDEN, gamma,
                      Q38_GR_HIDDEN, true);
         }
-        if (!full_matvec(model, weights->input_mix_weight_down,
-                         normed + t * width, 320, width, down, scratch,
-                         error, error_len, "gr_read_down"))
-            return false;
+    }
+    if (!full_matvec_batch(model, weights->input_mix_weight_down, normed,
+                           tokens, 320, width, down_batch, scratch, error,
+                           error_len, "gr_read_down") ||
+        !full_matvec_batch(model, weights->input_mix_weight_up, down_batch,
+                           tokens, width, 320, up_batch, scratch, error,
+                           error_len, "gr_read_up")) {
+        free(down_batch);
+        free(up_batch);
+        return false;
+    }
+    for (size_t t = 0; t < tokens; ++t) {
         for (size_t r = 0; r < 320; ++r)
-            down[r] = down[r] / 4.0f /
-                      (1.0f + expf(-down[r] / 4.0f));
-        if (!full_matvec(model, weights->input_mix_weight_up, down, width,
-                         320, up, scratch, error, error_len, "gr_read_up"))
-            return false;
+            down_batch[t * 320u + r] =
+                down_batch[t * 320u + r] / 4.0f /
+                (1.0f + expf(-down_batch[t * 320u + r] / 4.0f));
+        memcpy(up, up_batch + t * width, width * sizeof(float));
+        memcpy(down, down_batch + t * 320u, 320u * sizeof(float));
         for (size_t s = 0; s < 4; ++s)
             for (size_t d = 0; d < Q38_GR_HIDDEN; ++d) {
                 float gate = 1.0f /
@@ -852,6 +935,8 @@ static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
                     gate * normed[t * width + s * Q38_GR_HIDDEN + d] / 4.0f;
             }
     }
+    free(down_batch);
+    free(up_batch);
     return true;
 }
 
@@ -861,6 +946,9 @@ static bool full_gr_write(const q38_gguf *model, const q38_gr_weights *weights,
                           float *inject, float *scratch, char *error,
                           size_t error_len) {
     const size_t width = 4u * Q38_GR_HIDDEN;
+    float *inject_batch = calloc(tokens * 4u, sizeof(float));
+    if (!inject_batch)
+        return full_fail(error, error_len, "GR inject allocation failed");
     for (size_t t = 0; t < tokens; ++t) {
         memcpy(normed + t * width, residual + t * width,
                width * sizeof(float));
@@ -873,10 +961,15 @@ static bool full_gr_write(const q38_gguf *model, const q38_gr_weights *weights,
             full_rms(normed + t * width + s * Q38_GR_HIDDEN, gamma,
                      Q38_GR_HIDDEN, true);
         }
-        if (!full_matvec(model, weights->block_inject_weight,
-                         normed + t * width, 4, width, inject, scratch,
-                         error, error_len, "gr_write_inject"))
-            return false;
+    }
+    if (!full_matvec_batch(model, weights->block_inject_weight, normed, tokens,
+                           4, width, inject_batch, scratch, error, error_len,
+                           "gr_write_inject")) {
+        free(inject_batch);
+        return false;
+    }
+    for (size_t t = 0; t < tokens; ++t) {
+        memcpy(inject, inject_batch + t * 4u, 4u * sizeof(float));
         for (size_t s = 0; s < 4; ++s) {
             const float scale = 2.0f /
                 (1.0f + expf(-inject[s] / 4.0f));
@@ -886,6 +979,7 @@ static bool full_gr_write(const q38_gguf *model, const q38_gr_weights *weights,
                     scale * block[t * Q38_GR_HIDDEN + d];
         }
     }
+    free(inject_batch);
     return true;
 }
 
@@ -915,16 +1009,14 @@ static bool full_gdn(const q38_gguf *model, const q38_layer_weights *layer,
                                 layer->gdn.in_proj_a, layer->gdn.in_proj_b};
     const size_t sizes[] = {qkv_n, z_n, heads, heads};
     float *outs[] = {qkv, z, a, b};
-    for (size_t t = 0; t < tokens; ++t)
-        for (size_t p = 0; p < 4; ++p)
-            if (!full_matvec(model, proj[p],
-                             input + t * Q38_GR_HIDDEN,
-                             sizes[p], Q38_GR_HIDDEN,
-                             outs[p] + t * sizes[p], scratch, error, error_len,
-                             p == 0 ? "gdn_qkv_projection" :
-                             p == 1 ? "gdn_z_projection" :
-                             p == 2 ? "gdn_a_projection" : "gdn_b_projection"))
-                goto fail;
+    for (size_t p = 0; p < 4; ++p)
+        if (!full_matvec_batch(
+                model, proj[p], input, tokens, sizes[p], Q38_GR_HIDDEN,
+                outs[p], scratch, error, error_len,
+                p == 0 ? "gdn_qkv_projection" :
+                p == 1 ? "gdn_z_projection" :
+                p == 2 ? "gdn_a_projection" : "gdn_b_projection"))
+            goto fail;
     for (size_t t = 0; t < tokens; ++t) {
         for (size_t c = 0; c < qkv_n; ++c) {
             float sum = 0.0f;
@@ -1017,12 +1109,11 @@ static bool full_gdn(const q38_gguf *model, const q38_layer_weights *layer,
                 gdn_out[(t * heads + h) * dim + d] =
                     norm[d] * (1.0f / (1.0f + expf(-z[t * z_n + h * dim + d])));
         }
-        if (!full_matvec(model, layer->gdn.out_proj,
-                         gdn_out + t * heads * dim, Q38_GR_HIDDEN,
-                         z_n, output + t * Q38_GR_HIDDEN,
-                         scratch, error, error_len, "gdn_output_projection"))
-            goto fail;
     }
+    if (!full_matvec_batch(model, layer->gdn.out_proj, gdn_out, tokens,
+                           Q38_GR_HIDDEN, z_n, output, scratch, error,
+                           error_len, "gdn_output_projection"))
+        goto fail;
     free(qkv); free(z); free(a); free(b); free(conv); free(q); free(k); free(v);
     free(decay); free(beta); free(gdn_out);
     return true;
@@ -1067,10 +1158,25 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
     float *shared = calloc(Q38_GR_HIDDEN, sizeof(float));
     float *gate = calloc(640, sizeof(float));
     float *up = calloc(640, sizeof(float));
-    if (!intermediate || !routed || !shared || !gate || !up) {
+    float *router_batch = calloc(tokens * Q38_MOE_EXPERTS, sizeof(float));
+    float *shared_gate_batch = calloc(tokens * 640u, sizeof(float));
+    float *shared_up_batch = calloc(tokens * 640u, sizeof(float));
+    if (!intermediate || !routed || !shared || !gate || !up ||
+        !router_batch || !shared_gate_batch || !shared_up_batch) {
         free(intermediate); free(routed); free(shared); free(gate); free(up);
+        free(router_batch); free(shared_gate_batch); free(shared_up_batch);
         return full_fail(error, error_len, "MoE activation allocation failed");
     }
+    if (!full_matvec_batch(model, weights.router, input, tokens,
+                           Q38_MOE_EXPERTS, Q38_GR_HIDDEN, router_batch,
+                           scratch, error, error_len, "moe_router") ||
+        !full_matvec_batch(model, weights.shared_gate_proj, input, tokens,
+                           640, Q38_GR_HIDDEN, shared_gate_batch, scratch,
+                           error, error_len, "moe_shared_gate") ||
+        !full_matvec_batch(model, weights.shared_up_proj, input, tokens,
+                           640, Q38_GR_HIDDEN, shared_up_batch, scratch,
+                           error, error_len, "moe_shared_up"))
+        goto fail;
     for (size_t t = 0; t < tokens; ++t) {
         const float *x = input + t * Q38_GR_HIDDEN;
         const q38_forward_dtype router_dtype =
@@ -1100,31 +1206,8 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         float probs_effective[Q38_MOE_EXPERTS];
         float max_pre_cast = -INFINITY;
         float max_effective = -INFINITY;
-        if (full_matrix_backend) {
-            full_backend_context(weights.router, Q38_MOE_EXPERTS,
-                                Q38_GR_HIDDEN, "moe_router");
-            const double started = full_now_ms();
-            if (!full_matrix_backend(
-                    model, weights.router, x, Q38_MOE_EXPERTS,
-                    Q38_GR_HIDDEN, logits_pre_cast, full_backend_user, error,
-                    error_len)) {
-                ++full_backend_declines;
-                if (error && error_len && error[0] != '\0') goto fail;
-                goto fail;
-            }
-            full_backend_rows += Q38_MOE_EXPERTS;
-            if (!full_emit_stage(full_diagnostics, "moe_router",
-                                 Q38_MOE_EXPERTS, 0, 0,
-                                 full_now_ms() - started, error, error_len))
-                goto fail;
-        } else {
-            for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
-                if (!full_row_dot(model, weights.router, e, x, Q38_GR_HIDDEN,
-                                  scratch, &logits_pre_cast[e], error,
-                                  error_len))
-                    goto fail;
-            }
-        }
+        memcpy(logits_pre_cast, router_batch + t * Q38_MOE_EXPERTS,
+               sizeof(logits_pre_cast));
         for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
             logits_effective[e] = full_cast_forward_dtype(
                 logits_pre_cast[e], router_dtype);
@@ -1294,13 +1377,8 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                                         error_len))
                 goto fail;
         }
-        if (!full_matvec(model, weights.shared_gate_proj, x, 640,
-                         Q38_GR_HIDDEN, gate, scratch, error, error_len,
-                         "moe_shared_gate") ||
-            !full_matvec(model, weights.shared_up_proj, x, 640,
-                         Q38_GR_HIDDEN, up, scratch, error, error_len,
-                         "moe_shared_up"))
-            goto fail;
+        memcpy(gate, shared_gate_batch + t * 640u, 640u * sizeof(float));
+        memcpy(up, shared_up_batch + t * 640u, 640u * sizeof(float));
         for (size_t i = 0; i < 640; ++i)
             intermediate[i] = gate[i] / (1.0f + expf(-gate[i])) * up[i];
         if (!full_matvec(model, weights.shared_down_proj, intermediate,
@@ -1329,9 +1407,11 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
             goto fail;
     }
     free(intermediate); free(routed); free(shared); free(gate); free(up);
+    free(router_batch); free(shared_gate_batch); free(shared_up_batch);
     return true;
 fail:
     free(intermediate); free(routed); free(shared); free(gate); free(up);
+    free(router_batch); free(shared_gate_batch); free(shared_up_batch);
     return false;
 }
 
@@ -1715,6 +1795,13 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
     w.hidden = 2560; w.query_heads = 24; w.kv_heads = 2; w.head_dim = 256;
     w.index_heads = 4; w.index_dim = 128; w.ratio = 4; w.budget = 2048;
     w.rope_theta = 10000000.0f; w.rotary_dims = 64;
+    full_qsa_batch_user batch_user = {
+        model, full_matrix_batch_backend, full_backend_user
+    };
+    if (full_matrix_batch_backend) {
+        w.matrix_batch_backend = full_qsa_matrix_batch;
+        w.matrix_batch_user = &batch_user;
+    }
     w.q_norm = calloc(256, sizeof(float));
     w.k_norm = calloc(256, sizeof(float));
     w.index_q_norm = calloc(128, sizeof(float));
@@ -1893,6 +1980,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         free(counts);
         return full_fail(error, error_len, "full forward activation allocation failed");
     }
+    const double embedding_started = full_now_ms();
     for (size_t t = 0; t < token_count; ++t) {
         if (tokens[t] >= 248320) {
             full_fail(error, error_len, "token ID is outside vocabulary");
@@ -1910,6 +1998,9 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                 streams[t * width + s * Q38_GR_HIDDEN + d] = value;
         }
     }
+    if (!full_emit_stage(diagnostics, "embedding_input_prep", 0, 0, 0,
+                         full_now_ms() - embedding_started, error, error_len))
+        goto fail;
     for (uint32_t layer_number = 0; layer_number < Q38_MODEL_LAYERS;
          ++layer_number) {
         full_current_layer = layer_number;
@@ -2009,7 +2100,25 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  token_count, Q38_GR_HIDDEN, diagnostics,
                                  error, error_len))
             goto fail;
-        if (full_matrix_backend && token_count == 1) {
+        if (full_matrix_batch_backend && token_count > 1) {
+            full_current_layer = UINT32_MAX;
+            full_backend_context(weights->output, 248320, Q38_GR_HIDDEN,
+                                 "lm_head_projection_batch");
+            const double started = full_now_ms();
+            if (!full_matrix_batch_backend(
+                    model, weights->output, mixed, token_count, 248320,
+                    Q38_GR_HIDDEN, logits, full_backend_user, error,
+                    error_len)) {
+                ++full_backend_declines;
+                if (error && error_len && error[0] != '\0') goto fail;
+                goto fail;
+            }
+            full_backend_rows += token_count * 248320u;
+            if (!full_emit_stage(full_diagnostics, "lm_head_projection_batch",
+                                 token_count * 248320u, 0, 0,
+                                 full_now_ms() - started, error, error_len))
+                goto fail;
+        } else if (full_matrix_backend && token_count == 1) {
             full_current_layer = UINT32_MAX;
             full_backend_context(weights->output, 248320, Q38_GR_HIDDEN,
                                  "lm_head_projection");
@@ -2078,9 +2187,27 @@ bool q38_forward_full_with_matrix_moe_layer_backend(
     q38_forward_expert_backend expert_backend,
     q38_forward_moe_layer_backend moe_layer_backend,
     void *backend_user, char *error, size_t error_len) {
+    return q38_forward_full_with_matrix_batch_moe_layer_backend(
+        model, weights, state, tokens, token_count, logits, logits_stride,
+        diagnostics, backend, matrix_backend, NULL, expert_backend,
+        moe_layer_backend, backend_user, error, error_len);
+}
+
+bool q38_forward_full_with_matrix_batch_moe_layer_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend backend,
+    q38_forward_matrix_backend matrix_backend,
+    q38_forward_matrix_batch_backend matrix_batch_backend,
+    q38_forward_expert_backend expert_backend,
+    q38_forward_moe_layer_backend moe_layer_backend,
+    void *backend_user, char *error, size_t error_len) {
     const q38_forward_matvec_backend previous_backend = full_backend;
     const q38_forward_matrix_backend previous_matrix_backend =
         full_matrix_backend;
+    const q38_forward_matrix_batch_backend previous_matrix_batch_backend =
+        full_matrix_batch_backend;
     const q38_forward_expert_backend previous_expert_backend =
         full_expert_backend;
     const q38_forward_moe_layer_backend previous_moe_layer_backend =
@@ -2089,6 +2216,7 @@ bool q38_forward_full_with_matrix_moe_layer_backend(
     const bool previous_strict = full_backend_strict;
     full_backend = backend;
     full_matrix_backend = matrix_backend;
+    full_matrix_batch_backend = matrix_batch_backend;
     full_expert_backend = expert_backend;
     full_moe_layer_backend = moe_layer_backend;
     full_backend_user = backend_user;
@@ -2102,6 +2230,7 @@ bool q38_forward_full_with_matrix_moe_layer_backend(
         diagnostics, error, error_len);
     full_backend = previous_backend;
     full_matrix_backend = previous_matrix_backend;
+    full_matrix_batch_backend = previous_matrix_batch_backend;
     full_expert_backend = previous_expert_backend;
     full_moe_layer_backend = previous_moe_layer_backend;
     full_backend_user = previous_user;
