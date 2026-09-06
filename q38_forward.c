@@ -2239,6 +2239,19 @@ bool q38_forward_full_with_matrix_batch_moe_layer_backend(
     return ok;
 }
 
+bool q38_forward_full_with_backend_config(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    const q38_forward_backend_config *config, char *error, size_t error_len) {
+    if (!config)
+        return full_fail(error, error_len, "backend configuration is null");
+    return q38_forward_full_with_matrix_batch_moe_layer_backend(
+        model, weights, state, tokens, token_count, logits, logits_stride,
+        diagnostics, config->matvec, config->matrix, config->matrix_batch,
+        config->expert, config->moe_layer, config->user, error, error_len);
+}
+
 bool q38_forward_full_with_backend(
     const q38_gguf *model, const q38_weights *weights,
     q38_forward_state *state, const uint32_t *tokens, size_t token_count,

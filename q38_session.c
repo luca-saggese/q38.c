@@ -221,15 +221,10 @@ bool q38_session_eval_timed(
         diagnostics->backend_context_user = session->runtime->backend.user;
     }
     const double started = session_now_ms();
-    if (!q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
+    if (!q38_decode_step_with_backend_config_timed(
             session->runtime->model, &session->runtime->weights,
             &session->state, token, logits, logits_stride, next_token,
-            diagnostics, session->runtime->backend.matvec,
-            session->runtime->backend.matrix,
-            session->runtime->backend.matrix_batch,
-            session->runtime->backend.expert,
-            session->runtime->backend.moe_layer,
-            session->runtime->backend.user,
+            diagnostics, &session->runtime->backend,
             trace_kind, emitted_token, consumed_token, (*step_index)++, trace,
             trace_user, timing, error, error_len))
         return false;
@@ -336,16 +331,11 @@ bool q38_session_prefill_chunked(
     while (offset < token_count) {
         const size_t count = (token_count - offset) < max_chunk
             ? token_count - offset : max_chunk;
-        if (!q38_forward_full_with_matrix_batch_moe_layer_backend(
+        if (!q38_forward_full_with_backend_config(
                 session->runtime->model, &session->runtime->weights,
                 &session->state, tokens + offset, count, chunk_logits,
                 Q38_DECODE_VOCAB_SIZE, diagnostics,
-                session->runtime->backend.matvec,
-                session->runtime->backend.matrix,
-                session->runtime->backend.matrix_batch,
-                session->runtime->backend.expert,
-                session->runtime->backend.moe_layer,
-                session->runtime->backend.user, error, error_len)) {
+                &session->runtime->backend, error, error_len)) {
             free(chunk_logits);
             return false;
         }

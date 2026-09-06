@@ -381,6 +381,26 @@ bool q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
     return ok;
 }
 
+bool q38_decode_step_with_backend_config_timed(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, uint32_t token, float *logits,
+    size_t logits_stride, uint32_t *next_token,
+    q38_forward_diagnostics *diagnostics,
+    const q38_forward_backend_config *config,
+    q38_decode_trace_kind trace_kind, uint32_t emitted_token,
+    uint32_t consumed_token, size_t step_index, q38_decode_trace trace,
+    void *trace_user, q38_decode_timing *timing, char *error,
+    size_t error_len) {
+    if (!config)
+        return fail(error, error_len, "backend configuration is null");
+    return q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
+        model, weights, state, token, logits, logits_stride, next_token,
+        diagnostics, config->matvec, config->matrix, config->matrix_batch,
+        config->expert, config->moe_layer, config->user, trace_kind,
+        emitted_token, consumed_token, step_index, trace, trace_user, timing,
+        error, error_len);
+}
+
 bool q38_decode_emit_trace(
     const q38_forward_state *state, const float *logits, size_t step_index,
     uint32_t token, q38_decode_trace trace, void *trace_user, char *error,
