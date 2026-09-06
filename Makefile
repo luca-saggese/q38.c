@@ -209,9 +209,9 @@ $(TEST_DIR)/test_model_config: $(TEST_DIR)/test_model_config.c q38_model_config.
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_model_config.c q38_model_config.o
 
 $(TEST_DIR)/test_quant_blocks: $(TEST_DIR)/test_quant_blocks.c \
-		to_be_deleted/gguf-tools/quants.c to_be_deleted/gguf-tools/quants.h
-	$(CC) $(CFLAGS) -Ito_be_deleted/gguf-tools -o $@ \
-		$(TEST_DIR)/test_quant_blocks.c to_be_deleted/gguf-tools/quants.c \
+		third_party/gguf-tools/quants.c third_party/gguf-tools/quants.h
+	$(CC) $(CFLAGS) -Ithird_party/gguf-tools -o $@ \
+		$(TEST_DIR)/test_quant_blocks.c third_party/gguf-tools/quants.c \
 		-lm -lpthread
 
 $(TEST_DIR)/test_m2_golden: $(TEST_DIR)/test_m2_golden.c q38_golden.o q38_golden.h
@@ -1548,10 +1548,10 @@ m1-subset: m1-validate tools/q38_quantize
 		--revision de4b8e4d43b917e7706784d8bb445c9af86a3540 \
 		--quantize --quantizer ./tools/q38_quantize
 
-tools/q38_quantize: tools/q38_quantize.c to_be_deleted/gguf-tools/quants.c \
-		to_be_deleted/gguf-tools/quants.h
-	$(CC) $(CFLAGS) -Ito_be_deleted/gguf-tools -o $@ \
-		tools/q38_quantize.c to_be_deleted/gguf-tools/quants.c -lm -lpthread
+tools/q38_quantize: tools/q38_quantize.c third_party/gguf-tools/quants.c \
+		third_party/gguf-tools/quants.h
+	$(CC) $(CFLAGS) -Ithird_party/gguf-tools -o $@ \
+		tools/q38_quantize.c third_party/gguf-tools/quants.c -lm -lpthread
 
 m1-full: m1-validate tools/q38_quantize
 	python3 tools/convert_q38_gguf.py --model-dir $(MODEL_DIR) \

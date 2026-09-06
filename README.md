@@ -4,10 +4,10 @@ A native inference runtime skeleton for **Qwen3.8-Flash-Next**, targeting the
 **NVIDIA DGX Spark** (GB10 / Grace Blackwell / SM 12.1 / 128 GB unified
 coherent LPDDR5x memory / Linux aarch64 / CUDA).
 
-`q38` is at **M0**: it is a fork-and-prune of [ds4](https://github.com/antirez/ds4)
-reduced to a minimal, single-target runtime skeleton. There is **no inference
-path yet** — M0 provides platform probing, GGUF inspection, tensor inventory,
-and a memory-plan dry run only.
+`q38` is the native Qwen3.8-Flash-Next runtime for the DGX Spark production
+path. The canonical execution flow is `q38_runtime -> q38_session ->
+q38_session_prefill/q38_session_eval`; legacy forward runners are not part of
+the benchmark contract.
 
 ## Scope
 
@@ -15,6 +15,9 @@ and a memory-plan dry run only.
   explicitly, never silently degraded.
 - **No** Metal, ROCm, CPU, distributed, or tensor-parallel backends.
 - **No** DeepSeek / GLM / DSpark / MTP / vision model-family bindings.
+- Q2 conversion retains only `third_party/gguf-tools/quants.{c,h}` for the
+  conversion utility and fixture test; those sources are not linked into
+  production inference.
 
 ## Build
 
@@ -66,9 +69,8 @@ done, the commit plan, and the M0 test matrix.
   rendering, structured text/image/video content markers, and special-token
   handling. Python is used only by the golden-vector tools.
 - `q38.c` — inspection CLI.
-- `tests/` — M0 test suite (`test_platform`, `test_gguf`, `test_memory`).
-- `ds4_ssd.{c,h}`, `cuda/mmq/` — parked, out of the M0 link.
-- `to_be_deleted/` — donor sources parked for deletion review.
+- `tests/` — runtime, canonical benchmark, and fixture test suites.
+- `third_party/gguf-tools/quants.{c,h}` — retained conversion-only donor pair.
 - `BASELINE.md`, `THIRD_PARTY_NOTES.md` — donor freeze and provenance.
 
 ## M3 reference boundaries

@@ -7,7 +7,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 
-#include "../to_be_deleted/gguf-tools/quants.h"
+#include "../third_party/gguf-tools/quants.h"
 
 #include <errno.h>
 #include <fcntl.h>

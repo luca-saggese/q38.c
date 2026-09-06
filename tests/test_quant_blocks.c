@@ -1,4 +1,4 @@
-#include "../to_be_deleted/gguf-tools/quants.h"
+#include "../third_party/gguf-tools/quants.h"
 
 #include <math.h>
 #include <stdio.h>
