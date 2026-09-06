@@ -48,7 +48,7 @@ TEST_BINS := \
 	tests/test_platform tests/test_gguf tests/test_memory \
 	tests/test_model_config tests/test_quant_blocks tests/test_residency
 
-.PHONY: all q38 spark test clean tools \
+.PHONY: all q38 q38-server q38-cli spark test test-server clean tools \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	check-perf-artifacts
 
@@ -57,10 +57,44 @@ all: q38
 q38: $(PRODUCTION_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ $(PRODUCTION_OBJS) $(CUDA_LDLIBS)
 
+SERVER_OBJS := q38_server.o q38_server_protocol.o q38_server_engine_mock.o q38_json.o
+
+q38-server: q38_server_main.o $(SERVER_OBJS)
+	$(CC) $(CFLAGS) -o $@ q38_server_main.o $(SERVER_OBJS)
+
+q38-cli: q38_cli.o q38_json.o
+	$(CC) $(CFLAGS) -o $@ q38_cli.o q38_json.o
+
 spark: q38 $(TEST_BINS)
 
 test: $(TEST_BINS)
 	@set -e; for test in $(TEST_BINS); do ./$$test; done
+
+test-server: tests/test_q38_json tests/test_q38_server_engine \
+		tests/test_q38_server_protocol tests/test_q38_server
+	@set -e; \
+	./tests/test_q38_json; \
+	./tests/test_q38_server_engine; \
+	./tests/test_q38_server_protocol; \
+	./tests/test_q38_server
+
+tests/test_q38_json: tests/test_q38_json.c q38_json.o q38_json.h
+	$(CC) $(CFLAGS) -o $@ tests/test_q38_json.c q38_json.o
+
+tests/test_q38_server_engine: tests/test_q38_server_engine.c \
+		q38_server_engine_mock.o q38_prompt.o q38_server_engine.h q38_prompt.h
+	$(CC) $(CFLAGS) -o $@ tests/test_q38_server_engine.c \
+		q38_server_engine_mock.o q38_prompt.o
+
+tests/test_q38_server_protocol: tests/test_q38_server_protocol.c \
+		q38_server_protocol.o q38_server_engine_mock.o q38_json.o \
+		q38_server_protocol.h q38_server_engine.h q38_json.h
+	$(CC) $(CFLAGS) -o $@ tests/test_q38_server_protocol.c \
+		q38_server_protocol.o q38_server_engine_mock.o q38_json.o
+
+tests/test_q38_server: tests/test_q38_server.c $(SERVER_OBJS) \
+		q38_server.h q38_server_protocol.h q38_server_engine.h q38_json.h
+	$(CC) $(CFLAGS) -o $@ tests/test_q38_server.c $(SERVER_OBJS)
 
 tools: tools/q38_quantize
 
@@ -139,5 +173,9 @@ q38_%.o: cuda/q38_%.cu
 	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
 
 clean:
-	rm -f q38 $(PRODUCTION_OBJS) q38_session.o \
-		tests/q2_canonical_bench $(TEST_BINS) tools/q38_quantize
+	rm -f q38 q38-server q38-cli $(PRODUCTION_OBJS) q38_session.o \
+		$(SERVER_OBJS) q38_server_main.o q38_cli.o \
+		tests/q2_canonical_bench $(TEST_BINS) \
+		tests/test_q38_json tests/test_q38_server_engine \
+		tests/test_q38_server_protocol tests/test_q38_server \
+		tools/q38_quantize
