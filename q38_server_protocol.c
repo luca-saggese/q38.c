@@ -680,7 +680,6 @@ static bool parse_chat_or_anthropic(q38_server_endpoint endpoint,
             goto fail;
     } else {
         request->api = Q38_SERVER_API_OPENAI;
-        request->legacy_completion = true;
         if (!q38_json_object_field(body, "messages", &messages,
                                    error, error_len) ||
             !parse_messages_raw(request, messages, error, error_len))
@@ -704,6 +703,7 @@ static bool parse_completion(const char *body, q38_server_request *request,
     if (!parse_common_fields(body, request, error, error_len))
         return false;
     request->api = Q38_SERVER_API_OPENAI;
+    request->legacy_completion = true;
     if (!q38_json_get_string(body, "prompt", &prompt, error, error_len))
         goto fail;
     request->prompt = prompt;

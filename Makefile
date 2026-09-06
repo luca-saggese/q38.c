@@ -49,6 +49,7 @@ TEST_BINS := \
 	tests/test_model_config tests/test_quant_blocks tests/test_residency
 
 .PHONY: all q38 q38-server q38-cli spark test test-server clean tools \
+	q38-server-real \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	check-perf-artifacts
 
@@ -58,13 +59,22 @@ q38: $(PRODUCTION_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ $(PRODUCTION_OBJS) $(CUDA_LDLIBS)
 
 SERVER_OBJS := q38_server.o q38_server_protocol.o q38_server_engine_mock.o \
-	q38_server_engine.o q38_json.o q38_kvstore.o
+	q38_server_engine.o q38_json.o q38_kvstore.o q38_prompt.o
 
 q38_server.o q38_server_engine.o q38_server_engine_mock.o \
 q38_server_protocol.o q38_kvstore.o: q38_server_engine.h
 
 q38-server: q38_server_main.o $(SERVER_OBJS)
 	$(CC) $(CFLAGS) -o $@ q38_server_main.o $(SERVER_OBJS)
+
+SERVER_RUNTIME_C_OBJS := $(filter-out q38.o,$(PRODUCTION_C_OBJS))
+SERVER_RUNTIME_OBJS := $(SERVER_RUNTIME_C_OBJS) $(PRODUCTION_CUDA_OBJS)
+
+q38-server-real: q38_server_real_main.o q38_server_engine_q38.o \
+		$(SERVER_OBJS) $(SERVER_RUNTIME_OBJS)
+	$(NVCC) $(NVCCFLAGS) -o $@ q38_server_real_main.o \
+		q38_server_engine_q38.o $(SERVER_OBJS) $(SERVER_RUNTIME_OBJS) \
+		$(CUDA_LDLIBS)
 
 q38-cli: q38_cli.o q38_json.o
 	$(CC) $(CFLAGS) -o $@ q38_cli.o q38_json.o
@@ -182,8 +192,9 @@ q38_%.o: cuda/q38_%.cu
 	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
 
 clean:
-	rm -f q38 q38-server q38-cli $(PRODUCTION_OBJS) q38_session.o \
-		$(SERVER_OBJS) q38_server_main.o q38_cli.o \
+	rm -f q38 q38-server q38-server-real q38-cli $(PRODUCTION_OBJS) q38_session.o \
+		$(SERVER_OBJS) q38_server_main.o q38_server_real_main.o \
+		q38_server_engine_q38.o q38_cli.o \
 		tests/q2_canonical_bench $(TEST_BINS) \
 		tests/test_q38_json tests/test_q38_server_engine \
 		tests/test_q38_kvstore \

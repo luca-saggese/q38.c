@@ -407,16 +407,56 @@ static bool stream_event_json(generation_context *context,
     if (!event) return false;
     if (event->kind == Q38_SERVER_EVENT_DONE) {
         if (!strcmp(api, "openai")) {
-            ok = buffer_append_cstr(&body, "data: [DONE]\n\n");
+            if (context->request->stream_include_usage) {
+                char usage[256];
+                snprintf(usage, sizeof(usage),
+                         "data: {\"id\":\"%s\",\"object\":\"%s\","
+                         "\"choices\":[],\"usage\":{\"prompt_tokens\":%u,"
+                         "\"completion_tokens\":%u,\"total_tokens\":%u}}\n\n",
+                         context->id,
+                         context->request->legacy_completion ?
+                         "text_completion" : "chat.completion.chunk",
+                         context->usage.prompt_tokens,
+                         context->usage.completion_tokens,
+                         context->usage.prompt_tokens +
+                         context->usage.completion_tokens);
+                ok = buffer_append_cstr(&body, usage) &&
+                     buffer_append_cstr(&body, "data: [DONE]\n\n");
+            } else {
+                ok = buffer_append_cstr(&body, "data: [DONE]\n\n");
+            }
         } else if (!strcmp(api, "anthropic")) {
-            ok = buffer_append_cstr(&body,
-                "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
+            char usage[256];
+            snprintf(usage, sizeof(usage),
+                     "event: message_delta\n"
+                     "data: {\"type\":\"message_delta\",\"delta\":{},"
+                     "\"usage\":{\"input_tokens\":%u,\"output_tokens\":%u}}\n\n"
+                     "event: message_stop\n"
+                     "data: {\"type\":\"message_stop\"}\n\n",
+                     context->usage.prompt_tokens,
+                     context->usage.completion_tokens);
+            ok = buffer_append_cstr(&body, usage);
         } else {
             ok = buffer_append_cstr(&body,
                 "event: response.completed\n"
                 "data: {\"type\":\"response.completed\"}\n\n");
         }
     } else if (!strcmp(api, "openai")) {
+        if (context->request->legacy_completion) {
+            if (!buffer_append_cstr(&body, "data: {\"id\":") ||
+                !json_append_escaped(&body, context->id) ||
+                !buffer_append_cstr(&body,
+                    ",\"object\":\"text_completion\",\"choices\":["
+                    "{\"index\":0,\"text\":"))
+                ok = false;
+            if (ok)
+                ok = json_append_escaped(&body, event->text) &&
+                     buffer_append_cstr(&body,
+                        ",\"finish_reason\":null}]}\n\n");
+            if (ok) ok = send_all(context->fd, body.data, body.len);
+            buffer_free(&body);
+            return ok;
+        }
         if (!buffer_append_cstr(&body, "data: {\"id\":") ||
             !json_append_escaped(&body, context->id) ||
             !buffer_append_cstr(&body,
@@ -544,6 +584,15 @@ static bool build_nonstream_response(generation_context *context,
     const char *finish = context->tool.len ? "tool_calls" : "stop";
     char usage[128];
     char legacy_usage[128];
+    char anthropic_usage[96];
+    char response_usage[96];
+    snprintf(anthropic_usage, sizeof(anthropic_usage),
+             "%u,\"output_tokens\":%u}",
+             context->usage.prompt_tokens, context->usage.completion_tokens);
+    snprintf(response_usage, sizeof(response_usage),
+             "%u,\"output_tokens\":%u,\"total_tokens\":%u}",
+             context->usage.prompt_tokens, context->usage.completion_tokens,
+             context->usage.prompt_tokens + context->usage.completion_tokens);
     if (context->request->api == Q38_SERVER_API_ANTHROPIC) {
         if (!buffer_append_cstr(body,
             "{\"id\":") || !json_append_escaped(body, context->id) ||
@@ -569,16 +618,54 @@ static bool build_nonstream_response(generation_context *context,
             !json_append_escaped(body, context->text.data) ||
             !buffer_append_cstr(body, "}],\"stop_reason\":\"") ||
             !buffer_append_cstr(body, finish) ||
-            !buffer_append_cstr(body, "\"}"))
+            !buffer_append_cstr(body, "\",\"usage\":{\"input_tokens\":") ||
+            !buffer_append_cstr(body, anthropic_usage))
             return false;
         return true;
     }
     if (context->request->api == Q38_SERVER_API_RESPONSES) {
-        return buffer_append_cstr(body, "{\"id\":") &&
-               json_append_escaped(body, context->id) &&
-               buffer_append_cstr(body, ",\"object\":\"response\",\"output_text\":") &&
+        bool first = true;
+        if (!buffer_append_cstr(body, "{\"id\":") ||
+            !json_append_escaped(body, context->id) ||
+            !buffer_append_cstr(body,
+                ",\"object\":\"response\",\"status\":\"completed\","
+                "\"output\":["))
+            return false;
+        if (context->reasoning.len) {
+            if (!buffer_append_cstr(body,
+                "{\"type\":\"reasoning\",\"summary\":[{\"type\":"
+                "\"summary_text\",\"text\":") ||
+                !json_append_escaped(body, context->reasoning.data) ||
+                !buffer_append_cstr(body, "}]}"))
+                return false;
+            first = false;
+        }
+        if (context->tool.len) {
+            if (!first && !buffer_append_cstr(body, ",")) return false;
+            if (!buffer_append_cstr(body,
+                "{\"type\":\"function_call\",\"call_id\":") ||
+                !json_append_escaped(body, context->tool_id) ||
+                !buffer_append_cstr(body, ",\"name\":") ||
+                !json_append_escaped(body, context->tool_name) ||
+                !buffer_append_cstr(body, ",\"arguments\":") ||
+                !json_append_escaped(body, context->tool_arguments.data) ||
+                !buffer_append_cstr(body, "}"))
+                return false;
+            first = false;
+        }
+        if (context->text.len) {
+            if (!first && !buffer_append_cstr(body, ",")) return false;
+            if (!buffer_append_cstr(body,
+                "{\"type\":\"message\",\"role\":\"assistant\","
+                "\"content\":[{\"type\":\"output_text\",\"text\":") ||
+                !json_append_escaped(body, context->text.data) ||
+                !buffer_append_cstr(body, "}]}"))
+                return false;
+        }
+        return buffer_append_cstr(body, "],\"output_text\":") &&
                json_append_escaped(body, context->text.data) &&
-               buffer_append_cstr(body, "}");
+               buffer_append_cstr(body, ",\"usage\":{\"input_tokens\":") &&
+               buffer_append_cstr(body, response_usage);
     }
     snprintf(usage, sizeof(usage),
              "\"}],\"usage\":{\"prompt_tokens\":%u,"
@@ -684,6 +771,39 @@ static bool handle_generation(q38_server *server, int fd,
         if (!send_cstr(fd, ": q38 prefill started\n\n")) {
             set_error(error, error_len, "client disconnected");
             return false;
+        }
+        if (request->api == Q38_SERVER_API_ANTHROPIC) {
+            char start[512];
+            int start_len = snprintf(
+                start, sizeof(start),
+                "event: message_start\n"
+                "data: {\"type\":\"message_start\",\"message\":"
+                "{\"id\":\"%s\",\"type\":\"message\",\"role\":\"assistant\","
+                "\"content\":[],\"model\":\"%s\",\"usage\":{\"input_tokens\":0,"
+                "\"output_tokens\":0}}}\n\n"
+                "event: content_block_start\n"
+                "data: {\"type\":\"content_block_start\",\"index\":0,"
+                "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+                context.id, q38_server_engine_model_name(server->engine));
+            if (start_len <= 0 || (size_t)start_len >= sizeof(start) ||
+                !send_all(fd, start, (size_t)start_len)) {
+                set_error(error, error_len, "client disconnected");
+                return false;
+            }
+        } else if (request->api == Q38_SERVER_API_RESPONSES) {
+            char start[256];
+            int start_len = snprintf(
+                start, sizeof(start),
+                "event: response.created\n"
+                "data: {\"type\":\"response.created\",\"response\":"
+                "{\"id\":\"%s\",\"object\":\"response\","
+                "\"status\":\"in_progress\"}}\n\n",
+                context.id);
+            if (start_len <= 0 || (size_t)start_len >= sizeof(start) ||
+                !send_all(fd, start, (size_t)start_len)) {
+                set_error(error, error_len, "client disconnected");
+                return false;
+            }
         }
     }
     generation_job job;

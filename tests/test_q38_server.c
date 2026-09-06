@@ -121,6 +121,33 @@ int main(void) {
           "Anthropic message endpoint");
     free(response);
 
+    const char *completion_body =
+        "{\"model\":\"qwen3.8-flash-next\",\"prompt\":\"hello\","
+        "\"max_tokens\":4}";
+    snprintf(request, sizeof(request),
+             "POST /v1/completions HTTP/1.1\r\n"
+             "Host: localhost\r\nContent-Type: application/json\r\n"
+             "Content-Length: %zu\r\n\r\n%s",
+             strlen(completion_body), completion_body);
+    response = exchange(server, request);
+    check(response && strstr(response, "\"object\":\"text_completion\"") &&
+              strstr(response, "\"text\":\"This is a deterministic"),
+          "OpenAI legacy completion endpoint");
+    free(response);
+
+    const char *responses_body =
+        "{\"model\":\"qwen3.8-flash-next\",\"input\":\"hello\"}";
+    snprintf(request, sizeof(request),
+             "POST /v1/responses HTTP/1.1\r\n"
+             "Host: localhost\r\nContent-Type: application/json\r\n"
+             "Content-Length: %zu\r\n\r\n%s",
+             strlen(responses_body), responses_body);
+    response = exchange(server, request);
+    check(response && strstr(response, "\"object\":\"response\"") &&
+              strstr(response, "\"output_text\":\"This is a deterministic"),
+          "OpenAI Responses endpoint");
+    free(response);
+
     response = exchange(server,
         "OPTIONS /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n\r\n");
     check(response && strstr(response, "204 No Content") &&
