@@ -45,6 +45,7 @@ typedef struct {
     double cuda_dispatch_ms;
     double cuda_sync_wait_ms;
     double memcpy_ms;
+    double other_ms;
     uint64_t telemetry_callbacks;
     uint64_t kernel_launches;
     uint64_t host_syncs;
@@ -311,6 +312,7 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     ADD(cuda_dispatch_ms);
     ADD(cuda_sync_wait_ms);
     ADD(memcpy_ms);
+    ADD(other_ms);
     sum->telemetry_callbacks += sample->telemetry_callbacks;
     sum->kernel_launches += sample->kernel_launches;
     sum->host_syncs += sample->host_syncs;
@@ -347,6 +349,7 @@ static void divide_sample(q2_sample *sample, double divisor) {
     DIV(cuda_dispatch_ms);
     DIV(cuda_sync_wait_ms);
     DIV(memcpy_ms);
+    DIV(other_ms);
 #undef DIV
     sample->telemetry_callbacks = (uint64_t)(
         (double)sample->telemetry_callbacks / divisor);
@@ -491,6 +494,17 @@ static void add_telemetry_delta(q2_sample *sample,
     sample->memcpy_ms = after->upload_ms - before->upload_ms;
 }
 
+static void finalize_other(q2_sample *sample) {
+    double accounted;
+    double total;
+    if (!sample) return;
+    accounted = sample->qsa_ms + sample->moe_ms + sample->gdn_ms +
+                sample->gr_ms + sample->norms_residual_glue_ms +
+                sample->lm_head_ms;
+    total = sample->forward_ms > 0.0 ? sample->forward_ms : sample->wall_ms;
+    sample->other_ms = total > accounted ? total - accounted : 0.0;
+}
+
 static bool run_decode(q38_session *session, const q2_options *options,
                        const q38_token_batch *prompt, float *logits,
                        q2_telemetry *telemetry, q2_sample *summary,
@@ -525,8 +539,6 @@ static bool run_decode(q38_session *session, const q2_options *options,
     memset(&prefill_capture, 0, sizeof(prefill_capture));
     diagnostics.trace_user = &prefill_capture;
     diagnostics.qsa_timing = &prefill_capture.qsa_timing;
-    q38_forward_cuda_set_telemetry_observer(
-        session->runtime->cuda, telemetry_observer, telemetry);
     if (!q38_session_prefill_chunked(
             session, prompt->tokens, prompt->token_count,
             options->prefill_chunk, logits, VOCAB_SIZE, &next_token,
@@ -534,6 +546,11 @@ static bool run_decode(q38_session *session, const q2_options *options,
             error, error_len))
         goto fail;
     generated[0] = next_token;
+    if (!q38_session_emit(session, logits, next_token, NULL, NULL,
+                          &step_index, error, error_len))
+        goto fail;
+    q38_forward_cuda_set_telemetry_observer(
+        session->runtime->cuda, telemetry_observer, telemetry);
     for (size_t index = 1; index < options->generated_count; ++index) {
         q2_capture capture;
         q38_decode_timing timing = {0};
@@ -560,6 +577,7 @@ static bool run_decode(q38_session *session, const q2_options *options,
         capture.sample.ple_overlap_ms = ple.overlap_ms;
         apply_qsa_timing(&capture.sample, &capture.qsa_timing);
         add_telemetry_delta(&capture.sample, &telemetry_before, telemetry);
+        finalize_other(&capture.sample);
         generated[index] = next_token;
         if (index >= options->measure_first &&
             index <= options->measure_last) {
@@ -609,6 +627,7 @@ static bool run_prefill_case(
     sample->wall_ms = now_ms() - started;
     apply_qsa_timing(sample, &qsa_timing);
     add_telemetry_delta(sample, &before, telemetry);
+    finalize_other(sample);
     *logits_hash = hash_bytes(logits, VOCAB_SIZE * sizeof(*logits));
     *finite = true;
     for (size_t i = 0; i < VOCAB_SIZE; ++i)
@@ -703,7 +722,8 @@ static void print_sample(const q2_sample *sample) {
            "\"cuda_dispatch\":{\"ms\":%.6f},"
            "\"cuda_sync_wait\":{\"ms\":%.6f},"
            "\"memcpy\":{\"ms\":%.6f},"
-           "\"PLE_critical_stall\":{\"ms\":%.6f}},"
+           "\"PLE_critical_stall\":{\"ms\":%.6f},"
+           "\"other\":{\"ms\":%.6f}},"
            "\"traffic\":{\"kernel_launches\":%" PRIu64
            ",\"host_syncs\":%" PRIu64 ",\"h2d_bytes\":%" PRIu64
            ",\"d2h_bytes\":%" PRIu64 ",\"d2d_bytes\":%" PRIu64 "}}",
@@ -717,6 +737,7 @@ static void print_sample(const q2_sample *sample) {
            sample->lm_head_ms, sample->host_scalar_ms,
            sample->cuda_dispatch_ms, sample->cuda_sync_wait_ms,
            sample->memcpy_ms, sample->ple_critical_stall_ms,
+           sample->other_ms,
            sample->kernel_launches, sample->host_syncs, sample->h2d_bytes,
            sample->d2h_bytes, sample->d2d_bytes);
 }

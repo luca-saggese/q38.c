@@ -162,6 +162,7 @@ def sample_breakdown(samples: list[dict[str, object]]) -> dict[str, object]:
         "cuda_dispatch": ("categories", "cuda_dispatch", "ms"),
         "memcpy": ("categories", "memcpy", "ms"),
         "PLE_critical_stall": ("categories", "PLE_critical_stall", "ms"),
+        "other": ("categories", "other", "ms"),
         "PLE_elapsed": ("ple_elapsed_ms",),
         "PLE_overlap": ("ple_overlap_ms",),
     }
