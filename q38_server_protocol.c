@@ -503,6 +503,10 @@ static bool parse_common_fields(const char *body, q38_server_request *request,
     char *stop = NULL;
     char *reasoning = NULL;
     char *thinking = NULL;
+    char *q38 = NULL;
+    char *steering = NULL;
+    char *steering_ffn = NULL;
+    char *steering_attn = NULL;
     char *stream_options = NULL;
     char *session_id = NULL;
     double number;
@@ -514,6 +518,7 @@ static bool parse_common_fields(const char *body, q38_server_request *request,
                              error, error_len) ||
         !q38_json_object_field(body, "thinking", &thinking,
                                error, error_len) ||
+        !q38_json_object_field(body, "q38", &q38, error, error_len) ||
         !q38_json_object_field(body, "stream_options", &stream_options,
                                error, error_len) ||
         !q38_json_get_string(body, "session_id", &session_id,
@@ -533,6 +538,39 @@ static bool parse_common_fields(const char *body, q38_server_request *request,
             request->thinking = boolean;
         } else if (thinking[0] == 't') {
             request->thinking = true;
+        }
+    }
+    if (q38 && q38[0] == '{' &&
+        !q38_json_object_field(q38, "steering", &steering, error, error_len))
+        goto fail;
+    if (steering && steering[0] == '{') {
+        double value = 0.0;
+        if (!q38_json_object_field(steering, "ffn", &steering_ffn,
+                                   error, error_len) ||
+            !q38_json_object_field(steering, "attn", &steering_attn,
+                                   error, error_len))
+            goto fail;
+        if (steering_ffn) {
+            if (!q38_json_get_number(steering, "ffn", &value,
+                                     error, error_len))
+                goto fail;
+            request->steering_ffn = (float)value;
+            request->steering_override = true;
+        }
+        if (steering_attn) {
+            value = 0.0;
+            if (!q38_json_get_number(steering, "attn", &value,
+                                     error, error_len))
+                goto fail;
+            request->steering_attn = (float)value;
+            request->steering_override = true;
+        }
+        if (request->steering_ffn < -100.0f ||
+            request->steering_ffn > 100.0f ||
+            request->steering_attn < -100.0f ||
+            request->steering_attn > 100.0f) {
+            protocol_fail(error, error_len, "steering scale out of range");
+            goto fail;
         }
     }
     if (!parse_tools_raw(request, tools, error, error_len))
@@ -622,6 +660,10 @@ static bool parse_common_fields(const char *body, q38_server_request *request,
     request->cache_save = boolean;
     free(stream_options);
     free(session_id);
+    free(q38);
+    free(steering);
+    free(steering_ffn);
+    free(steering_attn);
     stream_options = NULL;
     if (!request->model) request->model = duplicate_range("", 0);
     free(tools);
@@ -633,6 +675,10 @@ fail:
     free(stop);
     free(reasoning);
     free(thinking);
+    free(q38);
+    free(steering);
+    free(steering_ffn);
+    free(steering_attn);
     free(stream_options);
     free(session_id);
     return false;

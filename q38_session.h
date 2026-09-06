@@ -2,6 +2,7 @@
 #define Q38_SESSION_H
 
 #include "q38_decode.h"
+#include "q38_directional_steering.h"
 #include "q38_gguf.h"
 #include "q38_tokenizer.h"
 #include "q38_weights.h"
@@ -23,6 +24,7 @@ typedef struct {
     q38_weights weights;
     q38_forward_cuda_context *cuda;
     q38_forward_backend_config backend;
+    q38_directional_steering steering;
     bool tokenizer_initialized;
 } q38_runtime;
 
@@ -35,6 +37,9 @@ typedef struct {
     size_t token_count;
     size_t token_capacity;
     double ple_wait_at_injection_ms;
+    float steering_ffn_scale;
+    float steering_attn_scale;
+    bool steering_override_set;
 } q38_session;
 
 typedef void (*q38_token_callback)(uint32_t token, const char *piece,
@@ -44,11 +49,18 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
                       const char *tokenizer_path, char *error,
                       size_t error_len);
 void q38_runtime_destroy(q38_runtime *runtime);
+bool q38_runtime_load_directional_steering(
+    q38_runtime *runtime, const char *path, float ffn_scale,
+    float attn_scale, char *error, size_t error_len);
 
 bool q38_session_create(q38_session *session, q38_runtime *runtime,
                         uint32_t ctx_size, char *error, size_t error_len);
 void q38_session_reset(q38_session *session);
 void q38_session_destroy(q38_session *session);
+bool q38_session_set_directional_steering(
+    q38_session *session, float ffn_scale, float attn_scale, char *error,
+    size_t error_len);
+void q38_session_clear_directional_steering_override(q38_session *session);
 
 bool q38_session_prefill(
     q38_session *session, const uint32_t *tokens, size_t token_count,

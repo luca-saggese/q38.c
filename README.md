@@ -43,9 +43,59 @@ versions are recorded in `BASELINE.md`.
 ./q38 --inspect model.gguf
 ./q38 --list-tensors model.gguf
 ./q38 --memory-plan model.gguf
+./q38 -m model.gguf -p "Explain why the sky is blue." --max-tokens 128
 ```
 
 Add `--json` for deterministic machine-readable output.
+
+## Server and HTTP client
+
+The direct `q38` binary remains the canonical local inference and benchmark
+path. The resident server loads the model once and keeps the runtime/session
+alive:
+
+```
+make q38-server
+./q38-server --model model.gguf --tokenizer /path/to/tokenizer \
+  --host 127.0.0.1 --port 8000
+```
+
+`q38-server-mock` is the model-free protocol test server. It is used for
+HTTP/parser/SSE tests and never loads a GGUF. `q38-cli` is an HTTP-only
+localhost client; it does not link CUDA, GGUF, or the Q38 runtime:
+
+```
+./q38-cli
+./q38-cli --no-autostart --host 127.0.0.1 --port 8000
+```
+
+The server exposes the OpenAI Completions, Chat Completions, and Responses
+APIs plus Anthropic Messages, streaming SSE, tools, reasoning fields,
+cancellation, and image request parsing. Unsupported Q38 runtime capabilities
+return explicit errors instead of silently selecting a donor model path.
+
+## Directional steering
+
+Q38 directional steering uses a raw little-endian float32 file containing
+exactly `48 x 2560` normalized direction values. It is loaded once into the
+resident runtime and can be enabled on the direct CLI or resident server:
+
+```
+./q38 -m model.gguf --dir-steering-file direction.bin \
+  --dir-steering-ffn 1.0 --dir-steering-attn 0.0 -p "..."
+./q38-server --model model.gguf --tokenizer /path/to/tokenizer \
+  --dir-steering-file direction.bin --dir-steering-ffn 1.0
+```
+
+The server accepts a request-local `q38.steering` override. Overrides are
+cleared after every request and cannot contaminate the next session:
+
+```json
+{"q38":{"steering":{"ffn":-0.5,"attn":0.0}}}
+```
+
+Reference 0 remains steering-disabled; steering experiments must use separate
+artifacts and must not be compared with Reference 0 as a performance claim.
 
 ## Acceptance
 

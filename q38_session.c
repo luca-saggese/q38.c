@@ -101,6 +101,7 @@ fail_runtime:
 
 void q38_runtime_destroy(q38_runtime *runtime) {
     if (!runtime) return;
+    q38_directional_steering_destroy(&runtime->steering);
     q38_forward_cuda_context_destroy(runtime->cuda);
     runtime->cuda = NULL;
     q38_weights_release(&runtime->weights);
@@ -109,6 +110,25 @@ void q38_runtime_destroy(q38_runtime *runtime) {
     runtime->tokenizer_initialized = false;
     q38_gguf_close(runtime->model);
     runtime->model = NULL;
+}
+
+bool q38_runtime_load_directional_steering(
+    q38_runtime *runtime, const char *path, float ffn_scale,
+    float attn_scale, char *error, size_t error_len) {
+    if (!runtime)
+        return fail(error, error_len, "invalid runtime steering arguments");
+    if (!q38_directional_steering_load(
+            &runtime->steering, path, ffn_scale, attn_scale, error,
+            error_len))
+        return false;
+    if (!q38_forward_cuda_load_directional_steering(
+            runtime->cuda, &runtime->steering, error, error_len)) {
+        q38_directional_steering_destroy(&runtime->steering);
+        return false;
+    }
+    q38_forward_cuda_set_directional_steering_scales(
+        runtime->cuda, ffn_scale, attn_scale);
+    return true;
 }
 
 static bool reserve_history(q38_session *session, size_t extra,
@@ -159,6 +179,11 @@ bool q38_session_create(q38_session *session, q38_runtime *runtime,
     memset(session, 0, sizeof(*session));
     session->runtime = runtime;
     session->ctx_size = ctx_size;
+    session->steering_ffn_scale = runtime->steering.ffn_scale;
+    session->steering_attn_scale = runtime->steering.attn_scale;
+    q38_forward_cuda_set_directional_steering_scales(
+        runtime->cuda, session->steering_ffn_scale,
+        session->steering_attn_scale);
     if (!q38_forward_state_init(&session->state, &runtime->weights,
                                 runtime->tokenizer.eos_id, error, error_len)) {
         memset(session, 0, sizeof(*session));
@@ -169,10 +194,57 @@ bool q38_session_create(q38_session *session, q38_runtime *runtime,
 
 void q38_session_reset(q38_session *session) {
     if (!session) return;
+    const bool keep_override = session->steering_override_set;
+    const float override_ffn = session->steering_ffn_scale;
+    const float override_attn = session->steering_attn_scale;
     q38_forward_state_reset(&session->state);
     session->position = 0;
     session->token_count = 0;
     session->ple_wait_at_injection_ms = 0.0;
+    session->steering_override_set = keep_override;
+    session->steering_ffn_scale = keep_override
+        ? override_ffn
+        : session->runtime ? session->runtime->steering.ffn_scale : 0.0f;
+    session->steering_attn_scale = keep_override
+        ? override_attn
+        : session->runtime ? session->runtime->steering.attn_scale : 0.0f;
+    if (session->runtime && session->runtime->cuda)
+        q38_forward_cuda_set_directional_steering_scales(
+            session->runtime->cuda, session->steering_ffn_scale,
+            session->steering_attn_scale);
+}
+
+bool q38_session_set_directional_steering(
+    q38_session *session, float ffn_scale, float attn_scale, char *error,
+    size_t error_len) {
+    if (!session || !session->runtime)
+        return fail(error, error_len, "invalid session steering arguments");
+    if (!isfinite(ffn_scale) || !isfinite(attn_scale) ||
+        fabsf(ffn_scale) > 100.0f || fabsf(attn_scale) > 100.0f)
+        return fail(error, error_len, "Q38 steering scale is out of range");
+    if ((ffn_scale != 0.0f || attn_scale != 0.0f) &&
+        !session->runtime->steering.directions)
+        return fail(error, error_len,
+                    "session steering requires a loaded Q38 direction");
+    session->steering_ffn_scale = ffn_scale;
+    session->steering_attn_scale = attn_scale;
+    session->steering_override_set = true;
+    q38_forward_cuda_set_directional_steering_scales(
+        session->runtime->cuda, ffn_scale, attn_scale);
+    return true;
+}
+
+void q38_session_clear_directional_steering_override(q38_session *session) {
+    if (!session) return;
+    session->steering_override_set = false;
+    session->steering_ffn_scale =
+        session->runtime ? session->runtime->steering.ffn_scale : 0.0f;
+    session->steering_attn_scale =
+        session->runtime ? session->runtime->steering.attn_scale : 0.0f;
+    if (session->runtime && session->runtime->cuda)
+        q38_forward_cuda_set_directional_steering_scales(
+            session->runtime->cuda, session->steering_ffn_scale,
+            session->steering_attn_scale);
 }
 
 void q38_session_destroy(q38_session *session) {
@@ -216,6 +288,14 @@ bool q38_session_eval_timed(
     }
     diagnostics->qsa_qkv_backend = session->runtime->backend.qsa_qkv;
     diagnostics->qsa_qkv_backend_user = session->runtime->backend.user;
+    diagnostics->directional_steering = &session->runtime->steering;
+    diagnostics->directional_steering_ffn_scale =
+        session->steering_ffn_scale;
+    diagnostics->directional_steering_attn_scale =
+        session->steering_attn_scale;
+    diagnostics->directional_steering_attn_device =
+        session->runtime->cuda != NULL &&
+        session->runtime->steering.directions != NULL;
     if (diagnostics) {
         diagnostics->backend_context = runtime_backend_context;
         diagnostics->backend_context_user = session->runtime->backend.user;

@@ -1,0 +1,3 @@
+Explain why databases use indexes in a concise answer.
+What does DNS do in one short paragraph?
+Describe how a compiler works briefly.

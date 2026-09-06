@@ -82,6 +82,9 @@ typedef struct {
     bool cache_restore;
     bool cache_save;
     bool has_image;
+    bool steering_override;
+    float steering_ffn;
+    float steering_attn;
     q38_server_cancel_cb cancelled;
     void *cancel_user;
 } q38_server_request;

@@ -1,0 +1,3 @@
+Explain why databases use indexes.
+What does DNS do?
+Describe how a compiler works.

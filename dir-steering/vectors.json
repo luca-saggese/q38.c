@@ -1,0 +1,11 @@
+{
+  "concise": {
+    "file": "out/verbosity.f32",
+    "description": "Bias toward concise answers",
+    "default_ffn": -0.5,
+    "max_abs_ffn": 2.0,
+    "default_attn": 0.0,
+    "model_callable": false,
+    "scope": "next_message"
+  }
+}

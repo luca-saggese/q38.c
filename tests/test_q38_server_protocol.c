@@ -22,6 +22,7 @@ int main(void) {
         "\"model\":\"qwen3.8-flash-next\","
         "\"stream\":true,"
         "\"max_tokens\":32,"
+        "\"q38\":{\"steering\":{\"ffn\":-0.5,\"attn\":0}},"
         "\"messages\":["
           "{\"role\":\"system\",\"content\":\"be concise\"},"
           "{\"role\":\"user\",\"content\":["
@@ -54,6 +55,9 @@ int main(void) {
                       "call-1"),
           "OpenAI tool-call history parsing");
     check(request.stream && request.max_tokens == 32, "common options");
+    check(request.steering_override && request.steering_ffn == -0.5f &&
+              request.steering_attn == 0.0f,
+          "Q38 steering request override");
     q38_server_request_free(&request);
 
     const char *responses =

@@ -11,6 +11,7 @@
 #include "q38_memory.h"
 #include "q38_platform.h"
 #include "q38_decode.h"
+#include "q38_directional_steering.h"
 #include "q38_forward_cuda.h"
 #include "q38_session.h"
 #include "q38_tokenizer.h"
@@ -44,6 +45,11 @@ static void usage(FILE *fp) {
         "  --trace-state              Enable full semantic state snapshots\n"
         "  --max-tokens <n>           Maximum generated tokens (default: 256)\n"
         "  --disable-ple              Omit PLE output while retaining PLE state\n"
+        "  --dir-steering-file FILE   Load a Q38 48x2560 f32 direction\n"
+        "  --dir-steering-ffn F       Apply steering after FFN outputs\n"
+        "  --dir-steering-attn F      Apply steering after attention outputs\n"
+        "  --dump-steering-dir DIR    Dump per-layer activation rows\n"
+        "  --dump-steering-component C ffn_out or attn_out\n"
         "  --json                     Machine-readable output\n"
         "  --verbose                  Extra diagnostics\n");
 }
@@ -348,6 +354,9 @@ typedef struct {
     uint64_t diagnostic_conv_history_hash;
     uint64_t diagnostic_ple_history_hash;
     double diagnostic_trace_ms;
+    const char *steering_dump_dir;
+    const char *steering_dump_component;
+    uint64_t steering_dump_layers;
     q38_memory_tracker memory;
 } q38_generate_evidence;
 
@@ -685,6 +694,31 @@ static bool generate_boundary_trace(uint32_t layer, const char *boundary,
      * consumes the first emitted token, after all prompt tokens have run.
      */
     if (token_count != 1) return true;
+    if (layer < Q38_MODEL_LAYERS && evidence->steering_dump_dir &&
+        evidence->steering_dump_component &&
+        ((strcmp(evidence->steering_dump_component, "ffn_out") == 0 &&
+          strcmp(boundary, "ffn_output") == 0) ||
+         (strcmp(evidence->steering_dump_component, "attn_out") == 0 &&
+          strcmp(boundary, "gdn_qsa_output") == 0)) &&
+        !(evidence->steering_dump_layers & (UINT64_C(1) << layer))) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s-%u-pos0.bin",
+                 evidence->steering_dump_dir,
+                 evidence->steering_dump_component, layer);
+        FILE *file = fopen(path, "wb");
+        bool ok = false;
+        if (file) {
+            ok = fwrite(values, sizeof(float), width, file) == width;
+            if (fclose(file) != 0) ok = false;
+        }
+        if (!ok) {
+            if (error && error_len)
+                snprintf(error, error_len,
+                         "failed to write Q38 steering activation %s", path);
+            return false;
+        }
+        evidence->steering_dump_layers |= UINT64_C(1) << layer;
+    }
     q38_decode_stats stats = cli_stats_floats(values, token_count * width);
     if (layer == 1 && strcmp(boundary, "hidden_before_ple") == 0) {
         evidence->latest_hidden_before_ple = stats;
@@ -1094,6 +1128,19 @@ static int cmd_generate(const q38_options *opt) {
         fprintf(stderr, "q38: runtime/tokenizer: %s\n", error);
         goto cleanup;
     }
+    if (opt->directional_steering_file) {
+        if (!q38_runtime_load_directional_steering(
+                &runtime, opt->directional_steering_file,
+                opt->directional_steering_ffn,
+                opt->directional_steering_attn, error, sizeof(error))) {
+            fprintf(stderr, "q38: steering: %s\n", error);
+            goto cleanup;
+        }
+    } else if (opt->directional_steering_ffn != 0.0f ||
+               opt->directional_steering_attn != 0.0f) {
+        fprintf(stderr, "q38: steering scales require --dir-steering-file\n");
+        goto cleanup;
+    }
     if (!q38_session_create(&session, &runtime, opt->ctx_size, error,
                             sizeof(error))) {
         fprintf(stderr, "q38: session: %s\n", error);
@@ -1125,6 +1172,8 @@ static int cmd_generate(const q38_options *opt) {
     evidence.per_token_ple_stall_ms = generation_limit
         ? calloc(generation_limit,
                  sizeof(*evidence.per_token_ple_stall_ms)) : NULL;
+    evidence.steering_dump_dir = opt->steering_dump_dir;
+    evidence.steering_dump_component = opt->steering_dump_component;
     if (!generated || !logits ||
         (generation_limit && (!evidence.per_token_ms ||
                               !evidence.per_token_forward_ms ||
@@ -1150,7 +1199,8 @@ static int cmd_generate(const q38_options *opt) {
     q38_forward_diagnostics diagnostics;
     memset(&diagnostics, 0, sizeof(diagnostics));
     diagnostics.stage_trace = generate_stage_trace;
-    diagnostics.boundary_trace = trace_state ? generate_boundary_trace : NULL;
+    diagnostics.boundary_trace =
+        (trace_state || opt->steering_dump_dir) ? generate_boundary_trace : NULL;
     diagnostics.trace_user = &evidence;
     diagnostics.disable_ple = opt->disable_ple;
     size_t step_index = 0;
@@ -1463,6 +1513,47 @@ int main(int argc, char **argv) {
             opt.trace_state = true;
         } else if (strcmp(a, "--disable-ple") == 0) {
             opt.disable_ple = true;
+        } else if (strcmp(a, "--dir-steering-file") == 0) {
+            if (i + 1 >= argc) {
+                usage(stderr);
+                return 2;
+            }
+            opt.directional_steering_file = argv[++i];
+        } else if (strcmp(a, "--dir-steering-ffn") == 0 ||
+                   strcmp(a, "--dir-steering-attn") == 0) {
+            if (i + 1 >= argc) {
+                usage(stderr);
+                return 2;
+            }
+            char *end = NULL;
+            const float value = strtof(argv[++i], &end);
+            if (!end || *end || !isfinite(value) ||
+                value < -100.0f || value > 100.0f) {
+                fprintf(stderr, "q38: invalid steering scale\n");
+                return 2;
+            }
+            opt.directional_steering_scale_set = true;
+            if (strcmp(a, "--dir-steering-ffn") == 0)
+                opt.directional_steering_ffn = value;
+            else
+                opt.directional_steering_attn = value;
+        } else if (strcmp(a, "--dump-steering-dir") == 0) {
+            if (i + 1 >= argc) {
+                usage(stderr);
+                return 2;
+            }
+            opt.steering_dump_dir = argv[++i];
+        } else if (strcmp(a, "--dump-steering-component") == 0) {
+            if (i + 1 >= argc) {
+                usage(stderr);
+                return 2;
+            }
+            opt.steering_dump_component = argv[++i];
+            if (strcmp(opt.steering_dump_component, "ffn_out") != 0 &&
+                strcmp(opt.steering_dump_component, "attn_out") != 0) {
+                fprintf(stderr, "q38: invalid steering dump component\n");
+                return 2;
+            }
         } else if (strcmp(a, "--json") == 0) {
             opt.json = true;
         } else if (strcmp(a, "--verbose") == 0) {
@@ -1487,6 +1578,9 @@ int main(int argc, char **argv) {
         opt.ctx_size = 8192;
     if (mode == Q38_MODE_GENERATE && opt.prefill_chunk == 0)
         opt.prefill_chunk = 128;
+    if (opt.directional_steering_file &&
+        !opt.directional_steering_scale_set)
+        opt.directional_steering_ffn = 1.0f;
 
     int rc;
     switch (mode) {

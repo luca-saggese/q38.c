@@ -19,6 +19,24 @@ int main(void) {
         q38_kvstore_destroy(&store);
         return 1;
     }
+    q38_kvstore_steering_metadata saved = {
+        .steering_fingerprint = 7,
+        .steering_ffn_scale = -1.0f,
+        .steering_attn_scale = 0.0f,
+        .steering_abi = 1,
+    };
+    q38_kvstore_steering_metadata requested = saved;
+    if (!q38_kvstore_steering_compatible(&saved, &requested)) {
+        fprintf(stderr, "KV steering metadata compatibility failed\n");
+        q38_kvstore_destroy(&store);
+        return 1;
+    }
+    requested.steering_ffn_scale = 0.0f;
+    if (q38_kvstore_steering_compatible(&saved, &requested)) {
+        fprintf(stderr, "KV accepted incompatible steering metadata\n");
+        q38_kvstore_destroy(&store);
+        return 1;
+    }
     q38_kvstore_destroy(&store);
     puts("test_q38_kvstore: disabled capability gate passed");
     return 0;

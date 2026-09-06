@@ -808,6 +808,9 @@ static bool full_qsa_matrix_batch(
     size_t token_count, float *output, void *opaque, char *error,
     size_t error_len) {
     full_qsa_batch_user *user = (full_qsa_batch_user *)opaque;
+    if (matrix && matrix->tensor)
+        full_backend_context(matrix->tensor, matrix->rows, matrix->cols,
+                             "qsa_output_projection");
     return user && user->backend && matrix && matrix->tensor &&
            user->backend(user->model, matrix->tensor, input, token_count,
                          matrix->rows, matrix->cols, output, user->user,
@@ -1397,6 +1400,14 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
             output[t * Q38_GR_HIDDEN + d] += shared_gate * shared[d];
         for (size_t d = 0; d < Q38_GR_HIDDEN; ++d)
             shared[d] *= shared_gate;
+        if (diagnostics && diagnostics->directional_steering &&
+            q38_directional_steering_enabled(
+                diagnostics->directional_steering,
+                diagnostics->directional_steering_ffn_scale))
+            q38_directional_steering_apply_cpu(
+                output + t * Q38_GR_HIDDEN, 1,
+                diagnostics->directional_steering, layer_number,
+                diagnostics->directional_steering_ffn_scale);
         if (!full_boundary_trace(layer_number, "shared_expert", shared, 1,
                                  Q38_GR_HIDDEN, diagnostics, error,
                                  error_len))
@@ -2037,6 +2048,14 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                              token_count, block, selected, counts,
                              layer_number, diagnostics, error, error_len))
             goto fail;
+        if (diagnostics && !diagnostics->directional_steering_attn_device &&
+            diagnostics->directional_steering &&
+            q38_directional_steering_enabled(
+                diagnostics->directional_steering,
+                diagnostics->directional_steering_attn_scale))
+            q38_directional_steering_apply_cpu(
+                block, token_count, diagnostics->directional_steering,
+                layer_number, diagnostics->directional_steering_attn_scale);
         if (!full_boundary_trace(layer_number, "gdn_qsa_output", block,
                                  token_count, Q38_GR_HIDDEN, diagnostics,
                                  error, error_len))
@@ -2054,6 +2073,9 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             !full_moe(model, layer, weights->quantized, mixed, token_count,
                       layer_number, block, scratch, diagnostics, error,
                       error_len) ||
+            !full_boundary_trace(layer_number, "ffn_output", block,
+                                 token_count, Q38_GR_HIDDEN, diagnostics,
+                                 error, error_len) ||
             !full_gr_write(model, &layer->mlp_gr, updated, block, token_count,
                            streams, normed, inject, scratch, error, error_len))
             goto fail;

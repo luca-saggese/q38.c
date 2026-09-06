@@ -1,0 +1,3 @@
+Explain in detail why databases use indexes, including tradeoffs and examples.
+What does DNS do? Give a detailed step-by-step explanation with examples.
+Describe how a compiler works, covering each major stage and its tradeoffs.

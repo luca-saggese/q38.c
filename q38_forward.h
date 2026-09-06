@@ -2,6 +2,7 @@
 #define Q38_FORWARD_H
 
 #include "q38_qsa.h"
+#include "q38_directional_steering.h"
 #include "q38_ple_prefetch.h"
 #include "q38_moe_ref.h"
 #include "q38_session_types.h"
@@ -69,12 +70,16 @@ bool q38_forward_qsa_state_init(q38_qsa_state *state,
 
 typedef struct {
     double total_ms;
+    double q_projection_ms;
+    double k_projection_ms;
+    double v_projection_ms;
     double qkv_projection_ms;
     double indexer_compression_ms;
     double score_ms;
     double exact_top_k_ms;
     double selected_kv_gather_ms;
     double attention_ms;
+    double output_projection_ms;
     double state_update_ms;
     double allocation_cleanup_ms;
     uint64_t allocations;
@@ -83,7 +88,26 @@ typedef struct {
     uint64_t h2d_bytes;
     uint64_t d2h_bytes;
     uint64_t residency_misses;
+    bool qkv_backend_used;
+    bool output_projection_backend_used;
 } q38_forward_qsa_timing;
+
+typedef struct {
+    uint32_t layer;
+    bool qkv_backend_used;
+    bool output_projection_backend_used;
+    bool qkv_fallback;
+    double q_projection_ms;
+    double k_projection_ms;
+    double v_projection_ms;
+    double qkv_projection_ms;
+    double output_projection_ms;
+    double indexer_projection_ms;
+} q38_forward_qsa_projection_trace;
+
+typedef bool (*q38_forward_qsa_projection_trace_fn)(
+    const q38_forward_qsa_projection_trace *trace, void *user,
+    char *error, size_t error_len);
 
 typedef bool (*q38_forward_qsa_qkv_backend)(
     const q38_gguf *model, const q38_tensor *q_proj,
@@ -218,8 +242,13 @@ typedef struct {
     q38_forward_backend_context_trace backend_context;
     void *backend_context_user;
     q38_forward_qsa_timing *qsa_timing;
+    q38_forward_qsa_projection_trace_fn qsa_projection_trace;
     q38_forward_qsa_qkv_backend qsa_qkv_backend;
     void *qsa_qkv_backend_user;
+    const q38_directional_steering *directional_steering;
+    float directional_steering_ffn_scale;
+    float directional_steering_attn_scale;
+    bool directional_steering_attn_device;
 } q38_forward_diagnostics;
 
 /* Optional diagnostic row-matvec backend.  It is strict when installed via

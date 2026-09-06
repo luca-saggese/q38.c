@@ -6,6 +6,7 @@
 
 #include "q38_forward.h"
 #include "q38_qsa_candidate.h"
+#include "q38_directional_steering.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -112,6 +113,15 @@ void q38_forward_cuda_set_telemetry_observer(
 void q38_forward_cuda_set_stage_context(q38_forward_cuda_context *context,
                                         uint32_t layer,
                                         const char *logical_stage);
+bool q38_forward_cuda_load_directional_steering(
+    q38_forward_cuda_context *context,
+    const q38_directional_steering *steering, char *error, size_t error_len);
+void q38_forward_cuda_set_directional_steering_scales(
+    q38_forward_cuda_context *context, float ffn_scale, float attn_scale);
+bool q38_forward_cuda_apply_directional_steering(
+    q38_forward_cuda_context *context, float *device_values,
+    uint32_t layer, size_t width, size_t rows, float scale,
+    char *error, size_t error_len);
 bool q38_forward_cuda_enable_all_non_ple_residency(
     q38_forward_cuda_context *context, const q38_gguf *model,
     char *error, size_t error_len);

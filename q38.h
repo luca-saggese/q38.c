@@ -48,6 +48,12 @@ typedef struct {
     bool trace_state;     /* --trace-state / Q38_DIAGNOSTIC_STATE_TRACE */
     bool json;            /* --json */
     bool verbose;         /* --verbose */
+    const char *directional_steering_file;
+    float directional_steering_ffn;
+    float directional_steering_attn;
+    bool directional_steering_scale_set;
+    const char *steering_dump_dir;
+    const char *steering_dump_component;
 } q38_options;
 
 /* --- Platform probe (spec §7) ------------------------------------- */

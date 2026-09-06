@@ -59,6 +59,10 @@ struct q38_forward_cuda_context {
     size_t device_qsa_output_bytes;
     float *host_qsa_output;
     size_t host_qsa_output_bytes;
+    float *device_steering;
+    size_t device_steering_bytes;
+    float directional_steering_ffn_scale;
+    float directional_steering_attn_scale;
     void *lm_head_device_weights;
     size_t lm_head_device_weights_bytes;
     const void *lm_head_host_data;
@@ -123,6 +127,29 @@ struct q38_forward_cuda_context {
     uint64_t expert_fast_calls_by_layer[Q38_MODEL_LAYERS];
     uint64_t expert_legacy_calls_by_layer[Q38_MODEL_LAYERS];
 };
+
+__global__ static void q38_directional_steering_kernel(
+        float *values, const float *directions, uint32_t layer,
+        uint32_t width, uint32_t rows, float scale) {
+    const uint32_t row = blockIdx.x;
+    if (row >= rows || !width || !scale) return;
+    float *value = values + (uint64_t)row * width;
+    const float *direction = directions + (uint64_t)layer * width;
+    float dot = 0.0f;
+    for (uint32_t i = threadIdx.x; i < width; i += blockDim.x)
+        dot += value[i] * direction[i];
+    __shared__ float partial[256];
+    partial[threadIdx.x] = dot;
+    __syncthreads();
+    for (uint32_t stride = blockDim.x >> 1; stride; stride >>= 1) {
+        if (threadIdx.x < stride)
+            partial[threadIdx.x] += partial[threadIdx.x + stride];
+        __syncthreads();
+    }
+    const float coefficient = scale * partial[0];
+    for (uint32_t i = threadIdx.x; i < width; i += blockDim.x)
+        value[i] -= coefficient * direction[i];
+}
 
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
@@ -879,6 +906,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_moe_accum);
     cudaFree(context->device_qsa_input);
     cudaFree(context->device_qsa_output);
+    cudaFree(context->device_steering);
     free(context->host_qsa_output);
     if (!context->lm_head_uses_persistent)
         cudaFree(context->lm_head_device_weights);
@@ -888,6 +916,64 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     free(context->exec_tensors);
     if (context->stream) cudaStreamDestroy(context->stream);
     free(context);
+}
+
+extern "C" bool q38_forward_cuda_load_directional_steering(
+    q38_forward_cuda_context *context,
+    const q38_directional_steering *steering, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!context || !steering || !steering->directions ||
+        steering->layers != Q38_DIRECTIONAL_STEERING_LAYERS ||
+        steering->hidden_size != Q38_DIRECTIONAL_STEERING_HIDDEN)
+        return fail(error, error_len, "invalid CUDA Q38 steering state");
+    if (!context->device_steering &&
+        cudaMalloc((void **)&context->device_steering,
+                   Q38_DIRECTIONAL_STEERING_BYTES) != cudaSuccess)
+        return fail(error, error_len, "Q38 steering CUDA allocation failed");
+    context->device_steering_bytes = Q38_DIRECTIONAL_STEERING_BYTES;
+    if (cudaMemcpyAsync(context->device_steering, steering->directions,
+                        Q38_DIRECTIONAL_STEERING_BYTES,
+                        cudaMemcpyHostToDevice, context->stream) !=
+            cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "Q38 steering CUDA upload failed");
+    ++context->cuda_synchronizations;
+    return true;
+}
+
+extern "C" void q38_forward_cuda_set_directional_steering_scales(
+    q38_forward_cuda_context *context, float ffn_scale, float attn_scale) {
+    if (!context) return;
+    context->directional_steering_ffn_scale = ffn_scale;
+    context->directional_steering_attn_scale = attn_scale;
+}
+
+static bool apply_directional_steering_device(
+    q38_forward_cuda_context *context, float *values, uint32_t layer,
+    size_t width, size_t rows, float scale, char *error, size_t error_len) {
+    if (!context || !context->device_steering || !values || !rows ||
+        !scale)
+        return true;
+    if (width != Q38_DIRECTIONAL_STEERING_HIDDEN ||
+        layer >= Q38_DIRECTIONAL_STEERING_LAYERS ||
+        rows > UINT32_MAX)
+        return fail(error, error_len, "invalid CUDA Q38 steering geometry");
+    uint32_t threads = 256u;
+    while (threads > width && threads > 1u) threads >>= 1;
+    q38_directional_steering_kernel<<<(unsigned)rows, threads, 0,
+                                      context->stream>>>(
+        values, context->device_steering, layer, (uint32_t)width,
+        (uint32_t)rows, scale);
+    return cudaGetLastError() == cudaSuccess ||
+           fail(error, error_len, "Q38 steering kernel launch failed");
+}
+
+extern "C" bool q38_forward_cuda_apply_directional_steering(
+    q38_forward_cuda_context *context, float *device_values, uint32_t layer,
+    size_t width, size_t rows, float scale, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    return apply_directional_steering_device(
+        context, device_values, layer, width, rows, scale, error, error_len);
 }
 
 extern "C" bool q38_forward_cuda_prepare_lm_head(
@@ -1323,17 +1409,28 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     } else {
         return fail(error, error_len, "unsupported CUDA forward matrix type");
     }
+    if (!launched) {
+        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        return false;
+    }
+    if (context->current_stage &&
+        (!strcmp(context->current_stage, "qsa_output_projection") ||
+         !strcmp(context->current_stage, "gdn_output_projection")) &&
+        !apply_directional_steering_device(
+            context, context->device_output, context->current_layer, rows, 1,
+            context->directional_steering_attn_scale, error, error_len)) {
+        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        return false;
+    }
     if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA kernel timing failed");
-
-    if (!launched ||
-        cudaMemcpyAsync(output, context->device_output, rows * sizeof(float),
+    if (cudaMemcpyAsync(output, context->device_output, rows * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) !=
             cudaSuccess ||
         cudaStreamSynchronize(context->stream) != cudaSuccess)
-        return launched ? fail(error, error_len,
-                               "CUDA forward matrix download failed")
-                        : false;
+        return fail(error, error_len, "CUDA forward matrix download failed");
     ++context->cuda_synchronizations;
     context->device_output_elements = rows;
     float upload_ms = event_elapsed(upload_start, upload_stop);
@@ -1420,9 +1517,28 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
     matrix_batch_kernel<<<blocks, 256, 0, context->stream>>>(
         tensor->type, exec->ptr, context->device_input, token_count, rows,
         cols, context->device_output);
-    if (cudaGetLastError() != cudaSuccess ||
-        cudaEventRecord(kernel_stop, context->stream) != cudaSuccess ||
-        cudaMemcpyAsync(output, context->device_output, output_bytes,
+    if (cudaGetLastError() != cudaSuccess) {
+        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        return fail(error, error_len, "CUDA batched matrix kernel failed");
+    }
+    if (context->current_stage &&
+        (!strcmp(context->current_stage, "qsa_output_projection") ||
+         !strcmp(context->current_stage, "gdn_output_projection")) &&
+        !apply_directional_steering_device(
+            context, context->device_output, context->current_layer, rows,
+            token_count, context->directional_steering_attn_scale, error,
+            error_len)) {
+        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        return false;
+    }
+    if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess) {
+        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
+        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        return fail(error, error_len, "CUDA batched matrix timing failed");
+    }
+    if (cudaMemcpyAsync(output, context->device_output, output_bytes,
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
         cudaStreamSynchronize(context->stream) != cudaSuccess)
         {

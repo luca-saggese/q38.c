@@ -1,12 +1,25 @@
 #include "q38_kvstore.h"
 
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 static bool kv_error(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
     return false;
+}
+
+bool q38_kvstore_steering_compatible(
+    const q38_kvstore_steering_metadata *saved,
+    const q38_kvstore_steering_metadata *requested) {
+    if (!saved || !requested) return false;
+    return saved->steering_fingerprint == requested->steering_fingerprint &&
+           saved->steering_abi == requested->steering_abi &&
+           fabsf(saved->steering_ffn_scale - requested->steering_ffn_scale) <=
+               1.0e-7f &&
+           fabsf(saved->steering_attn_scale - requested->steering_attn_scale) <=
+               1.0e-7f;
 }
 
 bool q38_kvstore_init(q38_kvstore *store, const char *root,

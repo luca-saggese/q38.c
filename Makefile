@@ -27,7 +27,7 @@ PRODUCTION_C_OBJS := \
 	q38_decode.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_quant.o \
 	q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o q38_profile.o \
-	q38_residency.o q38_session.o
+	q38_residency.o q38_directional_steering.o q38_session.o
 PRODUCTION_CUDA_OBJS := \
 	q38_cuda.o q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o \
@@ -37,6 +37,7 @@ PRODUCTION_OBJS := $(PRODUCTION_C_OBJS) $(PRODUCTION_CUDA_OBJS)
 CANONICAL_BENCH_C_OBJS := \
 	q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
+	q38_directional_steering.o \
 	q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o \
 	q38_tokenizer.o
 CANONICAL_BENCH_CUDA_OBJS := \
@@ -48,10 +49,10 @@ TEST_BINS := \
 	tests/test_platform tests/test_gguf tests/test_memory \
 	tests/test_model_config tests/test_quant_blocks tests/test_residency
 
-.PHONY: all q38 q38-server q38-cli spark test test-server clean tools \
+.PHONY: all q38 q38-server q38-server-mock q38-cli spark test test-server clean tools \
 	q38-server-real \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
-	check-perf-artifacts
+	check-perf-artifacts test-steering test-steering-cuda
 
 all: q38
 
@@ -63,14 +64,21 @@ SERVER_OBJS := q38_server.o q38_server_protocol.o q38_server_engine_mock.o \
 
 q38_server.o q38_server_engine.o q38_server_engine_mock.o \
 q38_server_protocol.o q38_kvstore.o: q38_server_engine.h
+q38_session.o q38_directional_steering.o: q38_directional_steering.h
 
-q38-server: q38_server_main.o $(SERVER_OBJS)
+q38-server-mock: q38_server_main.o $(SERVER_OBJS)
 	$(CC) $(CFLAGS) -o $@ q38_server_main.o $(SERVER_OBJS)
 
 SERVER_RUNTIME_C_OBJS := $(filter-out q38.o,$(PRODUCTION_C_OBJS))
 SERVER_RUNTIME_OBJS := $(SERVER_RUNTIME_C_OBJS) $(PRODUCTION_CUDA_OBJS)
 
 q38-server-real: q38_server_real_main.o q38_server_engine_q38.o \
+		$(SERVER_OBJS) $(SERVER_RUNTIME_OBJS)
+	$(NVCC) $(NVCCFLAGS) -o $@ q38_server_real_main.o \
+		q38_server_engine_q38.o $(SERVER_OBJS) $(SERVER_RUNTIME_OBJS) \
+		$(CUDA_LDLIBS)
+
+q38-server: q38_server_real_main.o q38_server_engine_q38.o \
 		$(SERVER_OBJS) $(SERVER_RUNTIME_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ q38_server_real_main.o \
 		q38_server_engine_q38.o $(SERVER_OBJS) $(SERVER_RUNTIME_OBJS) \
@@ -84,20 +92,42 @@ spark: q38 $(TEST_BINS)
 test: $(TEST_BINS)
 	@set -e; for test in $(TEST_BINS); do ./$$test; done
 
-test-server: tests/test_q38_json tests/test_q38_kvstore tests/test_q38_server_engine \
+test-server: tests/test_q38_directional_steering tests/test_q38_json tests/test_q38_kvstore tests/test_q38_server_engine \
 		tests/test_q38_server_protocol tests/test_q38_server
 	@set -e; \
+	./tests/test_q38_directional_steering; \
 	./tests/test_q38_json; \
 	./tests/test_q38_kvstore; \
 	./tests/test_q38_server_engine; \
 	./tests/test_q38_server_protocol; \
 	./tests/test_q38_server
 
+test-steering: tests/test_q38_directional_steering
+	./tests/test_q38_directional_steering
+
+test-steering-cuda: tests/test_q38_directional_steering_cuda
+	@set +e; ./tests/test_q38_directional_steering_cuda; status=$$?; \
+	if [ $$status -ne 0 ] && [ $$status -ne 2 ]; then exit $$status; fi
+
+tests/test_q38_directional_steering_cuda: tests/test_q38_directional_steering_cuda.o \
+		q38_forward_cuda.o q38_directional_steering.o q38_gguf.o \
+		q38_moe_cuda.o q38_cuda.o q38_cuda_primitives.o q38_qsa_cuda.o \
+		q38_gdn.o q38_cuda_timing.o q38_profile_cuda.o q38_topk_cuda.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
+
+tests/test_q38_directional_steering_cuda.o: tests/test_q38_directional_steering_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
+tests/test_q38_directional_steering: tests/test_q38_directional_steering.c \
+		q38_directional_steering.o q38_directional_steering.h
+	$(CC) $(CFLAGS) -o $@ tests/test_q38_directional_steering.c \
+		q38_directional_steering.o -lm
+
 tests/test_q38_json: tests/test_q38_json.c q38_json.o q38_json.h
 	$(CC) $(CFLAGS) -o $@ tests/test_q38_json.c q38_json.o
 
 tests/test_q38_kvstore: tests/test_q38_kvstore.c q38_kvstore.o q38_kvstore.h
-	$(CC) $(CFLAGS) -o $@ tests/test_q38_kvstore.c q38_kvstore.o
+	$(CC) $(CFLAGS) -o $@ tests/test_q38_kvstore.c q38_kvstore.o -lm
 
 tests/test_q38_server_engine: tests/test_q38_server_engine.c \
 		q38_server_engine_mock.o q38_server_engine.o q38_prompt.o \
@@ -192,11 +222,12 @@ q38_%.o: cuda/q38_%.cu
 	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
 
 clean:
-	rm -f q38 q38-server q38-server-real q38-cli $(PRODUCTION_OBJS) q38_session.o \
+	rm -f q38 q38-server q38-server-real q38-server-mock q38-cli $(PRODUCTION_OBJS) q38_session.o \
 		$(SERVER_OBJS) q38_server_main.o q38_server_real_main.o \
 		q38_server_engine_q38.o q38_cli.o \
-		tests/q2_canonical_bench $(TEST_BINS) \
-		tests/test_q38_json tests/test_q38_server_engine \
+		tests/q2_canonical_bench tests/test_q38_directional_steering_cuda \
+		tests/test_q38_directional_steering_cuda.o $(TEST_BINS) \
+		tests/test_q38_directional_steering tests/test_q38_json tests/test_q38_server_engine \
 		tests/test_q38_kvstore \
 		tests/test_q38_server_protocol tests/test_q38_server \
 		tools/q38_quantize
