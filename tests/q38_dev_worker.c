@@ -5,6 +5,7 @@
 #include "q38_weights.h"
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
@@ -55,6 +56,33 @@ typedef struct {
     float hidden[HIDDEN];
     char error[256];
 } capture_context;
+
+enum {
+    MOE_CAPTURE_COUNT = 3,
+    MOE_ROUTER_EXPERTS = 512,
+    MOE_TOP_K = 10,
+    MOE_INTERMEDIATE = 640,
+    MOE_QK_K = 256,
+};
+
+typedef struct {
+    uint32_t layer;
+    bool routed_captured;
+    bool shared_captured;
+    float hidden[HIDDEN];
+    float router_logits_pre[MOE_ROUTER_EXPERTS];
+    float router_logits_effective[MOE_ROUTER_EXPERTS];
+    uint16_t selected_experts[MOE_TOP_K];
+    float selected_weights_pre[MOE_TOP_K];
+    float selected_weights[MOE_TOP_K];
+    float routed[HIDDEN];
+    float shared[HIDDEN];
+} moe_capture_case;
+
+typedef struct {
+    worker *worker;
+    moe_capture_case cases[MOE_CAPTURE_COUNT];
+} moe_capture_context;
 
 static void residency_telemetry(
     const q38_forward_cuda_telemetry *telemetry, void *user) {
@@ -388,6 +416,313 @@ static bool capture_hidden(worker *w, uint32_t token) {
     return true;
 }
 
+static moe_capture_case *find_moe_capture_case(moe_capture_context *capture,
+                                               uint32_t layer) {
+    for (size_t i = 0; i < MOE_CAPTURE_COUNT; ++i)
+        if (capture->cases[i].layer == layer)
+            return &capture->cases[i];
+    return NULL;
+}
+
+static bool capture_moe_trace(uint32_t layer, const q38_moe_trace *trace,
+                              void *user, char *error, size_t error_len) {
+    moe_capture_context *capture = (moe_capture_context *)user;
+    moe_capture_case *case_data = find_moe_capture_case(capture, layer);
+    if (!case_data || !trace || trace->router_input_count != HIDDEN ||
+        trace->router_logits_count != MOE_ROUTER_EXPERTS ||
+        trace->selected_count != MOE_TOP_K ||
+        trace->routed_output_count != HIDDEN) {
+        if (case_data)
+            snprintf(error, error_len, "invalid MoE capture trace at layer %u",
+                     layer);
+        return case_data == NULL;
+    }
+    memcpy(case_data->hidden, trace->router_input,
+           sizeof(case_data->hidden));
+    memcpy(case_data->router_logits_pre, trace->router_logits_pre_cast,
+           sizeof(case_data->router_logits_pre));
+    memcpy(case_data->router_logits_effective,
+           trace->router_logits_effective,
+           sizeof(case_data->router_logits_effective));
+    memcpy(case_data->selected_experts, trace->selected_experts,
+           sizeof(case_data->selected_experts));
+    memcpy(case_data->selected_weights_pre,
+           trace->selected_weights_pre_cast,
+           sizeof(case_data->selected_weights_pre));
+    memcpy(case_data->selected_weights, trace->selected_weights_effective,
+           sizeof(case_data->selected_weights));
+    memcpy(case_data->routed, trace->routed_output, sizeof(case_data->routed));
+    case_data->routed_captured = true;
+    return true;
+}
+
+static bool capture_moe_boundary(uint32_t layer, const char *boundary,
+                                 const float *values, size_t token_count,
+                                 size_t width, void *user, char *error,
+                                 size_t error_len) {
+    moe_capture_context *capture = (moe_capture_context *)user;
+    moe_capture_case *case_data = find_moe_capture_case(capture, layer);
+    if (!case_data || strcmp(boundary, "shared_expert") != 0)
+        return true;
+    if (!values || token_count != 1 || width != HIDDEN) {
+        snprintf(error, error_len, "invalid shared MoE capture at layer %u",
+                 layer);
+        return false;
+    }
+    memcpy(case_data->shared, values, sizeof(case_data->shared));
+    case_data->shared_captured = true;
+    return true;
+}
+
+static bool write_binary_atomic(const char *path, const void *data,
+                                size_t bytes, char *error, size_t error_len) {
+    char temporary[1200];
+    snprintf(temporary, sizeof(temporary), "%s.tmp.%ld", path, (long)getpid());
+    FILE *out = fopen(temporary, "wb");
+    if (!out || fwrite(data, 1, bytes, out) != bytes || fclose(out) != 0) {
+        if (out) fclose(out);
+        (void)remove(temporary);
+        snprintf(error, error_len, "failed to write %s", path);
+        return false;
+    }
+    if (rename(temporary, path) != 0) {
+        (void)remove(temporary);
+        snprintf(error, error_len, "failed to publish %s", path);
+        return false;
+    }
+    return true;
+}
+
+static bool make_directory(const char *path, char *error, size_t error_len) {
+    if (mkdir(path, 0755) == 0 || errno == EEXIST)
+        return true;
+    snprintf(error, error_len, "failed to create fixture directory %s", path);
+    return false;
+}
+
+static bool write_moe_tensor(const char *directory, const char *name,
+                             const q38_gguf *model, const q38_tensor *tensor,
+                             char *error, size_t error_len) {
+    const void *data = q38_gguf_tensor_data(model, tensor);
+    if (!data || !tensor) {
+        snprintf(error, error_len, "missing MoE tensor payload %s", name);
+        return false;
+    }
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/%s", directory, name);
+    return write_binary_atomic(path, data, (size_t)tensor->bytes, error,
+                               error_len);
+}
+
+static bool write_moe_selected_tensor(
+    const char *directory, const char *name, const q38_gguf *model,
+    const q38_tensor *tensor, const uint16_t *experts, size_t rows_per_expert,
+    char *error, size_t error_len) {
+    const unsigned char *data = (const unsigned char *)
+        q38_gguf_tensor_data(model, tensor);
+    if (!data || !tensor || !experts || tensor->ndim != 3 ||
+        tensor->dim[0] != MOE_ROUTER_EXPERTS ||
+        tensor->dim[1] != rows_per_expert ||
+        tensor->bytes % tensor->dim[0] != 0) {
+        snprintf(error, error_len, "invalid selected MoE tensor %s", name);
+        return false;
+    }
+    const size_t expert_bytes = (size_t)(tensor->bytes / tensor->dim[0]);
+    const size_t total_bytes = MOE_TOP_K * expert_bytes;
+    unsigned char *selected = (unsigned char *)malloc(total_bytes);
+    if (!selected) {
+        snprintf(error, error_len, "selected MoE tensor allocation failed");
+        return false;
+    }
+    for (size_t k = 0; k < MOE_TOP_K; ++k) {
+        if (experts[k] >= MOE_ROUTER_EXPERTS) {
+            free(selected);
+            snprintf(error, error_len, "invalid selected expert ID");
+            return false;
+        }
+        memcpy(selected + k * expert_bytes,
+               data + (size_t)experts[k] * expert_bytes, expert_bytes);
+    }
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/%s", directory, name);
+    const bool ok = write_binary_atomic(path, selected, total_bytes, error,
+                                        error_len);
+    free(selected);
+    return ok;
+}
+
+static bool write_moe_fixture(worker *w, const moe_capture_case *case_data,
+                              const char *directory, uint32_t token,
+                              char *error, size_t error_len) {
+    const q38_layer_weights *layer = &w->weights.layer[case_data->layer];
+    const q38_tensor *gate_up = layer->experts.bank[0].gate_up;
+    const q38_tensor *down = layer->experts.bank[0].down;
+    if (!layer->router || !layer->shared_gate_proj || !layer->shared_up_proj ||
+        !layer->shared_down_proj || !layer->shared_expert_gate || !gate_up ||
+        !down || gate_up->type != 10 || down->type != 10 ||
+        layer->router->type != Q38_FORWARD_BF16 ||
+        layer->shared_gate_proj->type != Q38_FORWARD_BF16 ||
+        layer->shared_up_proj->type != Q38_FORWARD_BF16 ||
+        layer->shared_down_proj->type != Q38_FORWARD_BF16 ||
+        layer->shared_expert_gate->type != Q38_FORWARD_BF16) {
+        snprintf(error, error_len, "layer %u MoE fixture tensors incomplete",
+                 case_data->layer);
+        return false;
+    }
+    if (!case_data->routed_captured || !case_data->shared_captured) {
+        snprintf(error, error_len, "layer %u MoE trace incomplete",
+                 case_data->layer);
+        return false;
+    }
+    if (!make_directory(directory, error, error_len))
+        return false;
+
+    float final_output[HIDDEN];
+    for (size_t i = 0; i < HIDDEN; ++i)
+        final_output[i] = case_data->routed[i] + case_data->shared[i];
+
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/hidden.f32", directory);
+    if (!write_binary_atomic(path, case_data->hidden, sizeof(case_data->hidden),
+                             error, error_len))
+        return false;
+    snprintf(path, sizeof(path), "%s/router_logits_pre.f32", directory);
+    if (!write_binary_atomic(path, case_data->router_logits_pre,
+                             sizeof(case_data->router_logits_pre), error,
+                             error_len))
+        return false;
+    snprintf(path, sizeof(path), "%s/router_logits_effective.f32", directory);
+    if (!write_binary_atomic(path, case_data->router_logits_effective,
+                             sizeof(case_data->router_logits_effective), error,
+                             error_len))
+        return false;
+    snprintf(path, sizeof(path), "%s/selected_experts.u16", directory);
+    if (!write_binary_atomic(path, case_data->selected_experts,
+                             sizeof(case_data->selected_experts), error,
+                             error_len))
+        return false;
+    snprintf(path, sizeof(path), "%s/selected_weights_pre.f32", directory);
+    if (!write_binary_atomic(path, case_data->selected_weights_pre,
+                             sizeof(case_data->selected_weights_pre), error,
+                             error_len))
+        return false;
+    snprintf(path, sizeof(path), "%s/selected_weights.f32", directory);
+    if (!write_binary_atomic(path, case_data->selected_weights,
+                             sizeof(case_data->selected_weights), error,
+                             error_len))
+        return false;
+    snprintf(path, sizeof(path), "%s/expected_routed.f32", directory);
+    if (!write_binary_atomic(path, case_data->routed, sizeof(case_data->routed),
+                             error, error_len))
+        return false;
+    snprintf(path, sizeof(path), "%s/expected_shared.f32", directory);
+    if (!write_binary_atomic(path, case_data->shared, sizeof(case_data->shared),
+                             error, error_len))
+        return false;
+    snprintf(path, sizeof(path), "%s/expected.f32", directory);
+    if (!write_binary_atomic(path, final_output, sizeof(final_output), error,
+                             error_len))
+        return false;
+    if (!write_moe_tensor(directory, "router.bf16", w->model, layer->router,
+                           error, error_len) ||
+        !write_moe_selected_tensor(directory, "selected_gate_up.q2_k",
+                                    w->model, gate_up, case_data->selected_experts,
+                                    1280, error, error_len) ||
+        !write_moe_selected_tensor(directory, "selected_down.q2_k", w->model,
+                                    down, case_data->selected_experts, 640,
+                                    error, error_len) ||
+        !write_moe_tensor(directory, "shared_gate.bf16", w->model,
+                           layer->shared_gate_proj, error, error_len) ||
+        !write_moe_tensor(directory, "shared_up.bf16", w->model,
+                           layer->shared_up_proj, error, error_len) ||
+        !write_moe_tensor(directory, "shared_down.bf16", w->model,
+                           layer->shared_down_proj, error, error_len) ||
+        !write_moe_tensor(directory, "shared_gate_weight.bf16", w->model,
+                           layer->shared_expert_gate, error, error_len))
+        return false;
+
+    snprintf(path, sizeof(path), "%s/metadata.json", directory);
+    char metadata[4096];
+    const int length = snprintf(
+        metadata, sizeof(metadata),
+        "{\"real_capture\":true,\"token\":%u,\"layer\":%u,"
+        "\"hidden_elements\":%d,\"router_shape\":[%u,%d],"
+        "\"selected_count\":%d,\"gate_up_shape\":[%d,%d,%d],"
+        "\"down_storage_shape\":[%d,%d,%d],"
+        "\"source_model\":\"%s\",\"router_tensor\":\"%.*s\","
+        "\"gate_up_tensor\":\"%.*s\",\"down_tensor\":\"%.*s\","
+        "\"selected_experts\":[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u],"
+        "\"tensor_offsets\":{\"router\":%" PRIu64
+        ",\"gate_up\":%" PRIu64 ",\"down\":%" PRIu64 "}}\n",
+        token, case_data->layer, HIDDEN, MOE_ROUTER_EXPERTS, HIDDEN, MOE_TOP_K,
+        MOE_TOP_K, 1280, HIDDEN / MOE_QK_K, MOE_TOP_K, MOE_INTERMEDIATE,
+        HIDDEN / MOE_QK_K, w->model ? "q38_runtime_q2" : "unknown",
+        (int)layer->router->name.len, layer->router->name.ptr,
+        (int)gate_up->name.len, gate_up->name.ptr,
+        (int)down->name.len, down->name.ptr,
+        case_data->selected_experts[0], case_data->selected_experts[1],
+        case_data->selected_experts[2], case_data->selected_experts[3],
+        case_data->selected_experts[4], case_data->selected_experts[5],
+        case_data->selected_experts[6], case_data->selected_experts[7],
+        case_data->selected_experts[8], case_data->selected_experts[9],
+        layer->router->rel_offset, gate_up->rel_offset, down->rel_offset);
+    if (length < 0 || (size_t)length >= sizeof(metadata)) {
+        snprintf(error, error_len, "MoE fixture metadata is too large");
+        return false;
+    }
+    return write_binary_atomic(path, metadata, (size_t)length, error,
+                               error_len);
+}
+
+static bool capture_moe_fixtures(worker *w, uint32_t token) {
+    static const uint32_t layers[MOE_CAPTURE_COUNT] = {0, 23, 47};
+    static const char *directories[MOE_CAPTURE_COUNT] = {
+        "tests/fixtures/moe/early",
+        "tests/fixtures/moe/middle",
+        "tests/fixtures/moe/late",
+    };
+    moe_capture_context capture = {.worker = w};
+    for (size_t i = 0; i < MOE_CAPTURE_COUNT; ++i)
+        capture.cases[i].layer = layers[i];
+
+    float *logits = (float *)calloc(VOCAB, sizeof(float));
+    char error[256] = {0};
+    if (!logits) {
+        fprintf(stderr, "CAPTURE_MOE error=logit allocation failed\n");
+        return false;
+    }
+    q38_forward_state_reset(&w->state);
+    q38_forward_diagnostics diagnostics = {0};
+    diagnostics.moe_trace = capture_moe_trace;
+    diagnostics.boundary_trace = capture_moe_boundary;
+    diagnostics.trace_user = &capture;
+    diagnostics.backend_context = backend_context_trace;
+    diagnostics.backend_context_user = w->cuda;
+    const q38_forward_backend_config backend = cuda_backend_config(w);
+    setenv("Q38_TRACE_ALL_QSA", "1", 1);
+    const bool ok = q38_forward_full_with_backend_config(
+        w->model, &w->weights, &w->state, &token, 1, logits, VOCAB,
+        &diagnostics, &backend, error, sizeof(error));
+    unsetenv("Q38_TRACE_ALL_QSA");
+    free(logits);
+    if (!ok) {
+        fprintf(stderr, "CAPTURE_MOE error=%s\n",
+                error[0] ? error : "forward failed");
+        return false;
+    }
+    for (size_t i = 0; i < MOE_CAPTURE_COUNT; ++i) {
+        if (!write_moe_fixture(w, &capture.cases[i], directories[i], token,
+                               error, sizeof(error))) {
+            fprintf(stderr, "CAPTURE_MOE error=%s\n", error);
+            return false;
+        }
+        printf("{\"capture_moe\":{\"layer\":%u,\"fixture\":\"%s\"}}\n",
+               capture.cases[i].layer, directories[i]);
+    }
+    fflush(stdout);
+    return true;
+}
+
 static void status(worker *w) {
     q38_forward_cuda_residency_stats stats;
     q38_forward_cuda_get_residency_stats(w->cuda, &stats);
@@ -670,8 +1005,8 @@ int main(int argc, char **argv) {
         q38_gguf_close(w.model);
         return 1;
     }
-    q38_forward_cuda_set_telemetry_observer(
-        w.cuda, residency_telemetry, NULL);
+    /* Keep detailed row-level PLE telemetry out of performance runs. */
+    q38_forward_cuda_set_telemetry_observer(w.cuda, NULL, NULL);
     if (tokenizer[0]) {
         if (!q38_tokenizer_init(&w.tokenizer_state, tokenizer, NULL, error,
                                 sizeof(error))) {
@@ -688,6 +1023,7 @@ int main(int argc, char **argv) {
     printf("{\"ready\":true,\"commands\":[\"RESET\",\"LOAD_QSA_PLUGIN\","
            "\"UNLOAD_QSA_PLUGIN\",\"RUN_QKV_FIXTURE\",\"RUN_QKV\","
            "\"RUN_FORWARD\",\"BENCH_QSA\",\"CAPTURE\",\"CAPTURE_QSA\","
+           "\"CAPTURE_MOE\","
            "\"STATUS\",\"QUIT\"]}\n");
     status(&w);
     char line[1024];
@@ -712,6 +1048,10 @@ int main(int argc, char **argv) {
             unload_qsa_plugin(&w);
         } else if (!strncmp(line, "STATUS", 6)) {
             status(&w);
+        } else if (!strncmp(line, "CAPTURE_MOE", 11)) {
+            uint32_t token = 9419;
+            parse_u32(line, "token=", &token);
+            capture_moe_fixtures(&w, token);
         } else if (!strncmp(line, "CAPTURE_QSA", 11) ||
                    !strncmp(line, "CAPTURE", 7)) {
             uint32_t token = 9419;

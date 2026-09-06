@@ -69,6 +69,23 @@ bool q38_moe_cuda_accumulate_weighted(
     float *device_accum, const float *device_expert, float weight,
     cudaStream_t stream, char *error, size_t error_len);
 
+/* Structural candidate: execute all selected routed experts with one grouped
+ * gate/up launch and one down/weighted-accumulation launch. */
+bool q38_moe_cuda_q2_grouped(
+    const void *device_gate_up, const void *device_down,
+    const float *device_hidden, const float *device_route_weights,
+    size_t expert_count, float *device_output, float *device_mid,
+    cudaStream_t stream, char *error, size_t error_len);
+
+/* Indexed variant for resident full expert tensors. */
+bool q38_moe_cuda_q2_grouped_indexed(
+    const void *device_gate_up, const void *device_down,
+    const float *device_hidden, const uint16_t *device_expert_ids,
+    const float *device_route_weights, size_t expert_count,
+    size_t gate_expert_blocks, size_t down_expert_blocks,
+    float *device_output, float *device_mid, cudaStream_t stream,
+    char *error, size_t error_len);
+
 bool q38_moe_cuda_shared_f32(const float *device_hidden, size_t token_count,
                              const float *device_gate_proj,
                              const float *device_up_proj,

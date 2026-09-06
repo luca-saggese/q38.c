@@ -14,7 +14,7 @@ per-expert wrappers and test-only kernels are not valid baselines.
 | routed intermediate | 640 |
 | router tensor | `[512, 2560]`, bias-free |
 | routed gate/up tensor | `[512, 1280, 2560]`, Q2_K in the current production path |
-| routed down tensor | `[512, 2560, 640]`, Q2_K in the current production path |
+| routed down tensor | logical `[512, 2560, 640]`; stored `[512, 640, 2560]`, Q2_K |
 | shared gate/up tensors | `[640, 2560]`, BF16 |
 | shared down tensor | `[2560, 640]`, BF16 |
 | shared gate tensor | `[1, 2560]`, BF16 |

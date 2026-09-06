@@ -18,11 +18,16 @@ Each layer directory must contain the following binary files:
 | `selected_experts.u16` | `[10]` uint16 |
 | `selected_weights.f32` | `[10]` FP32 |
 | `selected_gate_up.q2_k` | `[10, 1280, 10]` Q2_K blocks |
-| `selected_down.q2_k` | `[10, 2560, 2]` Q2_K blocks |
+| `selected_down.q2_k` | `[10, 640, 10]` Q2_K blocks (production-transposed storage) |
 | `shared_gate.bf16` | `[640, 2560]` BF16 |
 | `shared_up.bf16` | `[640, 2560]` BF16 |
 | `shared_down.bf16` | `[2560, 640]` BF16 |
 | `shared_gate_weight.bf16` | `[2560]` BF16 |
+| `router_logits_pre.f32` | `[512]` FP32 |
+| `router_logits_effective.f32` | `[512]` FP32 |
+| `selected_weights_pre.f32` | `[10]` FP32 |
+| `expected_routed.f32` | `[2560]` FP32 |
+| `expected_shared.f32` | `[2560]` FP32 |
 | `expected.f32` | `[2560]` FP32 |
 
 The selected Q2 tensors are stored in route order, not expert-ID order. The

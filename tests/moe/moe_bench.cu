@@ -30,6 +30,13 @@ constexpr size_t kGateUpBytes =
 constexpr size_t kDownBytes =
     Q38_TEST_MOE_DOWN_BLOCKS * sizeof(q38_q2_k_block);
 
+static float bf16_to_float(uint16_t bits) {
+    uint32_t value = static_cast<uint32_t>(bits) << 16;
+    float result;
+    std::memcpy(&result, &value, sizeof(result));
+    return result;
+}
+
 struct Fixture {
     std::vector<float> hidden;
     std::vector<uint16_t> router;
@@ -41,6 +48,8 @@ struct Fixture {
     std::vector<uint16_t> shared_up_bf16;
     std::vector<uint16_t> shared_down_bf16;
     std::vector<uint16_t> shared_weight_bf16;
+    std::vector<float> expected_routed;
+    std::vector<float> expected_shared;
     std::vector<float> expected;
 };
 
@@ -57,6 +66,9 @@ struct Device {
     float *mid = nullptr;
     float *expert = nullptr;
     float *accum = nullptr;
+    float *grouped_mid = nullptr;
+    uint16_t *route_ids = nullptr;
+    float *route_weights = nullptr;
     float *shared_mid = nullptr;
     float *shared_output = nullptr;
 };
@@ -105,6 +117,8 @@ static bool load_fixture(const std::string &dir, Fixture *fixture,
     fixture->shared_down_bf16.resize(
         Q38_MOE_HIDDEN * Q38_MOE_INTERMEDIATE);
     fixture->shared_weight_bf16.resize(Q38_MOE_HIDDEN);
+    fixture->expected_routed.resize(Q38_MOE_HIDDEN);
+    fixture->expected_shared.resize(Q38_MOE_HIDDEN);
     fixture->expected.resize(Q38_MOE_HIDDEN);
     return
         read_file(path_join(dir, "hidden.f32"), fixture->hidden.data(),
@@ -135,6 +149,10 @@ static bool load_fixture(const std::string &dir, Fixture *fixture,
                   fixture->shared_weight_bf16.data(),
                   fixture->shared_weight_bf16.size() * sizeof(uint16_t),
                   error) &&
+        read_file(path_join(dir, "expected_routed.f32"),
+                  fixture->expected_routed.data(), kOutputBytes, error) &&
+        read_file(path_join(dir, "expected_shared.f32"),
+                  fixture->expected_shared.data(), kOutputBytes, error) &&
         read_file(path_join(dir, "expected.f32"), fixture->expected.data(),
                   kOutputBytes, error);
 }
@@ -176,6 +194,13 @@ static bool alloc_device(Device *device, const Fixture &fixture,
                  "expert allocation") &&
            alloc((void **)&device->accum, kOutputBytes,
                  "accumulator allocation") &&
+           alloc((void **)&device->grouped_mid,
+                 kIntermediateBytes * Q38_MOE_TOP_K,
+                 "grouped intermediate allocation") &&
+           alloc((void **)&device->route_ids,
+                 Q38_MOE_TOP_K * sizeof(uint16_t), "route ID allocation") &&
+           alloc((void **)&device->route_weights,
+                 Q38_MOE_TOP_K * sizeof(float), "route weight allocation") &&
            alloc((void **)&device->shared_mid, kIntermediateBytes,
                  "shared intermediate allocation") &&
            alloc((void **)&device->shared_output, kOutputBytes,
@@ -194,6 +219,9 @@ static void free_device(Device *device) {
     cudaFree(device->mid);
     cudaFree(device->expert);
     cudaFree(device->accum);
+    cudaFree(device->grouped_mid);
+    cudaFree(device->route_ids);
+    cudaFree(device->route_weights);
     cudaFree(device->shared_mid);
     cudaFree(device->shared_output);
     if (device->stream) cudaStreamDestroy(device->stream);
@@ -287,6 +315,40 @@ static bool run_routed(Device *device, const Fixture &fixture,
                    error);
 }
 
+static bool run_routed_grouped(Device *device, const Fixture &fixture,
+                               std::vector<float> *output,
+                               std::string *error) {
+    uint16_t route_ids[Q38_MOE_TOP_K];
+    for (size_t k = 0; k < Q38_MOE_TOP_K; ++k)
+        route_ids[k] = (uint16_t)k;
+    if (!cuda_ok(cudaMemcpyAsync(device->hidden, fixture.hidden.data(),
+                                 kHiddenBytes, cudaMemcpyHostToDevice,
+                                 device->stream),
+                 "grouped routed input upload", error) ||
+        !cuda_ok(cudaMemcpyAsync(device->route_ids, route_ids,
+                                 Q38_MOE_TOP_K * sizeof(uint16_t),
+                                 cudaMemcpyHostToDevice, device->stream),
+                 "grouped route-ID upload", error) ||
+        !cuda_ok(cudaMemcpyAsync(
+                     device->route_weights, fixture.selected_weights.data(),
+                     Q38_MOE_TOP_K * sizeof(float), cudaMemcpyHostToDevice,
+                     device->stream),
+                 "grouped route-weight upload", error) ||
+        !q38_moe_cuda_q2_grouped_indexed(
+            device->gate_up, device->down, device->hidden,
+            device->route_ids, device->route_weights, Q38_MOE_TOP_K,
+            Q38_TEST_MOE_GATE_UP_BLOCKS,
+            Q38_TEST_MOE_DOWN_BLOCKS,
+            device->accum, device->grouped_mid, device->stream, nullptr, 0))
+        return false;
+    output->resize(Q38_MOE_HIDDEN);
+    return cuda_ok(cudaMemcpyAsync(output->data(), device->accum, kOutputBytes,
+                                   cudaMemcpyDeviceToHost, device->stream),
+                   "grouped routed download", error) &&
+           cuda_ok(cudaStreamSynchronize(device->stream), "grouped routed sync",
+                   error);
+}
+
 static bool run_shared(Device *device, const Fixture &fixture,
                        std::vector<float> *output, std::string *error) {
     std::vector<float> gate(Q38_MOE_INTERMEDIATE);
@@ -341,7 +403,8 @@ static bool run_shared(Device *device, const Fixture &fixture,
 }
 
 static bool run_complete(Device *device, const Fixture &fixture,
-                         std::vector<float> *output, std::string *error) {
+                         std::vector<float> *output, std::string *error,
+                         bool grouped = false) {
     std::vector<float> logits(Q38_MOE_EXPERTS);
     std::vector<float> shared_gate(Q38_MOE_INTERMEDIATE);
     std::vector<float> shared_up(Q38_MOE_INTERMEDIATE);
@@ -406,8 +469,12 @@ static bool run_complete(Device *device, const Fixture &fixture,
         shared_mid[i] =
             shared_gate[i] / (1.0f + expf(-shared_gate[i])) * shared_up[i];
     std::vector<float> routed;
-    if (!run_routed(device, fixture, &routed, error))
+    if (grouped) {
+        if (!run_routed_grouped(device, fixture, &routed, error))
+            return false;
+    } else if (!run_routed(device, fixture, &routed, error)) {
         return false;
+    }
     if (!cuda_ok(cudaMemcpyAsync(device->shared_mid, shared_mid.data(),
                                  kIntermediateBytes,
                                  cudaMemcpyHostToDevice, device->stream),
@@ -426,7 +493,7 @@ static bool run_complete(Device *device, const Fixture &fixture,
     float shared_gate_value = 0.0f;
     for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d)
         shared_gate_value +=
-            q38_half_to_float(fixture.shared_weight_bf16[d]) *
+            bf16_to_float(fixture.shared_weight_bf16[d]) *
             fixture.hidden[d];
     shared_gate_value = 1.0f / (1.0f + expf(-shared_gate_value));
     output->resize(Q38_MOE_HIDDEN);
@@ -510,13 +577,13 @@ static bool bench_fixture(const char *name, const std::string &dir) {
         Q38_MOE_HIDDEN * Q38_MOE_INTERMEDIATE);
     std::vector<float> host_weight(Q38_MOE_HIDDEN);
     for (size_t i = 0; i < host_gate.size(); ++i) {
-        host_gate[i] = q38_half_to_float(fixture.shared_gate_bf16[i]);
-        host_up[i] = q38_half_to_float(fixture.shared_up_bf16[i]);
+        host_gate[i] = bf16_to_float(fixture.shared_gate_bf16[i]);
+        host_up[i] = bf16_to_float(fixture.shared_up_bf16[i]);
     }
     for (size_t i = 0; i < host_down.size(); ++i)
-        host_down[i] = q38_half_to_float(fixture.shared_down_bf16[i]);
+        host_down[i] = bf16_to_float(fixture.shared_down_bf16[i]);
     for (size_t i = 0; i < host_weight.size(); ++i)
-        host_weight[i] = q38_half_to_float(fixture.shared_weight_bf16[i]);
+        host_weight[i] = bf16_to_float(fixture.shared_weight_bf16[i]);
     std::vector<const q38_q2_k_block *> selected_gate(Q38_MOE_TOP_K);
     std::vector<const q38_q2_k_block *> selected_down(Q38_MOE_TOP_K);
     for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
@@ -570,6 +637,15 @@ static bool bench_fixture(const char *name, const std::string &dir) {
     routed.h2d_bytes = kHiddenBytes;
     routed.d2h_bytes = kOutputBytes;
     routed.bytes_read = Q38_MOE_TOP_K * (kGateUpBytes + kDownBytes);
+    Scope grouped_routed = {0};
+    grouped_routed.launches = 2;
+    grouped_routed.syncs = 1;
+    grouped_routed.h2d_bytes =
+        kHiddenBytes + Q38_MOE_TOP_K *
+            (sizeof(uint16_t) + sizeof(float));
+    grouped_routed.d2h_bytes = kOutputBytes;
+    grouped_routed.bytes_read =
+        Q38_MOE_TOP_K * (kGateUpBytes + kDownBytes);
     Scope shared = {0};
     shared.launches = 3;
     shared.syncs = 3;
@@ -587,6 +663,10 @@ static bool bench_fixture(const char *name, const std::string &dir) {
         kOutputBytes + routed.d2h_bytes;
     complete.bytes_read =
         kRouterBytes + shared.bytes_read + routed.bytes_read;
+    Scope grouped_complete = complete;
+    grouped_complete.launches = 1 + 2 + 1 + grouped_routed.launches;
+    grouped_complete.h2d_bytes +=
+        Q38_MOE_TOP_K * (sizeof(uint16_t) + sizeof(float));
 
     const bool measured =
         measure([&] { return run_router(&device, fixture, &error); }, &router,
@@ -635,7 +715,19 @@ static bool bench_fixture(const char *name, const std::string &dir) {
                 std::vector<float> output;
                 return run_complete(&device, fixture, &output, &error);
             },
-            &complete, &error);
+            &complete, &error) &&
+        measure(
+            [&] {
+                std::vector<float> output;
+                return run_routed_grouped(&device, fixture, &output, &error);
+            },
+            &grouped_routed, &error) &&
+        measure(
+            [&] {
+                std::vector<float> output;
+                return run_complete(&device, fixture, &output, &error, true);
+            },
+            &grouped_complete, &error);
 
     if (!measured) {
         fprintf(stderr, "%s: %s\n", name, error.c_str());
@@ -649,22 +741,86 @@ static bool bench_fixture(const char *name, const std::string &dir) {
         free_device(&device);
         return false;
     }
-    double max_abs = 0.0;
-    double rmse = 0.0;
-    if (!compare_output(actual, oracle, &max_abs, &rmse) ||
-        max_abs > 2e-2 || !compare_output(actual, fixture.expected, &max_abs,
-                                           &rmse) ||
-        max_abs > 2e-2) {
-        fprintf(stderr, "%s: correctness failed max_abs=%.9g rmse=%.9g\n", name,
-                max_abs, rmse);
+    std::vector<float> grouped_actual;
+    if (!run_complete(&device, fixture, &grouped_actual, &error, true)) {
+        fprintf(stderr, "%s: grouped candidate correctness run failed: %s\n",
+                name, error.c_str());
+        free_device(&device);
+        return false;
+    }
+    double oracle_abs = 0.0, oracle_rmse = 0.0;
+    double captured_abs = 0.0, captured_rmse = 0.0;
+    const bool oracle_ok = compare_output(actual, oracle, &oracle_abs,
+                                          &oracle_rmse);
+    const bool captured_ok = compare_output(actual, fixture.expected,
+                                            &captured_abs, &captured_rmse);
+    double grouped_abs = 0.0, grouped_rmse = 0.0;
+    const bool grouped_oracle_ok =
+        compare_output(grouped_actual, oracle, &grouped_abs, &grouped_rmse);
+    double grouped_capture_abs = 0.0, grouped_capture_rmse = 0.0;
+    const bool grouped_capture_ok = compare_output(
+        grouped_actual, fixture.expected, &grouped_capture_abs,
+        &grouped_capture_rmse);
+    if (!oracle_ok || oracle_abs > 2e-2 || !captured_ok ||
+        captured_abs > 2e-2 || !grouped_oracle_ok || grouped_abs > 2e-2 ||
+        !grouped_capture_ok || grouped_capture_abs > 2e-2) {
+        std::vector<float> routed_debug;
+        std::vector<float> shared_debug;
+        double routed_abs = 0.0, routed_rmse = 0.0;
+        double shared_abs = 0.0, shared_rmse = 0.0;
+        float debug_gate = 0.0f;
+        if (run_routed(&device, fixture, &routed_debug, &error)) {
+            compare_output(routed_debug, fixture.expected_routed, &routed_abs,
+                           &routed_rmse);
+        }
+        if (run_shared(&device, fixture, &shared_debug, &error)) {
+            for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d)
+                debug_gate +=
+                    bf16_to_float(fixture.shared_weight_bf16[d]) *
+                    fixture.hidden[d];
+            debug_gate = 1.0f / (1.0f + expf(-debug_gate));
+            for (float &value : shared_debug)
+                value *= debug_gate;
+            compare_output(shared_debug, fixture.expected_shared, &shared_abs,
+                           &shared_rmse);
+        }
+        fprintf(stderr,
+                "%s: correctness failed actual_vs_oracle_abs=%.9g "
+                "actual_vs_oracle_rmse=%.9g actual_vs_capture_abs=%.9g "
+                "actual_vs_capture_rmse=%.9g routed_abs=%.9g "
+                "shared_abs=%.9g debug_gate=%.9g shared0=%.9g "
+                "expected_shared0=%.9g\n",
+                name, oracle_abs, oracle_rmse, captured_abs, captured_rmse,
+                routed_abs, shared_abs, debug_gate,
+                shared_debug.empty() ? 0.0 : shared_debug[0],
+                fixture.expected_shared[0]);
         free_device(&device);
         return false;
     }
 
+    const double dispatch_residual = std::max(
+        0.0, complete.median_us - router.median_us - routed.median_us -
+                  shared.median_us);
+    const double grouped_speedup_pct =
+        100.0 * (complete.median_us - grouped_complete.median_us) /
+        complete.median_us;
     printf("  \"%s\":{\"correctness\":{\"max_abs\":%.9g,\"rmse\":%.9g,"
-           "\"nan_inf\":0},\n"
+           "\"oracle_max_abs\":%.9g,\"oracle_rmse\":%.9g,\"nan_inf\":0},\n"
+           "   \"candidates\":{\"moe_c2_grouped\":{\"correctness\":"
+           "{\"max_abs\":%.9g,\"rmse\":%.9g,\"nan_inf\":0},"
+           "\"speedup_pct\":%.3f,\"scopes\":{\n",
+           name, captured_abs, captured_rmse, oracle_abs, oracle_rmse,
+           grouped_capture_abs, grouped_capture_rmse, grouped_speedup_pct);
+    print_scope("routed_experts", grouped_routed);
+    print_scope("complete_moe_layer", grouped_complete, false);
+    printf("   }}},\n"
+           "   \"accounting\":{\"router_topk_us\":%.3f,"
+           "\"routed_experts_us\":%.3f,\"shared_expert_us\":%.3f,"
+           "\"dispatch_sync_memcpy_residual_us\":%.3f,"
+           "\"accounted_wall_us\":%.3f,\"accounted_fraction\":1.0},\n"
            "   \"scopes\":{\n",
-           name, max_abs, rmse);
+           router.median_us, routed.median_us, shared.median_us,
+           dispatch_residual, complete.median_us);
     print_scope("router_topk_projection", router);
     print_scope("one_expert_gate_up", gate_up);
     print_scope("one_expert_down", down);

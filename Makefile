@@ -49,7 +49,7 @@ TEST_BINS := \
 	tests/test_platform tests/test_gguf tests/test_memory \
 	tests/test_model_config tests/test_quant_blocks tests/test_residency
 
-.PHONY: all q38 q38-server q38-server-mock q38-cli spark test test-server clean tools \
+.PHONY: all q38 q38-server q38-server-mock q38-cli q38-dev-worker spark test test-server clean tools \
 	q38-server-real \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	check-perf-artifacts test-steering test-steering-cuda \
@@ -88,6 +88,11 @@ q38-server: q38_server_real_main.o q38_server_engine_q38.o \
 
 q38-cli: q38_cli.o q38_json.o
 	$(CC) $(CFLAGS) -o $@ q38_cli.o q38_json.o
+
+Q38_WORKER_C_OBJS := $(filter-out q38.o,$(PRODUCTION_C_OBJS))
+q38-dev-worker: $(Q38_WORKER_C_OBJS) $(PRODUCTION_CUDA_OBJS)
+	$(NVCC) $(NVCCFLAGS) -o q38_dev_worker tests/q38_dev_worker.c \
+		$(Q38_WORKER_C_OBJS) $(PRODUCTION_CUDA_OBJS) $(CUDA_LDLIBS) -ldl -lm
 
 spark: q38 $(TEST_BINS)
 
@@ -271,7 +276,7 @@ test-gr: tests/gr/test_m3_gr_ref tests/gr/test_m3_gr_binding \
 	if [ $$status -ne 0 ] && [ $$status -ne 2 ]; then exit $$status; fi
 
 MOE_FIXTURE_DIR ?= tests/fixtures/moe
-MOE_ARTIFACT := artifacts/perf/subsystems/moe_baseline.json
+MOE_ARTIFACT := artifacts/perf/subsystems/moe_reference.json
 MOE_REFERENCE_OBJS := tests/moe/moe_reference.o q38_quant.o
 
 tests/moe/moe_reference.o: tests/moe/moe_reference.c \

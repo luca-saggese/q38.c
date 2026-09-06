@@ -61,6 +61,19 @@ static float q2_row_dot(const q38_q2_k_block *rows, size_t row,
     return sum;
 }
 
+static float q2_transposed_column_dot(const q38_q2_k_block *rows,
+                                      size_t column, const float *input,
+                                      size_t input_width) {
+    const size_t blocks_per_row = Q38_MOE_HIDDEN / Q38_QUANT_QK_K;
+    float sum = 0.0f;
+    for (size_t row = 0; row < input_width; ++row) {
+        const q38_q2_k_block *payload =
+            rows + row * blocks_per_row + column / Q38_QUANT_QK_K;
+        sum += q2_block_value(payload, column % Q38_QUANT_QK_K) * input[row];
+    }
+    return sum;
+}
+
 bool q38_test_moe_router_bf16(
     const float *hidden, const uint16_t *router_bf16,
     q38_test_moe_route *route, float *logits_pre_cast,
@@ -161,7 +174,8 @@ bool q38_test_moe_expert_q2(
     }
     for (size_t d = 0; d < Q38_MOE_HIDDEN; ++d)
         output[d] =
-            q2_row_dot(down, d, intermediate, Q38_MOE_INTERMEDIATE);
+            q2_transposed_column_dot(down, d, intermediate,
+                                     Q38_MOE_INTERMEDIATE);
     return true;
 }
 
