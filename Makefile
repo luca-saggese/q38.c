@@ -54,7 +54,8 @@ TEST_BINS := \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	check-perf-artifacts test-steering test-steering-cuda \
 	gr-fixtures gr-bench gr-c1-bench gr-c2-bench gr-c3-bench \
-	gr-c3-bundle gr-c4-bench test-gr test-moe bench-moe
+	gr-c3-bundle gr-c4-bench test-gr test-moe bench-moe \
+	gdn-fixtures test-gdn bench-gdn bench-gdn-c1 bench-gdn-c2 bench-gdn-c3
 
 all: q38
 
@@ -66,6 +67,10 @@ SERVER_OBJS := q38_server.o q38_server_protocol.o q38_server_engine_mock.o \
 
 q38_server.o q38_server_engine.o q38_server_engine_mock.o \
 q38_server_protocol.o q38_kvstore.o: q38_server_engine.h
+q38_decode.o q38_forward.o q38_session.o: q38_forward.h
+q38_decode.o q38_session.o: q38_session.h
+q38_forward.o q38_session.o: q38_forward_cuda.h
+q38_forward_cuda.o: q38_forward.h q38_forward_cuda.h
 q38_session.o q38_directional_steering.o: q38_directional_steering.h
 
 q38-server-mock: q38_server_main.o $(SERVER_OBJS)
@@ -303,6 +308,75 @@ bench-moe: tests/moe/moe_bench
 	@tmp="$(MOE_ARTIFACT).tmp"; rm -f "$$tmp"; \
 	./tests/moe/moe_bench "$(MOE_FIXTURE_DIR)" > "$$tmp" && \
 	mv "$$tmp" "$(MOE_ARTIFACT)" || { status=$$?; rm -f "$$tmp"; exit $$status; }
+
+GDN_FIXTURE_DIR ?= tests/fixtures/gdn
+GDN_ARTIFACT := artifacts/perf/subsystems/gdn_reference.json
+GDN_C1_ARTIFACT := artifacts/perf/subsystems/gdn_c1.json
+
+tests/gdn/gdn_reference.o: tests/gdn/gdn_reference.c \
+		tests/gdn/gdn_reference.h q38_quant.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+tests/gdn/gdn_bench: tests/gdn/gdn_bench.o tests/gdn/gdn_reference.o \
+		q38_gdn_ref.o q38_quant.o q38_cuda_primitives.o q38_gdn.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS) -lm
+
+tests/gdn/gdn_bench.o: tests/gdn/gdn_bench.cu tests/gdn/gdn_reference.h \
+		q38_gdn.h q38_gdn_ref.h q38_cuda_primitives.h
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
+gdn-fixtures: q38-dev-worker
+	@mkdir -p $(GDN_FIXTURE_DIR)
+	@printf 'CAPTURE_GDN token=220\nQUIT\n' | \
+		./q38_dev_worker --model "$(Q2_CANONICAL_MODEL)"
+
+tests/test_m3_gdn_ref: tests/test_m3_gdn_ref.c q38_gdn_ref.o
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+test-gdn: tests/test_m3_gdn_ref
+	./tests/test_m3_gdn_ref
+
+bench-gdn: tests/gdn/gdn_bench
+	@test -d "$(GDN_FIXTURE_DIR)/early" && \
+		test -d "$(GDN_FIXTURE_DIR)/middle" && \
+		test -d "$(GDN_FIXTURE_DIR)/late" || \
+		{ echo "GDN fixtures missing; run 'make gdn-fixtures' once"; exit 1; }
+	@mkdir -p artifacts/perf/subsystems
+	@tmp="$(GDN_ARTIFACT).tmp"; rm -f "$$tmp"; \
+	./tests/gdn/gdn_bench "$(GDN_FIXTURE_DIR)" "$$tmp" && \
+	mv "$$tmp" "$(GDN_ARTIFACT)" || { status=$$?; rm -f "$$tmp"; exit $$status; }
+
+bench-gdn-c1: tests/gdn/gdn_bench
+	@test -d "$(GDN_FIXTURE_DIR)/early" && \
+		test -d "$(GDN_FIXTURE_DIR)/middle" && \
+		test -d "$(GDN_FIXTURE_DIR)/late" || \
+		{ echo "GDN fixtures missing; run 'make gdn-fixtures' once"; exit 1; }
+	@mkdir -p artifacts/perf/subsystems
+	@tmp="$(GDN_C1_ARTIFACT).tmp"; rm -f "$$tmp"; \
+	./tests/gdn/gdn_bench "$(GDN_FIXTURE_DIR)" "$$tmp" gdn_c1 && \
+	mv "$$tmp" "$(GDN_C1_ARTIFACT)" || { status=$$?; rm -f "$$tmp"; exit $$status; }
+
+bench-gdn-c2: tests/gdn/gdn_bench
+	@test -d "$(GDN_FIXTURE_DIR)/early" && \
+		test -d "$(GDN_FIXTURE_DIR)/middle" && \
+		test -d "$(GDN_FIXTURE_DIR)/late" || \
+		{ echo "GDN fixtures missing; run 'make gdn-fixtures' once"; exit 1; }
+	@mkdir -p artifacts/perf/subsystems
+	@tmp="artifacts/perf/subsystems/gdn_c2.json.tmp"; rm -f "$$tmp"; \
+	./tests/gdn/gdn_bench "$(GDN_FIXTURE_DIR)" "$$tmp" gdn_c2 && \
+	mv "$$tmp" artifacts/perf/subsystems/gdn_c2.json || \
+		{ status=$$?; rm -f "$$tmp"; exit $$status; }
+
+bench-gdn-c3: tests/gdn/gdn_bench
+	@test -d "$(GDN_FIXTURE_DIR)/early" && \
+		test -d "$(GDN_FIXTURE_DIR)/middle" && \
+		test -d "$(GDN_FIXTURE_DIR)/late" || \
+		{ echo "GDN fixtures missing; run 'make gdn-fixtures' once"; exit 1; }
+	@mkdir -p artifacts/perf/subsystems
+	@tmp="artifacts/perf/subsystems/gdn_c3.json.tmp"; rm -f "$$tmp"; \
+	./tests/gdn/gdn_bench "$(GDN_FIXTURE_DIR)" "$$tmp" gdn_c3 && \
+	mv "$$tmp" artifacts/perf/subsystems/gdn_c3.json || \
+		{ status=$$?; rm -f "$$tmp"; exit $$status; }
 
 tests/q2_canonical_bench: tests/q2_canonical_bench.c \
 		$(CANONICAL_BENCH_C_OBJS) $(CANONICAL_BENCH_CUDA_OBJS)

@@ -1,0 +1,78 @@
+{
+  "format": "q38-gdn-optimization-v1",
+  "status": "GDN_OPT_V1",
+  "production_commit": "pending-gdn-c3-commit",
+  "fixtures": [
+    {"layer": 0, "position": "early"},
+    {"layer": 24, "position": "middle"},
+    {"layer": 46, "position": "late"}
+  ],
+  "baseline": {
+    "artifact": "gdn_reference.json",
+    "median_us_by_fixture": [3309.180, 3254.235, 3295.804],
+    "median_us_mean": 3286.406,
+    "p95_us_by_fixture": [4495.237, 4430.453, 4485.782],
+    "launches": 5,
+    "syncs": 5,
+    "h2d_bytes": 65536,
+    "d2h_bytes": 76160,
+    "correctness": "green"
+  },
+  "candidates": {
+    "S3-C1": {
+      "artifact": "gdn_c1.json",
+      "median_us_mean": 1704.867,
+      "launches": 5,
+      "syncs": 5,
+      "promotion": "promoted"
+    },
+    "S3-C2": {
+      "artifact": "gdn_c2.json",
+      "median_us_mean": 652.437,
+      "launches": 9,
+      "syncs": 1,
+      "promotion": "promoted"
+    },
+    "S3-C3": {
+      "artifact": "gdn_c3.json",
+      "median_us_mean": 579.151,
+      "p95_us_mean": 650.106,
+      "launches": 7,
+      "syncs": 1,
+      "promotion": "promoted"
+    }
+  },
+  "final": {
+    "candidate": "S3-C3",
+    "median_us_by_fixture": [566.629, 583.605, 587.220],
+    "p95_us_by_fixture": [658.549, 614.021, 677.749],
+    "absolute_us_saved_vs_baseline_mean": 2707.255,
+    "relative_speedup_vs_baseline": 5.675,
+    "wall_improvement_vs_baseline_percent": 82.377,
+    "absolute_us_saved_vs_c2_mean": 73.286,
+    "wall_improvement_vs_c2_percent": 11.233,
+    "launches_before_c2": 9,
+    "launches_after_c3": 7,
+    "syncs_before_c2": 1,
+    "syncs_after_c3": 1,
+    "accounting_ratio_by_fixture": [0.975, 0.976, 0.978],
+    "h2d_bytes": 10240,
+    "d2h_bytes": 10240,
+    "correctness": {
+      "fixtures": "early/middle/late",
+      "output_max_abs": 0.005,
+      "output_max_rel": 0.010,
+      "next_history_max_abs": 0.0001,
+      "next_state_max_abs": 0.00001,
+      "nan_inf": 0,
+      "oracle": "independent CPU reference",
+      "status": "green"
+    }
+  },
+  "artifacts": {
+    "baseline": "gdn_reference.json",
+    "c1": "gdn_c1.json",
+    "c2": "gdn_c2.json",
+    "c3": "gdn_c3.json"
+  }
+}

@@ -141,6 +141,9 @@ void q38_forward_cuda_record_route(
 void q38_forward_cuda_get_expert_layer_calls(
     const q38_forward_cuda_context *context, uint32_t layer,
     uint64_t *fast_calls, uint64_t *legacy_calls);
+void q38_forward_cuda_reset_gdn_state(q38_forward_cuda_context *context);
+bool q38_forward_cuda_sync_gdn_state(
+    q38_forward_state *state, void *user, char *error, size_t error_len);
 
 bool q38_forward_cuda_matvec_backend(
     const q38_gguf *model, const q38_tensor *tensor, size_t row,
@@ -187,6 +190,12 @@ bool q38_forward_cuda_moe_layer_q2_backend(
     const q38_gguf *model, const q38_tensor *gate_up,
     const q38_tensor *down, const q38_moe_route10 *route,
     const float *host_input, float *host_output, void *user, char *error,
+    size_t error_len);
+
+bool q38_forward_cuda_gdn_layer_backend(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_forward_state *state, const float *input, size_t token_count,
+    uint32_t layer_number, float *output, void *user, char *error,
     size_t error_len);
 
 #ifdef __cplusplus

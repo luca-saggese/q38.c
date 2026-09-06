@@ -393,12 +393,33 @@ bool q38_decode_step_with_backend_config_timed(
     size_t error_len) {
     if (!config)
         return fail(error, error_len, "backend configuration is null");
-    return q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
-        model, weights, state, token, logits, logits_stride, next_token,
-        diagnostics, config->matvec, config->matrix, config->matrix_batch,
-        config->expert, config->moe_layer, config->user, trace_kind,
-        emitted_token, consumed_token, step_index, trace, trace_user, timing,
-        error, error_len);
+    if (!config->sync_state || !trace)
+        return q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
+            model, weights, state, token, logits, logits_stride, next_token,
+            diagnostics, config->matvec, config->matrix, config->matrix_batch,
+            config->expert, config->moe_layer, config->user, trace_kind,
+            emitted_token, consumed_token, step_index, trace, trace_user,
+            timing, error, error_len);
+    const double total_started = decode_now_ms();
+    if (!q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
+            model, weights, state, token, logits, logits_stride, next_token,
+            diagnostics, config->matvec, config->matrix, config->matrix_batch,
+            config->expert, config->moe_layer, config->user, trace_kind,
+            emitted_token, consumed_token, step_index, NULL, NULL, timing,
+            error, error_len))
+        return false;
+    if (!config->sync_state(state, config->user, error, error_len))
+        return false;
+    const double trace_started = decode_now_ms();
+    const bool ok = q38_decode_trace_step(
+        state, logits, step_index, trace_kind, token, *next_token,
+        emitted_token, consumed_token, true, trace, trace_user, error,
+        error_len);
+    if (timing) {
+        timing->trace_ms = decode_now_ms() - trace_started;
+        timing->total_ms = decode_now_ms() - total_started;
+    }
+    return ok;
 }
 
 bool q38_decode_emit_trace(

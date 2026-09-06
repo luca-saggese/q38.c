@@ -29,6 +29,10 @@ constexpr size_t kHeads = Q38_TEST_GDN_HEADS;
 constexpr size_t kDim = Q38_TEST_GDN_DIM;
 constexpr size_t kStateElements = kHeads * kDim * kDim;
 constexpr size_t kHistoryElements = Q38_TEST_GDN_HISTORY * kQkv;
+constexpr double kOutputMaxAbsTolerance = 5.0e-3;
+constexpr double kOutputMaxRelTolerance = 1.0e-2;
+constexpr double kStateMaxAbsTolerance = 1.0e-5;
+constexpr double kHistoryMaxAbsTolerance = 1.0e-4;
 
 struct Weight {
     uint32_t type = 0;
@@ -53,6 +57,27 @@ struct Device {
     std::vector<void *> weights;
     float *input = nullptr;
     float *output = nullptr;
+    float *qkv = nullptr;
+    float *z = nullptr;
+    float *a = nullptr;
+    float *b = nullptr;
+    float *conv = nullptr;
+    float *q = nullptr;
+    float *k = nullptr;
+    float *v = nullptr;
+    float *decay = nullptr;
+    float *beta = nullptr;
+    float *recurrent = nullptr;
+    float *gated = nullptr;
+    float *history = nullptr;
+    float *state = nullptr;
+};
+
+enum class BenchMode {
+    Production,
+    C1,
+    C2,
+    C3,
 };
 
 struct Sample {
@@ -62,6 +87,7 @@ struct Sample {
     double a_us = 0.0;
     double b_us = 0.0;
     double conv_us = 0.0;
+    double fused_us = 0.0;
     double gate_us = 0.0;
     double recurrence_us = 0.0;
     double post_gate_us = 0.0;
@@ -73,6 +99,7 @@ struct Sample {
     uint64_t syncs = 0;
     uint64_t h2d_bytes = 0;
     uint64_t d2h_bytes = 0;
+    uint64_t state_reset_h2d_bytes = 0;
 };
 
 struct Compare {
@@ -290,18 +317,47 @@ static bool alloc_device(const Fixture &fixture, Device *device,
             return false;
         device->weights.push_back(ptr);
     }
-    return cuda_ok(cudaMalloc(
-                       &device->input,
-                       std::max(kHidden, kZ) * sizeof(float)),
-                   "cudaMalloc input", error) &&
-           cuda_ok(cudaMalloc(&device->output, kQkv * sizeof(float)),
-                   "cudaMalloc output", error);
+    const auto alloc = [&](float **ptr, size_t elements,
+                           const char *name) {
+        return cuda_ok(cudaMalloc(ptr, elements * sizeof(float)), name, error);
+    };
+    return alloc(&device->input, std::max(kHidden, kZ),
+                 "cudaMalloc input") &&
+           alloc(&device->output, kQkv, "cudaMalloc output") &&
+           alloc(&device->qkv, kQkv, "cudaMalloc qkv") &&
+           alloc(&device->z, kZ, "cudaMalloc z") &&
+           alloc(&device->a, kHeads, "cudaMalloc a") &&
+           alloc(&device->b, kHeads, "cudaMalloc b") &&
+           alloc(&device->conv, kQkv, "cudaMalloc conv") &&
+           alloc(&device->q, kHeads * kDim, "cudaMalloc q") &&
+           alloc(&device->k, kHeads * kDim, "cudaMalloc k") &&
+           alloc(&device->v, kHeads * kDim, "cudaMalloc v") &&
+           alloc(&device->decay, kHeads, "cudaMalloc decay") &&
+           alloc(&device->beta, kHeads, "cudaMalloc beta") &&
+           alloc(&device->recurrent, kHeads * kDim, "cudaMalloc recurrent") &&
+           alloc(&device->gated, kZ, "cudaMalloc gated") &&
+           alloc(&device->history, kHistoryElements, "cudaMalloc history") &&
+           alloc(&device->state, kStateElements, "cudaMalloc state");
 }
 
 static void free_device(Device *device) {
     for (void *ptr : device->weights) cudaFree(ptr);
     cudaFree(device->input);
     cudaFree(device->output);
+    cudaFree(device->qkv);
+    cudaFree(device->z);
+    cudaFree(device->a);
+    cudaFree(device->b);
+    cudaFree(device->conv);
+    cudaFree(device->q);
+    cudaFree(device->k);
+    cudaFree(device->v);
+    cudaFree(device->decay);
+    cudaFree(device->beta);
+    cudaFree(device->recurrent);
+    cudaFree(device->gated);
+    cudaFree(device->history);
+    cudaFree(device->state);
     if (device->stream) cudaStreamDestroy(device->stream);
 }
 
@@ -523,6 +579,318 @@ static bool run_once(const Fixture &fixture, Device *device, bool candidate,
     return true;
 }
 
+enum {
+    C2_EVENT_TOTAL = 0,
+    C2_EVENT_H2D = 1,
+    C2_EVENT_QKV = 2,
+    C2_EVENT_Z = 3,
+    C2_EVENT_A = 4,
+    C2_EVENT_B = 5,
+    C2_EVENT_CONV = 6,
+    C2_EVENT_PREPARE = 7,
+    C2_EVENT_RECURRENCE = 8,
+    C2_EVENT_POST = 9,
+    C2_EVENT_OUTPUT = 10,
+    C2_EVENT_D2H = 11,
+    C2_EVENT_COUNT = 12,
+};
+
+static bool run_once_device(const Fixture &fixture, Device *device,
+                            bool fused, bool capture_state,
+                            RunResult *result, std::string *error) {
+    result->sample = {};
+    result->output.resize(kHidden);
+    if (capture_state) {
+        result->next_history.resize(kHistoryElements);
+        result->next_state.resize(kStateElements);
+    }
+
+    const size_t history_bytes = kHistoryElements * sizeof(float);
+    const size_t state_bytes = kStateElements * sizeof(float);
+    if (!cuda_ok(cudaMemcpyAsync(device->history, fixture.history.data(),
+                                 history_bytes, cudaMemcpyHostToDevice,
+                                 device->stream),
+                 "C2 history reset", error) ||
+        !cuda_ok(cudaMemcpyAsync(device->state, fixture.state.data(),
+                                 state_bytes, cudaMemcpyHostToDevice,
+                                 device->stream),
+                 "C2 state reset", error) ||
+        !cuda_ok(cudaStreamSynchronize(device->stream), "C2 reset sync",
+                 error))
+        return false;
+    result->sample.state_reset_h2d_bytes =
+        static_cast<uint64_t>(history_bytes + state_bytes);
+
+    cudaEvent_t starts[C2_EVENT_COUNT] = {};
+    cudaEvent_t stops[C2_EVENT_COUNT] = {};
+    for (size_t i = 0; i < C2_EVENT_COUNT; ++i) {
+        if (!cuda_ok(cudaEventCreate(&starts[i]), "C2 event create", error) ||
+            !cuda_ok(cudaEventCreate(&stops[i]), "C2 event create", error)) {
+            for (size_t j = 0; j <= i; ++j) {
+                if (starts[j]) cudaEventDestroy(starts[j]);
+                if (stops[j]) cudaEventDestroy(stops[j]);
+            }
+            return false;
+        }
+    }
+    const auto cleanup_events = [&]() {
+        for (size_t i = 0; i < C2_EVENT_COUNT; ++i) {
+            cudaEventDestroy(starts[i]);
+            cudaEventDestroy(stops[i]);
+        }
+    };
+    const auto mark_start = [&](size_t index) {
+        return cuda_ok(cudaEventRecord(starts[index], device->stream),
+                       "C2 event record", error);
+    };
+    const auto mark_stop = [&](size_t index) {
+        return cuda_ok(cudaEventRecord(stops[index], device->stream),
+                       "C2 event record", error);
+    };
+    const auto elapsed = [&](size_t index, double *microseconds) {
+        float milliseconds = 0.0f;
+        if (!cuda_ok(cudaEventElapsedTime(&milliseconds, starts[index],
+                                          stops[index]),
+                     "C2 event elapsed", error))
+            return false;
+        *microseconds = static_cast<double>(milliseconds) * 1000.0;
+        return true;
+    };
+
+    const double started = now_us();
+    double dispatch_us = 0.0;
+    if (!mark_start(C2_EVENT_TOTAL) || !mark_start(C2_EVENT_H2D)) {
+        cleanup_events();
+        return false;
+    }
+    if (!cuda_ok(cudaMemcpyAsync(device->input, fixture.hidden.data(),
+                                 kHidden * sizeof(float),
+                                 cudaMemcpyHostToDevice, device->stream),
+                 "C2 hidden upload", error) ||
+        !mark_stop(C2_EVENT_H2D)) {
+        cleanup_events();
+        return false;
+    }
+    result->sample.h2d_bytes = kHidden * sizeof(float);
+
+    const auto launch_projection = [&](size_t event_index, const Weight &weight,
+                                       void *device_weight, float *output) {
+        if (!mark_start(event_index)) return false;
+        const double dispatch_started = now_us();
+        char cuda_error[256] = {};
+        const bool ok = q38_cuda_gdn_project(
+            cuda_weight_type(weight.type), device_weight, weight.rows,
+            weight.cols, device->input, 1, output, device->stream, cuda_error,
+            sizeof(cuda_error));
+        dispatch_us += now_us() - dispatch_started;
+        if (!ok) {
+            *error = cuda_error;
+            return false;
+        }
+        ++result->sample.launches;
+        return mark_stop(event_index);
+    };
+    if (!launch_projection(C2_EVENT_QKV, fixture.qkv, device->weights[0],
+                           device->qkv) ||
+        !launch_projection(C2_EVENT_Z, fixture.z, device->weights[1],
+                           device->z) ||
+        !launch_projection(C2_EVENT_A, fixture.a, device->weights[2],
+                           device->a) ||
+        !launch_projection(C2_EVENT_B, fixture.b, device->weights[3],
+                           device->b))
+        {
+            cleanup_events();
+            return false;
+        }
+
+    if (!mark_start(C2_EVENT_CONV)) {
+        cleanup_events();
+        return false;
+    }
+    if (fused) {
+        const double dispatch_started = now_us();
+        char cuda_error[256] = {};
+        if (!q38_cuda_gdn_fused_recurrent(
+                device->qkv, device->z, device->a, device->b,
+                cuda_weight_type(fixture.conv.type), device->weights[4],
+                cuda_weight_type(fixture.a_log.type), device->weights[5],
+                device->weights[6], cuda_weight_type(fixture.norm.type),
+                device->weights[7], device->state, device->history,
+                device->gated, device->stream, cuda_error,
+                sizeof(cuda_error)) ||
+            !q38_cuda_gdn_history_update(
+                device->qkv, 1, kQkv, Q38_TEST_GDN_KERNEL, device->history,
+                device->stream, cuda_error, sizeof(cuda_error))) {
+            *error = cuda_error;
+            cleanup_events();
+            return false;
+        }
+        dispatch_us += now_us() - dispatch_started;
+        result->sample.launches += 2;
+    } else {
+        const double dispatch_started = now_us();
+        char cuda_error[256] = {};
+        if (!q38_cuda_gdn_conv_silu_fused_channel_major(
+                cuda_weight_type(fixture.conv.type), device->weights[4],
+                device->qkv, 1, kQkv, Q38_TEST_GDN_KERNEL, device->history,
+                device->conv, device->stream, cuda_error, sizeof(cuda_error))) {
+            *error = cuda_error;
+            cleanup_events();
+            return false;
+        }
+        dispatch_us += now_us() - dispatch_started;
+        ++result->sample.launches;
+        if (!mark_stop(C2_EVENT_CONV) || !mark_start(C2_EVENT_PREPARE)) {
+            cleanup_events();
+            return false;
+        }
+        {
+            const double dispatch_started = now_us();
+            if (!q38_cuda_gdn_prepare_recurrence(
+                    device->conv, device->a, device->b,
+                    cuda_weight_type(fixture.a_log.type), device->weights[5],
+                    device->weights[6], 1, device->q, device->k, device->v,
+                    device->decay, device->beta, device->stream, cuda_error,
+                    sizeof(cuda_error))) {
+                *error = cuda_error;
+                cleanup_events();
+                return false;
+            }
+            dispatch_us += now_us() - dispatch_started;
+            ++result->sample.launches;
+        }
+        if (!mark_stop(C2_EVENT_PREPARE) || !mark_start(C2_EVENT_RECURRENCE)) {
+            cleanup_events();
+            return false;
+        }
+        {
+            const double dispatch_started = now_us();
+            if (!q38_cuda_gdn_recurrence(
+                    device->state, 1, device->q, device->k, device->v,
+                    device->decay, device->beta, 1.0f / std::sqrt(128.0f),
+                    device->recurrent, device->stream, cuda_error,
+                    sizeof(cuda_error))) {
+                *error = cuda_error;
+                cleanup_events();
+                return false;
+            }
+            dispatch_us += now_us() - dispatch_started;
+            ++result->sample.launches;
+        }
+        if (!mark_stop(C2_EVENT_RECURRENCE) || !mark_start(C2_EVENT_POST)) {
+            cleanup_events();
+            return false;
+        }
+        {
+            const double dispatch_started = now_us();
+            if (!q38_cuda_gdn_post_recurrence(
+                    device->recurrent, device->z,
+                    cuda_weight_type(fixture.norm.type), device->weights[7],
+                    1, device->gated, device->stream, cuda_error,
+                    sizeof(cuda_error))) {
+                *error = cuda_error;
+                cleanup_events();
+                return false;
+            }
+            dispatch_us += now_us() - dispatch_started;
+            ++result->sample.launches;
+        }
+    }
+    if (!fused && !mark_stop(C2_EVENT_POST)) {
+        cleanup_events();
+        return false;
+    }
+    if (fused) {
+        if (!mark_stop(C2_EVENT_CONV)) {
+            cleanup_events();
+            return false;
+        }
+    }
+    if (!mark_start(C2_EVENT_OUTPUT)) {
+        cleanup_events();
+        return false;
+    }
+    {
+        const double dispatch_started = now_us();
+        char cuda_error[256] = {};
+        if (!q38_cuda_gdn_project(
+                cuda_weight_type(fixture.out_proj.type), device->weights[8],
+                fixture.out_proj.rows, fixture.out_proj.cols, device->gated, 1,
+                device->output, device->stream, cuda_error, sizeof(cuda_error))) {
+            *error = cuda_error;
+            cleanup_events();
+            return false;
+        }
+        dispatch_us += now_us() - dispatch_started;
+        ++result->sample.launches;
+    }
+    if (!mark_stop(C2_EVENT_OUTPUT) || !mark_start(C2_EVENT_D2H) ||
+        !cuda_ok(cudaMemcpyAsync(result->output.data(), device->output,
+                                 kHidden * sizeof(float),
+                                 cudaMemcpyDeviceToHost, device->stream),
+                 "C2 output download", error) ||
+        !mark_stop(C2_EVENT_D2H) || !mark_stop(C2_EVENT_TOTAL)) {
+        cleanup_events();
+        return false;
+    }
+    const double sync_started = now_us();
+    if (!cuda_ok(cudaStreamSynchronize(device->stream), "C2 final sync",
+                 error)) {
+        cleanup_events();
+        return false;
+    }
+    result->sample.sync_us = now_us() - sync_started;
+    result->sample.syncs = 1;
+    result->sample.dispatch_us = dispatch_us;
+    if (!elapsed(C2_EVENT_TOTAL, &result->sample.total_us) ||
+        !elapsed(C2_EVENT_QKV, &result->sample.qkv_us) ||
+        !elapsed(C2_EVENT_Z, &result->sample.z_us) ||
+        !elapsed(C2_EVENT_A, &result->sample.a_us) ||
+        !elapsed(C2_EVENT_B, &result->sample.b_us) ||
+        !elapsed(C2_EVENT_OUTPUT, &result->sample.output_us)) {
+        cleanup_events();
+        return false;
+    }
+    if (fused) {
+        if (!elapsed(C2_EVENT_CONV, &result->sample.fused_us)) {
+            cleanup_events();
+            return false;
+        }
+        result->sample.conv_us = result->sample.fused_us;
+    } else if (!elapsed(C2_EVENT_CONV, &result->sample.conv_us) ||
+               !elapsed(C2_EVENT_PREPARE, &result->sample.gate_us) ||
+               !elapsed(C2_EVENT_RECURRENCE, &result->sample.recurrence_us) ||
+               !elapsed(C2_EVENT_POST, &result->sample.post_gate_us)) {
+        cleanup_events();
+        return false;
+    }
+    double h2d_us = 0.0;
+    double d2h_us = 0.0;
+    if (!elapsed(C2_EVENT_H2D, &h2d_us) ||
+        !elapsed(C2_EVENT_D2H, &d2h_us)) {
+        cleanup_events();
+        return false;
+    }
+    result->sample.memcpy_us = h2d_us + d2h_us;
+    result->sample.d2h_bytes = kHidden * sizeof(float);
+    result->sample.total_us = std::max(result->sample.total_us,
+                                       now_us() - started);
+
+    if (capture_state) {
+        if (!cuda_ok(cudaMemcpy(result->next_history.data(), device->history,
+                                history_bytes, cudaMemcpyDeviceToHost),
+                     "C2 history download", error) ||
+            !cuda_ok(cudaMemcpy(result->next_state.data(), device->state,
+                                state_bytes, cudaMemcpyDeviceToHost),
+                     "C2 state download", error)) {
+            cleanup_events();
+            return false;
+        }
+    }
+    cleanup_events();
+    return true;
+}
+
 static Compare compare(const std::vector<float> &expected,
                        const std::vector<float> &actual) {
     Compare result;
@@ -562,8 +930,11 @@ static void print_metric(std::ostream &output, const char *name,
            << ",\"p95_us\":" << p95_us << "}";
 }
 
-static bool benchmark_fixture(const std::string &dir, bool candidate,
+static bool benchmark_fixture(const std::string &dir, BenchMode mode,
                               std::string *json, std::string *error) {
+    const bool candidate = mode != BenchMode::Production;
+    const bool c2 = mode == BenchMode::C2;
+    const bool c3 = mode == BenchMode::C3;
     Fixture fixture;
     if (!load_fixture(dir, &fixture, error)) return false;
     Device device;
@@ -604,7 +975,9 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
         return false;
     }
     RunResult check;
-    if (!run_once(fixture, &device, candidate, &check, error)) {
+    if ((c2 || c3)
+            ? !run_once_device(fixture, &device, c3, true, &check, error)
+            : !run_once(fixture, &device, candidate, &check, error)) {
         free_device(&device);
         return false;
     }
@@ -613,10 +986,38 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
     const Compare history_check = compare(fixture.next_history,
                                           check.next_history);
     const Compare state_check = compare(fixture.next_state, check.next_state);
+    const bool correctness_ok =
+        output_check.nonfinite == 0 && oracle_check.nonfinite == 0 &&
+        history_check.nonfinite == 0 && state_check.nonfinite == 0 &&
+        output_check.max_abs <= kOutputMaxAbsTolerance &&
+        output_check.max_rel <= kOutputMaxRelTolerance &&
+        oracle_check.max_abs <= kOutputMaxAbsTolerance &&
+        oracle_check.max_rel <= kOutputMaxRelTolerance &&
+        history_check.max_abs <= kHistoryMaxAbsTolerance &&
+        state_check.max_abs <= kStateMaxAbsTolerance;
+    if (!correctness_ok) {
+        std::ostringstream detail;
+        detail << "GDN correctness tolerance failed for layer "
+               << fixture.layer << ": captured_abs=" << output_check.max_abs
+               << ", captured_rel=" << output_check.max_rel
+               << ", oracle_abs=" << oracle_check.max_abs
+               << ", oracle_rel=" << oracle_check.max_rel
+               << ", history_abs=" << history_check.max_abs
+               << ", state_abs=" << state_check.max_abs
+               << ", nonfinite="
+               << output_check.nonfinite + oracle_check.nonfinite +
+                      history_check.nonfinite + state_check.nonfinite;
+        *error = detail.str();
+        free_device(&device);
+        return false;
+    }
 
     for (size_t i = 0; i < kWarmup; ++i) {
         RunResult warmup;
-        if (!run_once(fixture, &device, candidate, &warmup, error)) {
+        if ((c2 || c3)
+                ? !run_once_device(fixture, &device, c3, false, &warmup,
+                                   error)
+                : !run_once(fixture, &device, candidate, &warmup, error)) {
             free_device(&device);
             return false;
         }
@@ -625,13 +1026,17 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
     samples.reserve(kSamples);
     for (size_t i = 0; i < kSamples; ++i) {
         RunResult measured;
-        if (!run_once(fixture, &device, candidate, &measured, error)) {
+        if ((c2 || c3)
+                ? !run_once_device(fixture, &device, c3, false, &measured,
+                                   error)
+                : !run_once(fixture, &device, candidate, &measured, error)) {
             free_device(&device);
             return false;
         }
         samples.push_back(std::move(measured.sample));
     }
-    std::vector<double> total, qkv, z, a, b, conv, gate, recurrence, post, out;
+    std::vector<double> total, qkv, z, a, b, conv, fused, gate, recurrence,
+        post, out;
     std::vector<double> dispatch, sync, memcpy;
     for (const Sample &sample : samples) {
         total.push_back(sample.total_us);
@@ -640,6 +1045,7 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
         a.push_back(sample.a_us);
         b.push_back(sample.b_us);
         conv.push_back(sample.conv_us);
+        fused.push_back(sample.fused_us);
         gate.push_back(sample.gate_us);
         recurrence.push_back(sample.recurrence_us);
         post.push_back(sample.post_gate_us);
@@ -650,8 +1056,12 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
     }
     const Sample &accounting = samples.front();
     double stage_sum = median(qkv) + median(z) + median(a) + median(b) +
-                       median(conv) + median(gate) + median(recurrence) +
-                       median(post) + median(out);
+                       (c3 ? 0.0 : median(conv)) + median(gate) +
+                       median(recurrence) + median(post) + median(out);
+    if (c2 || c3) stage_sum += median(memcpy);
+    if (c3) {
+        stage_sum += median(fused);
+    }
     const double total_median = median(total);
     const double accounting_ratio = total_median > 0.0
         ? stage_sum / total_median : 0.0;
@@ -659,7 +1069,10 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
     std::ostringstream output;
     output << std::fixed << std::setprecision(3);
     output << "{\"layer\":" << fixture.layer
-           << ",\"mode\":\"" << (candidate ? "gdn_c1" : "production")
+           << ",\"mode\":\""
+           << (mode == BenchMode::C3 ? "gdn_c3" :
+               mode == BenchMode::C2 ? "gdn_c2" :
+               candidate ? "gdn_c1" : "production")
            << "\",\"warmup\":" << kWarmup << ",\"samples\":" << kSamples
            << ",\"total\":";
     output << "{\"median_us\":" << total_median
@@ -672,9 +1085,15 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
     output << ",";
     print_metric(output, "b_projection", median(b), percentile(b, 0.95));
     output << ",";
-    print_metric(output, "conv_update_silu", median(conv),
-                 percentile(conv, 0.95));
-    output << ",";
+    if (c3) {
+        print_metric(output, "fused_recurrent_block", median(fused),
+                     percentile(fused, 0.95));
+        output << ",";
+    } else {
+        print_metric(output, "conv_update_silu", median(conv),
+                     percentile(conv, 0.95));
+        output << ",";
+    }
     print_metric(output, "gate_activation", median(gate), percentile(gate, 0.95));
     output << ",";
     print_metric(output, "recurrent_update", median(recurrence),
@@ -699,6 +1118,7 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
            << ",\"dispatch_us\":" << median(dispatch)
            << ",\"sync_wait_us\":" << median(sync)
            << ",\"memcpy_us\":" << median(memcpy)
+           << ",\"state_reset_h2d_bytes\":" << accounting.state_reset_h2d_bytes
            << ",\"correctness\":{\"captured_output_max_abs\":"
            << output_check.max_abs << ",\"captured_output_max_rel\":"
            << output_check.max_rel << ",\"oracle_output_max_abs\":"
@@ -709,7 +1129,13 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
            << state_check.max_abs << ",\"nan_inf\":"
            << output_check.nonfinite + oracle_check.nonfinite +
                   history_check.nonfinite + state_check.nonfinite
-           << "}}";
+           << ",\"passed\":" << (correctness_ok ? "true" : "false")
+           << ",\"tolerances\":{\"output_max_abs\":"
+           << kOutputMaxAbsTolerance << ",\"output_max_rel\":"
+           << kOutputMaxRelTolerance << ",\"next_history_max_abs\":"
+           << kHistoryMaxAbsTolerance << ",\"next_state_max_abs\":"
+           << kStateMaxAbsTolerance
+           << "}}}";
     *json = output.str();
     free_device(&device);
     return accounting_ratio >= 0.97;
@@ -720,15 +1146,30 @@ static bool benchmark_fixture(const std::string &dir, bool candidate,
 int main(int argc, char **argv) {
     if (argc < 3 || argc > 4) {
         std::fprintf(stderr,
-                     "usage: gdn_bench FIXTURE_ROOT ARTIFACT [gdn_c1]\n");
+                     "usage: gdn_bench FIXTURE_ROOT ARTIFACT "
+                     "[gdn_c1|gdn_c2|gdn_c3]\n");
         return 2;
     }
-    const bool candidate = argc == 4 && std::strcmp(argv[3], "gdn_c1") == 0;
+    BenchMode mode = BenchMode::Production;
+    if (argc == 4 && std::strcmp(argv[3], "gdn_c1") == 0)
+        mode = BenchMode::C1;
+    else if (argc == 4 && std::strcmp(argv[3], "gdn_c2") == 0)
+        mode = BenchMode::C2;
+    else if (argc == 4 && std::strcmp(argv[3], "gdn_c3") == 0)
+        mode = BenchMode::C3;
+    else if (argc == 4) {
+        std::fprintf(stderr, "gdn_bench: unknown mode %s\n", argv[3]);
+        return 2;
+    }
+    const bool candidate = mode != BenchMode::Production;
+    const char *mode_name = mode == BenchMode::C3 ? "gdn_c3" :
+                            mode == BenchMode::C2 ? "gdn_c2" :
+                            candidate ? "gdn_c1" : "production";
     const char *names[] = {"early", "middle", "late"};
     std::string results[3];
     std::string error;
     for (size_t i = 0; i < 3; ++i) {
-        if (!benchmark_fixture(std::string(argv[1]) + "/" + names[i], candidate,
+        if (!benchmark_fixture(std::string(argv[1]) + "/" + names[i], mode,
                                 &results[i], &error)) {
             std::fprintf(stderr, "gdn_bench: %s\n", error.c_str());
             return 1;
@@ -741,8 +1182,10 @@ int main(int argc, char **argv) {
         return 1;
     }
     artifact << "{\"format\":\"q38-gdn-subsystem-v1\",\"status\":\""
-             << (candidate ? "S3-C1" : "S3-BASELINE")
-             << "\",\"mode\":\"" << (candidate ? "gdn_c1" : "production")
+             << (mode == BenchMode::C3 ? "S3-C3" :
+                 mode == BenchMode::C2 ? "S3-C2" :
+                 candidate ? "S3-C1" : "S3-BASELINE")
+             << "\",\"mode\":\"" << mode_name
              << "\",\"fixtures\":[";
     for (size_t i = 0; i < 3; ++i)
         artifact << (i ? "," : "") << results[i];

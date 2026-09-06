@@ -86,6 +86,17 @@ bool q38_cuda_gdn_conv_silu_fused(
     size_t tokens, size_t channels, size_t kernel_size, float *history,
     float *output, cudaStream_t stream, char *error, size_t error_len);
 
+/* Same fused operation for GGUF GDN conv1d storage [channel, tap]. */
+bool q38_cuda_gdn_conv_silu_fused_channel_major(
+    uint32_t kernel_type, const void *kernel, const float *input,
+    size_t tokens, size_t channels, size_t kernel_size, float *history,
+    float *output, cudaStream_t stream, char *error, size_t error_len);
+
+/* Update the persistent causal history after a fused single-token core. */
+bool q38_cuda_gdn_history_update(
+    const float *input, size_t tokens, size_t channels, size_t kernel_size,
+    float *history, cudaStream_t stream, char *error, size_t error_len);
+
 /*
  * Split the frozen Qwen4Exp qkv stream, whose logical order is
  * [Q(16*128), K(16*128), V(48*128)].  Each output is token-major and remains
@@ -99,6 +110,36 @@ bool q38_cuda_gdn_split_qkv(const float *qkv, size_t tokens, float *q,
 bool q38_cuda_gdn_repeat_key_heads(const float *key, size_t tokens,
                                    float *value, cudaStream_t stream,
                                    char *error, size_t error_len);
+
+/*
+ * Prepare normalized, repeated q/k heads plus v, decay, and beta directly
+ * from the device-side convolution and projection outputs.
+ */
+bool q38_cuda_gdn_prepare_recurrence(
+    const float *conv, const float *a, const float *b,
+    uint32_t scalar_weight_type, const void *a_log, const void *dt_bias,
+    size_t tokens, float *q, float *k, float *v, float *decay, float *beta,
+    cudaStream_t stream, char *error, size_t error_len);
+
+/* Apply FP32 per-head normalization and sigmoid(z) gating on device. */
+bool q38_cuda_gdn_post_recurrence(
+    const float *recurrent, const float *z, uint32_t norm_weight_type,
+    const void *norm, size_t tokens, float *output, cudaStream_t stream,
+    char *error, size_t error_len);
+
+/*
+ * Fuse convolution/SiLU, q/k/v preparation, FP32 recurrence, and
+ * normalization/gating for the single-token decode shape.  The caller must
+ * enqueue q38_cuda_gdn_history_update after this kernel so all convolution
+ * reads observe the previous history.
+ */
+bool q38_cuda_gdn_fused_recurrent(
+    const float *qkv, const float *z, const float *a, const float *b,
+    uint32_t conv_weight_type, const void *conv_kernel,
+    uint32_t scalar_weight_type, const void *a_log, const void *dt_bias,
+    uint32_t norm_weight_type, const void *norm, float *state,
+    const float *history, float *output, cudaStream_t stream, char *error,
+    size_t error_len);
 
 /*
  * Apply the scalar reference recurrence to one sequence.  State is the

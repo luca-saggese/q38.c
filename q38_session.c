@@ -92,6 +92,8 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     runtime->backend.gr_write = q38_forward_cuda_gr_write_backend;
     runtime->backend.expert = q38_forward_cuda_expert_backend;
     runtime->backend.moe_layer = q38_forward_cuda_moe_layer_q2_backend;
+    runtime->backend.gdn_layer = q38_forward_cuda_gdn_layer_backend;
+    runtime->backend.sync_state = q38_forward_cuda_sync_gdn_state;
     runtime->backend.qsa_qkv = q38_forward_cuda_qsa_qkv_backend;
     runtime->backend.user = runtime->cuda;
     return true;
@@ -191,6 +193,7 @@ bool q38_session_create(q38_session *session, q38_runtime *runtime,
         memset(session, 0, sizeof(*session));
         return false;
     }
+    q38_forward_cuda_reset_gdn_state(runtime->cuda);
     return true;
 }
 
@@ -200,6 +203,8 @@ void q38_session_reset(q38_session *session) {
     const float override_ffn = session->steering_ffn_scale;
     const float override_attn = session->steering_attn_scale;
     q38_forward_state_reset(&session->state);
+    if (session->runtime && session->runtime->cuda)
+        q38_forward_cuda_reset_gdn_state(session->runtime->cuda);
     session->position = 0;
     session->token_count = 0;
     session->ple_wait_at_injection_ms = 0.0;

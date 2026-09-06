@@ -319,6 +319,15 @@ typedef bool (*q38_forward_moe_layer_backend)(
     const float *host_input, float *host_output, void *user, char *error,
     size_t error_len);
 
+typedef bool (*q38_forward_gdn_layer_backend)(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_forward_state *state, const float *input, size_t token_count,
+    uint32_t layer_number, float *output, void *user, char *error,
+    size_t error_len);
+
+typedef bool (*q38_forward_state_sync_backend)(
+    q38_forward_state *state, void *user, char *error, size_t error_len);
+
 typedef struct {
     q38_forward_matvec_backend matvec;
     q38_forward_matrix_backend matrix;
@@ -327,6 +336,9 @@ typedef struct {
     q38_forward_gr_write_backend gr_write;
     q38_forward_expert_backend expert;
     q38_forward_moe_layer_backend moe_layer;
+    q38_forward_gdn_layer_backend gdn_layer;
+    /* Optional host-state refresh used before device-backed trace snapshots. */
+    q38_forward_state_sync_backend sync_state;
     q38_forward_qsa_qkv_backend qsa_qkv;
     void *user;
 } q38_forward_backend_config;

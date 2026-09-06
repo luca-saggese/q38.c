@@ -88,6 +88,42 @@ struct q38_forward_cuda_context {
     size_t device_qsa_output_bytes;
     float *host_qsa_output;
     size_t host_qsa_output_bytes;
+    float *device_gdn_input;
+    size_t device_gdn_input_bytes;
+    float *device_gdn_qkv;
+    size_t device_gdn_qkv_bytes;
+    float *device_gdn_z;
+    size_t device_gdn_z_bytes;
+    float *device_gdn_a;
+    size_t device_gdn_a_bytes;
+    float *device_gdn_b;
+    size_t device_gdn_b_bytes;
+    float *device_gdn_conv;
+    size_t device_gdn_conv_bytes;
+    float *device_gdn_q;
+    size_t device_gdn_q_bytes;
+    float *device_gdn_k;
+    size_t device_gdn_k_bytes;
+    float *device_gdn_v;
+    size_t device_gdn_v_bytes;
+    float *device_gdn_decay;
+    size_t device_gdn_decay_bytes;
+    float *device_gdn_beta;
+    size_t device_gdn_beta_bytes;
+    float *device_gdn_recurrent;
+    size_t device_gdn_recurrent_bytes;
+    float *device_gdn_gated;
+    size_t device_gdn_gated_bytes;
+    float *device_gdn_state;
+    size_t device_gdn_state_bytes;
+    float *device_gdn_history;
+    size_t device_gdn_history_bytes;
+    bool device_gdn_state_initialized;
+    uint64_t gdn_c3_calls;
+    uint64_t gdn_c3_launches;
+    uint64_t gdn_c3_syncs;
+    uint64_t gdn_c3_h2d_bytes;
+    uint64_t gdn_c3_d2h_bytes;
     float *device_steering;
     size_t device_steering_bytes;
     float directional_steering_ffn_scale;
@@ -389,6 +425,15 @@ static bool is_gr_projection_stage(const char *stage) {
            (!strcmp(stage, "gr_read_down") ||
             !strcmp(stage, "gr_read_up") ||
             !strcmp(stage, "gr_write_inject"));
+}
+
+static bool is_gdn_projection_stage(const char *stage) {
+    return stage &&
+           (!strcmp(stage, "gdn_qkv_projection") ||
+            !strcmp(stage, "gdn_z_projection") ||
+            !strcmp(stage, "gdn_a_projection") ||
+            !strcmp(stage, "gdn_b_projection") ||
+            !strcmp(stage, "gdn_output_projection"));
 }
 
 static void copy_tensor_name(const q38_tensor *tensor, char *out,
@@ -840,6 +885,54 @@ q38_forward_cuda_context_create(char *error, size_t error_len) {
     return context;
 }
 
+extern "C" void
+q38_forward_cuda_reset_gdn_state(q38_forward_cuda_context *context) {
+    if (!context || !context->device_gdn_state ||
+        !context->device_gdn_history)
+        return;
+    const size_t state_bytes =
+        (size_t)Q38_GDN_LAYER_COUNT * Q38_GDN_VALUE_HEADS *
+        Q38_GDN_HEAD_DIM * Q38_GDN_HEAD_DIM * sizeof(float);
+    const size_t history_bytes =
+        (size_t)Q38_GDN_LAYER_COUNT * (Q38_GDN_CONV_KERNEL - 1u) *
+        Q38_GDN_CONV_CHANNELS * sizeof(float);
+    if (cudaMemsetAsync(context->device_gdn_state, 0, state_bytes,
+                        context->stream) == cudaSuccess &&
+        cudaMemsetAsync(context->device_gdn_history, 0, history_bytes,
+                        context->stream) == cudaSuccess)
+        context->device_gdn_state_initialized = true;
+}
+
+extern "C" bool q38_forward_cuda_sync_gdn_state(
+    q38_forward_state *state, void *user, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    if (!state || !context)
+        return fail(error, error_len, "invalid GDN state sync arguments");
+    if (!context->device_gdn_state_initialized)
+        return true;
+    if (!context->device_gdn_state || !context->device_gdn_history ||
+        !state->storage.recurrent_state || !state->storage.conv_history)
+        return fail(error, error_len, "GDN state sync storage is unavailable");
+    const size_t state_bytes =
+        (size_t)state->storage.layout.recurrent.bytes;
+    const size_t history_bytes =
+        (size_t)state->storage.layout.conv_history.bytes;
+    if (state_bytes > context->device_gdn_state_bytes ||
+        history_bytes > context->device_gdn_history_bytes)
+        return fail(error, error_len, "GDN state sync layout exceeds device storage");
+    if (cudaMemcpyAsync(state->storage.recurrent_state,
+                        context->device_gdn_state, state_bytes,
+                        cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(state->storage.conv_history,
+                        context->device_gdn_history, history_bytes,
+                        cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "GDN state sync transfer failed");
+    return true;
+}
+
 extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     q38_forward_cuda_context *context, const q38_gguf *model,
     char *error, size_t error_len) {
@@ -1021,6 +1114,21 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_gr_updated);
     cudaFree(context->device_qsa_input);
     cudaFree(context->device_qsa_output);
+    cudaFree(context->device_gdn_input);
+    cudaFree(context->device_gdn_qkv);
+    cudaFree(context->device_gdn_z);
+    cudaFree(context->device_gdn_a);
+    cudaFree(context->device_gdn_b);
+    cudaFree(context->device_gdn_conv);
+    cudaFree(context->device_gdn_q);
+    cudaFree(context->device_gdn_k);
+    cudaFree(context->device_gdn_v);
+    cudaFree(context->device_gdn_decay);
+    cudaFree(context->device_gdn_beta);
+    cudaFree(context->device_gdn_recurrent);
+    cudaFree(context->device_gdn_gated);
+    cudaFree(context->device_gdn_state);
+    cudaFree(context->device_gdn_history);
     cudaFree(context->device_steering);
     free(context->host_qsa_output);
     if (!context->lm_head_uses_persistent)
@@ -1592,8 +1700,7 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
     const bool resident = context->all_non_ple_resident &&
         exec_tensor_is_resident(exec, tensor);
     if (!resident)
-        return fail(error, error_len,
-                    "Q38 batched matrix requires resident weights");
+        return false;
     const size_t input_bytes = token_count * cols * sizeof(float);
     const size_t output_bytes = token_count * rows * sizeof(float);
     if (!ensure_buffer((void **)&context->device_input,
@@ -1639,10 +1746,18 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
                 !strcmp(context->current_stage, "gr_read_up")
             ? 128u
             : 256u;
+    const bool gdn_bf16_candidate =
+        token_count == 1 && tensor->type == 30 &&
+        is_gdn_projection_stage(context->current_stage);
     const bool launched = gr_bf16_candidate
         ? q38_cuda_bf16_matvec_configured(
               (const uint16_t *)exec->ptr, rows, cols,
               context->device_input, context->device_output, gr_threads,
+              context->stream, error, error_len)
+        : gdn_bf16_candidate
+        ? q38_cuda_gdn_project(
+              Q38_GDN_WEIGHT_BF16, exec->ptr, rows, cols,
+              context->device_input, token_count, context->device_output,
               context->stream, error, error_len)
         : q38_cuda_matrix_batch_generic(
               tensor->type, exec->ptr, context->device_input, token_count,
@@ -1686,9 +1801,170 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
     emit_telemetry(context, model, tensor, token_count * rows, cols,
                    (size_t)tensor->bytes, true, false, 0, upload_ms, kernel_ms,
                    host_now_ms() - started, 0, 1, "matrix_batch",
-                   "resident_exec_tensor");
+                   gdn_bf16_candidate ? "resident_gdn_projection"
+                                     : "resident_exec_tensor");
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_gdn_layer_backend(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_forward_state *state, const float *input, size_t token_count,
+    uint32_t layer_number, float *output, void *user, char *error,
+    size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    if (!context || !model || !layer || !state || !input || !output ||
+        token_count != 1)
+        return false;
+    const q38_tensor *tensors[] = {
+        layer->gdn.in_proj_qkv, layer->gdn.in_proj_z,
+        layer->gdn.in_proj_a, layer->gdn.in_proj_b, layer->gdn.conv1d,
+        layer->gdn.A_log, layer->gdn.dt_bias, layer->gdn.norm,
+        layer->gdn.out_proj,
+    };
+    for (const q38_tensor *tensor : tensors) {
+        if (!tensor || tensor->type != Q38_GDN_WEIGHT_BF16)
+            return fail(error, error_len,
+                        "GDN-C3 requires resident BF16 GDN tensors");
+    }
+    const int slot = q38_gdn_slot_for_layer(
+        &state->storage.layout, layer_number);
+    if (slot < 0 || (uint32_t)slot >= Q38_GDN_LAYER_COUNT)
+        return fail(error, error_len, "invalid GDN-C3 layer slot");
+    q38_exec_tensor *exec[9] = {};
+    for (size_t i = 0; i < 9; ++i) {
+        exec[i] = exec_tensor_for(context, model, tensors[i]);
+        if (!exec[i] || !exec_tensor_is_resident(exec[i], tensors[i]))
+            return fail(error, error_len,
+                        "GDN-C3 requires resident execution tensors");
+    }
+    const size_t state_slot_elements =
+        (size_t)Q38_GDN_VALUE_HEADS * Q38_GDN_HEAD_DIM * Q38_GDN_HEAD_DIM;
+    const size_t history_slot_elements =
+        (size_t)(Q38_GDN_CONV_KERNEL - 1u) * Q38_GDN_CONV_CHANNELS;
+    const size_t state_bytes =
+        (size_t)Q38_GDN_LAYER_COUNT * state_slot_elements * sizeof(float);
+    const size_t history_bytes =
+        (size_t)Q38_GDN_LAYER_COUNT * history_slot_elements * sizeof(float);
+    const auto ensure = [&](void **buffer, size_t *capacity, size_t bytes) {
+        return ensure_buffer(buffer, capacity, bytes,
+                             context->allocation_observer,
+                             context->allocation_observer_user,
+                             &context->cuda_allocations);
+    };
+    if (!ensure((void **)&context->device_gdn_input,
+                &context->device_gdn_input_bytes,
+                Q38_GDN_INPUT_DIM * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_qkv,
+                &context->device_gdn_qkv_bytes,
+                Q38_GDN_QKV_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_z,
+                &context->device_gdn_z_bytes,
+                Q38_GDN_Z_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_a,
+                &context->device_gdn_a_bytes,
+                Q38_GDN_VALUE_HEADS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_b,
+                &context->device_gdn_b_bytes,
+                Q38_GDN_VALUE_HEADS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_conv,
+                &context->device_gdn_conv_bytes,
+                Q38_GDN_QKV_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_q,
+                &context->device_gdn_q_bytes,
+                Q38_GDN_VALUE_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_k,
+                &context->device_gdn_k_bytes,
+                Q38_GDN_VALUE_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_v,
+                &context->device_gdn_v_bytes,
+                Q38_GDN_VALUE_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_decay,
+                &context->device_gdn_decay_bytes,
+                Q38_GDN_VALUE_HEADS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_beta,
+                &context->device_gdn_beta_bytes,
+                Q38_GDN_VALUE_HEADS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_recurrent,
+                &context->device_gdn_recurrent_bytes,
+                Q38_GDN_VALUE_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_gated,
+                &context->device_gdn_gated_bytes,
+                Q38_GDN_Z_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_state,
+                &context->device_gdn_state_bytes, state_bytes) ||
+        !ensure((void **)&context->device_gdn_history,
+                &context->device_gdn_history_bytes, history_bytes))
+        return fail(error, error_len, "GDN-C3 workspace allocation failed");
+    if (!context->device_gdn_state_initialized) {
+        if (cudaMemsetAsync(context->device_gdn_state, 0, state_bytes,
+                            context->stream) != cudaSuccess ||
+            cudaMemsetAsync(context->device_gdn_history, 0, history_bytes,
+                            context->stream) != cudaSuccess)
+            return fail(error, error_len, "GDN-C3 state initialization failed");
+        context->device_gdn_state_initialized = true;
+    }
+    float *device_state =
+        context->device_gdn_state + (size_t)slot * state_slot_elements;
+    float *device_history =
+        context->device_gdn_history + (size_t)slot * history_slot_elements;
+    if (cudaMemcpyAsync(
+            context->device_gdn_input, input,
+            Q38_GDN_INPUT_DIM * sizeof(float), cudaMemcpyHostToDevice,
+            context->stream) != cudaSuccess)
+        return fail(error, error_len, "GDN-C3 input upload failed");
+    context->gdn_c3_h2d_bytes += Q38_GDN_INPUT_DIM * sizeof(float);
+    char cuda_error[256] = {};
+    const auto project = [&](size_t index, size_t rows, size_t cols,
+                             float *destination) {
+        if (!q38_cuda_gdn_project(
+                Q38_GDN_WEIGHT_BF16, exec[index]->ptr, rows, cols,
+                context->device_gdn_input, 1, destination, context->stream,
+                cuda_error, sizeof(cuda_error)))
+            return false;
+        ++context->gdn_c3_launches;
+        return true;
+    };
+    if (!project(0, Q38_GDN_QKV_CHANNELS, Q38_GDN_INPUT_DIM,
+                 context->device_gdn_qkv) ||
+        !project(1, Q38_GDN_Z_CHANNELS, Q38_GDN_INPUT_DIM,
+                 context->device_gdn_z) ||
+        !project(2, Q38_GDN_VALUE_HEADS, Q38_GDN_INPUT_DIM,
+                 context->device_gdn_a) ||
+        !project(3, Q38_GDN_VALUE_HEADS, Q38_GDN_INPUT_DIM,
+                 context->device_gdn_b) ||
+        !q38_cuda_gdn_fused_recurrent(
+            context->device_gdn_qkv, context->device_gdn_z,
+            context->device_gdn_a, context->device_gdn_b, Q38_GDN_WEIGHT_BF16,
+            exec[4]->ptr, Q38_GDN_WEIGHT_BF16, exec[5]->ptr, exec[6]->ptr,
+            Q38_GDN_WEIGHT_BF16, exec[7]->ptr, device_state, device_history,
+            context->device_gdn_gated, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_cuda_gdn_history_update(
+            context->device_gdn_qkv, 1, Q38_GDN_QKV_CHANNELS,
+            Q38_GDN_CONV_KERNEL, device_history, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_cuda_gdn_project(
+            Q38_GDN_WEIGHT_BF16, exec[8]->ptr, Q38_GR_HIDDEN,
+            Q38_GDN_Z_CHANNELS, context->device_gdn_gated, 1,
+            context->device_gdn_gated, context->stream, cuda_error,
+            sizeof(cuda_error))) {
+        return fail(error, error_len,
+                    cuda_error[0] ? cuda_error : "GDN-C3 launch failed");
+    }
+    context->gdn_c3_launches += 3;
+    if (cudaMemcpyAsync(output, context->device_gdn_gated,
+                        Q38_GR_HIDDEN * sizeof(float),
+                        cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "GDN-C3 output transfer failed");
+    ++context->cuda_synchronizations;
+    ++context->gdn_c3_syncs;
+    ++context->gdn_c3_calls;
+    context->gdn_c3_d2h_bytes += Q38_GR_HIDDEN * sizeof(float);
     return true;
 }
 

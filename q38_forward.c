@@ -260,15 +260,9 @@ static bool q38_forward_qsa_ref_impl(
     if (timing) timing->allocations += precomputed ? 5 : 8;
     const double qkv_started = qsa_now_ms();
     if (!precomputed &&
-        (!project(&w->q_proj, hidden, token_count, qfull,
-                  w->matrix_batch_backend, w->matrix_batch_user, error,
-                  error_len) ||
-         !project(&w->k_proj, hidden, token_count, keys,
-                  w->matrix_batch_backend, w->matrix_batch_user, error,
-                  error_len) ||
-         !project(&w->v_proj, hidden, token_count, values,
-                  w->matrix_batch_backend, w->matrix_batch_user, error,
-                  error_len))) {
+        !project(&w->q_proj, hidden, token_count, qfull,
+                 w->matrix_batch_backend, w->matrix_batch_user, error,
+                 error_len)) {
         if (!precomputed) {
             free(qfull); free(keys); free(values);
         }
@@ -277,8 +271,36 @@ static bool q38_forward_qsa_ref_impl(
         free(attention);
         return fail(error, error_len, "forward projection failed");
     }
+    if (!precomputed && timing)
+        timing->q_projection_ms = qsa_now_ms() - qkv_started;
+    if (!precomputed) {
+        const double k_started = qsa_now_ms();
+        if (!project(&w->k_proj, hidden, token_count, keys,
+                     w->matrix_batch_backend, w->matrix_batch_user, error,
+                     error_len)) {
+            free(qfull); free(keys); free(values);
+            free(index); free(raw_index); free(queries);
+            free(indexq);
+            free(attention);
+            return fail(error, error_len, "forward projection failed");
+        }
+        if (timing) timing->k_projection_ms = qsa_now_ms() - k_started;
+        const double v_started = qsa_now_ms();
+        if (!project(&w->v_proj, hidden, token_count, values,
+                     w->matrix_batch_backend, w->matrix_batch_user, error,
+                     error_len)) {
+            free(qfull); free(keys); free(values);
+            free(index); free(raw_index); free(queries);
+            free(indexq);
+            free(attention);
+            return fail(error, error_len, "forward projection failed");
+        }
+        if (timing) timing->v_projection_ms = qsa_now_ms() - v_started;
+    }
     if (timing && !precomputed)
         timing->qkv_projection_ms = qsa_now_ms() - qkv_started;
+    if (timing)
+        timing->qkv_backend_used = precomputed != NULL;
     const double indexer_started = qsa_now_ms();
     if (!project(&w->index_qk_proj, hidden, token_count, index,
                  w->matrix_batch_backend, w->matrix_batch_user, error,
@@ -393,6 +415,9 @@ static bool q38_forward_qsa_ref_impl(
             free(numerator);
         }
         const double output_started = qsa_now_ms();
+        if (timing)
+            timing->output_projection_backend_used =
+                w->matrix_batch_backend != NULL;
         if (w->matrix_batch_backend &&
             !w->matrix_batch_backend(
                 &w->o_proj, attention + t * attention_width, 1,
@@ -409,7 +434,7 @@ static bool q38_forward_qsa_ref_impl(
             }
         }
         if (timing) {
-            timing->attention_ms += qsa_now_ms() - output_started;
+            timing->output_projection_ms += qsa_now_ms() - output_started;
         }
     }
     const double cleanup_started = qsa_now_ms();
@@ -466,6 +491,7 @@ static q38_forward_gr_read_backend full_gr_read_backend;
 static q38_forward_gr_write_backend full_gr_write_backend;
 static q38_forward_expert_backend full_expert_backend;
 static q38_forward_moe_layer_backend full_moe_layer_backend;
+static q38_forward_gdn_layer_backend full_gdn_layer_backend;
 static void *full_backend_user;
 static bool full_backend_strict;
 static uint64_t full_backend_rows;
@@ -1002,6 +1028,17 @@ static bool full_gdn(const q38_gguf *model, const q38_layer_weights *layer,
                      q38_forward_state *state, const float *input,
                      size_t tokens, uint32_t layer_number, float *output,
                      float *scratch, char *error, size_t error_len) {
+    if (full_gdn_layer_backend && tokens == 1) {
+        if (full_gdn_layer_backend(
+                model, layer, state, input, tokens, layer_number, output,
+                full_backend_user, error, error_len))
+            return true;
+        if (error && error_len && error[0] != '\0')
+            return false;
+        if (full_backend_strict)
+            return full_fail(error, error_len,
+                             "CUDA GDN layer backend declined");
+    }
     const size_t qkv_n = 10240, z_n = 6144, heads = 48, dim = 128;
     float *qkv = calloc(tokens * qkv_n, sizeof(float));
     float *z = calloc(tokens * z_n, sizeof(float));
@@ -1878,6 +1915,7 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
             free((void *)w.index_q_norm); free((void *)w.index_k_norm);
             return false;
         }
+        qkv_timing.qkv_backend_used = true;
         precomputed_ptr = &precomputed;
     }
     q38_forward_qsa_timing timing;
@@ -1887,6 +1925,10 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
         error, error_len);
     if (precomputed_ptr) {
         timing.qkv_projection_ms = qkv_timing.qkv_projection_ms;
+        timing.qkv_backend_used = qkv_timing.qkv_backend_used;
+        timing.q_projection_ms = qkv_timing.q_projection_ms;
+        timing.k_projection_ms = qkv_timing.k_projection_ms;
+        timing.v_projection_ms = qkv_timing.v_projection_ms;
         timing.allocations += qkv_timing.allocations;
         timing.kernel_launches += qkv_timing.kernel_launches;
         timing.host_syncs += qkv_timing.host_syncs;
@@ -1906,7 +1948,7 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
         const char *const stages[] = {
             "qsa_qkv", "qsa_indexer_compression", "qsa_score", "qsa_top_k",
             "qsa_gather", "qsa_attention", "qsa_state_update",
-            "qsa_allocation_cleanup"
+            "qsa_output_projection", "qsa_allocation_cleanup"
         };
         double values[] = {
             timing.qkv_projection_ms,
@@ -1916,6 +1958,7 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
             timing.selected_kv_gather_ms,
             timing.attention_ms,
             timing.state_update_ms,
+            timing.output_projection_ms,
             timing.allocation_cleanup_ms,
         };
         double sum = 0.0;
@@ -1934,19 +1977,44 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
             q38_forward_qsa_timing *total = diagnostics->qsa_timing;
             total->total_ms += qsa_elapsed;
             total->qkv_projection_ms += values[0];
+            total->q_projection_ms += timing.q_projection_ms;
+            total->k_projection_ms += timing.k_projection_ms;
+            total->v_projection_ms += timing.v_projection_ms;
             total->indexer_compression_ms += values[1];
             total->score_ms += values[2];
             total->exact_top_k_ms += values[3];
             total->selected_kv_gather_ms += values[4];
             total->attention_ms += values[5];
             total->state_update_ms += values[6];
-            total->allocation_cleanup_ms += values[7];
+            total->output_projection_ms += values[7];
+            total->allocation_cleanup_ms += values[8];
+            total->qkv_backend_used |= timing.qkv_backend_used;
+            total->output_projection_backend_used |=
+                timing.output_projection_backend_used;
             total->allocations += timing.allocations;
             total->kernel_launches += timing.kernel_launches;
             total->host_syncs += timing.host_syncs;
             total->h2d_bytes += timing.h2d_bytes;
             total->d2h_bytes += timing.d2h_bytes;
             total->residency_misses += timing.residency_misses;
+        }
+        if (diagnostics && diagnostics->qsa_projection_trace) {
+            const q38_forward_qsa_projection_trace trace = {
+                .layer = layer_number,
+                .qkv_backend_used = timing.qkv_backend_used,
+                .output_projection_backend_used =
+                    timing.output_projection_backend_used,
+                .qkv_fallback = false,
+                .q_projection_ms = timing.q_projection_ms,
+                .k_projection_ms = timing.k_projection_ms,
+                .v_projection_ms = timing.v_projection_ms,
+                .qkv_projection_ms = timing.qkv_projection_ms,
+                .output_projection_ms = timing.output_projection_ms,
+                .indexer_projection_ms = timing.indexer_compression_ms,
+            };
+            if (!diagnostics->qsa_projection_trace(
+                    &trace, diagnostics->trace_user, error, error_len))
+                ok = false;
         }
     }
     if (ok && diagnostics && diagnostics->qsa_trace)
@@ -2238,6 +2306,7 @@ static bool full_with_matrix_batch_moe_layer_backend_ex(
     q38_forward_gr_write_backend gr_write_backend,
     q38_forward_expert_backend expert_backend,
     q38_forward_moe_layer_backend moe_layer_backend,
+    q38_forward_gdn_layer_backend gdn_layer_backend,
     void *backend_user, char *error, size_t error_len) {
     const q38_forward_matvec_backend previous_backend = full_backend;
     const q38_forward_matrix_backend previous_matrix_backend =
@@ -2252,6 +2321,8 @@ static bool full_with_matrix_batch_moe_layer_backend_ex(
         full_expert_backend;
     const q38_forward_moe_layer_backend previous_moe_layer_backend =
         full_moe_layer_backend;
+    const q38_forward_gdn_layer_backend previous_gdn_layer_backend =
+        full_gdn_layer_backend;
     void *const previous_user = full_backend_user;
     const bool previous_strict = full_backend_strict;
     full_backend = backend;
@@ -2261,12 +2332,14 @@ static bool full_with_matrix_batch_moe_layer_backend_ex(
     full_gr_write_backend = gr_write_backend;
     full_expert_backend = expert_backend;
     full_moe_layer_backend = moe_layer_backend;
+    full_gdn_layer_backend = gdn_layer_backend;
     full_backend_user = backend_user;
     const char *strict = getenv("Q38_PERF_STRICT");
     const bool previous_perf_strict = full_perf_strict;
     full_perf_strict = strict && strict[0] != '\0' && strcmp(strict, "0") != 0;
     full_backend_strict = backend != NULL || matrix_backend != NULL ||
-                          expert_backend != NULL || moe_layer_backend != NULL;
+                          expert_backend != NULL || moe_layer_backend != NULL ||
+                          gdn_layer_backend != NULL;
     const bool ok = q38_forward_full(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, error, error_len);
@@ -2277,6 +2350,7 @@ static bool full_with_matrix_batch_moe_layer_backend_ex(
     full_gr_write_backend = previous_gr_write_backend;
     full_expert_backend = previous_expert_backend;
     full_moe_layer_backend = previous_moe_layer_backend;
+    full_gdn_layer_backend = previous_gdn_layer_backend;
     full_backend_user = previous_user;
     full_backend_strict = previous_strict;
     full_perf_strict = previous_perf_strict;
@@ -2296,7 +2370,8 @@ bool q38_forward_full_with_matrix_batch_moe_layer_backend(
     return full_with_matrix_batch_moe_layer_backend_ex(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, backend, matrix_backend, matrix_batch_backend, NULL, NULL,
-        expert_backend, moe_layer_backend, backend_user, error, error_len);
+        expert_backend, moe_layer_backend, NULL, backend_user, error,
+        error_len);
 }
 
 bool q38_forward_full_with_backend_config(
@@ -2310,7 +2385,7 @@ bool q38_forward_full_with_backend_config(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, config->matvec, config->matrix, config->matrix_batch,
         config->gr_read, config->gr_write, config->expert, config->moe_layer,
-        config->user, error, error_len);
+        config->gdn_layer, config->user, error, error_len);
 }
 
 bool q38_forward_full_with_backend(
