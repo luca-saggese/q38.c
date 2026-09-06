@@ -110,9 +110,23 @@ bench-q2-reference-0: tests/q2_canonical_bench
 		--prompt "$(Q2_CANONICAL_PROMPT)" \
 		--output-dir "$(Q2_REFERENCE_OUTPUT_DIR)"
 
-bench-q2-decode: bench-q2-reference-0
+bench-q2-decode: tests/q2_canonical_bench
+	@CFLAGS="$(CFLAGS)" NVCC="$(NVCC)" NVCCFLAGS="$(NVCCFLAGS)" \
+		python3 tools/bench_q2_canonical.py \
+		--mode current-decode --binary ./tests/q2_canonical_bench \
+		--model "$(Q2_CANONICAL_MODEL)" \
+		--tokenizer "$(Q2_CANONICAL_TOKENIZER)" \
+		--prompt "$(Q2_CANONICAL_PROMPT)" \
+		--output "$(Q2_CURRENT_OUTPUT_DIR)/q2_decode_canonical.json"
 
-bench-q2-prefill: bench-q2-reference-0
+bench-q2-prefill: tests/q2_canonical_bench
+	@CFLAGS="$(CFLAGS)" NVCC="$(NVCC)" NVCCFLAGS="$(NVCCFLAGS)" \
+		python3 tools/bench_q2_canonical.py \
+		--mode current-prefill --binary ./tests/q2_canonical_bench \
+		--model "$(Q2_CANONICAL_MODEL)" \
+		--tokenizer "$(Q2_CANONICAL_TOKENIZER)" \
+		--prompt "$(Q2_CANONICAL_PROMPT)" \
+		--output "$(Q2_CURRENT_OUTPUT_DIR)/q2_prefill_canonical.json"
 
 check-perf-artifacts:
 	@python3 tools/check_perf_artifacts.py

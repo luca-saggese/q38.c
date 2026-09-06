@@ -21,9 +21,16 @@ make bench-q2-decode
 make bench-q2-prefill
 ```
 
-Both targets share one Reference 0 execution. The first invocation performs
-one model load and produces both immutable artifacts; subsequent invocations
-must not overwrite them.
+These targets write non-immutable current artifacts:
+
+```text
+artifacts/perf/current/q2_decode_canonical.json
+artifacts/perf/current/q2_prefill_canonical.json
+```
+
+Reference 0 is created once with `make bench-q2-reference-0`. That target
+performs one model load and produces both immutable artifacts; subsequent
+invocations must not overwrite them.
 
 ## MODEL
 
@@ -78,7 +85,8 @@ Reference 0 is measured on:
 ```text
 Platform: DGX Spark / GB10 / NVIDIA GB10
 CPU architecture: aarch64
-Unified memory: recorded in the artifact hardware metadata
+Unified memory: approximately 128 GiB unified memory; exact value is recorded
+in the artifact hardware metadata
 CUDA driver: recorded in the artifact hardware metadata
 CUDA runtime: recorded in the artifact hardware metadata
 ```
@@ -190,6 +198,7 @@ Decode artifacts report:
 - CUDA dispatch;
 - memcpy;
 - PLE critical stall;
+- other/unattributed residual;
 - non-additive PLE elapsed and PLE overlap;
 - non-PLE resident bytes, upload bytes, and residency misses;
 - kernel launches, host synchronizations, and traffic counters;

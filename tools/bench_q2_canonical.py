@@ -197,10 +197,11 @@ def sample_breakdown(samples: list[dict[str, object]]) -> dict[str, object]:
 
 
 def run_raw(args: argparse.Namespace) -> dict[str, object]:
+    raw_mode = "reference0" if args.mode.startswith("current-") else args.mode
     command = [
         args.binary,
         "--mode",
-        args.mode,
+        raw_mode,
         "--model",
         args.model,
         "--tokenizer",
@@ -212,7 +213,7 @@ def run_raw(args: argparse.Namespace) -> dict[str, object]:
         "--prefill-chunk",
         str(args.prefill_chunk),
     ]
-    if args.mode == "decode":
+    if raw_mode == "decode":
         command += [
             "--generated",
             str(args.generated),
@@ -469,10 +470,27 @@ def normalize(raw: dict[str, object], args: argparse.Namespace) -> dict[str, obj
     return raw
 
 
+def normalize_current(raw: dict[str, object],
+                      args: argparse.Namespace) -> dict[str, object]:
+    decode, prefill = normalize_reference0(raw, args)
+    if args.mode == "current-decode":
+        decode.pop("ref_id", None)
+        decode["artifact_id"] = "Q2_DECODE_CANONICAL_CURRENT"
+        decode["immutable"] = False
+        return decode
+    prefill.pop("ref_id", None)
+    prefill["artifact_id"] = "Q2_PREFILL_CANONICAL_CURRENT"
+    prefill["immutable"] = False
+    return prefill
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--mode", choices=("decode", "prefill", "reference0"), required=True
+        "--mode",
+        choices=("decode", "prefill", "reference0",
+                 "current-decode", "current-prefill"),
+        required=True,
     )
     parser.add_argument("--binary", default="./tests/q2_canonical_bench")
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -502,6 +520,13 @@ def main() -> int:
         prefill_output.write_text(
             json.dumps(prefill, indent=2, sort_keys=True) + "\n"
         )
+    elif args.mode.startswith("current-"):
+        if not args.output:
+            raise SystemExit("--output is required for current benchmark mode")
+        result = normalize_current(run_raw(args), args)
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     else:
         if not args.output:
             raise SystemExit("--output is required for decode/prefill mode")
