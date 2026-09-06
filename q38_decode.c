@@ -231,6 +231,7 @@ static bool q38_decode_backend(const q38_gguf *model,
                 q38_forward_diagnostics *diagnostics, char *error,
                 size_t error_len, q38_forward_matvec_backend backend,
                 q38_forward_matrix_backend matrix_backend,
+                q38_forward_matrix_batch_backend matrix_batch_backend,
                 q38_forward_expert_backend expert_backend,
                 q38_forward_moe_layer_backend moe_layer_backend,
                 void *backend_user, q38_decode_timing *timing) {
@@ -240,9 +241,15 @@ static bool q38_decode_backend(const q38_gguf *model,
     if (timing) memset(timing, 0, sizeof(*timing));
     const double total_started = decode_now_ms();
     const double forward_started = decode_now_ms();
-    const bool ok = backend || matrix_backend || expert_backend ||
-                           moe_layer_backend
-        ? (moe_layer_backend
+    const bool ok = backend || matrix_backend || matrix_batch_backend ||
+                           expert_backend || moe_layer_backend
+        ? (matrix_batch_backend
+               ? q38_forward_full_with_matrix_batch_moe_layer_backend(
+                     model, weights, state, &token, 1, logits, logits_stride,
+                     diagnostics, backend, matrix_backend, matrix_batch_backend,
+                     expert_backend, moe_layer_backend, backend_user, error,
+                     error_len)
+               : moe_layer_backend
                ? q38_forward_full_with_matrix_moe_layer_backend(
                      model, weights, state, &token, 1, logits, logits_stride,
                      diagnostics, backend, matrix_backend, expert_backend,
@@ -332,12 +339,35 @@ bool q38_decode_step_with_matrix_moe_layer_backend_timed(
     uint32_t consumed_token, size_t step_index, q38_decode_trace trace,
     void *trace_user, q38_decode_timing *timing, char *error,
     size_t error_len) {
+    return q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
+        model, weights, state, token, logits, logits_stride, next_token,
+        diagnostics, row_backend, matrix_backend, NULL, expert_backend,
+        moe_layer_backend, backend_user, trace_kind, emitted_token,
+        consumed_token, step_index, trace, trace_user, timing, error,
+        error_len);
+}
+
+bool q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, uint32_t token, float *logits,
+    size_t logits_stride, uint32_t *next_token,
+    q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend row_backend,
+    q38_forward_matrix_backend matrix_backend,
+    q38_forward_matrix_batch_backend matrix_batch_backend,
+    q38_forward_expert_backend expert_backend,
+    q38_forward_moe_layer_backend moe_layer_backend, void *backend_user,
+    q38_decode_trace_kind trace_kind, uint32_t emitted_token,
+    uint32_t consumed_token, size_t step_index, q38_decode_trace trace,
+    void *trace_user, q38_decode_timing *timing, char *error,
+    size_t error_len) {
     if (error && error_len) error[0] = '\0';
     const double total_started = decode_now_ms();
     if (!q38_decode_backend(
             model, weights, state, token, logits, logits_stride, next_token,
             diagnostics, error, error_len, row_backend, matrix_backend,
-            expert_backend, moe_layer_backend, backend_user, timing))
+            matrix_batch_backend, expert_backend, moe_layer_backend,
+            backend_user, timing))
         return false;
     const double trace_started = decode_now_ms();
     const bool ok = q38_decode_trace_step(
@@ -422,8 +452,8 @@ bool q38_decode_stream_with_matrix_backend(
         uint32_t next = 0;
         if (!q38_decode_backend(model, weights, state, prompt[i], logits,
                                 logits_stride, &next, diagnostics, error,
-                                error_len, backend, matrix_backend, expert_backend,
-                                NULL, backend_user, NULL))
+                                error_len, backend, matrix_backend, NULL,
+                                expert_backend, NULL, backend_user, NULL))
             return false;
         current = next;
         if (!q38_decode_trace_step(
@@ -447,8 +477,8 @@ bool q38_decode_stream_with_matrix_backend(
         uint32_t next = 0;
         if (!q38_decode_backend(model, weights, state, input, logits,
                                 logits_stride, &next, diagnostics, error,
-                                error_len, backend, matrix_backend, expert_backend,
-                                NULL, backend_user, NULL))
+                                error_len, backend, matrix_backend, NULL,
+                                expert_backend, NULL, backend_user, NULL))
             return false;
         generated[i] = next;
         current = next;
@@ -468,7 +498,8 @@ bool q38_decode(
     q38_forward_diagnostics *diagnostics, char *error, size_t error_len) {
     return q38_decode_backend(model, weights, state, token, logits,
                               logits_stride, next_token, diagnostics, error,
-                              error_len, NULL, NULL, NULL, NULL, NULL, NULL);
+                              error_len, NULL, NULL, NULL, NULL, NULL, NULL,
+                              NULL);
 }
 
 bool q38_decode_stream(

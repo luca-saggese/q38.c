@@ -205,19 +205,28 @@ bool q38_session_eval_timed(
         return fail(error, error_len, "invalid session evaluation arguments");
     if (session->position >= session->ctx_size)
         return fail(error, error_len, "session context is full");
+    q38_forward_diagnostics local_diagnostics;
+    if (!diagnostics) {
+        memset(&local_diagnostics, 0, sizeof(local_diagnostics));
+        diagnostics = &local_diagnostics;
+    }
+    diagnostics->qsa_qkv_backend = q38_forward_cuda_qsa_qkv_backend;
+    diagnostics->qsa_qkv_backend_user = session->runtime->cuda;
     if (diagnostics) {
         diagnostics->backend_context = runtime_backend_context;
         diagnostics->backend_context_user = session->runtime->cuda;
     }
     const double started = session_now_ms();
-    if (!q38_decode_step_with_matrix_moe_layer_backend_timed(
+    if (!q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
             session->runtime->model, &session->runtime->weights,
             &session->state, token, logits, logits_stride, next_token,
             diagnostics, q38_forward_cuda_matvec_backend,
-            q38_forward_cuda_matrix_backend, q38_forward_cuda_expert_backend,
+            q38_forward_cuda_matrix_backend,
+            q38_forward_cuda_matrix_batch_backend,
+            q38_forward_cuda_expert_backend,
             q38_forward_cuda_moe_layer_q2_backend, session->runtime->cuda,
-            trace_kind, emitted_token, consumed_token, (*step_index)++,
-            trace, trace_user, timing, error, error_len))
+            trace_kind, emitted_token, consumed_token, (*step_index)++, trace,
+            trace_user, timing, error, error_len))
         return false;
     q38_ple_scheduler_stats ple = {0};
     if (q38_forward_state_get_ple_prefetch_stats(&session->state, &ple)) {
