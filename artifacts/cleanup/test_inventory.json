@@ -1,8 +1,8 @@
 {
   "schema_version": "cleanup-test-inventory-v1",
-  "generated_at": "2026-09-06T12:50:43.168523+00:00",
+  "generated_at": "2026-09-06T16:06:00+02:00",
   "repository": "luca-saggese/q38.c",
-  "head": "9324e1519d7fc18982ebb4d34f5bfb7575efaec9",
+  "head": "83f3e3241",
   "policy": {
     "canonical_decode": "make bench-q2-decode",
     "canonical_prefill": "make bench-q2-prefill",

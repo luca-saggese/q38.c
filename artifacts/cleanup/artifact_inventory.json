@@ -1,9 +1,9 @@
 {
   "schema_version": "cleanup-artifact-inventory-v1",
-  "generated_at": "2026-09-06T12:51:04.337135+00:00",
+  "generated_at": "2026-09-06T16:06:00+02:00",
   "repository": "luca-saggese/q38.c",
-  "head": "9324e1519d7fc18982ebb4d34f5bfb7575efaec9",
-  "comparison_policy": "Only canonical_baseline artifacts with complete PERF_SCHEMA_V2 metadata are automatically comparable.",
+  "head": "83f3e3241",
+  "comparison_policy": "Only artifacts/perf/current and artifacts/perf/reference_0 with complete PERF_SCHEMA_V2 metadata are automatically comparable.",
   "artifacts": [
     {
       "path": "artifacts/m8/R1_checksums.txt",
