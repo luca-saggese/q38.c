@@ -1,0 +1,3759 @@
+{
+  "schema_version": "cleanup-artifact-inventory-v1",
+  "generated_at": "2026-09-06T12:51:04.337135+00:00",
+  "repository": "luca-saggese/q38.c",
+  "head": "9324e1519d7fc18982ebb4d34f5bfb7575efaec9",
+  "comparison_policy": "Only canonical_baseline artifacts with complete PERF_SCHEMA_V2 metadata are automatically comparable.",
+  "artifacts": [
+    {
+      "path": "artifacts/m8/R1_checksums.txt",
+      "bytes": 231,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_conversion_plan.json",
+      "bytes": 291,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_full_conversion_plan.json",
+      "bytes": 754,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_full_inspect.json",
+      "bytes": 231,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_full_memory_plan.json",
+      "bytes": 257,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_full_quality_run.exit",
+      "bytes": 2,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_full_quality_run.json",
+      "bytes": 2151,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_full_quality_run.stderr",
+      "bytes": 0,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_full_sha256.txt",
+      "bytes": 129,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_inspect.json",
+      "bytes": 223,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_layer0_memory_plan.json",
+      "bytes": 253,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_memory_bench.json",
+      "bytes": 2647,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_memory_plan.json",
+      "bytes": 439,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_memory_plan.sha256",
+      "bytes": 65,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_perf_8.json",
+      "bytes": 3043,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_quality.json",
+      "bytes": 3016,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_quality_records.jsonl",
+      "bytes": 228,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_quality_records_full.jsonl",
+      "bytes": 8986624,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_quant_audit.json",
+      "bytes": 1387,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/R1_same_process_cold_warm.jsonl",
+      "bytes": 6879031,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/RELEASE_Q4.md",
+      "bytes": 2610,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/acceptance.txt",
+      "bytes": 1919,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/baseline_memory_plan.json",
+      "bytes": 257,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/baseline_perf_8.json",
+      "bytes": 3033,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/baseline_quality_records.jsonl",
+      "bytes": 228,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/baseline_quality_run.json",
+      "bytes": 2146,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/bf16_reference_corpus.jsonl",
+      "bytes": 2820103,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/checksums.txt",
+      "bytes": 3683,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/final_bench.json",
+      "bytes": 1762,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/final_greedy_eval.json",
+      "bytes": 960,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/final_memory.json",
+      "bytes": 2156,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/final_platform.json",
+      "bytes": 271,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/final_quality.json",
+      "bytes": 3024,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/final_quant_audit.json",
+      "bytes": 1738,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/full_regression.txt",
+      "bytes": 2096,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/m7_baseline_checksums.txt",
+      "bytes": 1030,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/m7_baseline_manifest.json",
+      "bytes": 1673,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/m7_baseline_status.json",
+      "bytes": 270,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/memory_solver_R0.json",
+      "bytes": 321134,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/memory_solver_R1.json",
+      "bytes": 320884,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/memory_solver_calibration.json",
+      "bytes": 2026,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/q4_cuda_test.txt",
+      "bytes": 541,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_corpus.jsonl",
+      "bytes": 4330,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_corpus_manifest.json",
+      "bytes": 581,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quant_manifest_R1.json",
+      "bytes": 4879,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quant_manifest_q4_selective.json",
+      "bytes": 4879,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/qwen38-runtime-R1-Q4Experts-BF16Core-BF16PLE.gguf",
+      "bytes": 132212799456,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/sensitivity_R0.json",
+      "bytes": 2077,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/sensitivity_R1.json",
+      "bytes": 2126,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/sensitivity_R2.json",
+      "bytes": 2298,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/sensitivity_R3.json",
+      "bytes": 2126,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/sensitivity_R4.json",
+      "bytes": 2177,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/sensitivity_R5.json",
+      "bytes": 2159,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/sensitivity_results.json",
+      "bytes": 15577,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/bf16_reference/m8-seq-0000.json",
+      "bytes": 495146,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/bf16_reference/m8-seq-0001.json",
+      "bytes": 788700,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/r1_bench_runs/run_1.json",
+      "bytes": 2157,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/r1_bench_runs/run_2.json",
+      "bytes": 2156,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/r1_bench_runs/run_3.json",
+      "bytes": 2155,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/r1_bench_runs/run_4.json",
+      "bytes": 2156,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/r1_bench_runs/run_5.json",
+      "bytes": 2156,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/r1_bench_runs/run_6.json",
+      "bytes": 2155,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_runs/R1_stateful_sequence_oracle_2.json",
+      "bytes": 2171,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_runs/R1_stateful_sequence_oracle_4.json",
+      "bytes": 2194,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_runs/R1_stateful_sequence_oracle_8.json",
+      "bytes": 2239,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_runs/R1_stateful_sequence_oracle_resume_probe.json",
+      "bytes": 2151,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_runs/baseline_stateful_sequence_oracle_2.json",
+      "bytes": 2166,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_runs/baseline_stateful_sequence_oracle_4.json",
+      "bytes": 2192,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_runs/baseline_stateful_sequence_oracle_8.json",
+      "bytes": 2237,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m8/quality_runs/baseline_stateful_sequence_oracle_resume_probe.json",
+      "bytes": 2145,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/acceptance_status.json",
+      "bytes": 418,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/all_non_ple_residency_progress.jsonl",
+      "bytes": 342203,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/all_non_ple_residency_report.json",
+      "bytes": 1494,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/all_non_ple_resident_benchmark.json",
+      "bytes": 2365,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/baseline_all_non_ple_resident.json",
+      "bytes": 2364,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/baseline_bench.json",
+      "bytes": 986884,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/baseline_memory.json",
+      "bytes": 897,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/baseline_platform.json",
+      "bytes": 302,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/benchmark_delta.json",
+      "bytes": 467,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/canonical_cold_warm.jsonl",
+      "bytes": 5928132,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/canonical_cold_warm_summary.json",
+      "bytes": 1189,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/decode_profile.json",
+      "bytes": 986462,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/expert_locality_sensitivity.json",
+      "bytes": 256,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/gdn_report.json",
+      "bytes": 246,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/lm_head_microbenchmark_v2.json",
+      "bytes": 842,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/long_context_gate.json",
+      "bytes": 166,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/m7_all_non_ple_footprint.json",
+      "bytes": 343,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/m7_baseline_frozen.json",
+      "bytes": 1427,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/m7_baseline_v2.json",
+      "bytes": 569,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/m7_candidate_a951bfeb631f17150f3bb4146177141a46444bf0.json",
+      "bytes": 8378,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/m7_candidate_delta_a951bfeb631f17150f3bb4146177141a46444bf0.json",
+      "bytes": 246,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/m7_repeat_profile_7383f2483.json",
+      "bytes": 1044,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/m7_steady_state_baseline.json",
+      "bytes": 882,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/memory_report.json",
+      "bytes": 853,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/ple_report.json",
+      "bytes": 244,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/qsa_report.json",
+      "bytes": 247,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/regression_status.json",
+      "bytes": 226,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/residency_footprint.json",
+      "bytes": 343,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/startup_gate.json",
+      "bytes": 204,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/workspace_bench.json",
+      "bytes": 1606,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/workspace_profile.json",
+      "bytes": 1184,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m7/candidates_fp32/m7_candidate_5bc0df42751892bf7fc73c27b5f3c8fa8de0c453.json",
+      "bytes": 4653,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/ab_q2_end_to_end.jsonl",
+      "bytes": 9159503,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/ab_q2_end_to_end.stdout",
+      "bytes": 9161894,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/ab_q2_expert.json",
+      "bytes": 597,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/ab_q4_end_to_end.jsonl",
+      "bytes": 9155691,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/ab_q4_end_to_end.stdout",
+      "bytes": 9158081,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/ab_q4_expert.json",
+      "bytes": 595,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/comparative_benchmark.json",
+      "bytes": 5970,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/descriptor.jsonl",
+      "bytes": 9154544,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/descriptor.stderr",
+      "bytes": 0,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/descriptor.stdout",
+      "bytes": 9156562,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/descriptor_strict.jsonl",
+      "bytes": 9150386,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/descriptor_strict.stderr",
+      "bytes": 0,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/descriptor_strict.stdout",
+      "bytes": 9152407,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/gb10_read_ceiling.json",
+      "bytes": 152,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/grouped_q2_candidate.jsonl",
+      "bytes": 11069,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/grouped_q2_end_to_end.jsonl",
+      "bytes": 11057,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/grouped_q2_end_to_end.stdout",
+      "bytes": 11445,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/lm_head_gemv.jsonl",
+      "bytes": 909,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_all_boundary_backend.jsonl",
+      "bytes": 1059422,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_all_boundary_host.jsonl",
+      "bytes": 1059100,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_boundary_backend.jsonl",
+      "bytes": 1059060,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_boundary_host.jsonl",
+      "bytes": 1059214,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_current_performance_checkpoint.json",
+      "bytes": 4436,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_exclusive_cold_warm.jsonl",
+      "bytes": 3174915,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_exclusive_post_qkv_canonical.jsonl",
+      "bytes": 10419827,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_exclusive_profile.jsonl",
+      "bytes": 6697,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_expert_dispatch_diagnostic.jsonl",
+      "bytes": 3055083,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_gate_up_candidate_end_to_end.jsonl",
+      "bytes": 9160327,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_layer_orchestration_cold_warm.jsonl",
+      "bytes": 3174262,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_layer_orchestration_diagnostic.jsonl",
+      "bytes": 1058437,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_ple_async_overlap.json",
+      "bytes": 8128,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_qkv_cuda_diagnostic.jsonl",
+      "bytes": 3177916,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_qkv_host_baseline.jsonl",
+      "bytes": 1059115,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_qkv_parity.jsonl",
+      "bytes": 1059126,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_qkv_parity_all.jsonl",
+      "bytes": 1059150,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_qkv_parity_cpu.jsonl",
+      "bytes": 1059210,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_qkv_parity_rn.jsonl",
+      "bytes": 1059411,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_qsa_real_profile_cold_warm.jsonl",
+      "bytes": 3178634,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/q2_vs_q4_symmetric_comparison.json",
+      "bytes": 5337,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_capture_abort.jsonl",
+      "bytes": 39753,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_layer3_hidden.bin",
+      "bytes": 10240,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_layer3_qkv_direct.json",
+      "bytes": 1111,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_layer3_qkv_reference.bin",
+      "bytes": 63488,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_ple_dispatch_fix.json",
+      "bytes": 1552,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_qkv_candidate_cooperative.json",
+      "bytes": 1496,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/routed_expert_q2_gemv.json",
+      "bytes": 0,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "invalid_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/routed_expert_q4_gemv.json",
+      "bytes": 594,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/routed_expert_q4_gemv.txt",
+      "bytes": 62,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/shared_hidden_layer0.bin",
+      "bytes": 10240,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/telemetry_cold_warm.jsonl",
+      "bytes": 9151529,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/telemetry_cold_warm.stdout",
+      "bytes": 9153547,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_layer3_fixture/hidden.bin",
+      "bytes": 10240,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_layer3_fixture/k_ref.bin",
+      "bytes": 2048,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_layer3_fixture/metadata.json",
+      "bytes": 1111,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_layer3_fixture/q_ref.bin",
+      "bytes": 49152,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_opt/qsa_layer3_fixture/v_ref.bin",
+      "bytes": 2048,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/acceptance.txt",
+      "bytes": 328,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/checksums.txt",
+      "bytes": 567,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/excluded_tensors.json",
+      "bytes": 173963,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/full_conversion_plan.json",
+      "bytes": 299,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/memory_cold.json",
+      "bytes": 427,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/memory_warm.json",
+      "bytes": 427,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/model_baseline.json",
+      "bytes": 784,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/quant_audit.json",
+      "bytes": 1357,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+      "bytes": 103901247456,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/runtime-layers0-q2-test.gguf",
+      "bytes": 3536474944,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/runtime_inventory.json",
+      "bytes": 662118,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/source_inventory.json",
+      "bytes": 641046,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/subset_conversion_plan.json",
+      "bytes": 295,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m1/tensor_classes.json",
+      "bytes": 837086,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/acceptance.txt",
+      "bytes": 353,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/cuda_health.txt",
+      "bytes": 191,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/integration_audit.json",
+      "bytes": 125,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_batching.json",
+      "bytes": 167,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_cache_stats.json",
+      "bytes": 197,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_cache_stats_cold.json",
+      "bytes": 154,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_cache_stats_warm.json",
+      "bytes": 154,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_chunk_invariance.json",
+      "bytes": 297,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_cuda_lookup.json",
+      "bytes": 111,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_injection_fixture.bin",
+      "bytes": 131891476,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_injection_golden.json",
+      "bytes": 15299,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_injection_probe.json",
+      "bytes": 315,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_injection_vectors.json",
+      "bytes": 3436837,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_memory_matrix.json",
+      "bytes": 362,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_prefetch_benchmark.json",
+      "bytes": 236,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_ref.json",
+      "bytes": 129,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_row_quant_tests.json",
+      "bytes": 103,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/ple_store.json",
+      "bytes": 109,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m4/session_history.json",
+      "bytes": 111,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/acceptance.txt",
+      "bytes": 839,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/baseline.json",
+      "bytes": 182,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/canonical_protocol_off.json",
+      "bytes": 3227,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/canonical_protocol_on.json",
+      "bytes": 3224,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/canonical_reference_consume220.json",
+      "bytes": 1059160,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/checkpoint_minimal_goldens.json",
+      "bytes": 1313,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/cuda_health.txt",
+      "bytes": 48,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_comparison_1.json",
+      "bytes": 3224,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_comparison_2.json",
+      "bytes": 3914,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_comparison_32_gpu.json",
+      "bytes": 20295,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_comparison_4.json",
+      "bytes": 4336,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_comparison_seed.json",
+      "bytes": 3224,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_gpu_1.json",
+      "bytes": 133141,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_gpu_2.json",
+      "bytes": 199704,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_gpu_32.json",
+      "bytes": 387791,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_gpu_32_fixed.json",
+      "bytes": 2196263,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_gpu_4.json",
+      "bytes": 332773,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_gpu_8.json",
+      "bytes": 599043,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_gpu_c13_forced_5.json",
+      "bytes": 332375,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_ladder_check.json",
+      "bytes": 893,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_loop.json",
+      "bytes": 1768,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_path.json",
+      "bytes": 140,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_protocol_1.json",
+      "bytes": 133139,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_protocol_2.json",
+      "bytes": 199709,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/decode_protocol_comparison.json",
+      "bytes": 3834,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/dispatch_combine_goldens.json",
+      "bytes": 104,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/expert_goldens.json",
+      "bytes": 119,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/expert_q2_goldens.json",
+      "bytes": 142,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/forward_48_layer.json",
+      "bytes": 4700,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/full_model_preflight.txt",
+      "bytes": 322,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/gguf_dequant_fixtures.json",
+      "bytes": 177853,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/gpu_forward.json",
+      "bytes": 173,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/gpu_phase7.json",
+      "bytes": 243,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/gpu_stage_usage_probe.json",
+      "bytes": 145873,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/layer_moe_integration.json",
+      "bytes": 96,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/m6_decode_seed_state.json",
+      "bytes": 207064,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/m6_stateful_decode_ladder.json",
+      "bytes": 1518,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/memory_baseline.txt",
+      "bytes": 63,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/moe_binding.json",
+      "bytes": 166,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/oracle_cpu_gpu_comparison.json",
+      "bytes": 2551,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/oracle_semantics_audit.json",
+      "bytes": 1646,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/ple_grouped_norm_fix.json",
+      "bytes": 3277,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/preflight.json",
+      "bytes": 654438,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/q38_cli_smoke.json",
+      "bytes": 862,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/quant_matched_comparison.json",
+      "bytes": 356448,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/quant_matched_reference.json",
+      "bytes": 32812873,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "too_large_to_parse",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/qwen_moe_semantics.json",
+      "bytes": 224,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/real_forward_trace.json",
+      "bytes": 13637503,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "too_large_to_parse",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/router_cuda.json",
+      "bytes": 169,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/router_goldens.json",
+      "bytes": 101,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/semantic_comparison.json",
+      "bytes": 71749,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/session_contamination.json",
+      "bytes": 114,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/shared_expert_goldens.json",
+      "bytes": 97,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/state_localization_gpu_c13.json",
+      "bytes": 287355,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_gguf_oracle_32_corrected.json",
+      "bytes": 4505575,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "too_large_to_parse",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_gguf_oracle_c13_forced.json",
+      "bytes": 927818,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_gguf_oracle_fresh.json",
+      "bytes": 277744,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_gguf_oracle_instrumented_2.json",
+      "bytes": 546655,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_gguf_oracle_protocol_2.json",
+      "bytes": 681105,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_gguf_oracle_resume_probe.json",
+      "bytes": 277744,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_oracle_cpu_1.json",
+      "bytes": 338,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_oracle_cpu_1_noc12.json",
+      "bytes": 113223,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_oracle_cpu_2.json",
+      "bytes": 121874,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_oracle_gpu_2.json",
+      "bytes": 122306,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_sequence_oracle_2.json",
+      "bytes": 119191,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_sequence_oracle_4.json",
+      "bytes": 123826,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_sequence_oracle_8.json",
+      "bytes": 132992,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/stateful_sequence_oracle_resume_probe.json",
+      "bytes": 115930,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/superblock.json",
+      "bytes": 160,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/transformers_reference.json",
+      "bytes": 493762,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m6/ubatch_fuzz.json",
+      "bytes": 159,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/acceptance.txt",
+      "bytes": 249,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/binding_report.json",
+      "bytes": 140,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/checksums.txt",
+      "bytes": 1203,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/embedding_probe.json",
+      "bytes": 235,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/full_binding_report.json",
+      "bytes": 121,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/golden_format_version.json",
+      "bytes": 123,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/lm_head_probe.json",
+      "bytes": 378,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/matvec_dispatch.json",
+      "bytes": 121,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/memory.json",
+      "bytes": 104,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/norm_activation.json",
+      "bytes": 119,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/primitive_accuracy.json",
+      "bytes": 92,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/quant_q2_oracle.json",
+      "bytes": 112,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/quant_q4_oracle.json",
+      "bytes": 113,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m2/tokenizer_vectors.json",
+      "bytes": 8536,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m0/inspect.json",
+      "bytes": 136,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m0/memory.json",
+      "bytes": 253,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m0/platform.json",
+      "bytes": 271,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m0/rss-kb.txt",
+      "bytes": 5,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m0/tensors.json",
+      "bytes": 15,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m0/test.gguf",
+      "bytes": 1073741824,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/archive/2026-09-cleanup/perf-legacy/q2_core_full_attribution_current.json",
+      "bytes": 9581,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": true
+    },
+    {
+      "path": "artifacts/archive/2026-09-cleanup/perf-legacy/q2_real_decode_position_breakdown.json",
+      "bytes": 1261,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": true
+    },
+    {
+      "path": "artifacts/archive/2026-09-cleanup/perf-legacy/q2_real_decode_reconciliation.json",
+      "bytes": 2685,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": true
+    },
+    {
+      "path": "artifacts/archive/2026-09-cleanup/perf-legacy/q2_real_qsa_projection_attribution.json",
+      "bytes": 10222,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": true
+    },
+    {
+      "path": "artifacts/m9/ADR-mtp.md",
+      "bytes": 357,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/acceptance.txt",
+      "bytes": 311,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/checkpoint_roundtrip.json",
+      "bytes": 319,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/checkpoint_test.log",
+      "bytes": 61,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/full_regression.txt",
+      "bytes": 623,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/isolation_test.log",
+      "bytes": 67,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/memory_soak.json",
+      "bytes": 160,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/multiturn_matrix.json",
+      "bytes": 345,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/qwen_mtp_semantics.md",
+      "bytes": 364,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/replay_test.log",
+      "bytes": 0,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/rewind_replay.json",
+      "bytes": 237,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/rewind_test.log",
+      "bytes": 69,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/server_bench.json",
+      "bytes": 124,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/session_format_v1.md",
+      "bytes": 694,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/session_test.log",
+      "bytes": 64,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/soak_results.json",
+      "bytes": 158,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m9/worker_fault_recovery.json",
+      "bytes": 249,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/cleanup/artifact_inventory.json",
+      "bytes": 114768,
+      "category": "current",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/cleanup/test_inventory.json",
+      "bytes": 108580,
+      "category": "current",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/binder_semantic_audit.json",
+      "bytes": 106,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/cuda_tail_stress.json",
+      "bytes": 123,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/integrated_forward_goldens.json",
+      "bytes": 296,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/platform_sm121.json",
+      "bytes": 238,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/ple_hidden_injection.json",
+      "bytes": 3436837,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/qsa_chunk_invariance.json",
+      "bytes": 201,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/qsa_exact_topk.json",
+      "bytes": 154,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/qsa_pending_state.json",
+      "bytes": 169,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/shared_memory_limits.json",
+      "bytes": 238,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5/tokenizer_extended_parity.json",
+      "bytes": 155,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/acceptance.txt",
+      "bytes": 244,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/attention_goldens.json",
+      "bytes": 218,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/causal_boundary_matrix.json",
+      "bytes": 221,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/indexer_cuda.json",
+      "bytes": 181,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/indexer_goldens.json",
+      "bytes": 202,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/m5_c12_modern_gate.json",
+      "bytes": 718,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qkv_goldens.json",
+      "bytes": 205,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qsa_binding.json",
+      "bytes": 190,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qsa_cache_memory.json",
+      "bytes": 219,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qsa_chunk_invariance.json",
+      "bytes": 201,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qsa_forward_fixture.bin",
+      "bytes": 205868108,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qsa_forward_goldens.json",
+      "bytes": 206,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qsa_forward_graph.json",
+      "bytes": 220,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qsa_long_context.json",
+      "bytes": 112,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/qwen_qsa_semantics.json",
+      "bytes": 324,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/rope_goldens.json",
+      "bytes": 222,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/safe_optimization.json",
+      "bytes": 166,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/superblock_goldens.json",
+      "bytes": 296,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m5/topk_goldens.json",
+      "bytes": 197,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/acceptance.txt",
+      "bytes": 271,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/audit.json",
+      "bytes": 553,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/chunk_invariance.json",
+      "bytes": 4833,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/cuda_profile_baseline.json",
+      "bytes": 3297,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/cuda_profile_fused.json",
+      "bytes": 9416,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/gdn_binding.json",
+      "bytes": 112,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/gdn_microtests.json",
+      "bytes": 557,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/gdn_projection_conv.json",
+      "bytes": 733,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/gdn_recurrence_cuda.json",
+      "bytes": 604,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/gr_binding.json",
+      "bytes": 118,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/gr_cuda_accuracy.json",
+      "bytes": 128,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/gr_golden.json",
+      "bytes": 191,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/layer0_intermediates.json",
+      "bytes": 2552,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/multigdn_intermediates.json",
+      "bytes": 5416,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/qwen_gdn_semantics.md",
+      "bytes": 17017,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/reference_audit.json",
+      "bytes": 286,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/state_layout.json",
+      "bytes": 577,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/m3/state_memory.json",
+      "bytes": 238,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/acceptance.txt",
+      "bytes": 70,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/chunked_prefix_cache_equivalence.json",
+      "bytes": 101,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/greedy_hit_miss.json",
+      "bytes": 101,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/memory.json",
+      "bytes": 110,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/ple_dedup_profile.json",
+      "bytes": 1491,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/ple_gather_benchmark.json",
+      "bytes": 1491,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/ple_gather_threshold.json",
+      "bytes": 93,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/ple_mmap_vs_stage_equivalence.json",
+      "bytes": 86,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/ple_stage_pool_config.json",
+      "bytes": 139,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/ple_stage_pool_profile.json",
+      "bytes": 153,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/ple_staging_profile.json",
+      "bytes": 153,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/prefix_cache_hit_state.json",
+      "bytes": 101,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/prefix_cache_miss_state.json",
+      "bytes": 101,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/prefix_cache_state_diff.json",
+      "bytes": 101,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m5_supplement/qsa_cache_boundary_matrix.json",
+      "bytes": 169,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_functional/forward_cold_warm_current.jsonl",
+      "bytes": 10419818,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_functional/q2_generation_128.json",
+      "bytes": 3681,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_functional/q2_generation_256.json",
+      "bytes": 6401,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_functional/q2_generation_32.json",
+      "bytes": 1668,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_functional/q2_generation_64.json",
+      "bytes": 2356,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_functional/q2_instrumentation_smoke.json",
+      "bytes": 85308,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_functional/q2_instrumentation_smoke.stderr",
+      "bytes": 0,
+      "category": "historical",
+      "json": false,
+      "canonical_comparable": false,
+      "required_metadata_present": null,
+      "metadata_status": "not_json",
+      "archived_from_current": false
+    },
+    {
+      "path": "artifacts/post_m8_functional/q2_prefill_128.json",
+      "bytes": 372,
+      "category": "historical",
+      "json": true,
+      "canonical_comparable": false,
+      "required_metadata_present": false,
+      "metadata_status": "legacy_or_incomplete",
+      "archived_from_current": false
+    }
+  ]
+}

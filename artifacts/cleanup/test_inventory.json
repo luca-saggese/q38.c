@@ -1,0 +1,3086 @@
+{
+  "schema_version": "cleanup-test-inventory-v1",
+  "generated_at": "2026-09-06T12:50:43.168523+00:00",
+  "repository": "luca-saggese/q38.c",
+  "head": "9324e1519d7fc18982ebb4d34f5bfb7575efaec9",
+  "policy": {
+    "canonical_decode": "make bench-q2-decode",
+    "canonical_prefill": "make bench-q2-prefill",
+    "default_build_includes_one_off_diagnostics": false,
+    "archived_one_off_directory": "tests/archive/2026-09-cleanup/q2-one-off"
+  },
+  "tests": [
+    {
+      "path": "tests/gb10_read_bw_probe",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/gb10_read_bw_probe.cu",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "c30b103d9548c5d98866039156cee366e178e2d1",
+        "subject": "p8o: add resident execution and decode telemetry"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m6_decode.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b91cb208c27d30cfbcd6a9bd4bccf706c3199a2f",
+        "subject": "Close M6 decode and acceptance evidence"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/m6_decode_gpu",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/m6_decode_trace.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b91cb208c27d30cfbcd6a9bd4bccf706c3199a2f",
+        "subject": "Close M6 decode and acceptance evidence"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/m6_real_forward.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "b3f42d085bae48ba3d4f36b3e3132e745ef2e9b6",
+        "subject": "M6: add progressive boundary diagnostics\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m6_real_forward_gpu.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "79d47d0d8af70dea9c8bece4e25fd4275d5955d2",
+        "subject": "M6-C13: add strict CUDA stage backends and oracle"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m6_real_forward_gpu.o",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/m7_cold_warm",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/m7_cold_warm.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "1c7baecd606643f4d5f8ab386ed48f99cb158ca1",
+        "subject": "Add real QSA exclusive telemetry"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m7_lm_head_kernel_bench.cu",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "64d838abe6fffb7bf6e671de7df1d7577988541a",
+        "subject": "perf: add kernel-only LM-head geometry sweep"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m7_profile_forward.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "c30b103d9548c5d98866039156cee366e178e2d1",
+        "subject": "p8o: add resident execution and decode telemetry"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m7_residency_footprint.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "a1b5d56f3ee4a87eb229b1a662c0fd944d92f3d8",
+        "subject": "perf: measure all non-PLE residency footprint"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m8_r1_quality",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/m8_r1_quality.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "4cfb8743d1ace564c90efc21c899340fadf350f9",
+        "subject": "m8: add native R1 quality record runner"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m8_routed_expert_q4_bench",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/m8_routed_expert_q4_bench.cu",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "f87ce50a1f88f7a4ff8b1978698ab44a4fcf0cae",
+        "subject": "Optimize Q2 routed expert gate-up"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/m8_single_expert_device_parity",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/m8_single_expert_device_parity.cu",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Historical attribution/probe runner; not release-gating.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": "f87ce50a1f88f7a4ff8b1978698ab44a4fcf0cae",
+        "subject": "Optimize Q2 routed expert gate-up"
+      },
+      "default_build": false,
+      "artifact_kind": "historical",
+      "archived": false
+    },
+    {
+      "path": "tests/q2_canonical_bench",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/q2_canonical_bench.c",
+      "category": "KEEP_CANONICAL",
+      "measures": "Canonical production session decode/prefill benchmark runner.",
+      "execution_path": "q38_runtime -> q38_session -> q38_session_prefill/eval",
+      "loads_full_model": false,
+      "requires_resident_model": true,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "canonical",
+      "archived": false
+    },
+    {
+      "path": "tests/q38_dev_worker.c",
+      "category": "KEEP_CANONICAL",
+      "measures": "Persistent worker infrastructure for warm microbenchmarks and fixtures.",
+      "execution_path": "persistent worker command paths; includes direct forward microbench paths",
+      "loads_full_model": false,
+      "requires_resident_model": true,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "9b2191459b65502510e308372f0e963043b737f2",
+        "subject": "Overlap file-backed PLE prefetch"
+      },
+      "default_build": false,
+      "artifact_kind": "infrastructure",
+      "archived": false
+    },
+    {
+      "path": "tests/q38_forward_probe",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_forward_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "e276e359832ea2c40d35efe3b10987a7f8acde92",
+        "subject": "M5-C12: add file-backed reference forward graph and probe\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_gguf",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_gguf.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "36ff87a863699523a94f5f263f817a0367000020",
+        "subject": "M0-C08: delete dead architecture code; park donor sources in to_be_deleted/"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4a31844e05ef45615a075d657810c26de5b512be",
+        "subject": "M2-C04: add CUDA dequant primitives"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_embedding",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_embedding.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "7cb969eca779462b3e55dc2319ea720a2ecdb13d",
+        "subject": "M2-C07: add embedding probe"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_golden",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_golden.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "58a45aa7b53887b2112da8ffbf8bf52f89f6f0cb",
+        "subject": "M2-C00: add golden vector format"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_lm_head",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_lm_head.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "9d5d839dd28b1ad0d609b5bd7fa467555b62ba39",
+        "subject": "M2-C08: add LM-head probe"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_matvec",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_matvec.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b3e5339d49b24b2a56d2426c3e30b58f386faad4",
+        "subject": "perf: complete cooperative primitive kernels"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_memory",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_memory.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "6a04395976e941e771cb171bc832fd3166472429",
+        "subject": "M2-C10: add full-bind memory regression"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_norm",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_norm.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "911a57fa3db482554261995a98fb589dfd2c5991",
+        "subject": "perf: parallelize RMSNorm reduction"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_quant",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_quant.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "58029d8b0f46a3590bd7ed2391f7845d22bf9830",
+        "subject": "M2-C03: add scalar quantization oracles"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_tokenizer",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_tokenizer.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4e324419e650071c810910814f430754b34cb9c1",
+        "subject": "M3-AUDIT: add multimodal tokenizer coverage"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_weights",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m2_weights.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "ff5d6bb136aa25f2216f5cfcb6e4d7f390a0e277",
+        "subject": "M2-C01: enforce strict weight binding"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_chunk_invariance",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_chunk_invariance.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4ef3933e8e28cfb6b0623b514ce1926f6d39657d",
+        "subject": "M3-C11: validate GDN chunk invariance"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_cuda_profile_baseline",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_cuda_profile_baseline.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4ee7809e3589bcb3e91c9f8d9ed3bad544e28669",
+        "subject": "M3-AUDIT: correct GR and multi-layer state semantics"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_forward_probe",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_forward_probe.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "890b9cec43463db8dc0abc84cae48374cb8f76ab",
+        "subject": "M3-C09: add layer-shaped GR GDN probe"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_binding",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_binding.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "9cc1419482bddaae47af51bfcfa2cad81d8f18e7",
+        "subject": "M3-C04: bind verified GDN tensors"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "c32be9ea649d4a0bc0b90719bf2f8b159eb27399",
+        "subject": "M3-C07: add reference GDN projection path"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_fused",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_fused.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4ee7809e3589bcb3e91c9f8d9ed3bad544e28669",
+        "subject": "M3-AUDIT: correct GR and multi-layer state semantics"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_recurrence_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_recurrence_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "d189040262c66bf8048ae5b235fc001d7315dd53",
+        "subject": "M3-C08: add reference CUDA GDN recurrence"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_ref",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gdn_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "7c7cb5e418c6d57e5f3551d5c95488823ca99727",
+        "subject": "M3-C06: add scalar GDN recurrence oracle"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gr_binding",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gr_binding.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "c27c1dd2391d61d96e54a80c1b8996ae936c3885",
+        "subject": "M3-C01: bind verified GR tensor families"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gr_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gr_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4ee7809e3589bcb3e91c9f8d9ed3bad544e28669",
+        "subject": "M3-AUDIT: correct GR and multi-layer state semantics"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gr_ref",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_gr_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4ee7809e3589bcb3e91c9f8d9ed3bad544e28669",
+        "subject": "M3-AUDIT: correct GR and multi-layer state semantics"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_multigdn",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_multigdn.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "7671d005562024d893427853d7aa2de202073009",
+        "subject": "M3-C10: add multi-GDN reference probe"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_state",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m3_state.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4ee7809e3589bcb3e91c9f8d9ed3bad544e28669",
+        "subject": "M3-AUDIT: correct GR and multi-layer state semantics"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_cache",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_cache.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "ed7787cdc0e0c258963b31919edec6be2d57422b",
+        "subject": "M4-C08: add bounded PLE row cache"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "f17f8c7a9a6ae7fc61a37fbdd945cda0b1d03532",
+        "subject": "M4-C05: add naive CUDA PLE lookup"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_cuda_batch",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_cuda_batch.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "f8b96bbb3c9ecb610cbbe8635e53f5349275081a",
+        "subject": "M4-C09: add deduplicated PLE CUDA lookup"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_cuda_failure",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_cuda_failure.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "ae1534815258de401fb7338ba70b2e151a2c232a",
+        "subject": "M4-C12: make fatal CUDA lookup errors terminal"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_injection",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_injection.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "92f4f8da7e939fb788ccb101e4b30b08e8339a6b",
+        "subject": "M4-C07: verify PLE activation chunk invariance\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_injection_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "9c01650bcbca0566740cce15f17f9540e5b746ad",
+        "subject": "M4-C06: add independent PLE injection hidden golden probe\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_loader",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_loader.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "0b41fad2fad8b09a0b7225f65a3d282b05261c1a",
+        "subject": "M4-C10: add file-backed PLE row loader"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_prefetch",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_prefetch.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "9b2191459b65502510e308372f0e963043b737f2",
+        "subject": "Overlap file-backed PLE prefetch"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_ref",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "10e36367729ec313edf4a7d547e8fdbefd907a4f",
+        "subject": "M4-C02: add scalar PLE hash oracle"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_row",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_row.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "f89013cb014d64b9551bc47a2f7dac8b36b99132",
+        "subject": "M4-C04: add scalar PLE row decoder"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_store",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_ple_store.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "29f4eabe7742c591376f9ebd6e8e01d458400c71",
+        "subject": "M4-C03: add dedicated PLE tensor descriptor"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_session",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m4_session.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "52672696500f806792d08fa3238dabfd71aee691",
+        "subject": "M4-C01: add n-gram session history"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_bis_cuda_tail.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "735c61ae89ee0d5c673f9062193eef5799bb20ed",
+        "subject": "PM5S-C05: add QSA pending and prefix cache stress probes\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_bis_qsa_pending.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "735c61ae89ee0d5c673f9062193eef5799bb20ed",
+        "subject": "PM5S-C05: add QSA pending and prefix cache stress probes\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_bis_shared.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "735c61ae89ee0d5c673f9062193eef5799bb20ed",
+        "subject": "PM5S-C05: add QSA pending and prefix cache stress probes\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_bis_topk_stress.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "735c61ae89ee0d5c673f9062193eef5799bb20ed",
+        "subject": "PM5S-C05: add QSA pending and prefix cache stress probes\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_forward_probe",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_forward_probe.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "e276e359832ea2c40d35efe3b10987a7f8acde92",
+        "subject": "M5-C12: add file-backed reference forward graph and probe\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_integrated_forward.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "ffb31b5bd7a0434fa6561fbf7bb2cb92adeeacb9",
+        "subject": "M5-C11: add integrated PLE and QSA stage probe\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_attention",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_attention.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "9c9545b965d39f8b10b988bf719f9e9163d0bc8c",
+        "subject": "M5-C08: add selected KV gather attention"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_binding",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_binding.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4d4119f2e9d92950401b977089f86a65395316d9",
+        "subject": "M5-C01: add strict QSA binder and state"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_chunking",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_chunking.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "e39a748627294a8b6701db31951d84b2d7948b10",
+        "subject": "M5-C10: add QSA chunk invariance harness"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "72142cdff463e6b6dd2acea8d406712832115cd4",
+        "subject": "M5-C03: add naive CUDA QSA projections"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_index_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_index_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b8750d0f819dd084bf43975297822848b5de206e",
+        "subject": "M5-C06: add naive CUDA QSA indexer"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_long.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "9c01650bcbca0566740cce15f17f9540e5b746ad",
+        "subject": "M4-C06: add independent PLE injection hidden golden probe\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_ref",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "7ace80712435aa58c8326a562e4a87a3c82658e0",
+        "subject": "M5-C04: add scalar QSA indexer oracle"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_state",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_state.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b08c4e8f738b1b31319517ceabf919e85e34a706",
+        "subject": "M5-C09: add QSA state growth and reset"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_tail",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_qsa_tail.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4531ecd7d9b465c3fe388d36d5bb71adb207dd46",
+        "subject": "M5-C07: add QSA causal tail reference"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_rope_ref",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_rope_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "470a49582d70bb47f937e4e127307689c8aba59b",
+        "subject": "M5-C02: add scalar Qwen4Exp RoPE reference"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_ter_gather.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "477b55486a774c481e2472a15ca9b1a3be8f6ab7",
+        "subject": "PM5S-C02: record measured PLE gather crossover\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_ter_prefix_cache.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "735c61ae89ee0d5c673f9062193eef5799bb20ed",
+        "subject": "PM5S-C05: add QSA pending and prefix cache stress probes\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_ter_stage.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "bd5e5b42c7e728e01837421c297008e6dc98d67d",
+        "subject": "PM5S-C01: add measured PLE gather and persistent staging paths\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_tokenizer_edges",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_tokenizer_edges.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "33658e4c454e793f56d58f673fad3815ccc23df0",
+        "subject": "M5-C13: verify tokenizer specials and escaping parity\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_topk",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m5_topk.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "c30b103d9548c5d98866039156cee366e178e2d1",
+        "subject": "p8o: add resident execution and decode telemetry"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_cuda_health",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_cuda_health.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "edffa0fee4a27caba4041206697644b8f0a98f27",
+        "subject": "M6-C12: add complete file-backed forward and decode APIs"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_decode_protocol.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b91cb208c27d30cfbcd6a9bd4bccf706c3199a2f",
+        "subject": "Close M6 decode and acceptance evidence"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_decode_seed_state.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4167b3a66fd74ea1f97866033f2790037c47e08a",
+        "subject": "M6-C13: resume official CUDA oracle validation"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_dispatch",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_dispatch.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "be3496fc1137eaa3face090bea450b3f7808a04f",
+        "subject": "M6-C10: add MoE dispatch, decode, Q2, and ubatch gates\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_expert_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "abb1eddae4fb3a29827e6a902995210e5ad3974d",
+        "subject": "M6-C06: add strict MoE binder and Q2 CUDA expert path\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_forward_api.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "edffa0fee4a27caba4041206697644b8f0a98f27",
+        "subject": "M6-C12: add complete file-backed forward and decode APIs"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_gguf_dequant.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "fe0072115c55bf63942c241fbf7b5dcff2b279e9",
+        "subject": "Gate runtime work on GGUF dequant parity"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_gguf_dequant.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "fe0072115c55bf63942c241fbf7b5dcff2b279e9",
+        "subject": "Gate runtime work on GGUF dequant parity"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_gpu_forward.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "6e6a5ebbf7b55d3a5bbad2cca0ae0bdef0f1af78",
+        "subject": "Implement M6 CUDA diagnostic forward path"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_memory_baseline",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_memory_baseline.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "edffa0fee4a27caba4041206697644b8f0a98f27",
+        "subject": "M6-C12: add complete file-backed forward and decode APIs"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_moe_binding",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_moe_binding.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b6b674536dc307dda492fd5fd66a5055c93adb79",
+        "subject": "M6-C01: add file-backed routed expert slice binding\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_moe_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_moe_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "26b8344bf60c00eeb52a1dbbdb43137d9b2dca7a",
+        "subject": "M7-C06: reuse MoE Q2 workspace"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_moe_ref",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_moe_ref.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "e276e359832ea2c40d35efe3b10987a7f8acde92",
+        "subject": "M5-C12: add file-backed reference forward graph and probe\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_ple_grouped_norm.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "e2b487978806bd0de8353aeb05e76838a4844815",
+        "subject": "M6-C13: harden decode evidence and preserve PLE norm regression"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_progressive_boundaries.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "5ea1953defaf0d3d41f7bda7a42791dc05130b6c",
+        "subject": "M6: fix grouped PLE normalization\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_quant_reference.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b3172d78e1f0069f66007941f027a06ed160eb75",
+        "subject": "Fix Q2_K quant reference parity"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_rounding_diagnostics.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "d091945cb08cc865fedbd41b92a7c88d4e4561f4",
+        "subject": "Record layer 9 rounding hypothesis evidence"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_session_contamination",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_session_contamination.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "edffa0fee4a27caba4041206697644b8f0a98f27",
+        "subject": "M6-C12: add complete file-backed forward and decode APIs"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_stateful_oracle.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b91cb208c27d30cfbcd6a9bd4bccf706c3199a2f",
+        "subject": "Close M6 decode and acceptance evidence"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_trace_schema.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "b3f42d085bae48ba3d4f36b3e3132e745ef2e9b6",
+        "subject": "M6: add progressive boundary diagnostics\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_trace_stats.py",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "4e86fe6b2365423ebb25aa8fb7ee763b701933a4",
+        "subject": "Freeze Qwen4Exp router dtype diagnostics\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_ubatch",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m6_ubatch.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "be3496fc1137eaa3face090bea450b3f7808a04f",
+        "subject": "M6-C10: add MoE dispatch, decode, Q2, and ubatch gates\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m7_profile",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m7_profile.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "c30b103d9548c5d98866039156cee366e178e2d1",
+        "subject": "p8o: add resident execution and decode telemetry"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m7_replay",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m7_replay.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "59c0d31d34a98b0b79416597dc826f5bec32fafd",
+        "subject": "M7-C01: add replay and profiling harness"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m8_q4_moe_cuda",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m8_q4_moe_cuda.cu",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "c2c60dcb93a5f8423aac073bec9954a6a10d069c",
+        "subject": "m8: finalize Q4 routed expert CUDA path"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m9_checkpoint_mismatch",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m9_checkpoint_mismatch.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "306e0a1932b493a711272f75ef91579cd4b520b5",
+        "subject": "m9: harden versioned session checkpoints"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m9_rewind_replay",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m9_rewind_replay.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "ee6ce5d13f8dd0110213590696bd269f9bc7427f",
+        "subject": "m9: add deterministic checkpoint replay orchestration"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m9_state_equivalence",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_m9_state_equivalence.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "c30b103d9548c5d98866039156cee366e178e2d1",
+        "subject": "p8o: add resident execution and decode telemetry"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_memory",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_memory.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "36ff87a863699523a94f5f263f817a0367000020",
+        "subject": "M0-C08: delete dead architecture code; park donor sources in to_be_deleted/"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_model_config",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_model_config.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "aef3d85dda0ded461df3d76c64334d786b5ffed0",
+        "subject": "Add M1 architecture validation"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_platform",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_platform.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "d8d60a3802079a247229789a5f8a18d205103f11",
+        "subject": "Complete M0 acceptance test coverage"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_ple_chunking",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_ple_chunking.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "92f4f8da7e939fb788ccb101e4b30b08e8339a6b",
+        "subject": "M4-C07: verify PLE activation chunk invariance\\n\\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_qsa_qkv_direct",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_qsa_qkv_direct.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "265c35a6d6c1540933f61ae8626aff01e41475ac",
+        "subject": "Optimize QSA QKV projection path"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_quant_blocks",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_quant_blocks.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "97f58828fb1f5a0d5347bdeb1ad0a7c8aae4f4a9",
+        "subject": "M1-C11: report complete donor quant test matrix"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_residency",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_residency.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "c30b103d9548c5d98866039156cee366e178e2d1",
+        "subject": "p8o: add resident execution and decode telemetry"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/test_weights",
+      "category": "DUPLICATE",
+      "measures": "Generated build output; source counterpart is authoritative.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "generated",
+      "archived": false
+    },
+    {
+      "path": "tests/test_weights.c",
+      "category": "KEEP_FIXTURE",
+      "measures": "Unit, byte-level, state, backend, or protocol fixture test.",
+      "execution_path": "direct fixture/module path",
+      "loads_full_model": false,
+      "requires_resident_model": false,
+      "semantic_status": "current",
+      "last_commit": {
+        "hash": "0b41fad2fad8b09a0b7225f65a3d282b05261c1a",
+        "subject": "M4-C10: add file-backed PLE row loader"
+      },
+      "default_build": false,
+      "artifact_kind": "fixture",
+      "archived": false
+    },
+    {
+      "path": "tests/archive/2026-09-cleanup/q2-one-off/q2_real_decode_position_breakdown",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Retired Q2 probe retained only as historical source evidence.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "archived",
+      "archived": true
+    },
+    {
+      "path": "tests/archive/2026-09-cleanup/q2-one-off/q2_real_decode_position_breakdown.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Retired Q2 probe retained only as historical source evidence.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "archived",
+      "archived": true
+    },
+    {
+      "path": "tests/archive/2026-09-cleanup/q2-one-off/q2_real_decode_reconciliation",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Retired Q2 probe retained only as historical source evidence.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "archived",
+      "archived": true
+    },
+    {
+      "path": "tests/archive/2026-09-cleanup/q2-one-off/q2_real_decode_reconciliation.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Retired Q2 probe retained only as historical source evidence.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "archived",
+      "archived": true
+    },
+    {
+      "path": "tests/archive/2026-09-cleanup/q2-one-off/q2_real_qsa_projection_attribution",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Retired Q2 probe retained only as historical source evidence.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "archived",
+      "archived": true
+    },
+    {
+      "path": "tests/archive/2026-09-cleanup/q2-one-off/q2_real_qsa_projection_attribution.c",
+      "category": "ONE_OFF_DIAGNOSTIC",
+      "measures": "Retired Q2 probe retained only as historical source evidence.",
+      "execution_path": "diagnostic-specific path; not canonical production decode",
+      "loads_full_model": true,
+      "requires_resident_model": true,
+      "semantic_status": "historical_only",
+      "last_commit": {
+        "hash": null,
+        "subject": null
+      },
+      "default_build": false,
+      "artifact_kind": "archived",
+      "archived": true
+    }
+  ]
+}

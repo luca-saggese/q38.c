@@ -70,6 +70,12 @@ M6_ORACLE_CPU ?= artifacts/m6/stateful_oracle_cpu_1_noc12.json
 M6_ORACLE_GPU ?= artifacts/m6/stateful_sequence_oracle_resume_probe.json
 M7_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
 M9_MODEL ?= $(DIRECT_RUNTIME_ARTIFACT)
+Q2_CANONICAL_MODEL ?= artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf
+Q2_CANONICAL_TOKENIZER ?= $(MODEL_DIR)
+Q2_CANONICAL_PROMPT ?= Explain in simple terms why the sky appears blue during the day and red near sunset.
+Q2_CANONICAL_OUTPUT_DIR := artifacts/perf/current
+Q2_CANONICAL_DECODE_OUTPUT := $(Q2_CANONICAL_OUTPUT_DIR)/q2_decode_canonical.json
+Q2_CANONICAL_PREFILL_OUTPUT := $(Q2_CANONICAL_OUTPUT_DIR)/q2_prefill_canonical.json
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -83,7 +89,8 @@ M9_MODEL ?= $(DIRECT_RUNTIME_ARTIFACT)
 	m6-decode-protocol m6-decode-ladder-check m6-decode-compare m6-oracle-compare \
 	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-schema m7-gates \
 	m7-profile-forward m7-residency-footprint m7-acceptance m8-q4-kernel \
-	m7-read-ceiling m9-checkpoint m9-rewind m9-state-equivalence
+	m7-read-ceiling m9-checkpoint m9-rewind m9-state-equivalence \
+	bench-q2-decode bench-q2-prefill
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
@@ -296,6 +303,40 @@ $(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
 		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
 		q38_qsa_cuda.o q38_residency.o q38_topk_cuda.o \
 		$(CUDA_LDLIBS) -lm
+
+$(TEST_DIR)/q2_canonical_bench: $(TEST_DIR)/q2_canonical_bench.c \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o \
+		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_runtime.o \
+		q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
+		q38_moe.o q38_decode.o q38_tokenizer.o q38_forward_cuda.o \
+		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
+		q38_qsa_cuda.o q38_residency.o q38_topk_cuda.o
+	$(NVCC) $(NVCCFLAGS) -I. -o $@ \
+		$(TEST_DIR)/q2_canonical_bench.c \
+		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o \
+		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_runtime.o \
+		q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
+		q38_moe.o q38_decode.o q38_tokenizer.o q38_forward_cuda.o \
+		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
+		q38_qsa_cuda.o q38_residency.o q38_topk_cuda.o $(CUDA_LDLIBS) -lm
+
+bench-q2-decode: $(TEST_DIR)/q2_canonical_bench
+	@mkdir -p $(Q2_CANONICAL_OUTPUT_DIR)
+	@python3 tools/bench_q2_canonical.py \
+		--mode decode --binary ./$(TEST_DIR)/q2_canonical_bench \
+		--model "$(Q2_CANONICAL_MODEL)" \
+		--tokenizer "$(Q2_CANONICAL_TOKENIZER)" \
+		--prompt "$(Q2_CANONICAL_PROMPT)" \
+		--output "$(Q2_CANONICAL_DECODE_OUTPUT)"
+
+bench-q2-prefill: $(TEST_DIR)/q2_canonical_bench
+	@mkdir -p $(Q2_CANONICAL_OUTPUT_DIR)
+	@python3 tools/bench_q2_canonical.py \
+		--mode prefill --binary ./$(TEST_DIR)/q2_canonical_bench \
+		--model "$(Q2_CANONICAL_MODEL)" \
+		--tokenizer "$(Q2_CANONICAL_TOKENIZER)" \
+		--prompt "$(Q2_CANONICAL_PROMPT)" \
+		--output "$(Q2_CANONICAL_PREFILL_OUTPUT)"
 
 $(TEST_DIR)/test_qsa_qkv_direct: $(TEST_DIR)/test_qsa_qkv_direct.c \
 		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o \

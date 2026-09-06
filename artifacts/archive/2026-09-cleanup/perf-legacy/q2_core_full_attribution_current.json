@@ -1,0 +1,241 @@
+{
+  "format": "q2-core-full-attribution-current-v1",
+  "status": "measured_worker_path_with_real_session_reconciliation_pending",
+  "model": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+  "measurement_scope": {
+    "path": "persistent_worker_steady_state_full_forward",
+    "token_count": 1,
+    "warm_runs": 5,
+    "fresh_full_model_loads_for_task": 0,
+    "worker_reloaded": false,
+    "real_session_path_reference": "artifacts/perf/q2_real_qsa_projection_attribution.json",
+    "note": "The persistent worker exposes the complete current stage telemetry without another model load. The real q38_session_eval reference is retained separately because its existing probe does not emit the same complete per-category telemetry."
+  },
+  "sources": [
+    "artifacts/post_m8_opt/q2_current_performance_checkpoint.json",
+    "artifacts/post_m8_opt/q2_exclusive_post_qkv_canonical.jsonl",
+    "artifacts/post_m8_opt/q2_exclusive_profile.jsonl",
+    "artifacts/perf/q2_real_qsa_projection_attribution.json"
+  ],
+  "residency_and_correctness": {
+    "all_non_ple_resident": true,
+    "persistent_non_ple_bytes": 49465890560,
+    "persistent_non_ple_tensors": 1157,
+    "persistent_ple_entries": 0,
+    "non_ple_upload_bytes": 0,
+    "non_ple_residency_misses": 0,
+    "fallback_count": 0,
+    "nan_inf_count": 0,
+    "final_logits_hash": "79c6fcf9088a4a46",
+    "argmax": 11,
+    "qsa_selected_ids_exact": true
+  },
+  "wall_and_async_accounting_ms_per_token": {
+    "wall_ms": 444.321488,
+    "wall_p95_ms": 447.069706,
+    "gpu_argmax_ms": 0.305280,
+    "ple_elapsed_ms": 177.294048,
+    "ple_overlap_ms": 177.294048,
+    "ple_critical_stall_ms": 0.0,
+    "critical_path_measured_sum_ms": 226.204817,
+    "critical_path_unattributed_ms": 218.116671,
+    "critical_path_unattributed_pct": 49.089832,
+    "legacy_accounted_including_async_ms": 403.498865,
+    "legacy_unattributed_including_async_ms": 40.822623,
+    "accounting_rule": "PLE elapsed is never added to the critical path; only ple_critical_stall_ms is eligible for critical-path accounting."
+  },
+  "categories": {
+    "QSA": {
+      "ms_per_token": 117.430687,
+      "wall_pct": 26.429216,
+      "kernel_launches_per_token": 36,
+      "host_syncs_per_token": 12,
+      "h2d_bytes_per_token": 122880,
+      "d2h_bytes_per_token": 638976,
+      "d2d_bytes_per_token": null,
+      "d2d_bytes_status": "not_emitted_by_current_telemetry",
+      "components_ms_per_token": {
+        "QKV": 8.507198,
+        "output_projection": null,
+        "attention": 98.794323,
+        "index_compression": 9.966343,
+        "score": 0.001968,
+        "top_k": 0.002040,
+        "selected_kv_gather": 0.053072,
+        "state_update": 0.040440,
+        "allocation_cleanup": 0.065303
+      },
+      "component_note": "The worker artifact predates separate output-projection emission. The real session probe measured output projection at 8.608755 ms/token and is recorded in real_session_reference below; it is not added to this worker QSA total."
+    },
+    "MoE": {
+      "ms_per_token": 66.255498,
+      "wall_pct": 14.911612,
+      "kernel_launches_per_token": 240,
+      "host_syncs_per_token": 4,
+      "h2d_bytes_per_token": 0,
+      "d2h_bytes_per_token": 17408,
+      "d2d_bytes_per_token": null,
+      "d2d_bytes_status": "not_emitted_by_current_telemetry",
+      "components_ms_per_token": {
+        "router": 1.508470,
+        "gate_up": 13.467776,
+        "down": 40.515584,
+        "weighted_reduction": 1.604224,
+        "other_backend": 9.159444
+      }
+    },
+    "GDN": {
+      "ms_per_token": 22.081300,
+      "wall_pct": 4.969667,
+      "kernel_launches_per_token": 180,
+      "host_syncs_per_token": 5,
+      "h2d_bytes_per_token": 0,
+      "d2h_bytes_per_token": 76160,
+      "d2d_bytes_per_token": null,
+      "d2d_bytes_status": "not_emitted_by_current_telemetry"
+    },
+    "GR": {
+      "ms_per_token": 14.540114,
+      "wall_pct": 3.272431,
+      "kernel_launches_per_token": null,
+      "host_syncs_per_token": null,
+      "h2d_bytes_per_token": null,
+      "d2h_bytes_per_token": null,
+      "d2d_bytes_per_token": null,
+      "telemetry_status": "stage_timer_only"
+    },
+    "LM_head": {
+      "ms_per_token": 5.591938,
+      "wall_pct": 1.258534,
+      "kernel_launches_per_token": 1,
+      "host_syncs_per_token": null,
+      "h2d_bytes_per_token": null,
+      "d2h_bytes_per_token": null,
+      "d2d_bytes_per_token": null,
+      "telemetry_status": "stage_timer_plus_single_dispatch"
+    },
+    "norms_residual_glue": {
+      "ms_per_token": null,
+      "wall_pct": null,
+      "kernel_launches_per_token": null,
+      "host_syncs_per_token": null,
+      "h2d_bytes_per_token": null,
+      "d2h_bytes_per_token": null,
+      "d2d_bytes_per_token": null,
+      "telemetry_status": "not_separately_emitted"
+    },
+    "host_scalar_work": {
+      "ms_per_token": null,
+      "wall_pct": null,
+      "kernel_launches_per_token": 0,
+      "host_syncs_per_token": null,
+      "h2d_bytes_per_token": 0,
+      "d2h_bytes_per_token": 0,
+      "d2d_bytes_per_token": null,
+      "telemetry_status": "not_separately_emitted"
+    },
+    "cuda_sync_wait": {
+      "ms_per_token": null,
+      "wall_pct": null,
+      "kernel_launches_per_token": null,
+      "host_syncs_per_token": 16934,
+      "h2d_bytes_per_token": 35307520,
+      "d2h_bytes_per_token": 720800,
+      "d2d_bytes_per_token": null,
+      "telemetry_status": "aggregate_only",
+      "note": "The aggregate wait/traffic counters cannot be converted to a non-overlapping wall span with the current observer."
+    },
+    "launch_dispatch_overhead": {
+      "ms_per_token": null,
+      "wall_pct": null,
+      "kernel_launches_per_token": 14759,
+      "host_syncs_per_token": null,
+      "h2d_bytes_per_token": 0,
+      "d2h_bytes_per_token": 0,
+      "d2d_bytes_per_token": null,
+      "telemetry_status": "aggregate_only"
+    },
+    "PLE": {
+      "ms_per_token": 177.294048,
+      "wall_pct": 39.903719,
+      "kernel_launches_per_token": 2,
+      "host_syncs_per_token": 0,
+      "h2d_bytes_per_token": 34816000,
+      "d2h_bytes_per_token": 0,
+      "d2d_bytes_per_token": null,
+      "d2d_bytes_status": "not_emitted_by_current_telemetry",
+      "file_backed_accesses_per_token": 12800,
+      "file_backed_bytes_per_token": 34816000,
+      "critical_stall_ms": 0.0,
+      "accounting_role": "async_side_work_only"
+    },
+    "other_unattributed": {
+      "ms_per_token": 218.116671,
+      "wall_pct": 49.089832,
+      "kernel_launches_per_token": null,
+      "host_syncs_per_token": null,
+      "h2d_bytes_per_token": null,
+      "d2h_bytes_per_token": null,
+      "d2d_bytes_per_token": null,
+      "telemetry_status": "critical_path_residual",
+      "note": "This residual is the correctly computed critical-path residual after excluding asynchronous PLE elapsed time. It is not safe to subdivide it without a new non-invasive stage boundary capture."
+    }
+  },
+  "aggregate_traffic_and_dispatch": {
+    "kernel_launches_per_token": 14759,
+    "host_syncs_per_token": 16934,
+    "h2d_bytes_per_token": 35307520,
+    "d2h_bytes_per_token": 720800,
+    "d2d_bytes_per_token": null,
+    "d2d_bytes_status": "not_emitted_by_current_telemetry",
+    "allocations_per_token": 408,
+    "qsa_kernel_launches_per_token": 36,
+    "qsa_host_syncs_per_token": 12,
+    "qsa_h2d_bytes_per_token": 122880,
+    "qsa_d2h_bytes_per_token": 638976
+  },
+  "real_session_reference": {
+    "source": "artifacts/perf/q2_real_qsa_projection_attribution.json",
+    "measured_tokens": 112,
+    "core_forward_mean_ms": 586.442110,
+    "argmax_mean_ms": 0.478426,
+    "qkv_ms_per_token": 14.231733,
+    "output_projection_ms_per_token": 8.608755,
+    "fast_qkv_calls_per_token": 12.0,
+    "legacy_qkv_calls_per_token": 0.0,
+    "fallback_qkv_calls_per_token": 0.0,
+    "ple_critical_stall_ms": 0.0,
+    "non_ple_upload_bytes": 0,
+    "non_ple_residency_misses": 0,
+    "correctness": {
+      "same_generated_ids": true,
+      "logits_mismatch_count": 0,
+      "max_abs_logits_diff": 0.0
+    },
+    "delta_vs_worker_wall_ms": 142.120622,
+    "reconciliation_status": "not_closed",
+    "note": "This delta is a path difference, not an optimization result. The existing real-session probe does not provide current per-category stage spans, so it must not be merged into the worker category sum."
+  },
+  "code_inspection_p0_candidate": {
+    "status": "high_confidence_routing_candidate_not_benchmarked_in_this_step",
+    "mechanism": "full_matvec_batch() selects the matrix_batch_backend whenever it is installed, including token_count == 1. The session wiring therefore exposes the generic matrix_batch_kernel to GR, GDN and MoE batch projections in addition to the intentional QSA output-projection use.",
+    "evidence": [
+      "q38_forward.c:793-834",
+      "q38_forward.c:1824-1828",
+      "q38_forward_cuda.cu:1448-1555"
+    ],
+    "impact": "The generic batched kernel assigns one CUDA thread per output row and performs a scalar column loop. It also performs a host synchronization and D2H copy per backend call. This is the first P0 candidate to isolate, but no kernel or routing change was made here."
+  },
+  "acceptance": {
+    "async_work_not_double_counted": true,
+    "non_ple_uploads_zero": true,
+    "residency_misses_zero": true,
+    "fallback_zero": true,
+    "ple_critical_stall_zero": true,
+    "correctness_invariants_pass": true,
+    "unexplained_target_pct": 3.0,
+    "unexplained_actual_pct": 49.089832,
+    "full_real_session_attribution_ge_97_pct": false,
+    "status": "blocked_on_non_invasive_current_session_stage_capture"
+  }
+}
