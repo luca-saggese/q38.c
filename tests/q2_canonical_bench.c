@@ -9,11 +9,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <sys/resource.h>
+#include <sys/utsname.h>
+#include <cuda_runtime_api.h>
 
 enum {
     VOCAB_SIZE = Q38_DECODE_VOCAB_SIZE,
     MAX_GENERATED = 4096,
-    MAX_PREFILL_CASES = 8
+    MAX_PREFILL_CASES = 8,
+    REFERENCE_WARMUPS = 1,
+    REFERENCE_RUNS = 10
 };
 
 typedef struct {
@@ -55,6 +61,23 @@ typedef struct {
 } q2_capture;
 
 typedef struct {
+    q2_sample summary;
+    q2_sample *samples;
+    uint32_t *generated;
+    uint64_t final_hash;
+    bool finite;
+} q2_decode_run;
+
+typedef struct {
+    size_t token_count;
+    uint32_t *tokens;
+    q2_sample measured[REFERENCE_RUNS];
+    uint32_t next_tokens[REFERENCE_RUNS];
+    uint64_t logits_hashes[REFERENCE_RUNS];
+    bool finite[REFERENCE_RUNS];
+} q2_prefill_reference;
+
+typedef struct {
     uint64_t callbacks;
     uint64_t kernel_launches;
     uint64_t host_syncs;
@@ -83,10 +106,19 @@ typedef struct {
 } q2_options;
 
 typedef struct {
-    uint64_t logits_hash;
-    uint32_t argmax;
-    bool finite;
-} q2_trace_capture;
+    uint64_t cuda_total_bytes;
+    uint64_t min_cuda_free_bytes;
+    uint64_t peak_unified_rss_bytes;
+} q2_memory;
+
+typedef struct {
+    char device_name[128];
+    char cpu_arch[64];
+    int cuda_driver_version;
+    int cuda_runtime_version;
+    uint64_t cuda_total_bytes;
+    uint64_t unified_memory_bytes;
+} q2_hardware;
 
 static double now_ms(void) {
     struct timespec ts;
@@ -132,6 +164,77 @@ static void print_ids(const uint32_t *ids, size_t count) {
     for (size_t i = 0; i < count; ++i)
         printf("%s%u", i ? "," : "", ids[i]);
     putchar(']');
+}
+
+static void observe_memory(q2_memory *memory) {
+    struct rusage usage;
+    size_t rss_bytes = 0;
+    size_t free_bytes = 0;
+    size_t total_bytes = 0;
+    if (!memory) return;
+    if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess) {
+        if (!memory->cuda_total_bytes)
+            memory->cuda_total_bytes = (uint64_t)total_bytes;
+        if (!memory->min_cuda_free_bytes ||
+            free_bytes < memory->min_cuda_free_bytes)
+            memory->min_cuda_free_bytes = (uint64_t)free_bytes;
+    }
+    memset(&usage, 0, sizeof(usage));
+    if (getrusage(RUSAGE_SELF, &usage) == 0 && usage.ru_maxrss > 0)
+        rss_bytes = (size_t)usage.ru_maxrss * 1024u;
+    if (rss_bytes > memory->peak_unified_rss_bytes)
+        memory->peak_unified_rss_bytes = rss_bytes;
+}
+
+static void query_hardware(q2_hardware *hardware) {
+    struct cudaDeviceProp properties;
+    struct utsname system_info;
+    int device = 0;
+    int driver = 0;
+    int runtime = 0;
+    long pages;
+    long page_size;
+    if (!hardware) return;
+    memset(hardware, 0, sizeof(*hardware));
+    if (uname(&system_info) == 0)
+        snprintf(hardware->cpu_arch, sizeof(hardware->cpu_arch), "%.63s",
+                 system_info.machine);
+    if (cudaGetDevice(&device) == cudaSuccess &&
+        cudaGetDeviceProperties(&properties, device) == cudaSuccess) {
+        snprintf(hardware->device_name, sizeof(hardware->device_name), "%.127s",
+                 properties.name);
+        hardware->cuda_total_bytes = properties.totalGlobalMem;
+    }
+    (void)cudaDriverGetVersion(&driver);
+    (void)cudaRuntimeGetVersion(&runtime);
+    hardware->cuda_driver_version = driver;
+    hardware->cuda_runtime_version = runtime;
+    pages = sysconf(_SC_PHYS_PAGES);
+    page_size = sysconf(_SC_PAGESIZE);
+    if (pages > 0 && page_size > 0)
+        hardware->unified_memory_bytes = (uint64_t)pages * (uint64_t)page_size;
+}
+
+static void print_hardware(const q2_hardware *hardware) {
+    if (!hardware) return;
+    printf("\"hardware\":{\"device\":");
+    json_string(hardware->device_name);
+    printf(",\"gpu\":\"DGX Spark / GB10\",\"cpu_arch\":");
+    json_string(hardware->cpu_arch);
+    printf(",\"cuda_driver_version\":%d,\"cuda_runtime_version\":%d,"
+           "\"cuda_total_bytes\":%" PRIu64
+           ",\"unified_memory_bytes\":%" PRIu64 "}",
+           hardware->cuda_driver_version, hardware->cuda_runtime_version,
+           hardware->cuda_total_bytes, hardware->unified_memory_bytes);
+}
+
+static void print_memory(const q2_memory *memory) {
+    uint64_t peak_cuda = 0;
+    if (memory && memory->cuda_total_bytes >= memory->min_cuda_free_bytes)
+        peak_cuda = memory->cuda_total_bytes - memory->min_cuda_free_bytes;
+    printf("\"memory\":{\"peak_cuda_bytes\":%" PRIu64
+           ",\"peak_unified_rss_bytes\":%" PRIu64 "}",
+           peak_cuda, memory ? memory->peak_unified_rss_bytes : 0);
 }
 
 static void zero_sample(q2_sample *sample) {
@@ -180,20 +283,6 @@ static bool stage_trace(const q38_forward_stage_usage *usage, void *opaque,
     double *slot = stage_slot(&capture->sample, usage->logical_stage);
     if (!slot) slot = stage_slot(&capture->sample, usage->name);
     if (slot) *slot += usage->elapsed_ms;
-    return true;
-}
-
-static bool trace_step(const q38_decode_step *step, void *opaque,
-                       char *error, size_t error_len) {
-    q2_trace_capture *capture = (q2_trace_capture *)opaque;
-    if (!capture || !step) {
-        if (error && error_len)
-            snprintf(error, error_len, "invalid canonical decode trace");
-        return false;
-    }
-    capture->logits_hash = step->logits_hash;
-    capture->argmax = step->argmax;
-    capture->finite = step->finite && step->logits_finite;
     return true;
 }
 
@@ -298,7 +387,7 @@ static bool parse_size_list(const char *value, q2_options *options) {
 
 static void usage(FILE *stream) {
     fprintf(stream,
-            "usage: q2_canonical_bench --mode decode|prefill "
+            "usage: q2_canonical_bench --mode decode|prefill|reference0 "
             "--model MODEL --tokenizer DIR --prompt TEXT [options]\n"
             "  --generated N       decode generated token count (default 128)\n"
             "  --ctx N             session context (default 4096)\n"
@@ -351,7 +440,8 @@ static bool parse_options(int argc, char **argv, q2_options *options) {
     }
     return options->model_path && options->tokenizer_path && options->prompt &&
            options->mode && (!strcmp(options->mode, "decode") ||
-                             !strcmp(options->mode, "prefill")) &&
+                             !strcmp(options->mode, "prefill") ||
+                             !strcmp(options->mode, "reference0")) &&
            options->generated_count && options->context_size &&
            options->prefill_chunk;
 }
@@ -408,7 +498,6 @@ static bool run_decode(q38_session *session, const q2_options *options,
                        uint64_t *final_hash, bool *final_finite, char *error,
                        size_t error_len) {
     q38_forward_diagnostics diagnostics;
-    q2_trace_capture trace_capture = {0};
     q2_capture prefill_capture;
     q2_sample *samples = NULL;
     q2_telemetry telemetry_before;
@@ -441,7 +530,7 @@ static bool run_decode(q38_session *session, const q2_options *options,
     if (!q38_session_prefill_chunked(
             session, prompt->tokens, prompt->token_count,
             options->prefill_chunk, logits, VOCAB_SIZE, &next_token,
-            &diagnostics, trace_step, &trace_capture, &step_index,
+            &diagnostics, NULL, NULL, &step_index,
             error, error_len))
         goto fail;
     generated[0] = next_token;
@@ -527,6 +616,79 @@ static bool run_prefill_case(
     return true;
 }
 
+static void print_sample(const q2_sample *sample);
+
+static void print_decode_run(const q2_decode_run *run,
+                             const q2_options *options) {
+    if (!run || !options) return;
+    printf("{\"summary\":");
+    print_sample(&run->summary);
+    printf(",\"generated_ids\":");
+    print_ids(run->generated, options->generated_count);
+    printf(",\"correctness\":{\"final_logits_hash\":\"%016" PRIx64
+           "\",\"argmax\":%u,\"nan_inf\":%s},\"samples\":[",
+           run->final_hash, run->generated[options->generated_count - 1],
+           run->finite ? "false" : "true");
+    for (size_t i = options->measure_first; i <= options->measure_last; ++i) {
+        if (i != options->measure_first) putchar(',');
+        print_sample(&run->samples[i]);
+    }
+    printf("]}");
+}
+
+static void print_prefill_reference(const q2_prefill_reference *reference,
+                                    const q2_options *options) {
+    if (!reference || !options) return;
+    printf("{\"token_count\":%zu,\"tokens\":", reference->token_count);
+    print_ids(reference->tokens, reference->token_count);
+    printf(",\"measured_runs\":[");
+    for (size_t i = 0; i < REFERENCE_RUNS; ++i) {
+        if (i) putchar(',');
+        printf("{\"run\":%zu,\"next_token\":%u,"
+               "\"logits_hash\":\"%016" PRIx64
+               "\",\"nan_inf\":%s,\"sample\":",
+               i + 1, reference->next_tokens[i],
+               reference->logits_hashes[i],
+               reference->finite[i] ? "false" : "true");
+        print_sample(&reference->measured[i]);
+        putchar('}');
+    }
+    printf("]}");
+}
+
+static bool reference_correct_decode(const q2_decode_run *runs,
+                                     size_t count,
+                                     const q2_decode_run *warmup,
+                                     const q2_options *options) {
+    if (!runs || !count || !warmup || !options || !warmup->generated)
+        return false;
+    for (size_t run = 0; run < count; ++run) {
+        if (!runs[run].finite || runs[run].final_hash != runs[0].final_hash)
+            return false;
+        for (size_t i = 0; i < options->generated_count; ++i)
+            if (runs[run].generated[i] != runs[0].generated[i])
+                return false;
+    }
+    if (!warmup->finite || warmup->final_hash != runs[0].final_hash)
+        return false;
+    for (size_t i = 0; i < options->generated_count; ++i)
+        if (warmup->generated[i] != runs[0].generated[i]) return false;
+    return true;
+}
+
+static bool reference_correct_prefill(
+    const q2_prefill_reference *reference, size_t count, uint32_t warm_next,
+    uint64_t warm_hash, bool warm_finite) {
+    if (!reference || !count || !warm_finite) return false;
+    for (size_t i = 0; i < count; ++i)
+        if (!reference->finite[i] ||
+            reference->next_tokens[i] != reference->next_tokens[0] ||
+            reference->logits_hashes[i] != reference->logits_hashes[0])
+            return false;
+    return warm_finite && warm_next == reference->next_tokens[0] &&
+           warm_hash == reference->logits_hashes[0];
+}
+
 static void print_sample(const q2_sample *sample) {
     printf("{\"wall_ms\":%.6f,\"forward_core_ms\":%.6f,"
            "\"argmax_ms\":%.6f,\"bookkeeping_ms\":%.6f,"
@@ -559,6 +721,157 @@ static void print_sample(const q2_sample *sample) {
            sample->d2h_bytes, sample->d2d_bytes);
 }
 
+static void free_decode_run(q2_decode_run *run) {
+    if (!run) return;
+    free(run->samples);
+    free(run->generated);
+    memset(run, 0, sizeof(*run));
+}
+
+static bool run_reference0(q38_session *session, const q2_options *options,
+                           const q38_token_batch *seed, float *logits,
+                           q38_forward_cuda_residency_stats *residency,
+                           char *error, size_t error_len) {
+    q2_telemetry telemetry = {0};
+    q2_hardware hardware;
+    q2_memory memory = {0};
+    q2_decode_run warmup = {0};
+    q2_decode_run decode_runs[REFERENCE_RUNS] = {0};
+    q2_prefill_reference prefill[MAX_PREFILL_CASES];
+    q2_sample warm_sample = {0};
+    uint32_t warm_next = 0;
+    uint64_t warm_hash = 0;
+    bool warm_finite = false;
+    bool decode_ok = false;
+    bool prefill_ok = true;
+    bool all_finite = true;
+    memset(prefill, 0, sizeof(prefill));
+    query_hardware(&hardware);
+    observe_memory(&memory);
+
+    q38_session_reset(session);
+    if (!run_decode(session, options, seed, logits, &telemetry,
+                    &warmup.summary, &warmup.samples, &warmup.generated,
+                    &warmup.final_hash, &warmup.finite, error, error_len))
+        goto cleanup;
+    observe_memory(&memory);
+    for (size_t run = 0; run < REFERENCE_RUNS; ++run) {
+        q38_session_reset(session);
+        if (!run_decode(session, options, seed, logits, &telemetry,
+                        &decode_runs[run].summary,
+                        &decode_runs[run].samples,
+                        &decode_runs[run].generated,
+                        &decode_runs[run].final_hash,
+                        &decode_runs[run].finite, error, error_len))
+            goto cleanup;
+        observe_memory(&memory);
+    }
+    decode_ok = reference_correct_decode(
+        decode_runs, REFERENCE_RUNS, &warmup, options);
+    all_finite = warmup.finite;
+    for (size_t run = 0; run < REFERENCE_RUNS; ++run)
+        all_finite = all_finite && decode_runs[run].finite;
+
+    for (size_t c = 0; c < options->prefill_count; ++c) {
+        q2_prefill_reference *reference = &prefill[c];
+        reference->token_count = options->prefill_sizes[c];
+        if (!make_repeated_tokens(seed, reference->token_count,
+                                  &reference->tokens))
+            goto cleanup;
+        q38_session_reset(session);
+        if (!run_prefill_case(
+                session, options, reference->tokens, reference->token_count,
+                logits, &telemetry, &warm_sample, &warm_next, &warm_hash,
+                &warm_finite, error, error_len))
+            goto cleanup;
+        observe_memory(&memory);
+        for (size_t run = 0; run < REFERENCE_RUNS; ++run) {
+            q38_session_reset(session);
+            if (!run_prefill_case(
+                    session, options, reference->tokens,
+                    reference->token_count, logits, &telemetry,
+                    &reference->measured[run],
+                    &reference->next_tokens[run],
+                    &reference->logits_hashes[run],
+                    &reference->finite[run], error, error_len))
+                goto cleanup;
+            observe_memory(&memory);
+        }
+        prefill_ok = prefill_ok &&
+            reference_correct_prefill(
+                reference, REFERENCE_RUNS, warm_next, warm_hash,
+                warm_finite);
+        all_finite = all_finite && warm_finite;
+        for (size_t run = 0; run < REFERENCE_RUNS; ++run)
+            all_finite = all_finite && reference->finite[run];
+    }
+    q38_forward_cuda_get_residency_stats(session->runtime->cuda, residency);
+
+    printf("{\"format\":\"q2-canonical-reference0-raw-v1\","
+           "\"reference_id\":\"Q2_DECODE_REFERENCE_0\","
+           "\"prompt\":");
+    json_string(options->prompt);
+    printf(",\"prompt_ids\":");
+    print_ids(seed->tokens, seed->token_count);
+    printf(",\"context_size\":%zu,\"generated_count\":%zu,"
+           "\"measure_first\":%zu,\"measure_last\":%zu,"
+           "\"prefill_chunk\":%zu,\"warmup_runs\":%d,"
+           "\"measured_runs\":%d,",
+           options->context_size, options->generated_count,
+           options->measure_first, options->measure_last,
+           options->prefill_chunk, REFERENCE_WARMUPS, REFERENCE_RUNS);
+    print_hardware(&hardware);
+    putchar(',');
+    print_memory(&memory);
+    printf(",\"decode\":{\"runs\":[");
+    for (size_t run = 0; run < REFERENCE_RUNS; ++run) {
+        if (run) putchar(',');
+        printf("{\"run\":%zu,", run + 1);
+        print_decode_run(&decode_runs[run], options);
+    }
+    printf("]},\"prefill\":{\"cases\":[");
+    for (size_t c = 0; c < options->prefill_count; ++c) {
+        if (c) putchar(',');
+        print_prefill_reference(&prefill[c], options);
+    }
+    printf("]},\"correctness\":{\"decode\":%s,\"prefill\":%s,"
+           "\"all_finite\":%s},"
+           "\"residency\":{\"all_non_ple_resident\":%s,"
+           "\"persistent_resident_bytes\":%zu,"
+           "\"persistent_resident_tensors\":%" PRIu64
+           ",\"persistent_ple_entries\":%" PRIu64
+           ",\"non_ple_upload_bytes\":%" PRIu64
+           ",\"non_ple_residency_misses\":%" PRIu64
+           "},\"telemetry\":{\"callbacks\":%" PRIu64
+           ",\"kernel_ms\":%.6f,\"backend_overhead_ms\":%.6f,"
+           "\"upload_ms\":%.6f,\"h2d_bytes\":%" PRIu64
+           ",\"d2h_bytes\":%" PRIu64 ",\"host_syncs\":%" PRIu64 "}}\n",
+           decode_ok ? "true" : "false", prefill_ok ? "true" : "false",
+           all_finite ? "true" : "false",
+           residency->all_non_ple_resident ? "true" : "false",
+           residency->persistent_resident_bytes,
+           residency->persistent_resident_tensors,
+           residency->persistent_ple_entries,
+           telemetry.non_ple_upload_bytes,
+           telemetry.non_ple_residency_misses, telemetry.callbacks,
+           telemetry.kernel_ms, telemetry.backend_overhead_ms,
+           telemetry.upload_ms, telemetry.h2d_bytes, telemetry.d2h_bytes,
+           telemetry.host_syncs);
+    for (size_t run = 0; run < REFERENCE_RUNS; ++run)
+        free_decode_run(&decode_runs[run]);
+    free_decode_run(&warmup);
+    for (size_t c = 0; c < options->prefill_count; ++c)
+        free(prefill[c].tokens);
+    return decode_ok && prefill_ok && all_finite;
+cleanup:
+    for (size_t run = 0; run < REFERENCE_RUNS; ++run)
+        free_decode_run(&decode_runs[run]);
+    free_decode_run(&warmup);
+    for (size_t c = 0; c < options->prefill_count; ++c)
+        free(prefill[c].tokens);
+    return false;
+}
+
 static int run(const q2_options *options) {
     char error[256] = {0};
     q38_runtime runtime = {0};
@@ -585,7 +898,14 @@ static int run(const q2_options *options) {
     session_ready = true;
     logits = calloc(VOCAB_SIZE, sizeof(*logits));
     if (!logits) goto cleanup;
-    if (!strcmp(options->mode, "decode")) {
+    if (!strcmp(options->mode, "reference0")) {
+        q38_forward_cuda_residency_stats residency = {0};
+        if (!run_reference0(&session, options, &seed, logits, &residency,
+                            error, sizeof(error))) {
+            fprintf(stderr, "canonical reference 0 failed: %s\n", error);
+            goto cleanup;
+        }
+    } else if (!strcmp(options->mode, "decode")) {
         q2_sample summary = {0};
         q2_sample *samples = NULL;
         uint32_t *generated = NULL;

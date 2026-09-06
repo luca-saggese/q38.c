@@ -76,6 +76,7 @@ Q2_CANONICAL_PROMPT ?= Explain in simple terms why the sky appears blue during t
 Q2_CANONICAL_OUTPUT_DIR := artifacts/perf/current
 Q2_CANONICAL_DECODE_OUTPUT := $(Q2_CANONICAL_OUTPUT_DIR)/q2_decode_canonical.json
 Q2_CANONICAL_PREFILL_OUTPUT := $(Q2_CANONICAL_OUTPUT_DIR)/q2_prefill_canonical.json
+Q2_REFERENCE_OUTPUT_DIR := artifacts/perf/reference_0
 
 .PHONY: all spark test clean m0-acceptance m1-inventory m1-validate m1-subset \
 	m1-bind m1-quant-block m1-full m1-memory-matrix m1-acceptance m2-c00 m2-c01 \
@@ -90,7 +91,7 @@ Q2_CANONICAL_PREFILL_OUTPUT := $(Q2_CANONICAL_OUTPUT_DIR)/q2_prefill_canonical.j
 	post-m5-bis post-m5-ter post-m5-supplement m7-replay m7-profile m7-profile-schema m7-gates \
 	m7-profile-forward m7-residency-footprint m7-acceptance m8-q4-kernel \
 	m7-read-ceiling m9-checkpoint m9-rewind m9-state-equivalence \
-	bench-q2-decode bench-q2-prefill
+	bench-q2-reference-0 bench-q2-decode bench-q2-prefill
 q38_moe.o: q38_moe.c q38_moe.h q38_weights.h
 	$(CC) $(CFLAGS) -c -o $@ q38_moe.c
 
@@ -320,23 +321,24 @@ $(TEST_DIR)/q2_canonical_bench: $(TEST_DIR)/q2_canonical_bench.c \
 		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
 		q38_qsa_cuda.o q38_residency.o q38_topk_cuda.o $(CUDA_LDLIBS) -lm
 
-bench-q2-decode: $(TEST_DIR)/q2_canonical_bench
-	@mkdir -p $(Q2_CANONICAL_OUTPUT_DIR)
+bench-q2-reference-0: $(TEST_DIR)/q2_canonical_bench
+	@if test -f $(Q2_REFERENCE_OUTPUT_DIR)/q2_decode_reference_0.json && \
+		test -f $(Q2_REFERENCE_OUTPUT_DIR)/q2_prefill_reference_0.json; then \
+		echo "q38: Reference 0 is immutable and already present"; \
+		exit 0; \
+	fi
+	@test ! -e $(Q2_REFERENCE_OUTPUT_DIR)/q2_decode_reference_0.json
+	@test ! -e $(Q2_REFERENCE_OUTPUT_DIR)/q2_prefill_reference_0.json
 	@python3 tools/bench_q2_canonical.py \
-		--mode decode --binary ./$(TEST_DIR)/q2_canonical_bench \
+		--mode reference0 --binary ./$(TEST_DIR)/q2_canonical_bench \
 		--model "$(Q2_CANONICAL_MODEL)" \
 		--tokenizer "$(Q2_CANONICAL_TOKENIZER)" \
 		--prompt "$(Q2_CANONICAL_PROMPT)" \
-		--output "$(Q2_CANONICAL_DECODE_OUTPUT)"
+		--output-dir "$(Q2_REFERENCE_OUTPUT_DIR)"
 
-bench-q2-prefill: $(TEST_DIR)/q2_canonical_bench
-	@mkdir -p $(Q2_CANONICAL_OUTPUT_DIR)
-	@python3 tools/bench_q2_canonical.py \
-		--mode prefill --binary ./$(TEST_DIR)/q2_canonical_bench \
-		--model "$(Q2_CANONICAL_MODEL)" \
-		--tokenizer "$(Q2_CANONICAL_TOKENIZER)" \
-		--prompt "$(Q2_CANONICAL_PROMPT)" \
-		--output "$(Q2_CANONICAL_PREFILL_OUTPUT)"
+bench-q2-decode: bench-q2-reference-0
+
+bench-q2-prefill: bench-q2-reference-0
 
 $(TEST_DIR)/test_qsa_qkv_direct: $(TEST_DIR)/test_qsa_qkv_direct.c \
 		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o \
