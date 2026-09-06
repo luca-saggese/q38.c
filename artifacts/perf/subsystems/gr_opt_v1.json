@@ -1,0 +1,135 @@
+{
+  "format": "q38-gr-opt-v1",
+  "status": "frozen",
+  "subsystem": "GR",
+  "production_commit": "d5d4133a8",
+  "scope": "isolated_fixture_only",
+  "full_model_load": false,
+  "full_chain_benchmark": false,
+  "reference_0_rerun": false,
+  "fixtures": [
+    {
+      "name": "early",
+      "layer": 0,
+      "baseline_ms": 1.52481,
+      "c3_baseline_us_median": 78.608,
+      "final_us_median": 62.401,
+      "final_us_p95": 63.73,
+      "absolute_us_saved_vs_c3": 16.207,
+      "relative_speedup_vs_c3": 1.2597,
+      "relative_improvement_vs_c3": 0.206175,
+      "correct": true,
+      "nan_inf": 0
+    },
+    {
+      "name": "middle",
+      "layer": 23,
+      "baseline_ms": 1.47371,
+      "c3_baseline_us_median": 78.528,
+      "final_us_median": 62.256,
+      "final_us_p95": 63.984,
+      "absolute_us_saved_vs_c3": 16.272,
+      "relative_speedup_vs_c3": 1.2614,
+      "relative_improvement_vs_c3": 0.207213,
+      "correct": true,
+      "nan_inf": 0
+    },
+    {
+      "name": "late",
+      "layer": 47,
+      "baseline_ms": 1.47526,
+      "c3_baseline_us_median": 78.592,
+      "final_us_median": 62.337,
+      "final_us_p95": 64.704,
+      "absolute_us_saved_vs_c3": 16.255,
+      "relative_speedup_vs_c3": 1.2608,
+      "relative_improvement_vs_c3": 0.206828,
+      "correct": true,
+      "nan_inf": 0
+    }
+  ],
+  "baseline": {
+    "isolated_end_to_end_ms_range": [
+      1.47371,
+      1.52481
+    ],
+    "source_artifact": "artifacts/perf/subsystems/gr_reference.json",
+    "launches": 5,
+    "explicit_host_syncs": 1
+  },
+  "candidate_history": [
+    {
+      "id": "GR-C1",
+      "status": "promoted",
+      "change": "Use cooperative BF16 matvec for GR down/up/inject projections.",
+      "artifact": "artifacts/perf/subsystems/gr_c1_projection.json"
+    },
+    {
+      "id": "GR-C2",
+      "status": "rejected",
+      "change": "Fuse branch preparation and branch merge.",
+      "artifact": "artifacts/perf/subsystems/gr_c2_bundle.json",
+      "promotion_gate": "10% isolated wall improvement",
+      "observed_improvement_range": [
+        0.0427,
+        0.0509
+      ]
+    },
+    {
+      "id": "GR-C3",
+      "status": "promoted",
+      "change": "Use 128-thread geometry for gr_read_up.",
+      "artifact": "artifacts/perf/subsystems/gr_c3_up_geometry.json",
+      "bundle_artifact": "artifacts/perf/subsystems/gr_c3_bundle.json"
+    },
+    {
+      "id": "GR-C4",
+      "status": "promoted",
+      "change": "Fuse normalization/down, low-rank SiLU/up, branch preparation/merge, and injection/writeback.",
+      "artifact": "artifacts/perf/subsystems/gr_c4_bundle.json",
+      "launches_before": 9,
+      "launches_after": 6,
+      "explicit_host_syncs_before": 1,
+      "explicit_host_syncs_after": 1
+    }
+  ],
+  "final": {
+    "candidate": "GR-C4",
+    "isolated_median_us_range": [
+      62.256,
+      62.401
+    ],
+    "isolated_p95_us_range": [
+      63.73,
+      64.704
+    ],
+    "absolute_us_saved_vs_c3_range": [
+      16.207,
+      16.272
+    ],
+    "relative_improvement_range": [
+      0.206175,
+      0.207213
+    ],
+    "launches_before": 9,
+    "launches_after": 6,
+    "explicit_host_syncs_before": 1,
+    "explicit_host_syncs_after": 1,
+    "h2d_bytes_in_measurement": 0,
+    "d2h_bytes_in_measurement": 0
+  },
+  "correctness": {
+    "early_middle_late": "green",
+    "nan_inf": 0,
+    "max_abs": 0.00000476837158,
+    "max_rel": 0.0000213356,
+    "rmse_max": 0.000000896732212,
+    "tolerances": {
+      "max_abs": 0.0001,
+      "max_rel": 0.0001,
+      "rmse": 0.00001
+    },
+    "source_artifact": "artifacts/perf/subsystems/gr_c4_bundle.json"
+  },
+  "freeze_note": "GR_OPT_V1 is frozen. Do not modify the GR production path before the next authorized full-chain integration benchmark."
+}
