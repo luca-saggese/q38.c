@@ -45,6 +45,7 @@ typedef struct {
     bool platform;        /* --platform */
     bool disable_ple;     /* --disable-ple diagnostic */
     bool prefill_reference;
+    bool trace_state;     /* --trace-state / Q38_DIAGNOSTIC_STATE_TRACE */
     bool json;            /* --json */
     bool verbose;         /* --verbose */
 } q38_options;

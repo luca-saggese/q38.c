@@ -74,6 +74,15 @@ bool q38_session_eval(
     q38_decode_trace trace, void *trace_user, size_t *step_index,
     char *error, size_t error_len);
 
+bool q38_session_eval_timed(
+    q38_session *session, uint32_t token, float *logits,
+    size_t logits_stride, uint32_t *next_token,
+    q38_forward_diagnostics *diagnostics, q38_decode_trace_kind trace_kind,
+    uint32_t emitted_token, uint32_t consumed_token,
+    q38_decode_trace trace, void *trace_user, size_t *step_index,
+    q38_decode_timing *timing, q38_ple_scheduler_stats *ple_stats,
+    char *error, size_t error_len);
+
 bool q38_session_emit(
     const q38_session *session, const float *logits, uint32_t token,
     q38_decode_trace trace, void *trace_user, size_t *step_index,

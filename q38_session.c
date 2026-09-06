@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifndef Q38_SESSION_RUNTIME
 void q38_ngram_history_reset(q38_ngram_history *history) {
@@ -49,6 +50,13 @@ void q38_ngram_history_context(const q38_ngram_history *history,
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
     return false;
+}
+
+static double session_now_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    return (double)ts.tv_sec * 1000.0 +
+           (double)ts.tv_nsec / 1000000.0;
 }
 
 static void runtime_zero(q38_runtime *runtime) {
@@ -177,6 +185,20 @@ bool q38_session_eval(
     uint32_t emitted_token, uint32_t consumed_token,
     q38_decode_trace trace, void *trace_user, size_t *step_index,
     char *error, size_t error_len) {
+    return q38_session_eval_timed(
+        session, token, logits, logits_stride, next_token, diagnostics,
+        trace_kind, emitted_token, consumed_token, trace, trace_user,
+        step_index, NULL, NULL, error, error_len);
+}
+
+bool q38_session_eval_timed(
+    q38_session *session, uint32_t token, float *logits,
+    size_t logits_stride, uint32_t *next_token,
+    q38_forward_diagnostics *diagnostics, q38_decode_trace_kind trace_kind,
+    uint32_t emitted_token, uint32_t consumed_token,
+    q38_decode_trace trace, void *trace_user, size_t *step_index,
+    q38_decode_timing *timing, q38_ple_scheduler_stats *ple_stats,
+    char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
     if (!session || !session->runtime || !logits || !next_token ||
         !step_index)
@@ -187,20 +209,25 @@ bool q38_session_eval(
         diagnostics->backend_context = runtime_backend_context;
         diagnostics->backend_context_user = session->runtime->cuda;
     }
-    if (!q38_decode_step_with_matrix_moe_layer_backend(
+    const double started = session_now_ms();
+    if (!q38_decode_step_with_matrix_moe_layer_backend_timed(
             session->runtime->model, &session->runtime->weights,
             &session->state, token, logits, logits_stride, next_token,
             diagnostics, q38_forward_cuda_matvec_backend,
             q38_forward_cuda_matrix_backend, q38_forward_cuda_expert_backend,
             q38_forward_cuda_moe_layer_q2_backend, session->runtime->cuda,
             trace_kind, emitted_token, consumed_token, (*step_index)++,
-            trace, trace_user, error, error_len))
+            trace, trace_user, timing, error, error_len))
         return false;
     q38_ple_scheduler_stats ple = {0};
-    if (q38_forward_state_get_ple_prefetch_stats(&session->state, &ple) &&
-        ple.wait_ms > session->ple_wait_at_injection_ms)
-        session->ple_wait_at_injection_ms = ple.wait_ms;
-    return append_history(session, token, error, error_len);
+    if (q38_forward_state_get_ple_prefetch_stats(&session->state, &ple)) {
+        if (ple_stats) *ple_stats = ple;
+        if (ple.wait_ms > session->ple_wait_at_injection_ms)
+            session->ple_wait_at_injection_ms = ple.wait_ms;
+    }
+    const bool committed = append_history(session, token, error, error_len);
+    (void)started;
+    return committed;
 }
 
 bool q38_session_prefill_reference(

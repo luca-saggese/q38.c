@@ -41,6 +41,7 @@ static void usage(FILE *fp) {
         "  --ctx <n>                  Session context capacity (default: 8192)\n"
         "  --prefill-chunk <n>        CUDA prefill chunk size (default: 128)\n"
         "  --prefill-reference        Use serial prefill oracle\n"
+        "  --trace-state              Enable full semantic state snapshots\n"
         "  --max-tokens <n>           Maximum generated tokens (default: 256)\n"
         "  --disable-ple              Omit PLE output while retaining PLE state\n"
         "  --json                     Machine-readable output\n"
@@ -265,6 +266,10 @@ typedef struct {
     double last_generated_ms;
     double first_token_ms;
     double *per_token_ms;
+    double *per_token_forward_ms;
+    double *per_token_argmax_ms;
+    double *per_token_bookkeeping_ms;
+    double *per_token_ple_stall_ms;
     size_t per_token_capacity;
     size_t generated_seen;
     size_t prompt_seen;
@@ -293,6 +298,9 @@ typedef struct {
     q38_stage_account stages[Q38_STAGE_ACCOUNT_CAPACITY];
     size_t stage_count;
     double stage_accounted_ms;
+    double ple_stage_elapsed_ms;
+    q38_ple_scheduler_stats ple_stats;
+    bool ple_stats_valid;
     uint64_t telemetry_callbacks;
     uint64_t telemetry_allocations;
     uint64_t telemetry_syncs;
@@ -334,6 +342,12 @@ typedef struct {
     bool latest_ple_contribution_valid;
     bool latest_hidden_after_ple_valid;
     bool latest_final_hidden_valid;
+    bool diagnostic_state_valid;
+    uint64_t diagnostic_logits_hash;
+    uint64_t diagnostic_gdn_state_hash;
+    uint64_t diagnostic_conv_history_hash;
+    uint64_t diagnostic_ple_history_hash;
+    double diagnostic_trace_ms;
     q38_memory_tracker memory;
 } q38_generate_evidence;
 
@@ -479,7 +493,10 @@ static bool generate_stage_trace(const q38_forward_stage_usage *usage,
         account->scalar_rows += usage->scalar_rows;
         account->backend_declines += usage->backend_declines;
         account->elapsed_ms += usage->elapsed_ms;
-        evidence->stage_accounted_ms += usage->elapsed_ms;
+        if (strstr(account->name, "ple") != NULL)
+            evidence->ple_stage_elapsed_ms += usage->elapsed_ms;
+        else
+            evidence->stage_accounted_ms += usage->elapsed_ms;
     }
     return true;
 }
@@ -502,14 +519,18 @@ static void print_generate_instrumentation_json(
         return;
     }
     const double observed = generate_observed_forward_ms(evidence);
-    const double unattributed = observed > evidence->stage_accounted_ms
-        ? observed - evidence->stage_accounted_ms : 0.0;
+    const double critical_accounted = evidence->stage_accounted_ms +
+        (evidence->ple_stats_valid ? evidence->ple_stats.wait_ms : 0.0);
+    const double unattributed = observed > critical_accounted
+        ? observed - critical_accounted : 0.0;
     const double cpu_stage_ms = evidence->stage_accounted_ms >
         evidence->telemetry_kernel_ms + evidence->telemetry_host_wait_gpu_ms
         ? evidence->stage_accounted_ms - evidence->telemetry_kernel_ms -
           evidence->telemetry_host_wait_gpu_ms : 0.0;
     printf("\"instrumentation\":{\"observed_forward_ms\":%.6f,"
-           "\"stage_accounted_ms\":%.6f,\"unattributed_ms\":%.6f,"
+           "\"stage_accounted_ms\":%.6f,\"ple_stage_elapsed_ms\":%.6f,"
+           "\"ple_elapsed_ms\":%.6f,\"ple_overlap_ms\":%.6f,"
+           "\"ple_critical_stall_ms\":%.6f,\"unattributed_ms\":%.6f,"
            "\"gpu_busy_ms\":%.6f,"
            "\"cpu_waiting_on_gpu_estimate_ms\":%.6f,"
            "\"cpu_stage_orchestration_estimate_ms\":%.6f,"
@@ -519,7 +540,12 @@ static void print_generate_instrumentation_json(
            "\"h2d_bytes\":%" PRIu64 ",\"d2h_bytes\":%" PRIu64
            ",\"syncs\":%" PRIu64 ",\"allocations\":%" PRIu64
            ",\"weight_upload_bytes\":%" PRIu64 "},\"stages\":[",
-           observed, evidence->stage_accounted_ms, unattributed,
+           observed, evidence->stage_accounted_ms,
+           evidence->ple_stage_elapsed_ms,
+           evidence->ple_stats_valid ? evidence->ple_stats.elapsed_ms : 0.0,
+           evidence->ple_stats_valid ? evidence->ple_stats.overlap_ms : 0.0,
+           evidence->ple_stats_valid ? evidence->ple_stats.wait_ms : 0.0,
+           unattributed,
            evidence->telemetry_kernel_ms,
            evidence->telemetry_host_wait_gpu_ms, cpu_stage_ms,
            evidence->telemetry_callbacks, evidence->telemetry_dispatches,
@@ -624,6 +650,23 @@ static bool generate_trace(const q38_decode_step *step, void *opaque,
                            step->conv_history_stats.inf_count +
                            step->ple_history_stats.inf_count;
     sample_generate_memory(evidence, evidence->model_bytes);
+    return step->finite && step->logits_finite;
+}
+
+static bool generate_diagnostic_trace(const q38_decode_step *step,
+                                      void *opaque, char *error,
+                                      size_t error_len) {
+    q38_generate_evidence *evidence = opaque;
+    if (!evidence || !step) {
+        if (error && error_len)
+            snprintf(error, error_len, "invalid diagnostic state trace");
+        return false;
+    }
+    evidence->diagnostic_state_valid = true;
+    evidence->diagnostic_logits_hash = step->logits_hash;
+    evidence->diagnostic_gdn_state_hash = step->gdn_state_hash;
+    evidence->diagnostic_conv_history_hash = step->conv_history_hash;
+    evidence->diagnostic_ple_history_hash = step->ple_history_hash;
     return step->finite && step->logits_finite;
 }
 
@@ -859,6 +902,8 @@ static int cmd_generate_legacy(const q38_options *opt) {
             goto cleanup;
         }
     }
+    evidence.ple_stats_valid =
+        q38_forward_state_get_ple_prefetch_stats(&state, &evidence.ple_stats);
     sample_generate_memory(&evidence, model->size);
     if (!q38_tokenizer_decode(&tokenizer, generated, opt->max_tokens,
                               &generated_text, &generated_text_len, error,
@@ -1035,6 +1080,9 @@ static int cmd_generate(const q38_options *opt) {
     size_t generated_text_len = 0;
     size_t generated_count = 0;
     int rc = 1;
+    const bool trace_state = opt->trace_state ||
+        (getenv("Q38_DIAGNOSTIC_STATE_TRACE") &&
+         strcmp(getenv("Q38_DIAGNOSTIC_STATE_TRACE"), "0") != 0);
 
     if (!q38_runtime_init(&runtime, opt->model_path, opt->tokenizer_path,
                           error, sizeof(error)) ||
@@ -1067,8 +1115,22 @@ static int cmd_generate(const q38_options *opt) {
     evidence.per_token_capacity = generation_limit;
     evidence.per_token_ms = generation_limit
         ? calloc(generation_limit, sizeof(*evidence.per_token_ms)) : NULL;
+    evidence.per_token_forward_ms = generation_limit
+        ? calloc(generation_limit, sizeof(*evidence.per_token_forward_ms)) : NULL;
+    evidence.per_token_argmax_ms = generation_limit
+        ? calloc(generation_limit, sizeof(*evidence.per_token_argmax_ms)) : NULL;
+    evidence.per_token_bookkeeping_ms = generation_limit
+        ? calloc(generation_limit,
+                 sizeof(*evidence.per_token_bookkeeping_ms)) : NULL;
+    evidence.per_token_ple_stall_ms = generation_limit
+        ? calloc(generation_limit,
+                 sizeof(*evidence.per_token_ple_stall_ms)) : NULL;
     if (!generated || !logits ||
-        (generation_limit && !evidence.per_token_ms)) {
+        (generation_limit && (!evidence.per_token_ms ||
+                              !evidence.per_token_forward_ms ||
+                              !evidence.per_token_argmax_ms ||
+                              !evidence.per_token_bookkeeping_ms ||
+                              !evidence.per_token_ple_stall_ms))) {
         fprintf(stderr, "q38: generation/timing buffer allocation failed\n");
         goto cleanup;
     }
@@ -1088,26 +1150,29 @@ static int cmd_generate(const q38_options *opt) {
     q38_forward_diagnostics diagnostics;
     memset(&diagnostics, 0, sizeof(diagnostics));
     diagnostics.stage_trace = generate_stage_trace;
-    diagnostics.boundary_trace = generate_boundary_trace;
+    diagnostics.boundary_trace = trace_state ? generate_boundary_trace : NULL;
     diagnostics.trace_user = &evidence;
     diagnostics.disable_ple = opt->disable_ple;
     size_t step_index = 0;
     uint32_t next_token = runtime.tokenizer.eos_id;
     const double prefill_started = monotonic_ms();
+    q38_decode_trace state_trace = trace_state ? generate_trace : NULL;
+    void *state_trace_user = trace_state ? &evidence : NULL;
     const bool prefill_ok = opt->prefill_reference
         ? q38_session_prefill_reference(
               &session, prompt.tokens, prompt.token_count, logits,
               Q38_DECODE_VOCAB_SIZE, &next_token, &diagnostics,
-              generate_trace, &evidence, &step_index, error, sizeof(error))
+              state_trace, state_trace_user, &step_index, error, sizeof(error))
         : q38_session_prefill_chunked(
               &session, prompt.tokens, prompt.token_count, opt->prefill_chunk,
               logits, Q38_DECODE_VOCAB_SIZE, &next_token, &diagnostics,
-              generate_trace, &evidence, &step_index, error, sizeof(error));
+              state_trace, state_trace_user, &step_index, error, sizeof(error));
     if (!prefill_ok) {
         fprintf(stderr, "q38: prefill: %s\n", error);
         goto cleanup;
     }
     evidence.prefill_ms = monotonic_ms() - prefill_started;
+    evidence.first_token_ms = evidence.prefill_ms;
 
     if (!opt->json && generation_limit) {
         fputs("stream: ", stdout);
@@ -1116,8 +1181,9 @@ static int cmd_generate(const q38_options *opt) {
     if (generation_limit) {
         generated[0] = next_token;
         generated_count = 1;
-        if (!q38_session_emit(&session, logits, next_token, generate_trace,
-                              &evidence, &step_index, error, sizeof(error)) ||
+        if (!q38_session_emit(&session, logits, next_token, state_trace,
+                              state_trace_user, &step_index, error,
+                              sizeof(error)) ||
             (!opt->json &&
              !q38_session_stream_token(&session, next_token, stream_piece,
                                         NULL, error, sizeof(error)))) {
@@ -1128,14 +1194,29 @@ static int cmd_generate(const q38_options *opt) {
                generated[generated_count - 1] !=
                    q38_session_eos_token(&session)) {
             const uint32_t input = generated[generated_count - 1];
-            if (!q38_session_eval(
+            q38_decode_timing step_timing = {0};
+            q38_ple_scheduler_stats step_ple = {0};
+            const double eval_started = monotonic_ms();
+            if (!q38_session_eval_timed(
                     &session, input, logits, Q38_DECODE_VOCAB_SIZE,
                     &next_token, &diagnostics,
                     Q38_DECODE_TRACE_GENERATED_CONSUME, next_token, input,
-                    generate_trace, &evidence, &step_index, error,
-                    sizeof(error))) {
+                    state_trace, state_trace_user, &step_index, &step_timing,
+                    &step_ple, error, sizeof(error))) {
                 fprintf(stderr, "q38: decode: %s\n", error);
                 goto cleanup;
+            }
+            const double eval_wall = monotonic_ms() - eval_started;
+            if (generated_count < evidence.per_token_capacity) {
+                evidence.per_token_ms[generated_count] = eval_wall;
+                evidence.per_token_forward_ms[generated_count] =
+                    step_timing.forward_core_ms;
+                evidence.per_token_argmax_ms[generated_count] =
+                    step_timing.argmax_ms;
+                evidence.per_token_bookkeeping_ms[generated_count] =
+                    eval_wall - step_timing.total_ms;
+                evidence.per_token_ple_stall_ms[generated_count] =
+                    step_ple.wait_ms;
             }
             generated[generated_count++] = next_token;
             if (!opt->json &&
@@ -1147,8 +1228,18 @@ static int cmd_generate(const q38_options *opt) {
         }
         if (!opt->json) putchar('\n');
     }
+    evidence.generated_seen = generated_count;
+    if (generated_count) {
+        const double diagnostic_started = monotonic_ms();
+        if (!q38_session_emit(
+                &session, logits, generated[generated_count - 1],
+                generate_diagnostic_trace, &evidence, &step_index, error,
+                sizeof(error)))
+            goto cleanup;
+        evidence.diagnostic_trace_ms = monotonic_ms() - diagnostic_started;
+    }
 
-    if (prompt.token_count == 5 && prompt.tokens[0] == 17 &&
+    if (trace_state && prompt.token_count == 5 && prompt.tokens[0] == 17 &&
         prompt.tokens[1] == 478 && prompt.tokens[2] == 220 &&
         prompt.tokens[3] == 17 && prompt.tokens[4] == 283 &&
         opt->max_tokens == 2 && generated_count == 2) {
@@ -1167,6 +1258,9 @@ static int cmd_generate(const q38_options *opt) {
         }
     }
 
+    evidence.ple_stats_valid =
+        q38_forward_state_get_ple_prefetch_stats(
+            &session.state, &evidence.ple_stats);
     sample_generate_memory(&evidence, runtime.model->size);
     if (generated_count) {
         if (!q38_tokenizer_decode(&runtime.tokenizer, generated,
@@ -1223,6 +1317,20 @@ static int cmd_generate(const q38_options *opt) {
                evidence.first_token_ms);
         for (size_t i = 0; i < generated_count; ++i)
             printf("%s%.6f", i ? "," : "", evidence.per_token_ms[i]);
+        printf("],\"forward_core\":[");
+        for (size_t i = 0; i < generated_count; ++i)
+            printf("%s%.6f", i ? "," : "", evidence.per_token_forward_ms[i]);
+        printf("],\"argmax\":[");
+        for (size_t i = 0; i < generated_count; ++i)
+            printf("%s%.6f", i ? "," : "", evidence.per_token_argmax_ms[i]);
+        printf("],\"bookkeeping\":[");
+        for (size_t i = 0; i < generated_count; ++i)
+            printf("%s%.6f", i ? "," : "",
+                   evidence.per_token_bookkeeping_ms[i]);
+        printf("],\"ple_critical_stall\":[");
+        for (size_t i = 0; i < generated_count; ++i)
+            printf("%s%.6f", i ? "," : "",
+                   evidence.per_token_ple_stall_ms[i]);
         printf("]},\"memory\":{\"cuda_total_bytes\":%" PRIu64
                ",\"cuda_free_initial_bytes\":%" PRIu64
                ",\"cuda_free_min_bytes\":%" PRIu64
@@ -1241,7 +1349,21 @@ static int cmd_generate(const q38_options *opt) {
                evidence.backend_rows, evidence.scalar_rows,
                evidence.backend_declines);
         print_generate_instrumentation_json(&evidence);
-        puts("}");
+        printf(",\"trace_state_enabled\":%s,\"diagnostic_state\":",
+               trace_state ? "true" : "false");
+        if (!evidence.diagnostic_state_valid) {
+            puts("null}");
+        } else {
+            printf("{\"trace_ms\":%.6f,\"logits_hash\":\"%016" PRIx64
+                   "\",\"gdn_state_hash\":\"%016" PRIx64
+                   "\",\"conv_history_hash\":\"%016" PRIx64
+                   "\",\"ple_history_hash\":\"%016" PRIx64 "\"}}\n",
+                   evidence.diagnostic_trace_ms,
+                   evidence.diagnostic_logits_hash,
+                   evidence.diagnostic_gdn_state_hash,
+                   evidence.diagnostic_conv_history_hash,
+                   evidence.diagnostic_ple_history_hash);
+        }
     } else {
         printf("prompt tokens:       %u\n", prompt.token_count);
         printf("generated tokens:    %zu\n", generated_count);
@@ -1258,6 +1380,8 @@ static int cmd_generate(const q38_options *opt) {
                "decode median:      %.3f ms/token\n"
                "decode p95:         %.3f ms/token\n"
                "generation speed:   %.3f tok/s\n"
+               "trace-state:        %s\n"
+               "diagnostic trace:   %.3f ms (outside timed region)\n"
                "PLE wait-at-injection: %.3f ms\n"
                "non-PLE upload:     %" PRIu64 " bytes\n"
                "non-PLE misses:     %" PRIu64 "\n"
@@ -1267,7 +1391,9 @@ static int cmd_generate(const q38_options *opt) {
                ", scalar_rows=%" PRIu64 ", declines=%" PRIu64 ")\n",
                generated_text, evidence.prefill_ms, prefill_tps,
                evidence.first_token_ms, decode_median, decode_p95,
-               generation_tps, session.ple_wait_at_injection_ms,
+               generation_tps, trace_state ? "enabled" : "disabled",
+               evidence.diagnostic_trace_ms,
+               session.ple_wait_at_injection_ms,
                evidence.non_ple_upload_bytes,
                evidence.non_ple_residency_misses, peak_cuda_allocated,
                nan_inf ? "present" : "none", evidence.nan_count,
@@ -1280,6 +1406,10 @@ static int cmd_generate(const q38_options *opt) {
 cleanup:
     free(generated_text);
     free(evidence.per_token_ms);
+    free(evidence.per_token_forward_ms);
+    free(evidence.per_token_argmax_ms);
+    free(evidence.per_token_bookkeeping_ms);
+    free(evidence.per_token_ple_stall_ms);
     free(generated);
     free(logits);
     q38_token_batch_free(&prompt);
@@ -1329,6 +1459,8 @@ int main(int argc, char **argv) {
                 opt.prefill_chunk = (size_t)strtoull(argv[++i], NULL, 10);
         } else if (strcmp(a, "--prefill-reference") == 0) {
             opt.prefill_reference = true;
+        } else if (strcmp(a, "--trace-state") == 0) {
+            opt.trace_state = true;
         } else if (strcmp(a, "--disable-ple") == 0) {
             opt.disable_ple = true;
         } else if (strcmp(a, "--json") == 0) {
