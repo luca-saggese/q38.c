@@ -368,6 +368,12 @@ static bool run_complete(Device *device, const Fixture &fixture,
             logits.data(), &route, effective, pre_weights, effective_weights,
             nullptr, 0))
         return false;
+    for (size_t k = 0; k < Q38_MOE_TOP_K; ++k)
+        if (route.expert[k] != fixture.selected_experts[k] ||
+            std::abs(route.weight[k] - fixture.selected_weights[k]) > 1e-5f) {
+            *error = "GPU router selection disagrees with fixture metadata";
+            return false;
+        }
     if (!cuda_ok(cudaMemcpyAsync(device->hidden, fixture.hidden.data(),
                                  kHiddenBytes, cudaMemcpyHostToDevice,
                                  device->stream),
