@@ -2,7 +2,7 @@
   "format": "q38-gr-opt-v1",
   "status": "frozen",
   "subsystem": "GR",
-  "production_commit": "d5d4133a8",
+  "production_commit": "9b95ea14f",
   "scope": "isolated_fixture_only",
   "full_model_load": false,
   "full_chain_benchmark": false,
@@ -95,6 +95,8 @@
   ],
   "final": {
     "candidate": "GR-C4",
+    "production_integrated": true,
+    "production_backend": "q38_forward_cuda_gr_read_backend/q38_forward_cuda_gr_write_backend",
     "isolated_median_us_range": [
       62.256,
       62.401
