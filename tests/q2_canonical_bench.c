@@ -640,7 +640,7 @@ static void print_sample(const q2_sample *sample);
 static void print_decode_run(const q2_decode_run *run,
                              const q2_options *options) {
     if (!run || !options) return;
-    printf("{\"summary\":");
+    printf("\"summary\":");
     print_sample(&run->summary);
     printf(",\"generated_ids\":");
     print_ids(run->generated, options->generated_count);

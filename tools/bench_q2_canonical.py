@@ -421,7 +421,7 @@ def normalize_reference0(raw: dict[str, object],
             "logits_hash": case["measured_runs"][0]["logits_hash"],
             "correctness": {
                 "green": raw["correctness"]["prefill"] and
-                all(run["nan_inf"] == "false"
+                all(run["nan_inf"] is False
                     for run in case["measured_runs"]),
                 "state_equivalent": all(
                     run["logits_hash"] == case["measured_runs"][0]["logits_hash"]
