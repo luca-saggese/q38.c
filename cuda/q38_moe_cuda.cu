@@ -202,7 +202,7 @@ __global__ static void q2_grouped_gate_up_kernel(
     const float up = q2_dot_row_warp(
         expert_weights, hidden, Q38_MOE_INTERMEDIATE + row, lane);
     if (lane == 0)
-        mid[expert * Q38_MOE_INTERMEDIATE + row] =
+        mid[expert_slot * Q38_MOE_INTERMEDIATE + row] =
             (gate / (1.0f + expf(-gate))) * up;
 }
 
@@ -222,7 +222,7 @@ __global__ static void q2_grouped_down_weighted_kernel(
     float value = 0.0f;
     for (size_t i = 0; i < Q38_MOE_INTERMEDIATE; ++i)
         value += q2_value(expert_weights, i, d, 10) * expert_mid[i];
-    atomicAdd(output + d, route_weights[expert] * value);
+    atomicAdd(output + d, route_weights[expert_slot] * value);
 }
 
 extern "C" bool q38_moe_cuda_q2_gate_up_candidate(
