@@ -193,6 +193,13 @@ static const char *subsystem_for_stage(const char *stage) {
     return "unknown";
 }
 
+static bool is_gr_projection_stage(const char *stage) {
+    return stage &&
+           (!strcmp(stage, "gr_read_down") ||
+            !strcmp(stage, "gr_read_up") ||
+            !strcmp(stage, "gr_write_inject"));
+}
+
 static void copy_tensor_name(const q38_tensor *tensor, char *out,
                              size_t out_len) {
     if (!out || !out_len) return;
@@ -271,70 +278,6 @@ static double host_now_ms(void) {
 static float event_elapsed(cudaEvent_t start, cudaEvent_t stop) {
     float ms = 0.0f;
     return cudaEventElapsedTime(&ms, start, stop) == cudaSuccess ? ms : 0.0f;
-}
-
-__device__ static float batch_q2_value(
-    const q38_q2_k_block *weights, size_t row, size_t column,
-    size_t blocks_per_row) {
-    const size_t element = column % 256;
-    const q38_q2_k_block *block =
-        weights + row * blocks_per_row + column / 256;
-    const size_t half = element / 128;
-    const size_t within = element % 128;
-    const size_t group = within / 16;
-    const size_t l = within % 16;
-    const unsigned shift = (unsigned)((group / 2) * 2);
-    const uint8_t scale = block->scales[half * 8 + group];
-    const size_t qindex = half * 32 + (group & 1) * 16 + l;
-    const float d = __half2float(*reinterpret_cast<const __half *>(&block->d));
-    const float m =
-        __half2float(*reinterpret_cast<const __half *>(&block->dmin));
-    return d * (scale & 0xf) * ((block->qs[qindex] >> shift) & 3) -
-           m * ((scale >> 4) & 0xf);
-}
-
-struct q38_q8_0_block {
-    uint16_t d;
-    int8_t qs[32];
-};
-
-__device__ static float batch_weight_value(
-    uint32_t type, const void *weights, size_t row, size_t column,
-    size_t cols) {
-    if (type == 30) {
-        const uint16_t *values = (const uint16_t *)weights;
-        const uint16_t bits = values[row * cols + column];
-        return __int_as_float((int)((uint32_t)bits << 16));
-    }
-    if (type == 0)
-        return ((const float *)weights)[row * cols + column];
-    if (type == 10)
-        return batch_q2_value((const q38_q2_k_block *)weights, row, column,
-                              cols / 256);
-    if (type == 8) {
-        const q38_q8_0_block *blocks =
-            (const q38_q8_0_block *)weights;
-        const q38_q8_0_block *block =
-            blocks + row * (cols / 32) + column / 32;
-        return __half2float(*reinterpret_cast<const __half *>(&block->d)) *
-               (float)block->qs[column % 32];
-    }
-    return 0.0f;
-}
-
-__global__ static void matrix_batch_kernel(
-    uint32_t type, const void *weights, const float *input,
-    size_t token_count, size_t rows, size_t cols, float *output) {
-    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    const size_t total = token_count * rows;
-    if (index >= total) return;
-    const size_t token = index / rows;
-    const size_t row = index % rows;
-    float sum = 0.0f;
-    for (size_t column = 0; column < cols; ++column)
-        sum += batch_weight_value(type, weights, row, column, cols) *
-               input[token * cols + column];
-    output[index] = sum;
 }
 
 static void emit_telemetry(q38_forward_cuda_context *context,
@@ -754,17 +697,12 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     }
     context->persistent_expected_tensors = count;
     context->persistent_expected_bytes = total;
-    size_t free_bytes = 0, total_bytes = 0;
-    const bool forced = getenv("Q38_FORCE_ALL_NON_PLE_RESIDENCY") != NULL;
-    if (!forced && cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess &&
-        free_bytes && total > free_bytes) {
-        if (error && error_len)
-            snprintf(error, error_len,
-                     "insufficient CUDA memory for all-non-PLE residency "
-                     "(need=%zu free=%zu total=%zu)", total, free_bytes,
-                     total_bytes);
-        return false;
-    }
+    /*
+     * On unified-memory systems, cudaMemGetInfo() reports immediately free
+     * device pages and excludes reclaimable host page cache.  Do not reject
+     * residency based on that snapshot; the actual cudaMalloc calls below
+     * remain the authoritative allocation gate.
+     */
     persistent_tensor *entries =
         (persistent_tensor *)calloc(count ? count : 1, sizeof(*entries));
     if (!entries) return fail(error, error_len, "all-non-PLE residency index allocation failed");
@@ -1513,14 +1451,22 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
         cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
         return fail(error, error_len, "CUDA batched matrix upload failed");
     }
-    const unsigned blocks = (unsigned)((token_count * rows + 255u) / 256u);
-    matrix_batch_kernel<<<blocks, 256, 0, context->stream>>>(
-        tensor->type, exec->ptr, context->device_input, token_count, rows,
-        cols, context->device_output);
-    if (cudaGetLastError() != cudaSuccess) {
+    const bool gr_bf16_candidate =
+        token_count == 1 && tensor->type == 30 &&
+        is_gr_projection_stage(context->current_stage);
+    const bool launched = gr_bf16_candidate
+        ? q38_cuda_bf16_matvec(
+              (const uint16_t *)exec->ptr, rows, cols,
+              context->device_input, context->device_output, context->stream,
+              error, error_len)
+        : q38_cuda_matrix_batch_generic(
+              tensor->type, exec->ptr, context->device_input, token_count,
+              rows, cols, context->device_output, context->stream, error,
+              error_len);
+    if (!launched) {
         cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
         cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
-        return fail(error, error_len, "CUDA batched matrix kernel failed");
+        return false;
     }
     if (context->current_stage &&
         (!strcmp(context->current_stage, "qsa_output_projection") ||
@@ -1628,24 +1574,36 @@ extern "C" bool q38_forward_cuda_qsa_qkv_backend(
     float *device_q = context->device_qsa_output;
     float *device_k = device_q + q_elements;
     float *device_v = device_k + k_elements;
-    if (cudaMemcpyAsync(context->device_qsa_input, host_input, input_bytes,
-                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
-        (context->qsa_candidate
-             ? context->qsa_candidate(
-                   q_exec->ptr, k_exec->ptr, v_exec->ptr,
-                   context->device_qsa_input, device_q, device_k, device_v,
-                   token_count, q_cols, (void *)context->stream) != 0
-             : q38_qsa_cuda_project_main(
-                   (const uint16_t *)q_exec->ptr, q_rows,
-                   (const uint16_t *)k_exec->ptr, k_rows,
-                   (const uint16_t *)v_exec->ptr, v_rows, q_cols,
-                   context->device_qsa_input, token_count, device_q, device_k,
-                   device_v, context->stream, error, error_len)) ||
-        cudaMemcpyAsync(context->host_qsa_output, context->device_qsa_output,
-                        output_bytes, cudaMemcpyDeviceToHost,
-                        context->stream) != cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
-        return fail(error, error_len, "QSA QKV CUDA execution failed");
+    bool projection_ok = cudaMemcpyAsync(
+                            context->device_qsa_input, host_input, input_bytes,
+                            cudaMemcpyHostToDevice, context->stream) ==
+                        cudaSuccess;
+    if (projection_ok) {
+        projection_ok = context->qsa_candidate
+            ? context->qsa_candidate(
+                  q_exec->ptr, k_exec->ptr, v_exec->ptr,
+                  context->device_qsa_input, device_q, device_k, device_v,
+                  token_count, q_cols, (void *)context->stream) == 0
+            : q38_qsa_cuda_project_main(
+                  (const uint16_t *)q_exec->ptr, q_rows,
+                  (const uint16_t *)k_exec->ptr, k_rows,
+                  (const uint16_t *)v_exec->ptr, v_rows, q_cols,
+                  context->device_qsa_input, token_count, device_q, device_k,
+                  device_v, context->stream, error, error_len);
+    }
+    if (projection_ok)
+        projection_ok = cudaMemcpyAsync(
+                            context->host_qsa_output, context->device_qsa_output,
+                            output_bytes, cudaMemcpyDeviceToHost,
+                            context->stream) == cudaSuccess;
+    if (projection_ok)
+        projection_ok = cudaStreamSynchronize(context->stream) == cudaSuccess;
+    if (!projection_ok) {
+        if (error && error_len && error[0] == '\0')
+            snprintf(error, error_len, "QSA QKV CUDA execution failed: %s",
+                     cudaGetErrorString(cudaGetLastError()));
+        return false;
+    }
 
     memcpy(host_q, context->host_qsa_output, q_elements * sizeof(float));
     memcpy(host_k, context->host_qsa_output + q_elements,

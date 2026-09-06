@@ -11,7 +11,8 @@ optimization history.
   and **1.692 tok/s**.
 - GR optimization starts from the isolated baseline in
   `artifacts/perf/subsystems/gr_reference.json`.
-- No GR optimization has been promoted yet.
+- GR-C1 has passed the model-free projection gates; no full-chain speedup has
+  been claimed or used to modify Reference 0.
 
 The full-chain Reference 0 benchmark must not be rerun for a GR candidate
 until the candidate passes all isolated gates.
@@ -45,6 +46,7 @@ tests/gr/
   gr_reference.c/.h       independent production-semantics oracle
   gr_extract_fixtures.c   compact BF16-to-F32 fixture extractor
   gr_bench.cu             isolated CUDA baseline benchmark
+  gr_c1_bench.cu          generic-vs-cooperative BF16 projection benchmark
   test_m3_gr_ref.c        historical scalar smoke/golden test
   test_m3_gr_cuda.cu      historical CUDA golden test
   test_m3_gr_binding.c    production tensor binding test
@@ -68,6 +70,7 @@ edit
   -> make test-gr (or the smallest relevant target)
   -> make gr-fixtures
   -> make gr-bench
+  -> make gr-c1-bench when changing projection dispatch
   -> inspect correctness and decomposition
   -> only then consider a full-chain benchmark
 ```

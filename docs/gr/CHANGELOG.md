@@ -45,6 +45,42 @@ The dominant isolated stage is the down projection at approximately
 71–74% of the measured GR kernel span. This is an observation only; no
 kernel or mathematical optimization has been applied.
 
+## 2026-09-06 — GR-C1
+
+- **Hypothesis:** decode-time GR projections were routed through the generic
+  `matrix_batch_kernel` even when `token_count == 1`.
+- **Production change:** BF16 GR projection stages
+  `gr_read_down`, `gr_read_up`, and `gr_write_inject` now use the existing
+  cooperative BF16 matvec kernel. All other matrix-batch calls retain the
+  generic fallback.
+- **Files changed:** `cuda/q38_forward_cuda.cu`,
+  `cuda/q38_cuda_primitives.cu`, `q38_cuda_primitives.h`.
+- **Isolated command:** `make gr-c1-bench`.
+- **Artifact:** `artifacts/perf/subsystems/gr_c1_projection.json`.
+- **Correctness:** all early/middle/late projection fixtures passed; no
+  non-finite values; maximum candidate absolute error was `2.06e-4`.
+- **Traffic/sync deltas:** timed projection loops keep H2D/D2H outside the
+  measurement window; the candidate adds no host synchronization or transfer.
+
+### GR-C1 projection results
+
+| Fixture | Projection | Generic median | Candidate median | Improvement |
+|---|---|---:|---:|---:|
+| early | down | 1114.46 us | 12.77 us | 98.85% |
+| early | up | 39.36 us | 31.17 us | 20.81% |
+| early | inject | 231.87 us | 4.51 us | 98.05% |
+| middle | down | 1114.53 us | 12.74 us | 98.86% |
+| middle | up | 39.33 us | 31.14 us | 20.83% |
+| middle | inject | 231.90 us | 4.54 us | 98.04% |
+| late | down | 1114.50 us | 12.77 us | 98.85% |
+| late | up | 39.36 us | 31.17 us | 20.81% |
+| late | inject | 231.87 us | 4.54 us | 98.04% |
+
+The summed projection component improves from approximately `1385.7 us` to
+`48.4 us` per fixture. This is a model-free projection result, not a
+full-chain speedup claim. The canonical full-chain benchmark and Reference 0
+remain unchanged.
+
 ## Candidate entry template
 
 ```text

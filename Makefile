@@ -179,6 +179,7 @@ tests/test_residency: tests/test_residency.c q38_residency.o \
 
 GR_FIXTURE_DIR := tests/fixtures/gr
 GR_REFERENCE_ARTIFACT := artifacts/perf/subsystems/gr_reference.json
+GR_C1_ARTIFACT := artifacts/perf/subsystems/gr_c1_projection.json
 GR_BINDING_OBJS := q38_gguf.o q38_weights.o q38_model_config.o q38_ple.o \
 	q38_residency.o q38_quant.o q38_qsa.o
 
@@ -208,6 +209,12 @@ tests/gr/gr_bench: tests/gr/gr_bench.o tests/gr/gr_reference.o q38_gr.o
 tests/gr/gr_bench.o: tests/gr/gr_bench.cu tests/gr/gr_reference.h
 	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
 
+tests/gr/gr_c1_bench: tests/gr/gr_c1_bench.o q38_cuda_primitives.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
+
+tests/gr/gr_c1_bench.o: tests/gr/gr_c1_bench.cu q38_cuda_primitives.h
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
 gr-fixtures: tests/gr/gr_extract_fixtures
 	@mkdir -p $(GR_FIXTURE_DIR)
 	@./tests/gr/gr_extract_fixtures \
@@ -217,8 +224,12 @@ gr-bench: tests/gr/gr_bench gr-fixtures
 	@mkdir -p artifacts/perf/subsystems
 	@./tests/gr/gr_bench "$(GR_FIXTURE_DIR)" "$(GR_REFERENCE_ARTIFACT)"
 
+gr-c1-bench: tests/gr/gr_c1_bench gr-fixtures
+	@mkdir -p artifacts/perf/subsystems
+	@./tests/gr/gr_c1_bench "$(GR_FIXTURE_DIR)" "$(GR_C1_ARTIFACT)"
+
 test-gr: tests/gr/test_m3_gr_ref tests/gr/test_m3_gr_binding \
-		tests/gr/test_m3_gr_cuda gr-bench
+		tests/gr/test_m3_gr_cuda gr-bench gr-c1-bench
 	@./tests/gr/test_m3_gr_ref
 	@./tests/gr/test_m3_gr_binding "$(Q2_CANONICAL_MODEL)"
 	@set +e; ./tests/gr/test_m3_gr_cuda; status=$$?; \

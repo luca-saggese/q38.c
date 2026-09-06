@@ -34,6 +34,10 @@ bool q38_cuda_bf16_matvec_configured(
     const uint16_t *weights, size_t rows, size_t cols, const float *input,
     float *output, unsigned threads, cudaStream_t stream, char *error,
     size_t error_len);
+bool q38_cuda_matrix_batch_generic(
+    uint32_t type, const void *weights, const float *input,
+    size_t token_count, size_t rows, size_t cols, float *output,
+    cudaStream_t stream, char *error, size_t error_len);
 
 #ifdef __cplusplus
 }

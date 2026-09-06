@@ -332,3 +332,97 @@ extern "C" bool q38_cuda_bf16_matvec_configured(
     }
     return true;
 }
+
+struct q38_cuda_q8_0_block {
+    uint16_t d;
+    int8_t qs[32];
+};
+
+__device__ static float matrix_batch_q2_value(
+    const q38_q2_k_block *weights, size_t row, size_t column,
+    size_t blocks_per_row) {
+    const size_t element = column % 256;
+    const q38_q2_k_block *block =
+        weights + row * blocks_per_row + column / 256;
+    const size_t half = element / 128;
+    const size_t within = element % 128;
+    const size_t group = within / 16;
+    const size_t l = within % 16;
+    const unsigned shift = (unsigned)((group / 2) * 2);
+    const uint8_t scale = block->scales[half * 8 + group];
+    const size_t qindex = half * 32 + (group & 1) * 16 + l;
+    const float d = half_to_float_device(block->d);
+    const float m = half_to_float_device(block->dmin);
+    return d * (scale & 0xf) * ((block->qs[qindex] >> shift) & 3) -
+           m * ((scale >> 4) & 0xf);
+}
+
+__device__ static float matrix_batch_weight_value(
+    uint32_t type, const void *weights, size_t row, size_t column,
+    size_t cols) {
+    if (type == 30) {
+        const uint16_t *values = (const uint16_t *)weights;
+        const uint16_t bits = values[row * cols + column];
+        return __int_as_float((int)((uint32_t)bits << 16));
+    }
+    if (type == 0)
+        return ((const float *)weights)[row * cols + column];
+    if (type == 10)
+        return matrix_batch_q2_value(
+            (const q38_q2_k_block *)weights, row, column, cols / 256);
+    if (type == 8) {
+        const q38_cuda_q8_0_block *blocks =
+            (const q38_cuda_q8_0_block *)weights;
+        const q38_cuda_q8_0_block *block =
+            blocks + row * (cols / 32) + column / 32;
+        return half_to_float_device(block->d) *
+               (float)block->qs[column % 32];
+    }
+    return 0.0f;
+}
+
+__global__ static void matrix_batch_generic_kernel(
+    uint32_t type, const void *weights, const float *input,
+    size_t token_count, size_t rows, size_t cols, float *output) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t total = token_count * rows;
+    if (index >= total) return;
+    const size_t token = index / rows;
+    const size_t row = index % rows;
+    float sum = 0.0f;
+    for (size_t column = 0; column < cols; ++column)
+        sum += matrix_batch_weight_value(
+            type, weights, row, column, cols) *
+               input[token * cols + column];
+    output[index] = sum;
+}
+
+extern "C" bool q38_cuda_matrix_batch_generic(
+    uint32_t type, const void *weights, const float *input,
+    size_t token_count, size_t rows, size_t cols, float *output,
+    cudaStream_t stream, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!weights || !input || !output || !token_count || !rows || !cols ||
+        (type != 0 && type != 8 && type != 10 && type != 30)) {
+        set_error(error, error_len, "invalid CUDA generic matrix batch arguments");
+        return false;
+    }
+    if (token_count > SIZE_MAX / rows ||
+        token_count * rows > SIZE_MAX / sizeof(float)) {
+        set_error(error, error_len, "CUDA generic matrix batch size overflow");
+        return false;
+    }
+    const size_t total = token_count * rows;
+    matrix_batch_generic_kernel<<<
+        (unsigned)((total + 255u) / 256u), 256, 0, stream>>>(
+            type, weights, input, token_count, rows, cols, output);
+    const cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) {
+        if (error && error_len)
+            snprintf(error, error_len,
+                     "CUDA generic matrix batch launch failed: %s",
+                     cudaGetErrorString(status));
+        return false;
+    }
+    return true;
+}
