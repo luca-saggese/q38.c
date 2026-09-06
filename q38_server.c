@@ -48,6 +48,7 @@ typedef struct {
     char *tool_id;
     char *tool_name;
     pthread_mutex_t stream_mutex;
+    volatile bool cancelled;
     q38_server_usage usage;
     char error[256];
 } generation_context;
@@ -504,9 +505,17 @@ static bool collect_event(const q38_server_event *event, void *user,
         pthread_mutex_lock(&context->stream_mutex);
         sent = stream_event_json(context, event);
         pthread_mutex_unlock(&context->stream_mutex);
-        if (!sent) return set_error(error, error_len, "client disconnected");
+        if (!sent) {
+            context->cancelled = true;
+            return set_error(error, error_len, "client disconnected");
+        }
     }
     return true;
+}
+
+static bool generation_cancelled(void *user) {
+    generation_context *context = user;
+    return context && context->cancelled;
 }
 
 typedef struct {
@@ -657,6 +666,8 @@ static bool handle_generation(q38_server *server, int fd,
     context.request = request;
     context.stream = request->stream;
     context.error[0] = '\0';
+    request->cancelled = generation_cancelled;
+    request->cancel_user = &context;
     snprintf(context.id, sizeof(context.id), "q38-%llu",
              (unsigned long long)server->next_request_id++);
     if (request->stream) {
@@ -704,8 +715,8 @@ static bool handle_generation(q38_server *server, int fd,
                 pthread_mutex_unlock(&context.stream_mutex);
                 pthread_mutex_lock(&job.state_mutex);
                 if (!sent) {
+                    context.cancelled = true;
                     pthread_mutex_unlock(&job.state_mutex);
-                    pthread_cancel(worker);
                     pthread_join(worker, NULL);
                     pthread_cond_destroy(&job.condition);
                     pthread_mutex_destroy(&job.state_mutex);

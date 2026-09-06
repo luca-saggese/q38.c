@@ -60,6 +60,9 @@ q38: $(PRODUCTION_OBJS)
 SERVER_OBJS := q38_server.o q38_server_protocol.o q38_server_engine_mock.o \
 	q38_server_engine.o q38_json.o q38_kvstore.o
 
+q38_server.o q38_server_engine.o q38_server_engine_mock.o \
+q38_server_protocol.o q38_kvstore.o: q38_server_engine.h
+
 q38-server: q38_server_main.o $(SERVER_OBJS)
 	$(CC) $(CFLAGS) -o $@ q38_server_main.o $(SERVER_OBJS)
 

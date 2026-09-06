@@ -28,7 +28,10 @@ int main(void) {
             "{\"type\":\"text\",\"text\":\"hello\"},"
             "{\"type\":\"image_url\",\"image_url\":"
               "{\"url\":\"data:image/png;base64,AAAA\"}}"
-          "]}"
+          "]},"
+          "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call-1\","
+            "\"type\":\"function\",\"function\":{\"name\":\"weather\","
+            "\"arguments\":\"{\\\"city\\\":\\\"Rome\\\"}\"}}]}"
         "],"
         "\"tools\":[{\"type\":\"function\",\"function\":{"
           "\"name\":\"weather\",\"description\":\"forecast\","
@@ -40,12 +43,16 @@ int main(void) {
               Q38_SERVER_ENDPOINT_CHAT_COMPLETIONS, chat, &request,
               error, sizeof(error)), error);
     check(request.api == Q38_SERVER_API_OPENAI, "OpenAI API selection");
-    check(request.messages.count == 2, "chat message count");
+    check(request.messages.count == 3, "chat message count");
     check(request.messages.items[1].image_count == 1, "data URI image");
     check(request.has_image, "image capability marker");
     check(request.tools.count == 1 &&
               !strcmp(request.tools.items[0].name, "weather"),
           "function tool parsing");
+    check(request.messages.items[2].tool_calls.count == 1 &&
+              !strcmp(request.messages.items[2].tool_calls.items[0].id,
+                      "call-1"),
+          "OpenAI tool-call history parsing");
     check(request.stream && request.max_tokens == 32, "common options");
     q38_server_request_free(&request);
 

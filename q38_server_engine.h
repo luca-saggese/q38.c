@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 typedef struct q38_server_engine q38_server_engine;
+typedef bool (*q38_server_cancel_cb)(void *user);
 
 typedef enum {
     Q38_SERVER_API_OPENAI = 0,
@@ -81,6 +82,8 @@ typedef struct {
     bool cache_restore;
     bool cache_save;
     bool has_image;
+    q38_server_cancel_cb cancelled;
+    void *cancel_user;
 } q38_server_request;
 
 typedef struct {

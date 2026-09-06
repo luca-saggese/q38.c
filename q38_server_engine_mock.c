@@ -46,6 +46,10 @@ static int mock_generate(void *opaque,
     mock_engine *engine = opaque;
     if (!engine || !request)
         goto invalid;
+    if (request->cancelled && request->cancelled(request->cancel_user)) {
+        if (error && error_len) snprintf(error, error_len, "request cancelled");
+        return -1;
+    }
     if (usage) {
         usage->prompt_tokens = (uint32_t)(
             request->prompt ? strlen(request->prompt) / 4 : 0);
@@ -53,18 +57,31 @@ static int mock_generate(void *opaque,
         usage->completion_tokens = 0;
     }
     if (request->thinking &&
+        (!request->cancelled ||
+         !request->cancelled(request->cancel_user)) &&
         !emit_event(callback, callback_user, Q38_SERVER_EVENT_REASONING,
                     NULL, NULL, NULL, reasoning, error, error_len))
         return -1;
     if (request->tools.count) {
         const char *tool_name = request->tools.items[0].name ?
                                 request->tools.items[0].name : "tool";
+        if (request->cancelled && request->cancelled(request->cancel_user)) {
+            if (error && error_len) snprintf(error, error_len,
+                                             "request cancelled");
+            return -1;
+        }
         if (!emit_event(callback, callback_user, Q38_SERVER_EVENT_TOOL_CALL,
                         "call_q38_mock_1", tool_name, "{}", NULL,
                         error, error_len))
             return -1;
-    } else if (!emit_event(callback, callback_user, Q38_SERVER_EVENT_TEXT,
+    } else if ((!request->cancelled ||
+                !request->cancelled(request->cancel_user)) &&
+               !emit_event(callback, callback_user, Q38_SERVER_EVENT_TEXT,
                            NULL, NULL, NULL, answer, error, error_len)) {
+        return -1;
+    }
+    if (request->cancelled && request->cancelled(request->cancel_user)) {
+        if (error && error_len) snprintf(error, error_len, "request cancelled");
         return -1;
     }
     if (usage) usage->completion_tokens = request->tools.count ? 1 : 8;

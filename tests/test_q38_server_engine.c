@@ -23,6 +23,11 @@ static bool collect_event(const q38_server_event *event, void *user,
     return true;
 }
 
+static bool always_cancelled(void *user) {
+    (void)user;
+    return true;
+}
+
 int main(void) {
     char error[256] = {0};
     q38_server_request request;
@@ -65,6 +70,12 @@ int main(void) {
           "mock generation");
     check(event_count == 3, "mock reasoning/text/done event count");
     check(usage.completion_tokens != 0, "mock usage accounting");
+    request.cancelled = always_cancelled;
+    check(q38_server_engine_generate(engine, &request, collect_event,
+                                     &event_count, &usage, error,
+                                     sizeof(error)) != 0 &&
+              strstr(error, "cancelled"),
+          "mock cancellation gate");
     q38_server_engine_destroy(engine);
     q38_server_request_free(&request);
     if (failures) return 1;

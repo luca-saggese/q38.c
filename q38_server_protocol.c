@@ -238,6 +238,7 @@ static bool parse_content_item(const char *raw, size_t raw_len, void *user,
     char *source = NULL;
     char *media_type = NULL;
     char *data = NULL;
+    char *raw_content = NULL;
     char *item = duplicate_range(raw, raw_len);
     bool ok = false;
     if (!item || !context || !context->message) goto done;
@@ -287,16 +288,25 @@ static bool parse_content_item(const char *raw, size_t raw_len, void *user,
     } else if (!strcmp(type, "tool_result")) {
         if (!q38_json_get_string(item, "tool_use_id", &tool_id,
                                  error, error_len) ||
-            !q38_json_get_string(item, "content", &text, error, error_len))
+            !q38_json_object_field(item, "content", &raw_content,
+                                   error, error_len))
             goto done;
         context->message->tool_call_id = tool_id;
         tool_id = NULL;
-        if (text) {
+        if (raw_content && raw_content[0] == '"') {
+            if (!raw_string(raw_content, &text, error, error_len))
+                goto done;
             context->message->content = duplicate_range(text, strlen(text));
             ok = context->message->content != NULL;
+        } else if (raw_content && raw_content[0] == '[') {
+            content_context nested = {.message = context->message};
+            ok = q38_json_array_each(raw_content, parse_content_item, &nested,
+                                     error, error_len);
         } else {
             ok = true;
         }
+        free(raw_content);
+        raw_content = NULL;
     } else {
         ok = protocol_fail(error, error_len, "unsupported content block type");
     }
@@ -310,6 +320,7 @@ done:
     free(source);
     free(media_type);
     free(data);
+    free(raw_content);
     free(item);
     return ok;
 }
@@ -420,6 +431,10 @@ static bool parse_tools_item(const char *raw, size_t raw_len, void *user,
             !q38_json_get_string(item, "description", &description,
                                  error, error_len) ||
             !q38_json_object_field(item, "input_schema", &parameters,
+                                   error, error_len))
+            goto done;
+        if (!parameters &&
+            !q38_json_object_field(item, "format", &parameters,
                                    error, error_len))
             goto done;
         ok = name && append_tool(request, name, description, parameters,
@@ -638,12 +653,24 @@ static bool parse_chat_or_anthropic(q38_server_endpoint endpoint,
             goto fail;
         if (prompt) {
             char *system = NULL;
-            if (prompt[0] == '"' && !raw_string(prompt, &system,
-                                                 error, error_len)) goto fail;
-            if (system && !append_message(request, "system", system, NULL,
-                                          error, error_len)) {
-                free(system);
-                goto fail;
+            if (prompt[0] == '"') {
+                if (!raw_string(prompt, &system, error, error_len) ||
+                    !append_message(request, "system", system, NULL,
+                                    error, error_len)) {
+                    free(system);
+                    goto fail;
+                }
+            } else if (prompt[0] == '[') {
+                if (!append_message(request, "system", NULL, NULL,
+                                    error, error_len))
+                    goto fail;
+                content_context context = {
+                    .message = &request->messages.items[
+                        request->messages.count - 1],
+                };
+                if (!q38_json_array_each(prompt, parse_content_item, &context,
+                                         error, error_len))
+                    goto fail;
             }
             free(system);
         }

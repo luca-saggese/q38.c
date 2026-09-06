@@ -75,6 +75,10 @@ static int real_generate(void *opaque, const q38_server_request *request,
                      "Q38 session cache backend unavailable");
         return -1;
     }
+    if (request->cancelled && request->cancelled(request->cancel_user)) {
+        engine_error(error, error_len, "request cancelled");
+        return -1;
+    }
     if (request->legacy_completion) {
         if (!request->prompt) {
             engine_error(error, error_len, "completion prompt is required");
@@ -126,6 +130,10 @@ static int real_generate(void *opaque, const q38_server_request *request,
                          (size_t)request->max_tokens : 1;
     while (generated < limit && next_token != q38_session_eos_token(
                &engine->session)) {
+        if (request->cancelled && request->cancelled(request->cancel_user)) {
+            engine_error(error, error_len, "request cancelled");
+            goto fail;
+        }
         if (!q38_session_stream_token(&engine->session, next_token,
                                       emit_piece, &token_user, error,
                                       error_len) || token_user.failed)
@@ -133,6 +141,10 @@ static int real_generate(void *opaque, const q38_server_request *request,
         generated++;
         if (usage) usage->completion_tokens++;
         if (generated == limit) break;
+        if (request->cancelled && request->cancelled(request->cancel_user)) {
+            engine_error(error, error_len, "request cancelled");
+            goto fail;
+        }
         if (!q38_session_eval(&engine->session, next_token, logits,
                               Q38_DECODE_VOCAB_SIZE, &next_token, NULL,
                               Q38_DECODE_TRACE_GENERATED_CONSUME,
