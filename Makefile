@@ -54,7 +54,7 @@ TEST_BINS := \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	check-perf-artifacts test-steering test-steering-cuda \
 	gr-fixtures gr-bench gr-c1-bench gr-c2-bench gr-c3-bench \
-	gr-c3-bundle test-gr
+	gr-c3-bundle gr-c4-bench test-gr
 
 all: q38
 
@@ -257,6 +257,11 @@ gr-c3-bundle: tests/gr/gr_c2_bench
 	@mkdir -p artifacts/perf/subsystems
 	@Q38_GR_C3=1 ./tests/gr/gr_c2_bench "$(GR_FIXTURE_DIR)" \
 		"artifacts/perf/subsystems/gr_c3_bundle.json"
+
+gr-c4-bench: tests/gr/gr_c2_bench
+	@mkdir -p artifacts/perf/subsystems
+	@Q38_GR_C4=1 ./tests/gr/gr_c2_bench "$(GR_FIXTURE_DIR)" \
+		"artifacts/perf/subsystems/gr_c4_bundle.json"
 
 test-gr: tests/gr/test_m3_gr_ref tests/gr/test_m3_gr_binding \
 		tests/gr/test_m3_gr_cuda gr-bench gr-c1-bench

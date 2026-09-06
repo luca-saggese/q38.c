@@ -16,6 +16,8 @@ optimization history.
 - GR-C2 was measured and rejected by the 10% isolated-wall gate.
 - GR-C3 has passed the model-free bundle gates and is promoted only for
   `gr_read_up`; no full-chain speedup has been claimed.
+- GR-C4 has passed the post-C3 isolated bundle gate: six launches, one host
+  synchronization, and approximately 20.7% lower GR bundle wall.
 
 The full-chain Reference 0 benchmark must not be rerun for a GR candidate
 until the candidate passes all isolated gates.
@@ -50,7 +52,7 @@ tests/gr/
   gr_extract_fixtures.c   compact BF16-to-F32 fixture extractor
   gr_bench.cu             isolated CUDA baseline benchmark
   gr_c1_bench.cu          generic-vs-cooperative BF16 projection benchmark
-  gr_c2_bench.cu          C1 bundle breakdown and branch-fusion candidate
+  gr_c2_bench.cu          C1/C2/C3/C4 bundle breakdown and candidates
   gr_c3_bench.cu          gr_read_up geometry benchmark
   test_m3_gr_ref.c        historical scalar smoke/golden test
   test_m3_gr_cuda.cu      historical CUDA golden test
@@ -78,6 +80,7 @@ edit
   -> make gr-c1-bench when changing projection dispatch
   -> make gr-c2-bench using the existing fixture pack only
   -> make gr-c3-bench using the existing fixture pack only
+  -> make gr-c4-bench against the post-C3 baseline
   -> inspect correctness and decomposition
   -> only then consider a full-chain benchmark
 ```
@@ -92,7 +95,8 @@ D2H are explicitly outside the measured window.
 
 `gr-c2-bench` and `gr-c3-bench` do not regenerate fixtures or open the GGUF.
 They use only `tests/fixtures/gr/`, so candidate iteration does not load the
-model.
+model. `gr-c4-bench` uses the same fixture-only policy and measures the
+post-C3 128-thread dispatch as its baseline.
 
 ## Promotion gates
 

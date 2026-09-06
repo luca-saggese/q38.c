@@ -169,6 +169,52 @@ runtime change was made for C2.
 C3 is promoted to the production GR dispatch. No full inference, model load,
 Reference 0 rerun, or change to MoE/GDN/QSA was performed.
 
+## 2026-09-06 — GR-C4 (promoted in isolated bundle)
+
+- **Baseline:** the post-C3 bundle (`gr_read_up` at 128 threads), not the
+  older C1/C2 bundle.
+- **Hypothesis:** remove launch/dispatch boundaries between adjacent
+  operations inside the GR contract without changing tensor semantics.
+- **Command:** `make gr-c4-bench`.
+- **Artifact:** `artifacts/perf/subsystems/gr_c4_bundle.json`.
+- **Fusion plan:**
+  - cooperative normalization + `gr_read_down`;
+  - cooperative low-rank SiLU + `gr_read_up`;
+  - existing branch-preparation/merge fusion;
+  - elementwise injection gate + residual writeback.
+- **Launches:** 9 -> 6.
+- **Synchronization:** one final host synchronization before and after.
+- **Transfers:** H2D/D2H remain outside the timed window and remain zero in
+  the artifact.
+
+### C4 result versus post-C3
+
+| Fixture | C3 wall median | C4 wall median | Improvement | C4 p95 |
+|---|---:|---:|---:|---:|
+| early | 78.59 us | 62.40 us | 20.60% | 63.73 us |
+| middle | 78.64 us | 62.29 us | 20.79% | 64.06 us |
+| late | 78.59 us | 62.27 us | 20.77% | 63.09 us |
+
+The exclusive breakdown accounted for approximately 100% of the measured
+wall on all fixtures. The largest remaining bundle category is the fused
+normalization/down-projection stage at approximately 23.5 us; `gr_read_up` is
+approximately 17.3 us and is no longer the dominant category.
+
+### C4 correctness
+
+- input `max_abs`: `3.27825546e-5`
+- input `max_rel`: `2.13350695e-5`
+- input RMSE: `8.96732212e-7`
+- updated `max_abs`: `4.76837158e-6`
+- updated `max_rel`: `9.59034521e-7`
+- updated RMSE: `4.23471231e-7`
+- NaN/Inf: `0`
+
+C4 passes the isolated promotion gate on early, middle, and late fixtures.
+This is an isolated GR-bundle promotion only: no full-model load, full-chain
+benchmark, Reference 0 rerun, MoE/GDN/QSA work, or canonical speedup claim was
+performed.
+
 ## Candidate entry template
 
 ```text

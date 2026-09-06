@@ -1,6 +1,7 @@
 #include "../../q38_cuda_primitives.h"
 #include "../../q38_gr_ref.h"
 
+#include <cooperative_groups.h>
 #include <cuda_runtime.h>
 
 #include <algorithm>
@@ -15,10 +16,13 @@
 
 namespace {
 
+namespace cg = cooperative_groups;
+
 constexpr size_t kWidth = Q38_GR_BRANCHES * Q38_GR_HIDDEN;
 constexpr size_t kWarmups = 100;
 constexpr size_t kSamples = 1000;
 constexpr size_t kStageCount = 9;
+constexpr unsigned kC4Threads = 128;
 
 enum Stage {
     kNormalize,
@@ -60,6 +64,7 @@ struct Device {
     uint16_t *inject_weights = nullptr;
     float *residual = nullptr;
     float *gamma = nullptr;
+    float *norm_sums = nullptr;
     float *normalized = nullptr;
     float *block = nullptr;
     float *down = nullptr;
@@ -166,6 +171,7 @@ static bool alloc_device(Device &device) {
     ALLOC(inject_weights, Q38_GR_BRANCHES * kWidth, "alloc inject weights");
     ALLOC(residual, kWidth, "alloc residual");
     ALLOC(gamma, kWidth, "alloc gamma");
+    ALLOC(norm_sums, Q38_GR_BRANCHES, "alloc normalization sums");
     ALLOC(normalized, kWidth, "alloc normalized");
     ALLOC(block, Q38_GR_HIDDEN, "alloc block");
     ALLOC(down, Q38_GR_RANK, "alloc down");
@@ -186,6 +192,7 @@ static void free_device(Device &device) {
     cudaFree(device.inject_weights);
     cudaFree(device.residual);
     cudaFree(device.gamma);
+    cudaFree(device.norm_sums);
     cudaFree(device.normalized);
     cudaFree(device.block);
     cudaFree(device.down);
@@ -310,6 +317,185 @@ __global__ static void writeback_kernel(const float *residual,
                      scales[branch] * block[index % Q38_GR_HIDDEN];
 }
 
+__device__ static float bf16_value(uint16_t bits) {
+    return __uint_as_float((uint32_t)bits << 16);
+}
+
+__device__ static float silu_value(float value) {
+    value /= 4.0f;
+    return value / (1.0f + expf(-value));
+}
+
+__global__ static void fused_normalize_down_kernel(
+    const float *residual, const float *gamma, const uint16_t *weights,
+    float *norm_sums, float *normalized, float *down) {
+    cg::grid_group grid = cg::this_grid();
+    __shared__ double partial[128];
+    if (blockIdx.x < Q38_GR_BRANCHES) {
+        const unsigned branch = blockIdx.x;
+        double sum = 0.0;
+        for (unsigned channel = threadIdx.x; channel < Q38_GR_HIDDEN;
+             channel += blockDim.x) {
+            const float value = residual[branch * Q38_GR_HIDDEN + channel];
+            sum += (double)value * (double)value;
+        }
+        partial[threadIdx.x] = sum;
+        __syncthreads();
+        for (unsigned stride = 64; stride; stride >>= 1) {
+            if (threadIdx.x < stride)
+                partial[threadIdx.x] += partial[threadIdx.x + stride];
+            __syncthreads();
+        }
+        if (threadIdx.x == 0)
+            norm_sums[branch] =
+                (float)(partial[0] / (double)Q38_GR_HIDDEN) + 1e-6f;
+    }
+    grid.sync();
+
+    for (size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+         index < kWidth; index += (size_t)gridDim.x * blockDim.x) {
+        const unsigned branch = (unsigned)(index / Q38_GR_HIDDEN);
+        normalized[index] = residual[index] * rsqrtf(norm_sums[branch]) *
+                            gamma[index];
+    }
+    grid.sync();
+
+    __shared__ float warp_sums[4];
+    for (size_t row = blockIdx.x; row < Q38_GR_RANK; row += gridDim.x) {
+        const unsigned lane = threadIdx.x & 31u;
+        const unsigned warp = threadIdx.x >> 5;
+        float sum = 0.0f;
+        for (size_t col = threadIdx.x; col < kWidth; col += blockDim.x)
+            sum += bf16_value(weights[row * kWidth + col]) * normalized[col];
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0) warp_sums[warp] = sum;
+        __syncthreads();
+        if (warp == 0) {
+            sum = lane < 4 ? warp_sums[lane] : 0.0f;
+            for (unsigned offset = 16; offset; offset >>= 1)
+                sum += __shfl_down_sync(0xffffffffu, sum, offset);
+            if (lane == 0) down[row] = sum;
+        }
+        __syncthreads();
+    }
+}
+
+__global__ static void fused_lowrank_up_kernel(
+    const uint16_t *weights, const float *down, float *bottleneck,
+    float *up) {
+    cg::grid_group grid = cg::this_grid();
+    for (size_t rank = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+         rank < Q38_GR_RANK; rank += (size_t)gridDim.x * blockDim.x)
+        bottleneck[rank] = silu_value(down[rank]);
+    grid.sync();
+
+    __shared__ float warp_sums[4];
+    for (size_t row = blockIdx.x; row < kWidth; row += gridDim.x) {
+        const unsigned lane = threadIdx.x & 31u;
+        const unsigned warp = threadIdx.x >> 5;
+        float sum = 0.0f;
+        for (size_t col = threadIdx.x; col < Q38_GR_RANK;
+             col += blockDim.x)
+            sum += bf16_value(weights[row * Q38_GR_RANK + col]) *
+                   bottleneck[col];
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0) warp_sums[warp] = sum;
+        __syncthreads();
+        if (warp == 0) {
+            sum = lane < 4 ? warp_sums[lane] : 0.0f;
+            for (unsigned offset = 16; offset; offset >>= 1)
+                sum += __shfl_down_sync(0xffffffffu, sum, offset);
+            if (lane == 0) up[row] = sum;
+        }
+        __syncthreads();
+    }
+}
+
+__global__ static void fused_writeback_kernel(const float *residual,
+                                              const float *block,
+                                              const float *inject,
+                                              float *updated) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= kWidth) return;
+    const unsigned branch = index / Q38_GR_HIDDEN;
+    const float scale = 2.0f /
+        (1.0f + expf(-inject[branch] / 4.0f));
+    updated[index] = residual[index] +
+                     scale * block[index % Q38_GR_HIDDEN];
+}
+
+static unsigned cooperative_grid(const void *kernel, unsigned rows) {
+    int device = 0;
+    int multiprocessors = 0;
+    int active_blocks = 0;
+    const cudaError_t device_status = cudaGetDevice(&device);
+    const cudaError_t attribute_status =
+        cudaDeviceGetAttribute(&multiprocessors,
+                               cudaDevAttrMultiProcessorCount, device);
+    const cudaError_t occupancy_status =
+        cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+            &active_blocks, kernel, kC4Threads, 0);
+    if (device_status != cudaSuccess || attribute_status != cudaSuccess ||
+        occupancy_status != cudaSuccess) {
+        std::fprintf(stderr,
+                     "GR-C4 cooperative setup failed: device=%s attr=%s "
+                     "occupancy=%s active=%d sm=%d\n",
+                     cudaGetErrorString(device_status),
+                     cudaGetErrorString(attribute_status),
+                     cudaGetErrorString(occupancy_status), active_blocks,
+                     multiprocessors);
+        return 0;
+    }
+    const unsigned maximum =
+        (unsigned)multiprocessors * (unsigned)active_blocks;
+    return std::min(rows, maximum);
+}
+
+static bool launch_fused_normalize_down(const Device &device) {
+    const unsigned grid =
+        cooperative_grid((const void *)fused_normalize_down_kernel,
+                         (unsigned)Q38_GR_RANK);
+    if (grid < Q38_GR_BRANCHES) {
+        std::fprintf(stderr, "GR-C4 normalize/down cooperative grid unavailable\n");
+        return false;
+    }
+    void *args[] = {
+        (void *)&device.residual, (void *)&device.gamma,
+        (void *)&device.down_weights, (void *)&device.norm_sums,
+        (void *)&device.normalized, (void *)&device.down,
+    };
+    const cudaError_t status = cudaLaunchCooperativeKernel(
+        (const void *)fused_normalize_down_kernel, dim3(grid),
+        dim3(kC4Threads), args, 0, nullptr);
+    return cuda_ok(status, "launch fused GR normalize/down");
+}
+
+static bool launch_fused_lowrank_up(const Device &device) {
+    const unsigned grid =
+        cooperative_grid((const void *)fused_lowrank_up_kernel,
+                         (unsigned)kWidth);
+    if (!grid) {
+        std::fprintf(stderr, "GR-C4 lowrank/up cooperative grid unavailable\n");
+        return false;
+    }
+    void *args[] = {
+        (void *)&device.up_weights, (void *)&device.down,
+        (void *)&device.bottleneck, (void *)&device.up,
+    };
+    return cuda_ok(cudaLaunchCooperativeKernel(
+                       (const void *)fused_lowrank_up_kernel,
+                       dim3(grid), dim3(kC4Threads), args, 0, nullptr),
+                   "launch fused GR low-rank/up");
+}
+
+static bool launch_fused_writeback(const Device &device) {
+    fused_writeback_kernel<<<(unsigned)((kWidth + 255) / 256), 256>>>(
+        device.residual, device.block, device.inject, device.updated);
+    return cudaGetLastError() == cudaSuccess;
+}
+
 static bool launch_normalize(const Device &device) {
     normalize_kernel<<<Q38_GR_BRANCHES, 256>>>(
         device.residual, device.gamma, device.normalized);
@@ -351,33 +537,42 @@ static bool launch_writeback(const Device &device) {
 }
 
 static bool launch_stage(const Device &device, unsigned stage,
-                         bool fused_branch_read, unsigned up_threads) {
+                         bool fused_branch_read, bool fused_c4,
+                         unsigned up_threads) {
     char error[256] = {};
     switch (stage) {
     case kNormalize:
-        return launch_normalize(device);
+        return fused_c4 ? launch_fused_normalize_down(device)
+                        : launch_normalize(device);
     case kReadDown:
+        if (fused_c4) return true;
         return q38_cuda_bf16_matvec(
             device.down_weights, Q38_GR_RANK, kWidth, device.normalized,
             device.down, nullptr, error, sizeof(error));
     case kLowRank:
+        if (fused_c4) return true;
         return launch_low_rank(device);
     case kReadUp:
+        if (fused_c4) return launch_fused_lowrank_up(device);
         return q38_cuda_bf16_matvec_configured(
             device.up_weights, kWidth, Q38_GR_RANK, device.bottleneck,
             device.up, up_threads, nullptr, error, sizeof(error));
     case kBranchPreparation:
-        return fused_branch_read ? true : launch_branch_prepare(device);
+        return fused_branch_read || fused_c4 ? true
+                                             : launch_branch_prepare(device);
     case kBranchMerge:
-        return fused_branch_read ? launch_fused_branch_read(device)
-                                 : launch_branch_merge(device);
+        return fused_branch_read || fused_c4
+            ? launch_fused_branch_read(device)
+            : launch_branch_merge(device);
     case kWriteInject:
         return q38_cuda_bf16_matvec(
             device.inject_weights, Q38_GR_BRANCHES, kWidth,
             device.normalized, device.inject, nullptr, error, sizeof(error));
     case kElementwise:
+        if (fused_c4) return true;
         return launch_elementwise(device);
     case kWriteback:
+        if (fused_c4) return launch_fused_writeback(device);
         return launch_writeback(device);
     default:
         return false;
@@ -397,23 +592,36 @@ static Stats summarize(const std::vector<double> &values) {
 
 static bool compare_output(const std::vector<float> &actual,
                            const std::vector<float> &expected, double *max_abs,
-                           double *max_rel, size_t *nonfinite) {
+                           double *max_rel, double *rmse,
+                           size_t *nonfinite) {
     *max_abs = 0.0;
     *max_rel = 0.0;
+    double squared_error = 0.0;
     *nonfinite = 0;
     for (size_t i = 0; i < actual.size(); ++i) {
         if (!std::isfinite(actual[i])) ++*nonfinite;
         const double abs_error =
             std::fabs((double)actual[i] - (double)expected[i]);
+        squared_error += abs_error * abs_error;
         *max_abs = std::max(*max_abs, abs_error);
         *max_rel = std::max(
             *max_rel, abs_error / std::max(1.0, std::fabs((double)expected[i])));
     }
+    *rmse = std::sqrt(squared_error / (double)actual.size());
     return *nonfinite == 0;
 }
 
+static bool stage_skipped(unsigned stage, bool fused_branch_read,
+                          bool fused_c4) {
+    return (fused_c4 &&
+            (stage == kReadDown || stage == kLowRank ||
+             stage == kBranchPreparation || stage == kElementwise)) ||
+           ((fused_branch_read || fused_c4) && stage == kBranchPreparation);
+}
+
 static bool run_once(const Device &device, bool fused_branch_read,
-                     unsigned up_threads, Sample *sample, bool measure) {
+                     bool fused_c4, unsigned up_threads, Sample *sample,
+                     bool measure) {
     cudaEvent_t total_start = nullptr, total_stop = nullptr;
     cudaEvent_t starts[kStageCount] = {};
     cudaEvent_t stops[kStageCount] = {};
@@ -430,27 +638,41 @@ static bool run_once(const Device &device, bool fused_branch_read,
     if (measure && cudaEventRecord(total_start) != cudaSuccess) return false;
     double host_submit = 0.0;
     for (unsigned stage = 0; stage < kStageCount; ++stage) {
-        if (fused_branch_read && stage == kBranchPreparation) {
+        if (stage_skipped(stage, fused_branch_read, fused_c4)) {
             if (measure) sample->stage[stage] = 0.0;
             continue;
         }
-        if (measure && cudaEventRecord(starts[stage]) != cudaSuccess)
+        if (measure && cudaEventRecord(starts[stage]) != cudaSuccess) {
+            std::fprintf(stderr, "GR stage %u start event failed: %s\n", stage,
+                         cudaGetErrorString(cudaGetLastError()));
             return false;
+        }
         const auto submit_start = std::chrono::steady_clock::now();
-        const bool ok =
-            launch_stage(device, stage, fused_branch_read, up_threads);
+        const bool ok = launch_stage(device, stage, fused_branch_read,
+                                     fused_c4, up_threads);
         const auto submit_stop = std::chrono::steady_clock::now();
         host_submit +=
             std::chrono::duration<double, std::micro>(submit_stop - submit_start)
                 .count();
-        if (!ok) return false;
-        if (measure && cudaEventRecord(stops[stage]) != cudaSuccess)
+        if (!ok) {
+            std::fprintf(stderr, "GR stage %u launch failed\n", stage);
             return false;
+        }
+        if (measure && cudaEventRecord(stops[stage]) != cudaSuccess) {
+            std::fprintf(stderr, "GR stage %u stop event failed: %s\n", stage,
+                         cudaGetErrorString(cudaGetLastError()));
+            return false;
+        }
     }
     if (measure && cudaEventRecord(total_stop) != cudaSuccess) return false;
     const auto sync_start = std::chrono::steady_clock::now();
     if (measure) {
-        if (cudaEventSynchronize(total_stop) != cudaSuccess) return false;
+        const cudaError_t status = cudaEventSynchronize(total_stop);
+        if (status != cudaSuccess) {
+            std::fprintf(stderr, "GR timed pipeline failed: %s\n",
+                         cudaGetErrorString(status));
+            return false;
+        }
     }
     const auto host_stop = std::chrono::steady_clock::now();
     if (!measure) return true;
@@ -465,7 +687,7 @@ static bool run_once(const Device &device, bool fused_branch_read,
             .count();
     sample->host_submit = host_submit;
     for (size_t i = 0; i < kStageCount; ++i) {
-        if (fused_branch_read && i == kBranchPreparation) continue;
+        if (stage_skipped((unsigned)i, fused_branch_read, fused_c4)) continue;
         if (cudaEventElapsedTime(&elapsed_ms, starts[i], stops[i]) !=
             cudaSuccess)
             return false;
@@ -487,18 +709,25 @@ static bool run_once(const Device &device, bool fused_branch_read,
 }
 
 static bool run_pipeline(const Device &device, const Fixture &fixture,
-                         bool fused_branch_read, unsigned up_threads,
+                         bool fused_branch_read, bool fused_c4,
+                         unsigned up_threads,
                          PipelineResult &result) {
     result.samples.clear();
     result.samples.reserve(kSamples);
     for (size_t i = 0; i < kWarmups; ++i)
-        if (!run_once(device, fused_branch_read, up_threads, nullptr, false))
+        if (!run_once(device, fused_branch_read, fused_c4, up_threads, nullptr,
+                      false)) {
+            std::fprintf(stderr, "GR pipeline warmup failed at %zu\n", i);
             return false;
+        }
     if (!cuda_ok(cudaDeviceSynchronize(), "synchronize GR warmup")) return false;
     for (size_t i = 0; i < kSamples; ++i) {
         Sample sample;
-        if (!run_once(device, fused_branch_read, up_threads, &sample, true))
+        if (!run_once(device, fused_branch_read, fused_c4, up_threads, &sample,
+                      true)) {
+            std::fprintf(stderr, "GR pipeline sample failed at %zu\n", i);
             return false;
+        }
         result.samples.push_back(sample);
     }
     result.input.resize(Q38_GR_HIDDEN);
@@ -551,9 +780,17 @@ static const char *const kCategoryNames[] = {
     "other",
 };
 
+static unsigned launch_count(const char *variant) {
+    if (!std::strcmp(variant, "c2")) return 8;
+    if (!std::strcmp(variant, "c4")) return 6;
+    return 9;
+}
+
 static void write_breakdown_json(FILE *out, const PipelineResult &result,
                                  double max_abs_input, double max_rel_input,
+                                 double rmse_input,
                                  double max_abs_updated, double max_rel_updated,
+                                 double rmse_updated,
                                  size_t nonfinite, const char *variant) {
     std::vector<double> categories[kStageCount + 4];
     collect_categories(result, categories);
@@ -565,12 +802,13 @@ static void write_breakdown_json(FILE *out, const PipelineResult &result,
         out,
         "{\"variant\":\"%s\",\"wall_us\":{\"median\":%.9g,\"p95\":%.9g},"
         "\"gpu_us\":{\"median\":%.9g,\"p95\":%.9g},\"correctness\":{"
-        "\"input_max_abs\":%.9g,\"input_max_rel\":%.9g,"
+        "\"input_max_abs\":%.9g,\"input_max_rel\":%.9g,\"input_rmse\":%.9g,"
         "\"updated_max_abs\":%.9g,\"updated_max_rel\":%.9g,"
+        "\"updated_rmse\":%.9g,"
         "\"nan_inf\":%zu},\"breakdown_us\":{",
         variant, result.median_wall, result.p95_wall, result.median_gpu,
-        result.p95_gpu, max_abs_input, max_rel_input, max_abs_updated,
-        max_rel_updated, nonfinite);
+        result.p95_gpu, max_abs_input, max_rel_input, rmse_input,
+        max_abs_updated, max_rel_updated, rmse_updated, nonfinite);
     for (size_t i = 0; i < sizeof(kCategoryNames) / sizeof(kCategoryNames[0]);
          ++i) {
         if (i) std::fputc(',', out);
@@ -584,14 +822,16 @@ static void write_breakdown_json(FILE *out, const PipelineResult &result,
                  "\"kernel_launches\":%u,\"explicit_host_syncs\":1,"
                  "\"host_submit_us\":{\"median\":%.9g,\"p95\":%.9g},"
                  "\"breakdown_explains_wall\":true}",
-                 9u - (std::strcmp(variant, "c2") == 0 ? 1u : 0u),
+                 launch_count(variant),
                  submit.median, submit.p95);
 }
 
 static void print_breakdown(const char *fixture, const char *variant,
                             const PipelineResult &result,
                             double max_abs_input, double max_rel_input,
+                            double rmse_input,
                             double max_abs_updated, double max_rel_updated,
+                            double rmse_updated,
                             size_t nonfinite) {
     std::vector<double> categories[kStageCount + 4];
     collect_categories(result, categories);
@@ -599,12 +839,14 @@ static void print_breakdown(const char *fixture, const char *variant,
                 "\"wall_us\":{\"median\":%.6f,\"p95\":%.6f},"
                 "\"gpu_us\":{\"median\":%.6f,\"p95\":%.6f},"
                 "\"correctness\":{\"input_max_abs\":%.9g,"
-                "\"input_max_rel\":%.9g,\"updated_max_abs\":%.9g,"
-                "\"updated_max_rel\":%.9g,\"nan_inf\":%zu},"
+                "\"input_max_rel\":%.9g,\"input_rmse\":%.9g,"
+                "\"updated_max_abs\":%.9g,\"updated_max_rel\":%.9g,"
+                "\"updated_rmse\":%.9g,\"nan_inf\":%zu},"
                 "\"breakdown_us\":{",
                 fixture, variant, result.median_wall, result.p95_wall,
                 result.median_gpu, result.p95_gpu, max_abs_input,
-                max_rel_input, max_abs_updated, max_rel_updated, nonfinite);
+                max_rel_input, rmse_input, max_abs_updated, max_rel_updated,
+                rmse_updated, nonfinite);
     for (size_t i = 0;
          i < sizeof(kCategoryNames) / sizeof(kCategoryNames[0]); ++i) {
         if (i) std::fputc(',', stdout);
@@ -622,7 +864,7 @@ static void print_breakdown(const char *fixture, const char *variant,
                 "\"kernel_launches\":%u,\"explicit_host_syncs\":1,"
                 "\"host_submit_us\":{\"median\":%.6f},"
                 "\"breakdown_explains_wall\":true}\n",
-                9u - (std::strcmp(variant, "c2") == 0 ? 1u : 0u),
+                launch_count(variant),
                 submit.median);
 }
 
@@ -635,59 +877,67 @@ static bool run_case(const std::string &root, const Case &spec,
         free_device(device);
         return false;
     }
-    const bool c3 = std::getenv("Q38_GR_C3") != nullptr;
+    const bool c4 = std::getenv("Q38_GR_C4") != nullptr;
+    const bool c3 = !c4 && std::getenv("Q38_GR_C3") != nullptr;
+    const char *baseline_name = c4 ? "c3" : "c1";
     PipelineResult c1, candidate;
-    const bool ok = run_pipeline(device, fixture, false, 256, c1) &&
-                    run_pipeline(device, fixture, c3 ? false : true,
-                                 c3 ? 128 : 256, candidate);
+    const bool ok = run_pipeline(device, fixture, false, false,
+                                 c4 ? 128 : 256, c1) &&
+                    run_pipeline(device, fixture, c4 || !c3, c4,
+                                 c4 || c3 ? 128 : 256, candidate);
     if (!ok) {
         free_device(device);
         return false;
     }
-    double c1_input_abs, c1_input_rel, c1_updated_abs, c1_updated_rel;
-    double c2_input_abs, c2_input_rel, c2_updated_abs, c2_updated_rel;
+    double c1_input_abs, c1_input_rel, c1_input_rmse;
+    double c1_updated_abs, c1_updated_rel, c1_updated_rmse;
+    double c2_input_abs, c2_input_rel, c2_input_rmse;
+    double c2_updated_abs, c2_updated_rel, c2_updated_rmse;
     size_t c1_input_nonfinite, c1_updated_nonfinite;
     size_t c2_input_nonfinite, c2_updated_nonfinite;
     compare_output(c1.input, fixture.expected_input, &c1_input_abs,
-                   &c1_input_rel, &c1_input_nonfinite);
+                   &c1_input_rel, &c1_input_rmse, &c1_input_nonfinite);
     compare_output(c1.updated, fixture.expected_updated, &c1_updated_abs,
-                   &c1_updated_rel, &c1_updated_nonfinite);
+                   &c1_updated_rel, &c1_updated_rmse, &c1_updated_nonfinite);
     compare_output(candidate.input, fixture.expected_input, &c2_input_abs,
-                   &c2_input_rel, &c2_input_nonfinite);
+                   &c2_input_rel, &c2_input_rmse, &c2_input_nonfinite);
     compare_output(candidate.updated, fixture.expected_updated, &c2_updated_abs,
-                   &c2_updated_rel, &c2_updated_nonfinite);
+                   &c2_updated_rel, &c2_updated_rmse, &c2_updated_nonfinite);
     const size_t c1_nonfinite = c1_input_nonfinite + c1_updated_nonfinite;
     const size_t c2_nonfinite = c2_input_nonfinite + c2_updated_nonfinite;
     const bool correct = c1_input_abs <= 3e-3 && c1_updated_abs <= 3e-3 &&
                          c2_input_abs <= 3e-3 && c2_updated_abs <= 3e-3 &&
                          c1_nonfinite == 0 && c2_nonfinite == 0;
     *all_correct = *all_correct && correct;
-    print_breakdown(spec.name, "c1", c1, c1_input_abs, c1_input_rel,
-                    c1_updated_abs, c1_updated_rel, c1_nonfinite);
-    const char *candidate_name = c3 ? "c3" : "c2";
+    print_breakdown(spec.name, baseline_name, c1, c1_input_abs, c1_input_rel,
+                    c1_input_rmse, c1_updated_abs, c1_updated_rel,
+                    c1_updated_rmse, c1_nonfinite);
+    const char *candidate_name = c4 ? "c4" : (c3 ? "c3" : "c2");
     print_breakdown(spec.name, candidate_name, candidate, c2_input_abs,
-                    c2_input_rel,
-                    c2_updated_abs, c2_updated_rel, c2_nonfinite);
+                    c2_input_rel, c2_input_rmse, c2_updated_abs,
+                    c2_updated_rel, c2_updated_rmse, c2_nonfinite);
     const double improvement = 1.0 - candidate.median_wall / c1.median_wall;
-    std::printf("{\"fixture\":\"%s\",\"c1_wall_us\":%.6f,"
-    "\"candidate\":\"%s\",\"candidate_wall_us\":%.6f,"
+    std::printf("{\"fixture\":\"%s\",\"baseline\":\"%s\","
+    "\"baseline_wall_us\":%.6f,\"candidate\":\"%s\","
+    "\"candidate_wall_us\":%.6f,"
     "\"relative_improvement\":%.9g,"
     "\"correct\":%s}\n",
-    spec.name, c1.median_wall, candidate_name, candidate.median_wall,
+    spec.name, baseline_name, c1.median_wall, candidate_name,
+    candidate.median_wall,
     improvement,
     correct ? "true" : "false");
     if (artifact) {
         std::fprintf(
             artifact,
-            "    {\"fixture\":\"%s\",\"layer\":%u,\"c1\":",
-            spec.name, spec.layer);
+            "    {\"fixture\":\"%s\",\"layer\":%u,\"%s\":",
+            spec.name, spec.layer, baseline_name);
         write_breakdown_json(artifact, c1, c1_input_abs, c1_input_rel,
-                             c1_updated_abs, c1_updated_rel, c1_nonfinite,
-                             "c1");
+                             c1_input_rmse, c1_updated_abs, c1_updated_rel,
+                             c1_updated_rmse, c1_nonfinite, baseline_name);
         std::fprintf(artifact, ",\"%s\":", candidate_name);
         write_breakdown_json(artifact, candidate, c2_input_abs, c2_input_rel,
-                             c2_updated_abs, c2_updated_rel, c2_nonfinite,
-                             candidate_name);
+                             c2_input_rmse, c2_updated_abs, c2_updated_rel,
+                             c2_updated_rmse, c2_nonfinite, candidate_name);
         std::fprintf(artifact,
                      ",\"relative_improvement\":%.9g,\"correct\":%s}",
                      improvement, correct ? "true" : "false");
@@ -712,7 +962,12 @@ int main(int argc, char **argv) {
     if (argc == 3) {
         artifact = std::fopen(argv[2], "w");
         if (!artifact) return 1;
-        if (std::getenv("Q38_GR_C3"))
+        if (std::getenv("Q38_GR_C4"))
+            std::fputs("{\"format\":\"q38-gr-c4-bundle-v1\","
+                       "\"c3_baseline\":\"gr_read_up_128_threads\","
+                       "\"c4\":\"launch_dispatch_fusion\",",
+                       artifact);
+        else if (std::getenv("Q38_GR_C3"))
             std::fputs("{\"format\":\"q38-gr-c3-bundle-v1\","
                        "\"c1\":\"cooperative_bf16_matvec\","
                        "\"c3\":\"gr_read_up_128_threads\",",
