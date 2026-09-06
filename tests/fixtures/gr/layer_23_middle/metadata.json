@@ -1,0 +1,16 @@
+{
+  "format": "q38-gr-fixture-v1",
+  "layer": 23,
+  "fixture_class": "middle",
+  "gr_family": "mlp_hyper_connection",
+  "hidden": 2560,
+  "branches": 4,
+  "rank": 320,
+  "weight_dtype": "BF16 converted to F32",
+  "input_dtype": "F32",
+  "capture_path": "artifacts/post_m8_opt/qsa_layer3_hidden.bin",
+  "capture_note": "captured layer-3 runtime hidden replayed for layer-23 shape coverage",
+  "reference0_boundary_capture": false,
+  "branch_completion": "branch0 captured; branches 1-3 deterministic scaled replay",
+  "expected_outputs": "gr_reference production contract"
+}

@@ -1,6 +1,7 @@
 #include "q38_gr.h"
 
 #include <stdio.h>
+#include <string.h>
 
 __global__ static void gr_normalize_kernel(const float *residual,
                                             const float *gamma,
@@ -74,14 +75,14 @@ static void set_error(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
 }
 
-extern "C" bool q38_cuda_gr_collapse(const float *residual, const float *gamma,
-                                      const float *input_mix_down,
-                                      const float *input_mix_up,
-                                      const float *block_inject,
-                                      const float *block_output, float *input,
-                                      float *updated, cudaStream_t stream,
-                                      char *error, size_t error_len) {
+static bool q38_cuda_gr_collapse_impl(
+    const float *residual, const float *gamma,
+    const float *input_mix_down, const float *input_mix_up,
+    const float *block_inject, const float *block_output, float *input,
+    float *updated, cudaStream_t stream, q38_cuda_gr_timing *timing,
+    char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
+    if (timing) memset(timing, 0, sizeof(*timing));
     if (!residual || !gamma || !input_mix_down || !input_mix_up ||
         !block_inject || !block_output || !input || !updated) {
         set_error(error, error_len, "invalid CUDA GR arguments");
@@ -96,16 +97,63 @@ extern "C" bool q38_cuda_gr_collapse(const float *residual, const float *gamma,
         set_error(error, error_len, "CUDA GR workspace allocation failed");
         return false;
     }
+    cudaEvent_t events[6] = {};
+    bool events_ok = true;
+    if (timing) {
+        for (cudaEvent_t &event : events)
+            if (cudaEventCreate(&event) != cudaSuccess) events_ok = false;
+        if (!events_ok) {
+            for (cudaEvent_t event : events)
+                if (event) cudaEventDestroy(event);
+            cudaFree(normalized); cudaFree(bottleneck); cudaFree(gates);
+            set_error(error, error_len, "CUDA GR timing event creation failed");
+            return false;
+        }
+        events_ok = cudaEventRecord(events[0], stream) == cudaSuccess;
+    }
     gr_normalize_kernel<<<Q38_GR_BRANCHES, 256, 0, stream>>>(residual, gamma,
                                                                normalized);
+    if (timing) events_ok = events_ok &&
+        cudaEventRecord(events[1], stream) == cudaSuccess;
     gr_down_kernel<<<2, 256, 0, stream>>>(normalized, input_mix_down, bottleneck);
+    if (timing) events_ok = events_ok &&
+        cudaEventRecord(events[2], stream) == cudaSuccess;
     gr_up_kernel<<<(width + 255) / 256, 256, 0, stream>>>(
         normalized, input_mix_up, bottleneck, gates);
+    if (timing) events_ok = events_ok &&
+        cudaEventRecord(events[3], stream) == cudaSuccess;
     gr_read_kernel<<<(Q38_GR_HIDDEN + 255) / 256, 256, 0, stream>>>(
         normalized, gates, input);
+    if (timing) events_ok = events_ok &&
+        cudaEventRecord(events[4], stream) == cudaSuccess;
     gr_write_kernel<<<(width + 255) / 256, 256, 0, stream>>>(
         residual, normalized, block_inject, block_output, updated);
+    if (timing) events_ok = events_ok &&
+        cudaEventRecord(events[5], stream) == cudaSuccess;
     cudaError_t status = cudaGetLastError();
+    if (timing && status == cudaSuccess && events_ok) {
+        status = cudaEventSynchronize(events[5]);
+        if (status == cudaSuccess)
+            status = cudaEventElapsedTime(&timing->normalize_ms,
+                                          events[0], events[1]);
+        if (status == cudaSuccess)
+            status = cudaEventElapsedTime(&timing->down_projection_ms,
+                                          events[1], events[2]);
+        if (status == cudaSuccess)
+            status = cudaEventElapsedTime(&timing->up_projection_ms,
+                                          events[2], events[3]);
+        if (status == cudaSuccess)
+            status = cudaEventElapsedTime(&timing->branch_merge_ms,
+                                          events[3], events[4]);
+        if (status == cudaSuccess)
+            status = cudaEventElapsedTime(&timing->injection_ms,
+                                          events[4], events[5]);
+    } else if (timing && !events_ok && status == cudaSuccess) {
+        status = cudaErrorUnknown;
+    }
+    if (timing)
+        for (cudaEvent_t event : events)
+            if (event) cudaEventDestroy(event);
     cudaFree(normalized); cudaFree(bottleneck); cudaFree(gates);
     if (status != cudaSuccess) {
         if (error && error_len) snprintf(error, error_len, "CUDA GR launch failed: %s",
@@ -113,4 +161,27 @@ extern "C" bool q38_cuda_gr_collapse(const float *residual, const float *gamma,
         return false;
     }
     return true;
+}
+
+extern "C" bool q38_cuda_gr_collapse(const float *residual, const float *gamma,
+                                      const float *input_mix_down,
+                                      const float *input_mix_up,
+                                      const float *block_inject,
+                                      const float *block_output, float *input,
+                                      float *updated, cudaStream_t stream,
+                                      char *error, size_t error_len) {
+    return q38_cuda_gr_collapse_impl(
+        residual, gamma, input_mix_down, input_mix_up, block_inject,
+        block_output, input, updated, stream, nullptr, error, error_len);
+}
+
+extern "C" bool q38_cuda_gr_collapse_timed(
+    const float *residual, const float *gamma,
+    const float *input_mix_down, const float *input_mix_up,
+    const float *block_inject, const float *block_output, float *input,
+    float *updated, cudaStream_t stream, q38_cuda_gr_timing *timing,
+    char *error, size_t error_len) {
+    return q38_cuda_gr_collapse_impl(
+        residual, gamma, input_mix_down, input_mix_up, block_inject,
+        block_output, input, updated, stream, timing, error, error_len);
 }

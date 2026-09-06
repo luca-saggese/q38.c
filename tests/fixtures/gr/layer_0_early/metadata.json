@@ -1,0 +1,16 @@
+{
+  "format": "q38-gr-fixture-v1",
+  "layer": 0,
+  "fixture_class": "early",
+  "gr_family": "mlp_hyper_connection",
+  "hidden": 2560,
+  "branches": 4,
+  "rank": 320,
+  "weight_dtype": "BF16 converted to F32",
+  "input_dtype": "F32",
+  "capture_path": "artifacts/post_m8_opt/shared_hidden_layer0.bin",
+  "capture_note": "captured runtime hidden; branch 0 source",
+  "reference0_boundary_capture": false,
+  "branch_completion": "branch0 captured; branches 1-3 deterministic scaled replay",
+  "expected_outputs": "gr_reference production contract"
+}

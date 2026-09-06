@@ -52,7 +52,8 @@ TEST_BINS := \
 .PHONY: all q38 q38-server q38-server-mock q38-cli spark test test-server clean tools \
 	q38-server-real \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
-	check-perf-artifacts test-steering test-steering-cuda
+	check-perf-artifacts test-steering test-steering-cuda \
+	gr-fixtures gr-bench test-gr
 
 all: q38
 
@@ -175,6 +176,53 @@ tests/test_quant_blocks: tests/test_quant_blocks.c \
 tests/test_residency: tests/test_residency.c q38_residency.o \
 		q38_residency.h
 	$(CC) $(CFLAGS) -o $@ tests/test_residency.c q38_residency.o
+
+GR_FIXTURE_DIR := tests/fixtures/gr
+GR_REFERENCE_ARTIFACT := artifacts/perf/subsystems/gr_reference.json
+GR_BINDING_OBJS := q38_gguf.o q38_weights.o q38_model_config.o q38_ple.o \
+	q38_residency.o q38_quant.o q38_qsa.o
+
+tests/gr/test_m3_gr_ref: tests/gr/test_m3_gr_ref.c q38_gr_ref.o
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+tests/gr/test_m3_gr_binding: tests/gr/test_m3_gr_binding.c $(GR_BINDING_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+tests/gr/test_m3_gr_cuda: tests/gr/test_m3_gr_cuda.o q38_gr.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
+
+tests/gr/test_m3_gr_cuda.o: tests/gr/test_m3_gr_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
+tests/gr/gr_reference.o: tests/gr/gr_reference.c tests/gr/gr_reference.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+tests/gr/gr_extract_fixtures: tests/gr/gr_extract_fixtures.c \
+		tests/gr/gr_reference.o $(GR_BINDING_OBJS)
+	$(CC) $(CFLAGS) -o $@ tests/gr/gr_extract_fixtures.c \
+		tests/gr/gr_reference.o $(GR_BINDING_OBJS) -lm
+
+tests/gr/gr_bench: tests/gr/gr_bench.o tests/gr/gr_reference.o q38_gr.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
+
+tests/gr/gr_bench.o: tests/gr/gr_bench.cu tests/gr/gr_reference.h
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
+gr-fixtures: tests/gr/gr_extract_fixtures
+	@mkdir -p $(GR_FIXTURE_DIR)
+	@./tests/gr/gr_extract_fixtures \
+		"$(Q2_CANONICAL_MODEL)" "$(GR_FIXTURE_DIR)"
+
+gr-bench: tests/gr/gr_bench gr-fixtures
+	@mkdir -p artifacts/perf/subsystems
+	@./tests/gr/gr_bench "$(GR_FIXTURE_DIR)" "$(GR_REFERENCE_ARTIFACT)"
+
+test-gr: tests/gr/test_m3_gr_ref tests/gr/test_m3_gr_binding \
+		tests/gr/test_m3_gr_cuda gr-bench
+	@./tests/gr/test_m3_gr_ref
+	@./tests/gr/test_m3_gr_binding "$(Q2_CANONICAL_MODEL)"
+	@set +e; ./tests/gr/test_m3_gr_cuda; status=$$?; \
+	if [ $$status -ne 0 ] && [ $$status -ne 2 ]; then exit $$status; fi
 
 tests/q2_canonical_bench: tests/q2_canonical_bench.c \
 		$(CANONICAL_BENCH_C_OBJS) $(CANONICAL_BENCH_CUDA_OBJS)
