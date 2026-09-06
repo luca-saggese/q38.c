@@ -2,6 +2,7 @@
 #include "q38_forward_cuda.h"
 #include "q38_moe.h"
 #include "q38_profile.h"
+#include "q38_qsa_candidate.h"
 #include "q38_gguf.h"
 #include "q38_weights.h"
 
@@ -37,12 +38,14 @@ typedef struct {
     double qsa_qkv, qsa_indexer_compression, qsa_score, qsa_top_k;
     double qsa_gather, qsa_attention, qsa_state_update, qsa_allocation_cleanup;
     double moe_total, moe_router, moe_gate_up, moe_down, moe_weighted_reduce;
-    double ple, lm_head, gpu_argmax, accounted, unattributed, wall;
+    double ple, ple_elapsed, ple_overlap, ple_critical_stall;
+    double lm_head, gpu_argmax, accounted, unattributed, wall;
     uint64_t kernel_launches, host_syncs, h2d_bytes, d2h_bytes;
     uint64_t qsa_allocations, qsa_kernel_launches, qsa_host_syncs;
     uint64_t qsa_h2d_bytes, qsa_d2h_bytes, qsa_residency_misses;
     uint64_t qsa_selected_ids_hash, qsa_selected_ids_count;
     uint64_t nan_inf_count;
+    uint64_t ple_file_backed_accesses, ple_file_bytes;
     bool qsa_selected_ids_exact;
 } exclusive_profile;
 
@@ -54,6 +57,11 @@ static unsigned long peak_rss_bytes;
 static unsigned long min_mem_available_bytes = ULONG_MAX;
 static FILE *hidden_capture;
 static bool hidden_captured;
+
+extern int q38_qsa_candidate_project(
+    const void *wq, const void *wk, const void *wv,
+    const float *input, float *q, float *k, float *v,
+    size_t token_count, size_t cols, void *stream);
 
 static bool capture_moe_hidden(uint32_t layer, const q38_moe_trace *trace,
                                void *user, char *error, size_t error_len) {
@@ -169,6 +177,136 @@ static size_t routed_selected[Q38_MODEL_LAYERS];
 static uint64_t qsa_selected_ids_hash;
 static uint64_t qsa_selected_ids_count;
 
+typedef struct {
+    q38_forward_cuda_context *cuda;
+    bool reported;
+} qsa_qkv_parity_context;
+
+static bool qsa_hidden_capture_boundary(
+    uint32_t layer, const char *boundary, const float *values,
+    size_t token_count, size_t width, void *user, char *error,
+    size_t error_len) {
+    (void)user;
+    if (!getenv("Q38_QSA_CAPTURE_HIDDEN") || layer != 3 ||
+        strcmp(boundary, "gdn_qsa_input") != 0)
+        return true;
+    if (token_count != 1 || width != 2560 || !values) {
+        if (error && error_len)
+            snprintf(error, error_len, "invalid QSA hidden capture geometry");
+        return false;
+    }
+    FILE *out = fopen(getenv("Q38_QSA_CAPTURE_HIDDEN"), "wb");
+    if (!out || fwrite(values, sizeof(float), width, out) != width) {
+        if (out) fclose(out);
+        if (error && error_len)
+            snprintf(error, error_len, "QSA hidden capture failed");
+        return false;
+    }
+    fclose(out);
+    fprintf(stderr, "captured QSA layer %u hidden fixture\n", layer);
+    if (error && error_len)
+        snprintf(error, error_len, "QSA hidden fixture captured");
+    return false;
+}
+
+static float host_bf16_to_float(uint16_t bits) {
+    uint32_t value = (uint32_t)bits << 16;
+    float result;
+    memcpy(&result, &value, sizeof(result));
+    return result;
+}
+
+static bool host_qkv_project(const q38_gguf *model, const q38_tensor *tensor,
+                             const float *input, size_t rows, float *output,
+                             char *error, size_t error_len) {
+    if (!tensor || tensor->type != Q38_FORWARD_BF16 ||
+        tensor->ndim != 2 || tensor->dim[0] != rows ||
+        tensor->dim[1] != 2560) {
+        if (error && error_len) snprintf(error, error_len,
+                                         "invalid host QKV tensor geometry");
+        return false;
+    }
+    const uint16_t *weights = (const uint16_t *)
+        q38_gguf_tensor_data(model, tensor);
+    if (!weights) {
+        if (error && error_len) snprintf(error, error_len,
+                                         "missing host QKV tensor payload");
+        return false;
+    }
+    for (size_t row = 0; row < rows; ++row) {
+        float sum = 0.0f;
+        for (size_t col = 0; col < 2560; ++col)
+            sum += host_bf16_to_float(weights[row * 2560 + col]) * input[col];
+        output[row] = sum;
+    }
+    return true;
+}
+
+static bool qsa_qkv_parity_backend(
+    const q38_gguf *model, const q38_tensor *q_proj,
+    const q38_tensor *k_proj, const q38_tensor *v_proj,
+    const float *host_input, size_t token_count, float *host_q,
+    float *host_k, float *host_v, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len) {
+    qsa_qkv_parity_context *parity = (qsa_qkv_parity_context *)user;
+    if (!q38_forward_cuda_qsa_qkv_backend(
+            model, q_proj, k_proj, v_proj, host_input, token_count,
+            host_q, host_k, host_v, timing, parity->cuda, error, error_len))
+        return false;
+    if (!parity->reported && getenv("Q38_QSA_QKV_PARITY")) {
+        const q38_tensor *tensors[] = {q_proj, k_proj, v_proj};
+        float *outputs[] = {host_q, host_k, host_v};
+        const size_t rows[] = {12288, 512, 512};
+        float max_abs[] = {0.0f, 0.0f, 0.0f};
+        float max_rel[] = {0.0f, 0.0f, 0.0f};
+        for (size_t matrix = 0; matrix < 3; ++matrix) {
+            const uint16_t *weights = (const uint16_t *)
+                q38_gguf_tensor_data(model, tensors[matrix]);
+            for (size_t row = 0; row < rows[matrix]; ++row) {
+                float reference = 0.0f;
+                for (size_t col = 0; col < 2560; ++col)
+                    reference += host_bf16_to_float(
+                        weights[row * 2560 + col]) * host_input[col];
+                const float absolute = fabsf(outputs[matrix][row] - reference);
+                const float relative = absolute /
+                    fmaxf(fabsf(reference), 1.0e-12f);
+                if (absolute > max_abs[matrix]) max_abs[matrix] = absolute;
+                if (relative > max_rel[matrix]) max_rel[matrix] = relative;
+            }
+        }
+        fprintf(stderr,
+                "{\"qsa_qkv_parity\":{\"Q_max_abs\":%.9g,\"Q_max_rel\":%.9g,"
+                "\"K_max_abs\":%.9g,\"K_max_rel\":%.9g,"
+                "\"V_max_abs\":%.9g,\"V_max_rel\":%.9g}}\n",
+                max_abs[0], max_rel[0], max_abs[1], max_rel[1],
+                max_abs[2], max_rel[2]);
+        parity->reported = true;
+    }
+    return true;
+}
+
+static bool qsa_qkv_single_layer_backend(
+    const q38_gguf *model, const q38_tensor *q_proj,
+    const q38_tensor *k_proj, const q38_tensor *v_proj,
+    const float *host_input, size_t token_count, float *host_q,
+    float *host_k, float *host_v, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len) {
+    qsa_qkv_parity_context *context = (qsa_qkv_parity_context *)user;
+    if (strstr(q_proj->name.ptr, ".layers.3.") != NULL)
+        return q38_forward_cuda_qsa_qkv_backend(
+            model, q_proj, k_proj, v_proj, host_input, token_count,
+            host_q, host_k, host_v, timing, context->cuda, error, error_len);
+    if (token_count != 1 ||
+        !host_qkv_project(model, q_proj, host_input, 12288, host_q,
+                          error, error_len) ||
+        !host_qkv_project(model, k_proj, host_input, 512, host_k,
+                          error, error_len) ||
+        !host_qkv_project(model, v_proj, host_input, 512, host_v,
+                          error, error_len))
+        return false;
+    return true;
+}
+
 static bool qsa_trace(uint32_t layer, const uint32_t *selected, size_t count,
                       void *user, char *error, size_t error_len) {
     (void)user;
@@ -264,7 +402,9 @@ static void print_exclusive_profile(const exclusive_profile *p) {
            "\"QSA_allocation_cleanup_ms\":%.6f,\"MoE_total_ms\":%.6f,"
            "\"MoE_router_ms\":%.6f,\"MoE_gate_up_ms\":%.6f,"
            "\"MoE_down_ms\":%.6f,\"MoE_weighted_reduction_ms\":%.6f,"
-           "\"PLE_ms\":%.6f,\"LM_head_ms\":%.6f,\"GPU_argmax_ms\":%.6f,"
+           "\"PLE_ms\":%.6f,\"PLE_elapsed_ms\":%.6f,"
+           "\"PLE_overlap_ms\":%.6f,\"PLE_critical_stall_ms\":%.6f,"
+           "\"LM_head_ms\":%.6f,\"GPU_argmax_ms\":%.6f,"
            "\"kernel_launches_per_token\":%" PRIu64
            ",\"host_syncs_per_token\":%" PRIu64
            ",\"H2D_bytes_per_token\":%" PRIu64
@@ -275,6 +415,8 @@ static void print_exclusive_profile(const exclusive_profile *p) {
            ",\"QSA_H2D_bytes_per_token\":%" PRIu64
            ",\"QSA_D2H_bytes_per_token\":%" PRIu64
            ",\"QSA_residency_misses\":%" PRIu64
+           ",\"PLE_file_backed_accesses_per_token\":%" PRIu64
+           ",\"PLE_file_bytes_per_token\":%" PRIu64
            ",\"QSA_selected_ids_hash\":%" PRIu64
            ",\"QSA_selected_ids_count\":%" PRIu64
            ",\"NaN_Inf_count\":%" PRIu64
@@ -284,11 +426,13 @@ static void print_exclusive_profile(const exclusive_profile *p) {
            p->qsa_score, p->qsa_top_k, p->qsa_gather, p->qsa_attention,
            p->qsa_state_update, p->qsa_allocation_cleanup, p->moe_total,
            p->moe_router, p->moe_gate_up,
-           p->moe_down, p->moe_weighted_reduce, p->ple, p->lm_head,
-           p->gpu_argmax, p->kernel_launches, p->host_syncs,
+           p->moe_down, p->moe_weighted_reduce, p->ple,
+           p->ple_elapsed, p->ple_overlap, p->ple_critical_stall,
+           p->lm_head, p->gpu_argmax, p->kernel_launches, p->host_syncs,
            p->h2d_bytes, p->d2h_bytes, p->qsa_allocations,
            p->qsa_kernel_launches, p->qsa_host_syncs, p->qsa_h2d_bytes,
            p->qsa_d2h_bytes, p->qsa_residency_misses,
+           p->ple_file_backed_accesses, p->ple_file_bytes,
            p->qsa_selected_ids_hash, p->qsa_selected_ids_count,
            p->nan_inf_count,
            p->qsa_selected_ids_exact ? "true" : "false");
@@ -345,7 +489,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "%s\n", error);
         return 1;
     }
-    q38_forward_cuda_set_telemetry_observer(cuda, telemetry_observer, &profile);
+    q38_forward_cuda_set_qsa_candidate(cuda, q38_qsa_candidate_project);
+    /*
+     * PLE is intentionally file-backed. Its row-wise fallback emits one
+     * diagnostic record per row, which overwhelms the detailed telemetry
+     * buffer and distorts this exclusive timing harness. Stage traces and
+     * QSA timing remain enabled for the accounting below.
+     */
+    q38_forward_cuda_set_telemetry_observer(cuda, NULL, NULL);
     backend_cuda = cuda;
     if (!q38_forward_state_init(&state, &weights, 248044, error,
                                 sizeof(error))) {
@@ -369,8 +520,11 @@ int main(int argc, char **argv) {
         !getenv("Q38_Q2_LAYER_BACKEND") ||
         strcmp(getenv("Q38_Q2_LAYER_BACKEND"), "0") != 0;
     const bool diagnostic_only = getenv("Q38_Q2_DIAGNOSTIC") != NULL;
-    const int run_count = diagnostic_only ? 2 : 6;
+    qsa_qkv_parity_context parity = {cuda, false};
+    const int run_count = getenv("Q38_Q2_RUNS")
+        ? atoi(getenv("Q38_Q2_RUNS")) : (diagnostic_only ? 2 : 6);
     for (int run = 1; run <= run_count; ++run) {
+        q38_forward_state_reset(&state);
         stages s = {0};
         memset(routed_selected, 0, sizeof(routed_selected));
         qsa_selected_ids_hash = 1469598103934665603ULL;
@@ -387,8 +541,21 @@ int main(int argc, char **argv) {
         d.moe_trace = capture_moe_hidden;
         d.route_trace = route_trace;
         d.qsa_trace = qsa_trace;
+        if (getenv("Q38_QSA_CAPTURE_HIDDEN"))
+            d.boundary_trace = qsa_hidden_capture_boundary;
         q38_forward_qsa_timing qsa_timing = {0};
         d.qsa_timing = &qsa_timing;
+        if (!getenv("Q38_QSA_QKV_BACKEND") ||
+            strcmp(getenv("Q38_QSA_QKV_BACKEND"), "0") != 0) {
+            d.qsa_qkv_backend = getenv("Q38_QSA_QKV_SINGLE_LAYER")
+                ? qsa_qkv_single_layer_backend :
+                (getenv("Q38_QSA_QKV_PARITY")
+                    ? qsa_qkv_parity_backend :
+                    q38_forward_cuda_qsa_qkv_backend);
+            d.qsa_qkv_backend_user = getenv("Q38_QSA_QKV_SINGLE_LAYER") ||
+                                     getenv("Q38_QSA_QKV_PARITY")
+                ? (void *)&parity : (void *)cuda;
+        }
         d.trace_user = &s;
         float *logits = run == 1 ? logits1 : logits2;
         q38_forward_cuda_residency_stats before, after;
@@ -414,6 +581,8 @@ int main(int argc, char **argv) {
                 q38_forward_cuda_matvec_backend,
                 q38_forward_cuda_matrix_backend,
                 q38_forward_cuda_expert_backend, cuda, error, sizeof(error));
+        if (!ok)
+            fprintf(stderr, "post-QKV profiling forward error: %s\n", error);
         sample_memory();
         uint32_t gpu_argmax_token = 0;
         float gpu_argmax_ms = 0.0f;
@@ -424,6 +593,26 @@ int main(int argc, char **argv) {
         gpu_argmax_ms = argmax_stats.gpu_argmax_kernel_ms;
         double wall = now_ms() - start;
         q38_forward_cuda_get_residency_stats(cuda, &after);
+        printf("{\"persistent_dev_telemetry\":{\"run\":%d,"
+               "\"resident_pointer_before\":\"%016" PRIx64
+               "\",\"resident_pointer_after\":\"%016" PRIx64
+               "\",\"resident_pointer_same\":%s,"
+               "\"resident_non_ple_bytes_before\":%zu,"
+               "\"resident_non_ple_bytes_after\":%zu,"
+               "\"resident_non_ple_bytes_constant\":%s,"
+               "\"weight_upload_after_init\":%zu,"
+               "\"residency_misses\":%" PRIu64 ","
+               "\"semantic_state_reset\":true}}\n",
+               run, before.persistent_pointer_fingerprint,
+               after.persistent_pointer_fingerprint,
+               before.persistent_pointer_fingerprint ==
+                       after.persistent_pointer_fingerprint ? "true" : "false",
+               before.persistent_resident_bytes,
+               after.persistent_resident_bytes,
+               before.persistent_resident_bytes ==
+                       after.persistent_resident_bytes ? "true" : "false",
+               after.matrix_upload_bytes - before.matrix_upload_bytes,
+               after.resident_misses - before.resident_misses);
         if (run == 1) {
             cold_qsa_selected_ids_hash = qsa_selected_ids_hash;
             cold_qsa_selected_ids_count = qsa_selected_ids_count;
@@ -460,7 +649,12 @@ int main(int argc, char **argv) {
          */
         exclusive.moe_total =
             exclusive.moe_router + s.moe_activation_reduction;
-        exclusive.ple = s.ple;
+        q38_ple_scheduler_stats ple_stats = {0};
+        (void)q38_forward_state_get_ple_prefetch_stats(&state, &ple_stats);
+        exclusive.ple_elapsed = ple_stats.elapsed_ms;
+        exclusive.ple_overlap = ple_stats.overlap_ms;
+        exclusive.ple_critical_stall = ple_stats.wait_ms;
+        exclusive.ple = exclusive.ple_critical_stall;
         exclusive.lm_head = s.lm_head;
         exclusive.gpu_argmax = gpu_argmax_ms;
         exclusive.qsa_allocations = qsa_timing.allocations;
@@ -469,6 +663,11 @@ int main(int argc, char **argv) {
         exclusive.qsa_h2d_bytes = qsa_timing.h2d_bytes;
         exclusive.qsa_d2h_bytes = qsa_timing.d2h_bytes;
         exclusive.qsa_residency_misses = qsa_timing.residency_misses;
+        exclusive.ple_file_backed_accesses =
+            after.ple_file_backed_accesses -
+            before.ple_file_backed_accesses;
+        exclusive.ple_file_bytes =
+            after.ple_file_bytes - before.ple_file_bytes;
         exclusive.qsa_selected_ids_hash = qsa_selected_ids_hash;
         exclusive.qsa_selected_ids_count = qsa_selected_ids_count;
         exclusive.nan_inf_count = nan_inf_count;
@@ -484,13 +683,18 @@ int main(int argc, char **argv) {
             exclusive.kernel_launches += profile.subsystem[i].kernel_launches;
         exclusive.kernel_launches +=
             after.expert_kernel_launches - before.expert_kernel_launches;
+        exclusive.kernel_launches += exclusive.ple_file_backed_accesses;
         exclusive.host_syncs = profile.bandwidth.host_syncs +
             after.expert_host_sync_count - before.expert_host_sync_count;
+        exclusive.host_syncs += exclusive.ple_file_backed_accesses;
         for (size_t i = 0; i < Q38_PROFILE_SUBSYSTEM_COUNT; ++i)
             exclusive.h2d_bytes += profile.subsystem[i].upload_bytes;
         exclusive.h2d_bytes += after.expert_H2D_bytes - before.expert_H2D_bytes;
+        exclusive.h2d_bytes += exclusive.ple_file_bytes;
         exclusive.d2h_bytes = profile.bandwidth.d2h_bytes +
             after.expert_D2H_bytes - before.expert_D2H_bytes;
+        exclusive.d2h_bytes +=
+            exclusive.ple_file_backed_accesses * sizeof(float);
         print_exclusive_profile(&exclusive);
         fprintf(exclusive_artifact,
                 "{\"run\":%d,\"cold\":%s,\"wall_ms\":%.6f,"
@@ -503,7 +707,9 @@ int main(int argc, char **argv) {
                 "\"QSA_allocation_cleanup_ms\":%.6f,\"MoE_total_ms\":%.6f,"
                 "\"MoE_router_ms\":%.6f,\"MoE_gate_up_ms\":%.6f,"
                 "\"MoE_down_ms\":%.6f,\"MoE_weighted_reduction_ms\":%.6f,"
-                "\"PLE_ms\":%.6f,\"LM_head_ms\":%.6f,"
+                "\"PLE_ms\":%.6f,\"PLE_elapsed_ms\":%.6f,"
+                "\"PLE_overlap_ms\":%.6f,\"PLE_critical_stall_ms\":%.6f,"
+                "\"LM_head_ms\":%.6f,"
                 "\"GPU_argmax_ms\":%.6f,\"kernel_launches_per_token\":%" PRIu64
                 ",\"host_syncs_per_token\":%" PRIu64
                 ",\"H2D_bytes_per_token\":%" PRIu64
@@ -514,6 +720,8 @@ int main(int argc, char **argv) {
                 ",\"QSA_H2D_bytes_per_token\":%" PRIu64
                 ",\"QSA_D2H_bytes_per_token\":%" PRIu64
                 ",\"QSA_residency_misses\":%" PRIu64
+                ",\"PLE_file_backed_accesses_per_token\":%" PRIu64
+                ",\"PLE_file_bytes_per_token\":%" PRIu64
                 ",\"QSA_selected_ids_hash\":%" PRIu64
                 ",\"QSA_selected_ids_count\":%" PRIu64
                 ",\"NaN_Inf_count\":%" PRIu64
@@ -528,12 +736,16 @@ int main(int argc, char **argv) {
                 exclusive.moe_router,
                 exclusive.moe_gate_up, exclusive.moe_down,
                 exclusive.moe_weighted_reduce, exclusive.ple,
-                exclusive.lm_head, exclusive.gpu_argmax,
+                exclusive.ple_elapsed, exclusive.ple_overlap,
+                exclusive.ple_critical_stall, exclusive.lm_head,
+                exclusive.gpu_argmax,
                 exclusive.kernel_launches, exclusive.host_syncs,
                 exclusive.h2d_bytes, exclusive.d2h_bytes,
                 exclusive.qsa_allocations, exclusive.qsa_kernel_launches,
                 exclusive.qsa_host_syncs, exclusive.qsa_h2d_bytes,
                 exclusive.qsa_d2h_bytes, exclusive.qsa_residency_misses,
+                exclusive.ple_file_backed_accesses,
+                exclusive.ple_file_bytes,
                 exclusive.qsa_selected_ids_hash,
                 exclusive.qsa_selected_ids_count,
                 exclusive.nan_inf_count,

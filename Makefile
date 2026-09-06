@@ -252,55 +252,6 @@ m7-profile-schema:
 m7-gates: m7-replay m7-profile m7-profile-schema
 	@$(M6_PYTHON) tools/m7_check_gates.py
 
-$(TEST_DIR)/m7_profile_forward: $(TEST_DIR)/m7_profile_forward.c \
-		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o q38_ple_prefetch.o \
-		q38_moe.o q38_weights.o q38_model_config.o q38_ple.o q38_qsa.o \
-		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
-		q38_gr_ref.o q38_profile.o q38_cuda.o q38_forward_cuda.o \
-		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o
-	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_profile_forward.c \
-		q38_gguf.o q38_memory.o q38_platform.o q38_decode.o q38_forward.o q38_ple_prefetch.o \
-		q38_moe.o q38_weights.o q38_model_config.o q38_ple.o q38_qsa.o \
-		q38_state.o q38_session.o q38_quant.o q38_ple_ref.o q38_gdn_ref.o \
-		q38_gr_ref.o q38_profile.o q38_cuda.o q38_forward_cuda.o \
-		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
-		$(CUDA_LDLIBS) -lm
-
-m7-profile-forward: $(TEST_DIR)/m7_profile_forward
-	@./$(TEST_DIR)/m7_profile_forward \
-		$(M7_MODEL) \
-		artifacts/m7
-
-$(TEST_DIR)/m7_lm_head_kernel_bench: $(TEST_DIR)/m7_lm_head_kernel_bench.cu \
-		q38_cuda_primitives.o q38_weights.o q38_gguf.o q38_model_config.o \
-		q38_ple.o q38_qsa.o q38_quant.o
-	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_lm_head_kernel_bench.cu \
-		q38_cuda_primitives.o q38_weights.o q38_gguf.o q38_model_config.o \
-		q38_ple.o q38_qsa.o q38_quant.o $(CUDA_LDLIBS) -lm
-
-m7-lm-head-kernel: $(TEST_DIR)/m7_lm_head_kernel_bench
-	@./$(TEST_DIR)/m7_lm_head_kernel_bench $(M7_MODEL)
-
-$(TEST_DIR)/gb10_read_bw_probe: $(TEST_DIR)/gb10_read_bw_probe.cu
-	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< $(CUDA_LDLIBS)
-
-m7-read-ceiling: $(TEST_DIR)/gb10_read_bw_probe
-	@./$(TEST_DIR)/gb10_read_bw_probe
-
-$(TEST_DIR)/m7_cold_warm: $(TEST_DIR)/m7_cold_warm.c \
-		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
-		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
-		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_profile.o \
-		q38_forward_cuda.o q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o \
-		q38_qsa_cuda.o q38_profile_cuda.o q38_residency.o q38_topk_cuda.o
-	$(NVCC) $(NVCCFLAGS) -I. -o $@ $(TEST_DIR)/m7_cold_warm.c \
-		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
-		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
-		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_decode.o q38_profile.o q38_forward_cuda.o \
-		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o q38_profile_cuda.o \
-		q38_qsa_cuda.o q38_residency.o q38_topk_cuda.o \
-		$(CUDA_LDLIBS) -lm
-
 $(TEST_DIR)/q2_canonical_bench: $(TEST_DIR)/q2_canonical_bench.c \
 		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_runtime.o \
@@ -365,18 +316,6 @@ q38_dev_worker: $(TEST_DIR)/q38_dev_worker.c \
 		q38_topk_cuda.o q38_moe.o q38_quant.o q38_ple.o q38_qsa.o \
 		q38_state.o q38_session.o q38_tokenizer.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
 		q38_rope_ref.o $(CUDA_LDLIBS) -ldl -lm
-
-m7-cold-warm: $(TEST_DIR)/m7_cold_warm
-	@./$(TEST_DIR)/m7_cold_warm $(M7_MODEL)
-
-$(TEST_DIR)/m7_residency_footprint: $(TEST_DIR)/m7_residency_footprint.c \
-		q38_gguf.o
-	$(CC) $(CFLAGS) -I. -o $@ $(TEST_DIR)/m7_residency_footprint.c \
-		q38_gguf.o
-
-m7-residency-footprint: $(TEST_DIR)/m7_residency_footprint
-	@./$(TEST_DIR)/m7_residency_footprint $(M7_MODEL) \
-		> artifacts/m7/residency_footprint.json
 
 m7-acceptance: m7-gates $(TEST_DIR)/test_m6_moe_cuda
 	@./$(TEST_DIR)/test_m6_moe_cuda
@@ -887,43 +826,6 @@ $(TEST_DIR)/test_m8_q4_moe_cuda: $(TEST_DIR)/test_m8_q4_moe_cuda.cu \
 m8-q4-kernel: $(TEST_DIR)/test_m8_q4_moe_cuda
 	@./$(TEST_DIR)/test_m8_q4_moe_cuda
 
-$(TEST_DIR)/m8_routed_expert_q4_bench: \
-		$(TEST_DIR)/m8_routed_expert_q4_bench.cu \
-		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
-		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
-		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
-		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
-		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
-		q38_topk_cuda.o
-	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< \
-		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
-		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
-		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
-		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
-		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
-		q38_topk_cuda.o $(CUDA_LDLIBS) -lm
-
-$(TEST_DIR)/m8_single_expert_device_parity: \
-		$(TEST_DIR)/m8_single_expert_device_parity.cu \
-		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
-		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
-		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
-		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
-		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
-		q38_topk_cuda.o
-	$(NVCC) $(NVCCFLAGS) -I. -o $@ $< \
-		q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o q38_model_config.o q38_ple.o \
-		q38_qsa.o q38_state.o q38_session.o q38_quant.o q38_ple_ref.o \
-		q38_gdn_ref.o q38_gr_ref.o q38_moe.o q38_moe_ref.o q38_decode.o \
-		q38_moe_cuda.o q38_cuda.o q38_forward_cuda.o q38_cuda_primitives.o \
-		q38_gdn.o q38_profile.o q38_profile_cuda.o q38_residency.o \
-		q38_topk_cuda.o $(CUDA_LDLIBS) -lm
-
-m8-routed-expert-q4-bench: $(TEST_DIR)/m8_routed_expert_q4_bench
-	@mkdir -p artifacts/post_m8_opt
-	@./$(TEST_DIR)/m8_routed_expert_q4_bench $(DIRECT_RUNTIME_ARTIFACT) \
-		| tee artifacts/post_m8_opt/routed_expert_q4_gemv.json
-
 $(TEST_DIR)/test_m9_checkpoint_mismatch: \
 		$(TEST_DIR)/test_m9_checkpoint_mismatch.c q38_replay.o q38_state.o \
 		q38_qsa.o q38_session.o q38_replay.h
@@ -1005,24 +907,6 @@ $(TEST_DIR)/test_m6_ple_grouped_norm: $(TEST_DIR)/test_m6_ple_grouped_norm.c \
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m6_ple_grouped_norm.c \
 		q38_ple_ref.o q38_quant.o q38_session.o -lm
 
-$(TEST_DIR)/m6_real_forward: $(TEST_DIR)/m6_real_forward.c \
-		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
-		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
-		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o
-	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m6_real_forward.c \
-		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
-		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
-		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o -lm
-
-$(TEST_DIR)/m8_r1_quality: $(TEST_DIR)/m8_r1_quality.c \
-		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
-		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
-		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_residency.o
-	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/m8_r1_quality.c \
-		q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o q38_model_config.o \
-		q38_ple.o q38_qsa.o q38_state.o q38_session.o q38_quant.o \
-		q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_residency.o -lm
-
 $(TEST_DIR)/m6_decode_trace: $(TEST_DIR)/m6_decode_trace.c \
 		q38_decode.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
 		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
@@ -1062,21 +946,6 @@ $(TEST_DIR)/test_m6_gpu_forward: $(TEST_DIR)/test_m6_gpu_forward.cu \
 		q38_moe_cuda.o q38_cuda_primitives.o q38_gdn.o q38_quant.o \
 		q38_moe_ref.o $(CUDA_LDLIBS) -lm
 
-$(TEST_DIR)/m6_real_forward_gpu.o: $(TEST_DIR)/m6_real_forward_gpu.c \
-		q38_forward_cuda.h $(TEST_DIR)/m6_real_forward.c
-	$(CC) $(CFLAGS) -c -o $@ $(TEST_DIR)/m6_real_forward_gpu.c
-
-$(TEST_DIR)/m6_real_forward_gpu: $(TEST_DIR)/m6_real_forward_gpu.o \
-		q38_forward_cuda.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
-		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
-		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
-		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o
-	$(NVCC) $(NVCCFLAGS) -o $@ $(TEST_DIR)/m6_real_forward_gpu.o \
-		q38_forward_cuda.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o q38_gguf.o \
-		q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_session.o \
-		q38_quant.o q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o \
-		q38_cuda_primitives.o q38_gdn.o q38_moe_cuda.o $(CUDA_LDLIBS) -lm
-
 m6-trace-stats:
 	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
 		$(M6_PYTHON) tests/test_m6_trace_stats.py
@@ -1111,20 +980,10 @@ m6-dequant-fixtures: $(TEST_DIR)/test_m6_gguf_dequant
 		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
 		artifacts/m6/gguf_dequant_fixtures.json
 
-m6-gpu-forward: $(TEST_DIR)/test_m6_gpu_forward \
-		$(TEST_DIR)/m6_real_forward_gpu
+m6-gpu-forward: $(TEST_DIR)/test_m6_gpu_forward
 	@mkdir -p artifacts/m6
 	@./$(TEST_DIR)/test_m6_gpu_forward
 	@printf '%s\n' '{"gate":"M6-GPU","path":"separate CUDA diagnostic forward with scalar sequencing and CUDA row matvecs","validation":["BF16 matvec","Q8 matvec","Q2 expert"],"status":"pass"}' > artifacts/m6/gpu_forward.json
-
-m6-gpu-progressive: m6-gpu-forward
-	@test -f $(M6_TRACE) || { echo "GPU progressive validation requires $(M6_TRACE)" >&2; exit 1; }
-	@./$(TEST_DIR)/m6_real_forward_gpu \
-		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
-		$(M6_GPU_TRACE)
-	@PYTHONPATH=$(CURDIR)/.venv-m6/lib/python3.12/site-packages \
-		$(M6_PYTHON) tools/m6_gpu_progressive.py \
-		--cpu $(M6_TRACE) --gpu $(M6_GPU_TRACE) --output $(M6_GPU_PROGRESSIVE)
 
 m6-gpu-phase7: $(TEST_DIR)/test_m2_matvec \
 		$(TEST_DIR)/test_m3_gr_cuda $(TEST_DIR)/test_m3_gdn_cuda \
@@ -1218,12 +1077,8 @@ m6-preflight: m6-c11
 m6-c12: m6-preflight m6-trace-stats m6-dequant-fixtures \
 		$(TEST_DIR)/test_m6_ple_grouped_norm
 	@./$(TEST_DIR)/test_m6_ple_grouped_norm
-	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api \
-		$(TEST_DIR)/m6_real_forward
+	@$(MAKE) --no-print-directory $(TEST_DIR)/test_m6_forward_api
 	@./$(TEST_DIR)/test_m6_forward_api
-	@./$(TEST_DIR)/m6_real_forward \
-		artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf \
-		$(M6_TRACE)
 	@$(MAKE) --no-print-directory m6-trace-schema
 	@python3 tools/m6_checkpoint_goldens.py --model-dir $(MODEL_DIR) \
 		--output $(M6_GOLDEN)
@@ -1812,6 +1667,5 @@ clean:
 		$(TEST_DIR)/test_m5_qsa_state \
 		$(TEST_DIR)/test_m5_qsa_chunking \
 		$(TEST_DIR)/test_m6_gpu_forward \
-		$(TEST_DIR)/m6_real_forward_gpu \
 		tools/q38_quantize
 	rm -rf $(ARTIFACT_DIR) $(M2_ARTIFACT_DIR) $(M3_ARTIFACT_DIR)
