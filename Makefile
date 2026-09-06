@@ -54,7 +54,7 @@ TEST_BINS := \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	check-perf-artifacts test-steering test-steering-cuda \
 	gr-fixtures gr-bench gr-c1-bench gr-c2-bench gr-c3-bench \
-	gr-c3-bundle gr-c4-bench test-gr
+	gr-c3-bundle gr-c4-bench test-gr test-moe bench-moe
 
 all: q38
 
@@ -270,6 +270,35 @@ test-gr: tests/gr/test_m3_gr_ref tests/gr/test_m3_gr_binding \
 	@set +e; ./tests/gr/test_m3_gr_cuda; status=$$?; \
 	if [ $$status -ne 0 ] && [ $$status -ne 2 ]; then exit $$status; fi
 
+MOE_FIXTURE_DIR ?= tests/fixtures/moe
+MOE_ARTIFACT := artifacts/perf/subsystems/moe_baseline.json
+MOE_REFERENCE_OBJS := tests/moe/moe_reference.o q38_quant.o
+
+tests/moe/moe_reference.o: tests/moe/moe_reference.c \
+		tests/moe/moe_reference.h q38_quant.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+tests/moe/test_moe_reference: tests/moe/test_moe_reference.c \
+		$(MOE_REFERENCE_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+tests/moe/moe_bench: tests/moe/moe_bench.o $(MOE_REFERENCE_OBJS) \
+		q38_moe_cuda.o q38_cuda_primitives.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS) -lm
+
+tests/moe/moe_bench.o: tests/moe/moe_bench.cu tests/moe/moe_reference.h \
+		q38_moe_cuda.h q38_cuda_primitives.h
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
+test-moe: tests/moe/test_moe_reference
+	./tests/moe/test_moe_reference
+
+bench-moe: tests/moe/moe_bench
+	@mkdir -p artifacts/perf/subsystems
+	@tmp="$(MOE_ARTIFACT).tmp"; rm -f "$$tmp"; \
+	./tests/moe/moe_bench "$(MOE_FIXTURE_DIR)" > "$$tmp" && \
+	mv "$$tmp" "$(MOE_ARTIFACT)" || { status=$$?; rm -f "$$tmp"; exit $$status; }
+
 tests/q2_canonical_bench: tests/q2_canonical_bench.c \
 		$(CANONICAL_BENCH_C_OBJS) $(CANONICAL_BENCH_CUDA_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ tests/q2_canonical_bench.c \
@@ -324,4 +353,5 @@ clean:
 		tests/test_q38_directional_steering tests/test_q38_json tests/test_q38_server_engine \
 		tests/test_q38_kvstore \
 		tests/test_q38_server_protocol tests/test_q38_server \
+		tests/moe/test_moe_reference tests/moe/moe_bench \
 		tools/q38_quantize
