@@ -349,6 +349,7 @@ def normalize_reference0(raw: dict[str, object],
     decode = dict(metadata)
     decode.update({
         "ref_id": "Q2_DECODE_REFERENCE_0",
+        "REF_ID": "Q2_DECODE_REFERENCE_0",
         "mode": "decode",
         "prompt": raw["prompt"],
         "prompt_ids": raw["prompt_ids"],
@@ -394,6 +395,7 @@ def normalize_reference0(raw: dict[str, object],
     prefill = dict(metadata)
     prefill.update({
         "ref_id": "Q2_PREFILL_REFERENCE_0",
+        "REF_ID": "Q2_PREFILL_REFERENCE_0",
         "mode": "prefill",
         "prompt": raw["prompt"],
         "prompt_ids": raw["prompt_ids"],
@@ -475,10 +477,12 @@ def normalize_current(raw: dict[str, object],
     decode, prefill = normalize_reference0(raw, args)
     if args.mode == "current-decode":
         decode.pop("ref_id", None)
+        decode.pop("REF_ID", None)
         decode["artifact_id"] = "Q2_DECODE_CANONICAL_CURRENT"
         decode["immutable"] = False
         return decode
     prefill.pop("ref_id", None)
+    prefill.pop("REF_ID", None)
     prefill["artifact_id"] = "Q2_PREFILL_CANONICAL_CURRENT"
     prefill["immutable"] = False
     return prefill
