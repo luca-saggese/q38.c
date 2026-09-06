@@ -5,14 +5,6 @@
 #include <string.h>
 #include <time.h>
 
-typedef struct q38_forward_cuda_context q38_forward_cuda_context;
-extern bool q38_forward_cuda_matrix_backend(
-    const q38_gguf *, const q38_tensor *, const float *, size_t, size_t,
-    float *, void *, char *, size_t) __attribute__((weak));
-extern bool q38_forward_cuda_greedy_argmax(
-    q38_forward_cuda_context *, uint32_t *, char *, size_t)
-    __attribute__((weak));
-
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
     return false;
@@ -277,21 +269,11 @@ static bool q38_decode_backend(const q38_gguf *model,
         }
     }
     if (timing) timing->argmax_cpu_ms = decode_now_ms() - argmax_started;
-    if (q38_forward_cuda_matrix_backend &&
-        q38_forward_cuda_greedy_argmax &&
-        matrix_backend == q38_forward_cuda_matrix_backend) {
-        const double gpu_started = decode_now_ms();
-        uint32_t device_best = 0;
-        if (!q38_forward_cuda_greedy_argmax(
-                (q38_forward_cuda_context *)backend_user, &device_best,
-                error, error_len))
-            return false;
-        if (device_best >= Q38_DECODE_VOCAB_SIZE)
-            return fail(error, error_len,
-                        "CUDA greedy argmax returned an invalid token");
-        best = device_best;
-        if (timing) timing->argmax_gpu_ms = decode_now_ms() - gpu_started;
-    }
+    /*
+     * Keep the token decision tied to the validated host logits.  The CUDA
+     * backend may retain a separate device output buffer, so replacing this
+     * result with a device-side argmax can select a stale previous projection.
+     */
     if (timing) {
         timing->argmax_ms = decode_now_ms() - argmax_started;
         timing->total_ms = decode_now_ms() - total_started;

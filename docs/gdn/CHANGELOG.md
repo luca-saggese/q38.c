@@ -55,3 +55,7 @@
 - Routed the production output projection into a dedicated 2560-element
   workspace instead of aliasing the 6144-element gated input. This removes an
   unsafe in-place BF16 matvec race that could corrupt decode output.
+- Made the host argmax over the completed logits buffer authoritative instead
+  of unconditionally replacing it with a separate CUDA argmax result, and
+  added an LM-head geometry check before runtime initialization. This prevents
+  stale-device-output selection and silent vocab-shape mismatches.

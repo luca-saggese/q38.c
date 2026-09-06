@@ -1,5 +1,6 @@
 #include "q38_session.h"
 #include "q38_forward_cuda.h"
+#include "q38_gr_ref.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -60,6 +61,16 @@ static void runtime_zero(q38_runtime *runtime) {
     if (runtime) memset(runtime, 0, sizeof(*runtime));
 }
 
+static bool validate_lm_head_geometry(const q38_tensor *tensor,
+                                      char *error, size_t error_len) {
+    if (!tensor || tensor->ndim != 2 ||
+        tensor->dim[0] != Q38_DECODE_VOCAB_SIZE ||
+        tensor->dim[1] != Q38_GR_HIDDEN)
+        return fail(error, error_len,
+                    "LM-head geometry does not match decode dimensions");
+    return true;
+}
+
 bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
                       const char *tokenizer_path, char *error,
                       size_t error_len) {
@@ -76,6 +87,8 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     runtime->tokenizer_initialized = true;
     if (!q38_weights_bind_subset(runtime->model, 47, &runtime->weights,
                                  error, error_len))
+        goto fail_runtime;
+    if (!validate_lm_head_geometry(runtime->weights.output, error, error_len))
         goto fail_runtime;
     runtime->cuda = q38_forward_cuda_context_create(error, error_len);
     if (!runtime->cuda ||
