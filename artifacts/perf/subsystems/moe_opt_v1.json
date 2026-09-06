@@ -1,0 +1,98 @@
+{
+  "subsystem": "moe",
+  "state": "MOE_OPT_V1",
+  "production_commit": "9bc081771",
+  "fixture_policy": "compact_real_early_middle_late",
+  "warmup": 100,
+  "samples": 1000,
+  "candidate": "MOE-C2 grouped routed execution with parallel down/weighted accumulation",
+  "promotion_gate": {
+    "required_complete_layer_speedup_pct": 10.0,
+    "all_fixtures_correct": true,
+    "nan_inf": 0,
+    "no_new_host_syncs": true
+  },
+  "summary": {
+    "baseline_median_us": 1087.770,
+    "final_median_us": 288.414,
+    "absolute_us_saved": 799.356,
+    "relative_speedup_pct": 73.486,
+    "launches_before": 34,
+    "launches_after": 6,
+    "syncs_before": 5,
+    "syncs_after": 5,
+    "correctness_max_abs": 5.43892384e-07,
+    "correctness_rmse": 6.49082834e-08
+  },
+  "fixtures": {
+    "early": {
+      "baseline": {
+        "median_us": 1085.482,
+        "p95_us": 1114.394,
+        "kernel_launches": 34,
+        "host_syncs": 5
+      },
+      "final": {
+        "median_us": 284.755,
+        "p95_us": 294.835,
+        "kernel_launches": 6,
+        "host_syncs": 5
+      },
+      "absolute_us_saved": 800.727,
+      "relative_speedup_pct": 73.767,
+      "correctness": {
+        "max_abs": 2.98023224e-07,
+        "rmse": 2.33552074e-08,
+        "nan_inf": 0
+      }
+    },
+    "middle": {
+      "baseline": {
+        "median_us": 1066.858,
+        "p95_us": 1094.906,
+        "kernel_launches": 34,
+        "host_syncs": 5
+      },
+      "final": {
+        "median_us": 283.683,
+        "p95_us": 308.866,
+        "kernel_launches": 6,
+        "host_syncs": 5
+      },
+      "absolute_us_saved": 783.175,
+      "relative_speedup_pct": 73.409,
+      "correctness": {
+        "max_abs": 3.25962901e-08,
+        "rmse": 5.73187978e-09,
+        "nan_inf": 0
+      }
+    },
+    "late": {
+      "baseline": {
+        "median_us": 1110.970,
+        "p95_us": 1135.658,
+        "kernel_launches": 34,
+        "host_syncs": 5
+      },
+      "final": {
+        "median_us": 296.803,
+        "p95_us": 416.340,
+        "kernel_launches": 6,
+        "host_syncs": 5
+      },
+      "absolute_us_saved": 814.167,
+      "relative_speedup_pct": 73.284,
+      "correctness": {
+        "max_abs": 5.43892384e-07,
+        "rmse": 6.49082834e-08,
+        "nan_inf": 0
+      }
+    }
+  },
+  "notes": [
+    "The first grouped implementation was rejected because it improved complete-layer wall time by less than 1%.",
+    "The promoted implementation parallelizes the down projection across expert slots and performs weighted accumulation with device atomics.",
+    "Production uses resident full expert tensors with device-side selected expert IDs; no host repacking is performed.",
+    "Reference 0, full-chain inference, and additional model loads were not used during S2."
+  ]
+}
