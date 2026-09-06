@@ -13,6 +13,17 @@ static bool protocol_fail(char *error, size_t error_len,
     return false;
 }
 
+static bool validate_json_object(const char *body, char *error,
+                                 size_t error_len) {
+    const char *cursor = body;
+    if (!q38_json_skip_value(&cursor, error, error_len))
+        return false;
+    while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+    if (*cursor || body[0] != '{')
+        return protocol_fail(error, error_len, "request body must be one JSON object");
+    return true;
+}
+
 static char *duplicate_range(const char *value, size_t len) {
     char *copy = malloc(len + 1);
     if (!copy) return NULL;
@@ -339,7 +350,7 @@ static bool parse_message_item(const char *raw, size_t raw_len, void *user,
     if (content && content[0] == '"') {
         if (!raw_string(content, &message->content, error, error_len))
             goto done;
-    } else if (content) {
+    } else if (content && !q38_json_raw_is_null(content)) {
         content_context context = {.message = message};
         if (!q38_json_array_each(content, parse_content_item, &context,
                                  error, error_len))
@@ -478,6 +489,7 @@ static bool parse_common_fields(const char *body, q38_server_request *request,
     char *reasoning = NULL;
     char *thinking = NULL;
     char *stream_options = NULL;
+    char *session_id = NULL;
     double number;
     bool boolean;
     if (!q38_json_get_string(body, "model", &model, error, error_len) ||
@@ -488,12 +500,16 @@ static bool parse_common_fields(const char *body, q38_server_request *request,
         !q38_json_object_field(body, "thinking", &thinking,
                                error, error_len) ||
         !q38_json_object_field(body, "stream_options", &stream_options,
-                               error, error_len))
+                               error, error_len) ||
+        !q38_json_get_string(body, "session_id", &session_id,
+                             error, error_len))
         goto fail;
     request->model = model;
     model = NULL;
     request->reasoning_effort = reasoning;
     reasoning = NULL;
+    request->session_id = session_id;
+    session_id = NULL;
     if (thinking) {
         if (thinking[0] == '{') {
             if (!q38_json_get_bool(thinking, "enabled", &boolean,
@@ -570,7 +586,27 @@ static bool parse_common_fields(const char *body, q38_server_request *request,
         q38_json_get_bool(stream_options, "include_usage", &boolean,
                           error, error_len))
         request->stream_include_usage = boolean;
+    number = -1.0;
+    if (!q38_json_get_number(body, "cache_read_tokens", &number,
+                             error, error_len))
+        goto fail;
+    if (number >= 0.0) request->cache_read_tokens = (uint32_t)number;
+    number = -1.0;
+    if (!q38_json_get_number(body, "cache_write_tokens", &number,
+                             error, error_len))
+        goto fail;
+    if (number >= 0.0) request->cache_write_tokens = (uint32_t)number;
+    boolean = false;
+    if (!q38_json_get_bool(body, "cache_restore", &boolean,
+                           error, error_len))
+        goto fail;
+    request->cache_restore = boolean;
+    boolean = false;
+    if (!q38_json_get_bool(body, "cache_save", &boolean, error, error_len))
+        goto fail;
+    request->cache_save = boolean;
     free(stream_options);
+    free(session_id);
     stream_options = NULL;
     if (!request->model) request->model = duplicate_range("", 0);
     free(tools);
@@ -583,6 +619,7 @@ fail:
     free(reasoning);
     free(thinking);
     free(stream_options);
+    free(session_id);
     return false;
 }
 
@@ -616,6 +653,7 @@ static bool parse_chat_or_anthropic(q38_server_endpoint endpoint,
             goto fail;
     } else {
         request->api = Q38_SERVER_API_OPENAI;
+        request->legacy_completion = true;
         if (!q38_json_object_field(body, "messages", &messages,
                                    error, error_len) ||
             !parse_messages_raw(request, messages, error, error_len))
@@ -763,13 +801,14 @@ static bool parse_responses(const char *body, q38_server_request *request,
                                     error, error_len)) {
         goto fail;
     }
-    if (reasoning) {
+    if (reasoning && !q38_json_raw_is_null(reasoning)) {
         char *effort = NULL;
-        if (q38_json_get_string(reasoning, "effort", &effort,
+        if (reasoning[0] == '{' &&
+            q38_json_get_string(reasoning, "effort", &effort,
                                 error, error_len)) {
             request->reasoning_effort = effort;
             request->thinking = true;
-        } else {
+        } else if (reasoning[0] == '{') {
             goto fail;
         }
     }
@@ -791,6 +830,7 @@ bool q38_server_parse_request(q38_server_endpoint endpoint,
     if (error && error_len) error[0] = '\0';
     if (!body || !request)
         return protocol_fail(error, error_len, "invalid request body");
+    if (!validate_json_object(body, error, error_len)) return false;
     q38_server_request_init(request);
     if (endpoint == Q38_SERVER_ENDPOINT_COMPLETIONS)
         return parse_completion(body, request, error, error_len);

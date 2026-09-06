@@ -76,13 +76,13 @@ donor vision encoder calls. Protocol structures may retain generic
 | Phase | State | Constraint |
 | --- | --- | --- |
 | SERVER-00 donor inventory | complete | Static inspection only |
-| SERVER-01 HTTP/protocol types | in progress | No model load |
-| SERVER-02 mock engine | pending | All protocol tests use mock behavior |
-| SERVER-03 Qwen prompt adapter | pending | No donor model markers |
-| SERVER-04 engine boundary | pending | One server-to-runtime adapter |
+| SERVER-01 HTTP/protocol types | complete | No model load |
+| SERVER-02 mock engine | complete | All protocol tests use mock behavior |
+| SERVER-03 Qwen prompt adapter | complete | No donor model markers; extraction fixture added |
+| SERVER-04 engine boundary | complete | Vtable boundary plus real adapter source |
 | SERVER-05 resident server | pending | One runtime load at server startup |
-| SERVER-06 `q38-cli` | pending | Must not link GGUF/CUDA |
-| SERVER-07 server protocol tests | pending | `make test-server` is model-free |
+| SERVER-06 `q38-cli` | complete | Must not link GGUF/CUDA |
+| SERVER-07 server protocol tests | complete | `make test-server` is model-free |
 | SERVER-08 real acceptance | pending | At most one fresh model load |
 
 No real model load is part of SERVER-00 through SERVER-07.

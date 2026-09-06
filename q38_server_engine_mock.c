@@ -4,10 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct q38_server_engine {
+typedef struct {
     char *model_name;
-    bool mock;
-};
+} mock_engine;
 
 static char *copy_string(const char *value) {
     const char *source = value ? value : "";
@@ -15,59 +14,6 @@ static char *copy_string(const char *value) {
     char *copy = malloc(len + 1);
     if (copy) memcpy(copy, source, len + 1);
     return copy;
-}
-
-static void free_tool_calls(q38_server_tool_calls *calls) {
-    if (!calls) return;
-    for (size_t i = 0; i < calls->count; ++i) {
-        free(calls->items[i].id);
-        free(calls->items[i].name);
-        free(calls->items[i].arguments_json);
-    }
-    free(calls->items);
-    memset(calls, 0, sizeof(*calls));
-}
-
-void q38_server_request_init(q38_server_request *request) {
-    if (!request) return;
-    memset(request, 0, sizeof(*request));
-    request->api = Q38_SERVER_API_OPENAI;
-    request->max_tokens = 256;
-    request->top_k = 0;
-    request->temperature = 0.7f;
-    request->top_p = 1.0f;
-    request->min_p = 0.0f;
-}
-
-void q38_server_request_free(q38_server_request *request) {
-    if (!request) return;
-    free(request->model);
-    free(request->prompt);
-    for (size_t i = 0; i < request->messages.count; ++i) {
-        q38_server_message *message = &request->messages.items[i];
-        free(message->role);
-        free(message->content);
-        free(message->reasoning);
-        free(message->tool_call_id);
-        free_tool_calls(&message->tool_calls);
-        for (size_t j = 0; j < message->image_count; ++j) {
-            free(message->images[j].media_type);
-            free(message->images[j].data);
-        }
-        free(message->images);
-    }
-    free(request->messages.items);
-    for (size_t i = 0; i < request->tools.count; ++i) {
-        free(request->tools.items[i].name);
-        free(request->tools.items[i].description);
-        free(request->tools.items[i].parameters_json);
-    }
-    free(request->tools.items);
-    for (size_t i = 0; i < request->stop_count; ++i)
-        free(request->stop[i]);
-    free(request->stop);
-    free(request->reasoning_effort);
-    memset(request, 0, sizeof(*request));
 }
 
 static bool emit_event(q38_server_event_cb callback,
@@ -87,7 +33,7 @@ static bool emit_event(q38_server_event_cb callback,
     return callback(&event, user, error, error_len);
 }
 
-int q38_server_engine_generate(q38_server_engine *engine,
+static int mock_generate(void *opaque,
                                const q38_server_request *request,
                                q38_server_event_cb callback, void *callback_user,
                                q38_server_usage *usage,
@@ -97,6 +43,7 @@ int q38_server_engine_generate(q38_server_engine *engine,
     static const char *const answer =
         "This is a deterministic Q38 mock response.";
     if (error && error_len) error[0] = '\0';
+    mock_engine *engine = opaque;
     if (!engine || !request)
         goto invalid;
     if (usage) {
@@ -131,15 +78,14 @@ invalid:
     return -1;
 }
 
-const char *q38_server_engine_model_name(const q38_server_engine *engine) {
-    return engine && engine->model_name ? engine->model_name : "qwen3.8-flash-next";
+static const char *mock_model_name(void *opaque) {
+    mock_engine *engine = opaque;
+    return engine && engine->model_name ? engine->model_name :
+           "qwen3.8-flash-next";
 }
 
-bool q38_server_engine_is_mock(const q38_server_engine *engine) {
-    return engine && engine->mock;
-}
-
-void q38_server_engine_destroy(q38_server_engine *engine) {
+static void mock_destroy(void *opaque) {
+    mock_engine *engine = opaque;
     if (!engine) return;
     free(engine->model_name);
     free(engine);
@@ -147,16 +93,27 @@ void q38_server_engine_destroy(q38_server_engine *engine) {
 
 q38_server_engine *q38_server_mock_engine_create(const char *model_name,
                                                   char *error, size_t error_len) {
-    q38_server_engine *engine = calloc(1, sizeof(*engine));
+    static const q38_server_engine_ops ops = {
+        .generate = mock_generate,
+        .model_name = mock_model_name,
+        .destroy = mock_destroy,
+        .mock = true,
+    };
+    mock_engine *impl = calloc(1, sizeof(*impl));
     if (error && error_len) error[0] = '\0';
-    if (!engine) goto oom;
-    engine->model_name = copy_string(model_name ? model_name :
-                                      "qwen3.8-flash-next");
-    if (!engine->model_name) {
-        free(engine);
+    if (!impl) goto oom;
+    impl->model_name = copy_string(model_name ? model_name :
+                                   "qwen3.8-flash-next");
+    if (!impl->model_name) {
+        free(impl);
         goto oom;
     }
-    engine->mock = true;
+    q38_server_engine *engine = q38_server_engine_wrap(&ops, impl, error,
+                                                        error_len);
+    if (!engine) {
+        mock_destroy(impl);
+        return NULL;
+    }
     return engine;
 oom:
     if (error && error_len)

@@ -3,6 +3,7 @@
 
 #include "q38_server_engine.h"
 #include "q38_server_protocol.h"
+#include "q38_kvstore.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -28,6 +29,8 @@ void q38_http_request_free(q38_http_request *request);
 q38_server *q38_server_create(q38_server_engine *engine,
                               bool owns_engine,
                               char *error, size_t error_len);
+bool q38_server_enable_kvstore(q38_server *server, const char *root,
+                               char *error, size_t error_len);
 void q38_server_destroy(q38_server *server);
 
 int q38_server_handle_connection(q38_server *server, int fd,

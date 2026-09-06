@@ -1,4 +1,5 @@
 #include "q38_prompt.h"
+#include "q38_json.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -122,16 +123,53 @@ oom:
 bool q38_prompt_extract_tool_call(const char *text, size_t text_len,
                                   q38_server_tool_call *call,
                                   char *error, size_t error_len) {
-    (void)text;
-    (void)text_len;
     if (error && error_len) error[0] = '\0';
-    if (!call) {
+    if (!text || !text_len || !call) {
         if (error && error_len)
             snprintf(error, error_len, "tool call output is null");
         return false;
     }
     memset(call, 0, sizeof(*call));
-    return false;
+    const char *start = strstr(text, "<tool_call>");
+    if (!start) return false;
+    start += strlen("<tool_call>");
+    const char *end = strstr(start, "</tool_call>");
+    if (!end || (size_t)(end - start) == 0 ||
+        (size_t)(end - text) > text_len)
+        return false;
+    char *object = malloc((size_t)(end - start) + 1);
+    if (!object) {
+        if (error && error_len)
+            snprintf(error, error_len, "tool call allocation failed");
+        return false;
+    }
+    memcpy(object, start, (size_t)(end - start));
+    object[end - start] = '\0';
+    if (!q38_json_get_string(object, "name", &call->name,
+                             error, error_len)) {
+        free(object);
+        return false;
+    }
+    char *arguments = NULL;
+    if (!q38_json_object_field(object, "arguments", &arguments,
+                               error, error_len)) {
+        free(call->name);
+        call->name = NULL;
+        free(object);
+        return false;
+    }
+    call->arguments_json = arguments ? strdup(arguments) : strdup("{}");
+    free(arguments);
+    free(object);
+    if (!call->name || !call->arguments_json) {
+        free(call->name);
+        free(call->arguments_json);
+        memset(call, 0, sizeof(*call));
+        if (error && error_len)
+            snprintf(error, error_len, "tool call allocation failed");
+        return false;
+    }
+    return true;
 }
 
 bool q38_prompt_is_reasoning_start(const char *text, size_t text_len) {

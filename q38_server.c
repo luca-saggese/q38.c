@@ -15,6 +15,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 struct q38_server {
@@ -23,6 +24,8 @@ struct q38_server {
     pthread_mutex_t inference_mutex;
     uint64_t next_request_id;
     char *model_json;
+    q38_kvstore kvstore;
+    bool kvstore_initialized;
 };
 
 typedef struct {
@@ -42,6 +45,9 @@ typedef struct {
     response_buffer reasoning;
     response_buffer tool;
     response_buffer tool_arguments;
+    char *tool_id;
+    char *tool_name;
+    pthread_mutex_t stream_mutex;
     q38_server_usage usage;
     char error[256];
 } generation_context;
@@ -480,6 +486,12 @@ static bool collect_event(const q38_server_event *event, void *user,
     else if (event->kind == Q38_SERVER_EVENT_REASONING)
         target = &context->reasoning;
     else if (event->kind == Q38_SERVER_EVENT_TOOL_CALL) {
+        free(context->tool_id);
+        free(context->tool_name);
+        context->tool_id = copy_string(event->id);
+        context->tool_name = copy_string(event->name);
+        if (!context->tool_id || !context->tool_name)
+            return set_error(error, error_len, "response allocation failed");
         if (!buffer_append_cstr(&context->tool, event->name) ||
             !buffer_append_cstr(&context->tool_arguments,
                                  event->arguments_json))
@@ -487,15 +499,42 @@ static bool collect_event(const q38_server_event *event, void *user,
     }
     if (target && !buffer_append(target, event->text, event->text_len))
         return set_error(error, error_len, "response allocation failed");
-    if (context->stream && !stream_event_json(context, event))
-        return set_error(error, error_len, "client disconnected");
+    if (context->stream) {
+        bool sent;
+        pthread_mutex_lock(&context->stream_mutex);
+        sent = stream_event_json(context, event);
+        pthread_mutex_unlock(&context->stream_mutex);
+        if (!sent) return set_error(error, error_len, "client disconnected");
+    }
     return true;
+}
+
+typedef struct {
+    generation_context *context;
+    bool done;
+    int result;
+    pthread_cond_t condition;
+    pthread_mutex_t state_mutex;
+} generation_job;
+
+static void *generation_worker(void *user) {
+    generation_job *job = user;
+    job->result = q38_server_engine_generate(
+        job->context->server->engine, job->context->request, collect_event,
+        job->context, &job->context->usage, job->context->error,
+        sizeof(job->context->error));
+    pthread_mutex_lock(&job->state_mutex);
+    job->done = true;
+    pthread_cond_signal(&job->condition);
+    pthread_mutex_unlock(&job->state_mutex);
+    return NULL;
 }
 
 static bool build_nonstream_response(generation_context *context,
                                      response_buffer *body) {
     const char *finish = context->tool.len ? "tool_calls" : "stop";
     char usage[128];
+    char legacy_usage[128];
     if (context->request->api == Q38_SERVER_API_ANTHROPIC) {
         if (!buffer_append_cstr(body,
             "{\"id\":") || !json_append_escaped(body, context->id) ||
@@ -512,7 +551,7 @@ static bool build_nonstream_response(generation_context *context,
             (!buffer_append_cstr(body,
                 "{\"type\":\"tool_use\",\"id\":\"call_q38_mock_1\","
                 "\"name\":") ||
-             !json_append_escaped(body, context->tool.data) ||
+             !json_append_escaped(body, context->tool_name) ||
              !buffer_append_cstr(body, ",\"input\":") ||
              buffer_append_cstr(body, context->tool_arguments.data) == false ||
              !buffer_append_cstr(body, "},")))
@@ -537,6 +576,38 @@ static bool build_nonstream_response(generation_context *context,
              "\"completion_tokens\":%u,\"total_tokens\":%u}}",
              context->usage.prompt_tokens, context->usage.completion_tokens,
              context->usage.prompt_tokens + context->usage.completion_tokens);
+    snprintf(legacy_usage, sizeof(legacy_usage),
+             "\"}],\"usage\":{\"prompt_tokens\":%u,"
+             "\"completion_tokens\":%u,\"total_tokens\":%u}}",
+             context->usage.prompt_tokens, context->usage.completion_tokens,
+             context->usage.prompt_tokens + context->usage.completion_tokens);
+    if (context->request->legacy_completion) {
+        return buffer_append_cstr(body,
+            "{\"id\":") && json_append_escaped(body, context->id) &&
+            buffer_append_cstr(body,
+                ",\"object\":\"text_completion\",\"choices\":[{\"index\":0,"
+                "\"text\":") &&
+            json_append_escaped(body, context->text.data) &&
+            buffer_append_cstr(body, ",\"finish_reason\":\"") &&
+            buffer_append_cstr(body, finish) &&
+            buffer_append_cstr(body, legacy_usage);
+    }
+    if (context->tool.len) {
+        return buffer_append_cstr(body,
+        "{\"id\":") && json_append_escaped(body, context->id) &&
+        buffer_append_cstr(body,
+            ",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,"
+            "\"message\":{\"role\":\"assistant\",\"content\":null,"
+            "\"tool_calls\":[{\"id\":") &&
+        json_append_escaped(body, context->tool_id) &&
+        buffer_append_cstr(body, ",\"type\":\"function\",\"function\":{\"name\":") &&
+        json_append_escaped(body, context->tool_name) &&
+        buffer_append_cstr(body, ",\"arguments\":") &&
+        json_append_escaped(body, context->tool_arguments.data) &&
+        buffer_append_cstr(body, "}}]},\"finish_reason\":\"") &&
+        buffer_append_cstr(body, finish) &&
+        buffer_append_cstr(body, usage);
+    }
     return buffer_append_cstr(body,
         "{\"id\":") && json_append_escaped(body, context->id) &&
         buffer_append_cstr(body,
@@ -585,6 +656,7 @@ static bool handle_generation(q38_server *server, int fd,
     context.fd = fd;
     context.request = request;
     context.stream = request->stream;
+    context.error[0] = '\0';
     snprintf(context.id, sizeof(context.id), "q38-%llu",
              (unsigned long long)server->next_request_id++);
     if (request->stream) {
@@ -598,10 +670,63 @@ static bool handle_generation(q38_server *server, int fd,
             set_error(error, error_len, "client disconnected");
             return false;
         }
+        if (!send_cstr(fd, ": q38 prefill started\n\n")) {
+            set_error(error, error_len, "client disconnected");
+            return false;
+        }
     }
-    result = q38_server_engine_generate(server->engine, request, collect_event,
-                                        &context, &context.usage,
-                                        error, error_len);
+    generation_job job;
+    memset(&job, 0, sizeof(job));
+    job.context = &context;
+    if (request->stream) {
+        pthread_t worker;
+        pthread_mutex_init(&context.stream_mutex, NULL);
+        pthread_mutex_init(&job.state_mutex, NULL);
+        pthread_cond_init(&job.condition, NULL);
+        if (pthread_create(&worker, NULL, generation_worker, &job) != 0) {
+            pthread_cond_destroy(&job.condition);
+            pthread_mutex_destroy(&job.state_mutex);
+            pthread_mutex_destroy(&context.stream_mutex);
+            set_error(error, error_len, "generation thread creation failed");
+            return false;
+        }
+        pthread_mutex_lock(&job.state_mutex);
+        while (!job.done) {
+            struct timespec deadline;
+            clock_gettime(CLOCK_REALTIME, &deadline);
+            deadline.tv_sec += 5;
+            int wait_result = pthread_cond_timedwait(
+                &job.condition, &job.state_mutex, &deadline);
+            if (!job.done && wait_result == ETIMEDOUT) {
+                pthread_mutex_unlock(&job.state_mutex);
+                pthread_mutex_lock(&context.stream_mutex);
+                bool sent = send_cstr(fd, ": q38 keepalive\n\n");
+                pthread_mutex_unlock(&context.stream_mutex);
+                pthread_mutex_lock(&job.state_mutex);
+                if (!sent) {
+                    pthread_mutex_unlock(&job.state_mutex);
+                    pthread_cancel(worker);
+                    pthread_join(worker, NULL);
+                    pthread_cond_destroy(&job.condition);
+                    pthread_mutex_destroy(&job.state_mutex);
+                    pthread_mutex_destroy(&context.stream_mutex);
+                    set_error(error, error_len, "client disconnected");
+                    return false;
+                }
+            }
+        }
+        pthread_mutex_unlock(&job.state_mutex);
+        pthread_join(worker, NULL);
+        result = job.result;
+        pthread_cond_destroy(&job.condition);
+        pthread_mutex_destroy(&job.state_mutex);
+    } else {
+        result = q38_server_engine_generate(server->engine, request, collect_event,
+                                            &context, &context.usage,
+                                            error, error_len);
+    }
+    if (context.error[0] && error && error_len)
+        snprintf(error, error_len, "%s", context.error);
     if (result != 0) {
         if (request->stream)
             send_cstr(fd, "event: error\ndata: {\"error\":{\"message\":\"generation failed\"}}\n\n");
@@ -609,6 +734,9 @@ static bool handle_generation(q38_server *server, int fd,
         buffer_free(&context.reasoning);
         buffer_free(&context.tool);
         buffer_free(&context.tool_arguments);
+        free(context.tool_id);
+        free(context.tool_name);
+        if (request->stream) pthread_mutex_destroy(&context.stream_mutex);
         return false;
     }
     if (!request->stream) {
@@ -621,6 +749,9 @@ static bool handle_generation(q38_server *server, int fd,
     buffer_free(&context.reasoning);
     buffer_free(&context.tool);
     buffer_free(&context.tool_arguments);
+    free(context.tool_id);
+    free(context.tool_name);
+    if (request->stream) pthread_mutex_destroy(&context.stream_mutex);
     return !error || error[0] == '\0';
 }
 
@@ -658,9 +789,21 @@ q38_server *q38_server_create(q38_server_engine *engine, bool owns_engine,
     return server;
 }
 
+bool q38_server_enable_kvstore(q38_server *server, const char *root,
+                               char *error, size_t error_len) {
+    if (!server) return set_error(error, error_len, "server is null");
+    if (server->kvstore_initialized)
+        q38_kvstore_destroy(&server->kvstore);
+    if (!q38_kvstore_init(&server->kvstore, root, error, error_len))
+        return false;
+    server->kvstore_initialized = true;
+    return true;
+}
+
 void q38_server_destroy(q38_server *server) {
     if (!server) return;
     if (server->owns_engine) q38_server_engine_destroy(server->engine);
+    if (server->kvstore_initialized) q38_kvstore_destroy(&server->kvstore);
     pthread_mutex_destroy(&server->inference_mutex);
     free(server->model_json);
     free(server);
@@ -710,6 +853,17 @@ int q38_server_handle_connection(q38_server *server, int fd,
             response_buffer body = {0};
             append_error_json(&body, error);
             send_http_response(fd, 400, "application/json", body.data, false);
+            buffer_free(&body);
+            q38_server_request_free(&request);
+            q38_http_request_free(&http);
+            return -1;
+        }
+        if ((request.cache_restore || request.cache_save) &&
+            (!server->kvstore_initialized || !server->kvstore.enabled)) {
+            response_buffer body = {0};
+            append_error_json(&body,
+                              "disk KV/session cache is unavailable for Q38 runtime");
+            send_http_response(fd, 501, "application/json", body.data, false);
             buffer_free(&body);
             q38_server_request_free(&request);
             q38_http_request_free(&http);
@@ -765,6 +919,23 @@ static int create_listener(const char *host, uint16_t port,
     return fd;
 }
 
+typedef struct {
+    q38_server *server;
+    int fd;
+} connection_context;
+
+static void *serve_connection_thread(void *user) {
+    connection_context *context = user;
+    char error[256] = {0};
+    if (context) {
+        q38_server_handle_connection(context->server, context->fd,
+                                     error, sizeof(error));
+        close(context->fd);
+        free(context);
+    }
+    return NULL;
+}
+
 int q38_server_listen_and_serve(q38_server *server, const char *host,
                                 uint16_t port, char *error, size_t error_len) {
     int listener;
@@ -784,7 +955,21 @@ int q38_server_listen_and_serve(q38_server *server, const char *host,
             set_error(error, error_len, "accept failed");
             return -1;
         }
-        q38_server_handle_connection(server, client, error, error_len);
-        close(client);
+        connection_context *context = malloc(sizeof(*context));
+        pthread_t thread;
+        if (!context) {
+            close(client);
+            set_error(error, error_len, "connection allocation failed");
+            continue;
+        }
+        context->server = server;
+        context->fd = client;
+        if (pthread_create(&thread, NULL, serve_connection_thread, context) != 0) {
+            close(client);
+            free(context);
+            set_error(error, error_len, "connection thread creation failed");
+            continue;
+        }
+        pthread_detach(thread);
     }
 }

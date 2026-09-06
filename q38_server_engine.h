@@ -73,9 +73,13 @@ typedef struct {
     bool stream;
     bool stream_include_usage;
     bool thinking;
+    bool legacy_completion;
     char *reasoning_effort;
     uint32_t cache_read_tokens;
     uint32_t cache_write_tokens;
+    char *session_id;
+    bool cache_restore;
+    bool cache_save;
     bool has_image;
 } q38_server_request;
 
@@ -107,6 +111,18 @@ typedef bool (*q38_server_event_cb)(const q38_server_event *event,
 /* Compatibility callback for engines that only emit ordinary text tokens. */
 typedef bool (*q38_server_token_cb)(const char *utf8, size_t len, void *user);
 
+typedef struct {
+    int (*generate)(void *impl, const q38_server_request *request,
+                    q38_server_event_cb callback, void *callback_user,
+                    q38_server_usage *usage, char *error, size_t error_len);
+    const char *(*model_name)(void *impl);
+    void (*destroy)(void *impl);
+    bool mock;
+} q38_server_engine_ops;
+
+q38_server_engine *q38_server_engine_wrap(const q38_server_engine_ops *ops,
+                                          void *impl,
+                                          char *error, size_t error_len);
 void q38_server_request_init(q38_server_request *request);
 void q38_server_request_free(q38_server_request *request);
 

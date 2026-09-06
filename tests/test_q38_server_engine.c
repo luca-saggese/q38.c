@@ -39,6 +39,20 @@ int main(void) {
     check(rendered && rendered_len && strstr(rendered, "<|im_start|>"),
           "Qwen prompt has native chat boundaries");
     free(rendered);
+    q38_server_tool_call extracted = {0};
+    check(q38_prompt_extract_tool_call(
+              "<tool_call>{\"name\":\"weather\",\"arguments\":{\"city\":\"Rome\"}}"
+              "</tool_call>",
+              strlen("<tool_call>{\"name\":\"weather\",\"arguments\":{\"city\":\"Rome\"}}"
+                     "</tool_call>"),
+              &extracted, error, sizeof(error)),
+          "Qwen tool-call extraction");
+    check(extracted.name && !strcmp(extracted.name, "weather") &&
+              extracted.arguments_json &&
+              strstr(extracted.arguments_json, "\"city\":\"Rome\""),
+          "Qwen tool-call fields");
+    free(extracted.name);
+    free(extracted.arguments_json);
 
     q38_server_engine *engine = q38_server_mock_engine_create(NULL, error,
                                                                 sizeof(error));
