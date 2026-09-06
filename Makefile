@@ -49,7 +49,8 @@ TEST_BINS := \
 	tests/test_model_config tests/test_quant_blocks tests/test_residency
 
 .PHONY: all q38 spark test clean tools \
-	bench-q2-reference-0 bench-q2-decode bench-q2-prefill
+	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
+	check-perf-artifacts
 
 all: q38
 
@@ -101,7 +102,8 @@ tests/q2_canonical_bench: tests/q2_canonical_bench.c \
 bench-q2-reference-0: tests/q2_canonical_bench
 	@test ! -e $(Q2_REFERENCE_OUTPUT_DIR)/q2_decode_reference_0.json
 	@test ! -e $(Q2_REFERENCE_OUTPUT_DIR)/q2_prefill_reference_0.json
-	@python3 tools/bench_q2_canonical.py \
+	@CFLAGS="$(CFLAGS)" NVCC="$(NVCC)" NVCCFLAGS="$(NVCCFLAGS)" \
+		python3 tools/bench_q2_canonical.py \
 		--mode reference0 --binary ./tests/q2_canonical_bench \
 		--model "$(Q2_CANONICAL_MODEL)" \
 		--tokenizer "$(Q2_CANONICAL_TOKENIZER)" \
@@ -111,6 +113,9 @@ bench-q2-reference-0: tests/q2_canonical_bench
 bench-q2-decode: bench-q2-reference-0
 
 bench-q2-prefill: bench-q2-reference-0
+
+check-perf-artifacts:
+	@python3 tools/check_perf_artifacts.py
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
