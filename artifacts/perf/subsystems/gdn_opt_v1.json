@@ -1,7 +1,7 @@
 {
   "format": "q38-gdn-optimization-v1",
   "status": "GDN_OPT_V1",
-  "production_commit": "pending-gdn-c3-commit",
+  "production_commit": "7148dce2a",
   "fixtures": [
     {"layer": 0, "position": "early"},
     {"layer": 24, "position": "middle"},
