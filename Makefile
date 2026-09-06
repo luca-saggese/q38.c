@@ -24,7 +24,7 @@ NVCC ?= $(CUDA_HOME)/bin/nvcc
 # Spark; see BASELINE.md).
 CUDA_ARCH ?= sm_121
 NVCC_ARCH_FLAGS := -gencode arch=compute_121a,code=sm_121a
-NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math $(NVCC_ARCH_FLAGS)
+NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math -I$(CURDIR) $(NVCC_ARCH_FLAGS)
 
 CUDA_LDLIBS ?= -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart -Xcompiler -pthread
 
@@ -113,17 +113,17 @@ $(TEST_DIR)/test_residency: $(TEST_DIR)/test_residency.c q38_residency.o \
 all: spark
 
 # --- CUDA object ----------------------------------------------------------
-q38_cuda.o: q38_cuda.cu q38_cuda.h q38.h
+q38_cuda.o: cuda/q38_cuda.cu q38_cuda.h q38.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_cuda.cu
 
-q38_cuda_timing.o: q38_cuda_timing.cu q38_cuda_timing.h
+q38_cuda_timing.o: cuda/q38_cuda_timing.cu q38_cuda_timing.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_cuda_timing.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_cuda_timing.cu
 
-q38_profile_cuda.o: q38_profile_cuda.cu q38_profile.h
+q38_profile_cuda.o: cuda/q38_profile_cuda.cu q38_profile.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_profile_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_profile_cuda.cu
 
 # --- C objects ------------------------------------------------------------
 q38.o: q38.c q38.h q38_gguf.h q38_memory.h q38_platform.h q38_cuda.h \
@@ -149,9 +149,9 @@ q38_session.o: q38_session.c q38_session.h q38_session_types.h
 q38_ple_ref.o: q38_ple_ref.c q38_ple_ref.h q38_session.h q38_quant.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple_ref.c
 
-q38_ple_stage.o: q38_ple_stage.cu q38_ple_stage.h
+q38_ple_stage.o: cuda/q38_ple_stage.cu q38_ple_stage.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_ple_stage.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_ple_stage.cu
 
 q38_ple.o: q38_ple.c q38_ple.h q38_gguf.h
 	$(CC) $(CFLAGS) -c -o $@ q38_ple.c
@@ -174,19 +174,19 @@ q38_quant.o: q38_quant.c q38_quant.h
 q38_oracle.o: q38_oracle.c q38_oracle.h
 	$(CC) $(CFLAGS) -c -o $@ q38_oracle.c
 
-q38_cuda_primitives.o: q38_cuda_primitives.cu q38_cuda_primitives.h q38_quant.h
+q38_cuda_primitives.o: cuda/q38_cuda_primitives.cu q38_cuda_primitives.h q38_quant.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_cuda_primitives.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_cuda_primitives.cu
 
-q38_forward_cuda.o: q38_forward_cuda.cu q38_forward_cuda.h \
+q38_forward_cuda.o: cuda/q38_forward_cuda.cu q38_forward_cuda.h \
 		q38_forward.h q38_cuda_primitives.h q38_gdn.h q38_qsa_cuda.h \
 		q38_qsa_candidate.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_forward_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_forward_cuda.cu
 
-libq38_qsa_candidate.so: q38_qsa_candidate.cu q38_qsa_candidate.h
+libq38_qsa_candidate.so: cuda/q38_qsa_candidate.cu q38_qsa_candidate.h
 	$(NVCC) $(NVCCFLAGS) -cudart shared -Xcompiler -fPIC -shared -o $@ \
-		q38_qsa_candidate.cu $(CUDA_LDLIBS)
+		cuda/q38_qsa_candidate.cu $(CUDA_LDLIBS)
 
 # --- Executable -----------------------------------------------------------
 q38: $(Q38_OBJS)
@@ -369,9 +369,9 @@ m4-c04: m4-c03 $(TEST_DIR)/test_m4_ple_row
 	@mkdir -p $(M4_ARTIFACT_DIR)
 	printf '%s\n' '{"gate":"M4-C04","decoder":"scalar PLE row","qtypes":["Q2_K","Q4_K"],"row_width":2560,"status":"pass"}' > $(M4_ARTIFACT_DIR)/ple_row_quant_tests.json
 
-q38_ple_cuda.o: q38_ple_cuda.cu q38_ple_cuda.h q38_quant.h
+q38_ple_cuda.o: cuda/q38_ple_cuda.cu q38_ple_cuda.h q38_quant.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_ple_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_ple_cuda.cu
 
 $(TEST_DIR)/test_m4_ple_cuda: $(TEST_DIR)/test_m4_ple_cuda.cu \
 		q38_ple_cuda.o q38_ple_ref.o q38_session.o q38_quant.o \
@@ -534,9 +534,9 @@ m5-c02: m5-c01 $(TEST_DIR)/test_m5_rope_ref
 	@./$(TEST_DIR)/test_m5_rope_ref
 	@printf '%s\n' '{"gate":"M5-C02","implementation":"scalar Qwen4Exp partial interleaved mRoPE","n_dims":64,"sections":[11,11,10,0],"theta":10000000,"text_positions":"all four mRoPE coordinates use committed text position","status":"pass"}' > artifacts/m5/rope_goldens.json
 
-q38_qsa_cuda.o: q38_qsa_cuda.cu q38_qsa_cuda.h q38_rope_ref.h
+q38_qsa_cuda.o: cuda/q38_qsa_cuda.cu q38_qsa_cuda.h q38_rope_ref.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_qsa_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_qsa_cuda.cu
 
 $(TEST_DIR)/test_m5_qsa_cuda: $(TEST_DIR)/test_m5_qsa_cuda.cu \
 		q38_qsa_cuda.o q38_rope_ref.o q38_qsa_cuda.h q38_rope_ref.h
@@ -562,9 +562,9 @@ m5-c04: m5-c03 $(TEST_DIR)/test_m5_qsa_ref
 q38_topk_ref.o: q38_topk_ref.c q38_topk_ref.h
 	$(CC) $(CFLAGS) -c -o $@ q38_topk_ref.c
 
-q38_topk_cuda.o: q38_topk_cuda.cu q38_topk_cuda.h
+q38_topk_cuda.o: cuda/q38_topk_cuda.cu q38_topk_cuda.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_topk_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_topk_cuda.cu
 
 $(TEST_DIR)/test_m5_topk: $(TEST_DIR)/test_m5_topk.cu \
 		q38_topk_ref.o q38_topk_cuda.o q38_topk_ref.h q38_topk_cuda.h
@@ -808,9 +808,9 @@ m6-c02: m6-c01 $(TEST_DIR)/test_m6_moe_ref
 	@./$(TEST_DIR)/test_m6_moe_ref
 	@printf '%s\n' '{"gate":"M6-C02","oracle":"scalar router projection, softmax, deterministic top-10","status":"pass"}' > artifacts/m6/router_goldens.json
 
-q38_moe_cuda.o: q38_moe_cuda.cu q38_moe_cuda.h q38_moe_ref.h q38_quant.h
+q38_moe_cuda.o: cuda/q38_moe_cuda.cu q38_moe_cuda.h q38_moe_ref.h q38_quant.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_moe_cuda.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_moe_cuda.cu
 
 $(TEST_DIR)/test_m6_moe_cuda: $(TEST_DIR)/test_m6_moe_cuda.cu \
 		q38_moe_cuda.o q38_moe_cuda.h q38_moe_ref.h
@@ -1196,9 +1196,9 @@ $(TEST_DIR)/test_m3_gr_ref: $(TEST_DIR)/test_m3_gr_ref.c q38_gr_ref.o \
 		q38_gr_ref.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gr_ref.c q38_gr_ref.o -lm
 
-q38_gr.o: q38_gr.cu q38_gr.h q38_gr_ref.h
+q38_gr.o: cuda/q38_gr.cu q38_gr.h q38_gr_ref.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_gr.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_gr.cu
 
 $(TEST_DIR)/test_m3_gr_cuda: $(TEST_DIR)/test_m3_gr_cuda.cu q38_gr.o \
 		q38_gr_ref.o q38_oracle.o q38_gr.h
@@ -1224,9 +1224,9 @@ $(TEST_DIR)/test_m3_gdn_ref: $(TEST_DIR)/test_m3_gdn_ref.c q38_gdn_ref.o \
 		q38_gdn_ref.h q38_state.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_DIR)/test_m3_gdn_ref.c q38_gdn_ref.o -lm
 
-q38_gdn.o: q38_gdn.cu q38_gdn.h q38_cuda_primitives.h q38_quant.h q38_state.h
+q38_gdn.o: cuda/q38_gdn.cu q38_gdn.h q38_cuda_primitives.h q38_quant.h q38_state.h
 	@echo "q38: nvcc arch flags: $(NVCC_ARCH_FLAGS)"
-	$(NVCC) $(NVCCFLAGS) -c -o $@ q38_gdn.cu
+	$(NVCC) $(NVCCFLAGS) -c -o $@ cuda/q38_gdn.cu
 
 $(TEST_DIR)/test_m3_gdn_cuda: $(TEST_DIR)/test_m3_gdn_cuda.cu q38_gdn.o \
 		q38_cuda_primitives.o q38_oracle.o q38_gdn.h

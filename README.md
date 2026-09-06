@@ -61,7 +61,7 @@ done, the commit plan, and the M0 test matrix.
 ## Repository layout
 
 - `q38.h`, `q38_cuda.h` — narrow public API.
-- `q38_platform.{c,h}`, `q38_cuda.cu` — platform guard (GB10 / SM 12.1).
+- `q38_platform.{c,h}`, `cuda/q38_cuda.cu` — platform guard (GB10 / SM 12.1).
 - `q38_gguf.{c,h}` — GGUF v3 parser core (isolated from model families).
 - `q38_memory.{c,h}` — memory telemetry.
 - `q38_tokenizer.{c,h}` — native byte-level BPE tokenizer loaded directly from
