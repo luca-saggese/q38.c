@@ -85,6 +85,13 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
             runtime->cuda, runtime->model, runtime->weights.output,
             error, error_len))
         goto fail_runtime;
+    runtime->backend.matvec = q38_forward_cuda_matvec_backend;
+    runtime->backend.matrix = q38_forward_cuda_matrix_backend;
+    runtime->backend.matrix_batch = q38_forward_cuda_matrix_batch_backend;
+    runtime->backend.expert = q38_forward_cuda_expert_backend;
+    runtime->backend.moe_layer = q38_forward_cuda_moe_layer_q2_backend;
+    runtime->backend.qsa_qkv = q38_forward_cuda_qsa_qkv_backend;
+    runtime->backend.user = runtime->cuda;
     return true;
 
 fail_runtime:
@@ -207,21 +214,22 @@ bool q38_session_eval_timed(
         memset(&local_diagnostics, 0, sizeof(local_diagnostics));
         diagnostics = &local_diagnostics;
     }
-    diagnostics->qsa_qkv_backend = q38_forward_cuda_qsa_qkv_backend;
-    diagnostics->qsa_qkv_backend_user = session->runtime->cuda;
+    diagnostics->qsa_qkv_backend = session->runtime->backend.qsa_qkv;
+    diagnostics->qsa_qkv_backend_user = session->runtime->backend.user;
     if (diagnostics) {
         diagnostics->backend_context = runtime_backend_context;
-        diagnostics->backend_context_user = session->runtime->cuda;
+        diagnostics->backend_context_user = session->runtime->backend.user;
     }
     const double started = session_now_ms();
     if (!q38_decode_step_with_matrix_batch_moe_layer_backend_timed(
             session->runtime->model, &session->runtime->weights,
             &session->state, token, logits, logits_stride, next_token,
-            diagnostics, q38_forward_cuda_matvec_backend,
-            q38_forward_cuda_matrix_backend,
-            q38_forward_cuda_matrix_batch_backend,
-            q38_forward_cuda_expert_backend,
-            q38_forward_cuda_moe_layer_q2_backend, session->runtime->cuda,
+            diagnostics, session->runtime->backend.matvec,
+            session->runtime->backend.matrix,
+            session->runtime->backend.matrix_batch,
+            session->runtime->backend.expert,
+            session->runtime->backend.moe_layer,
+            session->runtime->backend.user,
             trace_kind, emitted_token, consumed_token, (*step_index)++, trace,
             trace_user, timing, error, error_len))
         return false;
@@ -314,7 +322,7 @@ bool q38_session_prefill_chunked(
         return fail(error, error_len, "chunked prefill logits allocation failed");
     if (diagnostics) {
         diagnostics->backend_context = runtime_backend_context;
-        diagnostics->backend_context_user = session->runtime->cuda;
+        diagnostics->backend_context_user = session->runtime->backend.user;
         /*
          * Let the layer-major graph project Q/K/V through the same batched
          * matrix backend as the other resident projections.  The legacy
@@ -332,12 +340,12 @@ bool q38_session_prefill_chunked(
                 session->runtime->model, &session->runtime->weights,
                 &session->state, tokens + offset, count, chunk_logits,
                 Q38_DECODE_VOCAB_SIZE, diagnostics,
-                q38_forward_cuda_matvec_backend,
-                q38_forward_cuda_matrix_backend,
-                q38_forward_cuda_matrix_batch_backend,
-                q38_forward_cuda_expert_backend,
-                q38_forward_cuda_moe_layer_q2_backend,
-                session->runtime->cuda, error, error_len)) {
+                session->runtime->backend.matvec,
+                session->runtime->backend.matrix,
+                session->runtime->backend.matrix_batch,
+                session->runtime->backend.expert,
+                session->runtime->backend.moe_layer,
+                session->runtime->backend.user, error, error_len)) {
             free(chunk_logits);
             return false;
         }

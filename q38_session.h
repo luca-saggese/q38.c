@@ -22,6 +22,7 @@ typedef struct {
     q38_tokenizer tokenizer;
     q38_weights weights;
     q38_forward_cuda_context *cuda;
+    q38_forward_backend_config backend;
     bool tokenizer_initialized;
 } q38_runtime;
 

@@ -279,6 +279,16 @@ typedef bool (*q38_forward_moe_layer_backend)(
     const float *host_input, float *host_output, void *user, char *error,
     size_t error_len);
 
+typedef struct {
+    q38_forward_matvec_backend matvec;
+    q38_forward_matrix_backend matrix;
+    q38_forward_matrix_batch_backend matrix_batch;
+    q38_forward_expert_backend expert;
+    q38_forward_moe_layer_backend moe_layer;
+    q38_forward_qsa_qkv_backend qsa_qkv;
+    void *user;
+} q38_forward_backend_config;
+
 bool q38_forward_full_with_matrix_moe_layer_backend(
     const q38_gguf *model, const q38_weights *weights,
     q38_forward_state *state, const uint32_t *tokens, size_t token_count,
