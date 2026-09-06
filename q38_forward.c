@@ -462,6 +462,8 @@ static bool full_fail(char *error, size_t error_len, const char *message) {
 static q38_forward_matvec_backend full_backend;
 static q38_forward_matrix_backend full_matrix_backend;
 static q38_forward_matrix_batch_backend full_matrix_batch_backend;
+static q38_forward_gr_read_backend full_gr_read_backend;
+static q38_forward_gr_write_backend full_gr_write_backend;
 static q38_forward_expert_backend full_expert_backend;
 static q38_forward_moe_layer_backend full_moe_layer_backend;
 static void *full_backend_user;
@@ -891,6 +893,11 @@ static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
                          float *normed, float *down, float *up, float *scratch,
                          char *error, size_t error_len) {
     const size_t width = 4u * Q38_GR_HIDDEN;
+    if (full_gr_read_backend && tokens == 1 &&
+        full_gr_read_backend(model, weights, residual, tokens, input, normed,
+                             full_backend_user, error, error_len))
+        return true;
+    if (error && error_len && error[0] != '\0') return false;
     float *down_batch = calloc(tokens * 320u, sizeof(float));
     float *up_batch = calloc(tokens * width, sizeof(float));
     if (!down_batch || !up_batch) {
@@ -949,6 +956,11 @@ static bool full_gr_write(const q38_gguf *model, const q38_gr_weights *weights,
                           float *inject, float *scratch, char *error,
                           size_t error_len) {
     const size_t width = 4u * Q38_GR_HIDDEN;
+    if (full_gr_write_backend && tokens == 1 &&
+        full_gr_write_backend(model, weights, residual, normed, block, tokens,
+                              updated, full_backend_user, error, error_len))
+        return true;
+    if (error && error_len && error[0] != '\0') return false;
     float *inject_batch = calloc(tokens * 4u, sizeof(float));
     if (!inject_batch)
         return full_fail(error, error_len, "GR inject allocation failed");
@@ -2215,13 +2227,15 @@ bool q38_forward_full_with_matrix_moe_layer_backend(
         moe_layer_backend, backend_user, error, error_len);
 }
 
-bool q38_forward_full_with_matrix_batch_moe_layer_backend(
+static bool full_with_matrix_batch_moe_layer_backend_ex(
     const q38_gguf *model, const q38_weights *weights,
     q38_forward_state *state, const uint32_t *tokens, size_t token_count,
     float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
     q38_forward_matvec_backend backend,
     q38_forward_matrix_backend matrix_backend,
     q38_forward_matrix_batch_backend matrix_batch_backend,
+    q38_forward_gr_read_backend gr_read_backend,
+    q38_forward_gr_write_backend gr_write_backend,
     q38_forward_expert_backend expert_backend,
     q38_forward_moe_layer_backend moe_layer_backend,
     void *backend_user, char *error, size_t error_len) {
@@ -2230,6 +2244,10 @@ bool q38_forward_full_with_matrix_batch_moe_layer_backend(
         full_matrix_backend;
     const q38_forward_matrix_batch_backend previous_matrix_batch_backend =
         full_matrix_batch_backend;
+    const q38_forward_gr_read_backend previous_gr_read_backend =
+        full_gr_read_backend;
+    const q38_forward_gr_write_backend previous_gr_write_backend =
+        full_gr_write_backend;
     const q38_forward_expert_backend previous_expert_backend =
         full_expert_backend;
     const q38_forward_moe_layer_backend previous_moe_layer_backend =
@@ -2239,6 +2257,8 @@ bool q38_forward_full_with_matrix_batch_moe_layer_backend(
     full_backend = backend;
     full_matrix_backend = matrix_backend;
     full_matrix_batch_backend = matrix_batch_backend;
+    full_gr_read_backend = gr_read_backend;
+    full_gr_write_backend = gr_write_backend;
     full_expert_backend = expert_backend;
     full_moe_layer_backend = moe_layer_backend;
     full_backend_user = backend_user;
@@ -2253,12 +2273,30 @@ bool q38_forward_full_with_matrix_batch_moe_layer_backend(
     full_backend = previous_backend;
     full_matrix_backend = previous_matrix_backend;
     full_matrix_batch_backend = previous_matrix_batch_backend;
+    full_gr_read_backend = previous_gr_read_backend;
+    full_gr_write_backend = previous_gr_write_backend;
     full_expert_backend = previous_expert_backend;
     full_moe_layer_backend = previous_moe_layer_backend;
     full_backend_user = previous_user;
     full_backend_strict = previous_strict;
     full_perf_strict = previous_perf_strict;
     return ok;
+}
+
+bool q38_forward_full_with_matrix_batch_moe_layer_backend(
+    const q38_gguf *model, const q38_weights *weights,
+    q38_forward_state *state, const uint32_t *tokens, size_t token_count,
+    float *logits, size_t logits_stride, q38_forward_diagnostics *diagnostics,
+    q38_forward_matvec_backend backend,
+    q38_forward_matrix_backend matrix_backend,
+    q38_forward_matrix_batch_backend matrix_batch_backend,
+    q38_forward_expert_backend expert_backend,
+    q38_forward_moe_layer_backend moe_layer_backend,
+    void *backend_user, char *error, size_t error_len) {
+    return full_with_matrix_batch_moe_layer_backend_ex(
+        model, weights, state, tokens, token_count, logits, logits_stride,
+        diagnostics, backend, matrix_backend, matrix_batch_backend, NULL, NULL,
+        expert_backend, moe_layer_backend, backend_user, error, error_len);
 }
 
 bool q38_forward_full_with_backend_config(
@@ -2268,10 +2306,11 @@ bool q38_forward_full_with_backend_config(
     const q38_forward_backend_config *config, char *error, size_t error_len) {
     if (!config)
         return full_fail(error, error_len, "backend configuration is null");
-    return q38_forward_full_with_matrix_batch_moe_layer_backend(
+    return full_with_matrix_batch_moe_layer_backend_ex(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, config->matvec, config->matrix, config->matrix_batch,
-        config->expert, config->moe_layer, config->user, error, error_len);
+        config->gr_read, config->gr_write, config->expert, config->moe_layer,
+        config->user, error, error_len);
 }
 
 bool q38_forward_full_with_backend(

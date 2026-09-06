@@ -5,7 +5,9 @@
 #include "q38_moe_cuda.h"
 #include "q38_qsa_cuda.h"
 #include "q38_topk_cuda.h"
+#include "q38_gr_ref.h"
 
+#include <cooperative_groups.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
@@ -14,6 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+namespace cg = cooperative_groups;
+
 struct persistent_tensor {
     const void *host;
     void *device;
@@ -53,6 +58,24 @@ struct q38_forward_cuda_context {
     size_t device_moe_mid_bytes;
     float *device_moe_accum;
     size_t device_moe_accum_bytes;
+    float *device_gr_residual;
+    size_t device_gr_residual_bytes;
+    float *device_gr_norm;
+    size_t device_gr_norm_bytes;
+    float *device_gr_down;
+    size_t device_gr_down_bytes;
+    float *device_gr_bottleneck;
+    size_t device_gr_bottleneck_bytes;
+    float *device_gr_up;
+    size_t device_gr_up_bytes;
+    float *device_gr_input;
+    size_t device_gr_input_bytes;
+    float *device_gr_block;
+    size_t device_gr_block_bytes;
+    float *device_gr_inject;
+    size_t device_gr_inject_bytes;
+    float *device_gr_updated;
+    size_t device_gr_updated_bytes;
     float *device_qsa_input;
     size_t device_qsa_input_bytes;
     float *device_qsa_output;
@@ -149,6 +172,168 @@ __global__ static void q38_directional_steering_kernel(
     const float coefficient = scale * partial[0];
     for (uint32_t i = threadIdx.x; i < width; i += blockDim.x)
         value[i] -= coefficient * direction[i];
+}
+
+__device__ static float gr_bf16_value(uint16_t bits) {
+    return __uint_as_float((uint32_t)bits << 16);
+}
+
+__device__ static float gr_silu(float value) {
+    value /= 4.0f;
+    return value / (1.0f + expf(-value));
+}
+
+__global__ static void gr_fused_normalize_down_kernel(
+    const float *residual, const uint16_t *gamma, const uint16_t *weights,
+    float *norm_sums, float *normalized, float *down) {
+    cg::grid_group grid = cg::this_grid();
+    __shared__ double partial[128];
+    if (blockIdx.x < Q38_GR_BRANCHES) {
+        const unsigned branch = blockIdx.x;
+        double sum = 0.0;
+        for (unsigned channel = threadIdx.x; channel < Q38_GR_HIDDEN;
+             channel += blockDim.x) {
+            const float value =
+                residual[branch * Q38_GR_HIDDEN + channel];
+            sum += (double)value * (double)value;
+        }
+        partial[threadIdx.x] = sum;
+        __syncthreads();
+        for (unsigned stride = 64; stride; stride >>= 1) {
+            if (threadIdx.x < stride)
+                partial[threadIdx.x] += partial[threadIdx.x + stride];
+            __syncthreads();
+        }
+        if (threadIdx.x == 0)
+            norm_sums[branch] =
+                (float)(partial[0] / (double)Q38_GR_HIDDEN) + 1e-6f;
+    }
+    grid.sync();
+
+    for (size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+         index < Q38_GR_BRANCHES * Q38_GR_HIDDEN;
+         index += (size_t)gridDim.x * blockDim.x) {
+        const unsigned branch = (unsigned)(index / Q38_GR_HIDDEN);
+        normalized[index] =
+            residual[index] * rsqrtf(norm_sums[branch]) *
+            (1.0f + gr_bf16_value(gamma[index]));
+    }
+    grid.sync();
+
+    __shared__ float warp_sums[4];
+    for (size_t row = blockIdx.x; row < Q38_GR_RANK; row += gridDim.x) {
+        const unsigned lane = threadIdx.x & 31u;
+        const unsigned warp = threadIdx.x >> 5;
+        float sum = 0.0f;
+        for (size_t col = threadIdx.x;
+             col < Q38_GR_BRANCHES * Q38_GR_HIDDEN;
+             col += blockDim.x)
+            sum += gr_bf16_value(weights[row * Q38_GR_BRANCHES *
+                                             Q38_GR_HIDDEN + col]) *
+                   normalized[col];
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0) warp_sums[warp] = sum;
+        __syncthreads();
+        if (warp == 0) {
+            sum = lane < 4 ? warp_sums[lane] : 0.0f;
+            for (unsigned offset = 16; offset; offset >>= 1)
+                sum += __shfl_down_sync(0xffffffffu, sum, offset);
+            if (lane == 0) down[row] = sum;
+        }
+        __syncthreads();
+    }
+}
+
+__global__ static void gr_fused_lowrank_up_kernel(
+    const uint16_t *weights, const float *down, float *bottleneck,
+    float *up) {
+    cg::grid_group grid = cg::this_grid();
+    for (size_t rank = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+         rank < Q38_GR_RANK; rank += (size_t)gridDim.x * blockDim.x)
+        bottleneck[rank] = gr_silu(down[rank]);
+    grid.sync();
+
+    __shared__ float warp_sums[4];
+    for (size_t row = blockIdx.x;
+         row < Q38_GR_BRANCHES * Q38_GR_HIDDEN; row += gridDim.x) {
+        const unsigned lane = threadIdx.x & 31u;
+        const unsigned warp = threadIdx.x >> 5;
+        float sum = 0.0f;
+        for (size_t col = threadIdx.x; col < Q38_GR_RANK;
+             col += blockDim.x)
+            sum += gr_bf16_value(
+                       weights[row * Q38_GR_RANK + col]) *
+                   bottleneck[col];
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0) warp_sums[warp] = sum;
+        __syncthreads();
+        if (warp == 0) {
+            sum = lane < 4 ? warp_sums[lane] : 0.0f;
+            for (unsigned offset = 16; offset; offset >>= 1)
+                sum += __shfl_down_sync(0xffffffffu, sum, offset);
+            if (lane == 0) up[row] = sum;
+        }
+        __syncthreads();
+    }
+}
+
+__global__ static void gr_fused_branch_read_kernel(
+    const float *normalized, const float *up, float *input) {
+    const unsigned channel = blockIdx.x * blockDim.x + threadIdx.x;
+    if (channel >= Q38_GR_HIDDEN) return;
+    float value = 0.0f;
+    for (unsigned branch = 0; branch < Q38_GR_BRANCHES; ++branch) {
+        const size_t index = branch * Q38_GR_HIDDEN + channel;
+        value += (1.0f / (1.0f + expf(-up[index]))) * normalized[index];
+    }
+    input[channel] = value / (float)Q38_GR_BRANCHES;
+}
+
+__global__ static void gr_normalize_kernel(
+    const float *residual, const uint16_t *gamma, float *norm_sums,
+    float *normalized) {
+    const unsigned branch = blockIdx.x;
+    if (branch >= Q38_GR_BRANCHES) return;
+    __shared__ double partial[256];
+    double sum = 0.0;
+    for (unsigned channel = threadIdx.x; channel < Q38_GR_HIDDEN;
+         channel += blockDim.x) {
+        const float value = residual[branch * Q38_GR_HIDDEN + channel];
+        sum += (double)value * (double)value;
+    }
+    partial[threadIdx.x] = sum;
+    __syncthreads();
+    for (unsigned stride = blockDim.x >> 1; stride; stride >>= 1) {
+        if (threadIdx.x < stride)
+            partial[threadIdx.x] += partial[threadIdx.x + stride];
+        __syncthreads();
+    }
+    if (threadIdx.x == 0)
+        norm_sums[branch] =
+            (float)(partial[0] / (double)Q38_GR_HIDDEN) + 1e-6f;
+    __syncthreads();
+    for (unsigned channel = threadIdx.x; channel < Q38_GR_HIDDEN;
+         channel += blockDim.x) {
+        const size_t index = branch * Q38_GR_HIDDEN + channel;
+        normalized[index] =
+            residual[index] * rsqrtf(norm_sums[branch]) *
+            (1.0f + gr_bf16_value(gamma[index]));
+    }
+}
+
+__global__ static void gr_fused_writeback_kernel(
+    const float *residual, const float *block, const float *inject,
+    float *updated) {
+    const size_t index =
+        (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= Q38_GR_BRANCHES * Q38_GR_HIDDEN) return;
+    const unsigned branch = index / Q38_GR_HIDDEN;
+    const float scale = 2.0f /
+        (1.0f + expf(-inject[branch] / 4.0f));
+    updated[index] = residual[index] +
+                     scale * block[index % Q38_GR_HIDDEN];
 }
 
 static bool fail(char *error, size_t error_len, const char *message) {
@@ -842,6 +1027,15 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_aux);
     cudaFree(context->device_moe_mid);
     cudaFree(context->device_moe_accum);
+    cudaFree(context->device_gr_residual);
+    cudaFree(context->device_gr_norm);
+    cudaFree(context->device_gr_down);
+    cudaFree(context->device_gr_bottleneck);
+    cudaFree(context->device_gr_up);
+    cudaFree(context->device_gr_input);
+    cudaFree(context->device_gr_block);
+    cudaFree(context->device_gr_inject);
+    cudaFree(context->device_gr_updated);
     cudaFree(context->device_qsa_input);
     cudaFree(context->device_qsa_output);
     cudaFree(context->device_steering);
@@ -1509,6 +1703,243 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
                    "resident_exec_tensor");
     cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
     cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    return true;
+}
+
+static unsigned gr_cooperative_grid(const void *kernel, unsigned minimum) {
+    int device = 0;
+    int multiprocessors = 0;
+    int active_blocks = 0;
+    int cooperative = 0;
+    if (cudaGetDevice(&device) != cudaSuccess ||
+        cudaDeviceGetAttribute(&cooperative, cudaDevAttrCooperativeLaunch,
+                               device) != cudaSuccess ||
+        !cooperative ||
+        cudaDeviceGetAttribute(&multiprocessors,
+                               cudaDevAttrMultiProcessorCount,
+                               device) != cudaSuccess ||
+        cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+            &active_blocks, kernel, 128, 0) != cudaSuccess ||
+        active_blocks <= 0)
+        return 0;
+    const unsigned maximum =
+        (unsigned)multiprocessors * (unsigned)active_blocks;
+    return maximum >= minimum ? maximum : 0;
+}
+
+static bool ensure_gr_buffers(q38_forward_cuda_context *context) {
+    const size_t width = Q38_GR_BRANCHES * Q38_GR_HIDDEN;
+    return ensure_buffer((void **)&context->device_gr_residual,
+                         &context->device_gr_residual_bytes,
+                         width * sizeof(float), context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations) &&
+           ensure_buffer((void **)&context->device_gr_norm,
+                         &context->device_gr_norm_bytes,
+                         width * sizeof(float), context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations) &&
+           ensure_buffer((void **)&context->device_gr_down,
+                         &context->device_gr_down_bytes,
+                         Q38_GR_RANK * sizeof(float),
+                         context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations) &&
+           ensure_buffer((void **)&context->device_gr_bottleneck,
+                         &context->device_gr_bottleneck_bytes,
+                         Q38_GR_RANK * sizeof(float),
+                         context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations) &&
+           ensure_buffer((void **)&context->device_gr_up,
+                         &context->device_gr_up_bytes,
+                         width * sizeof(float), context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations) &&
+           ensure_buffer((void **)&context->device_gr_input,
+                         &context->device_gr_input_bytes,
+                         Q38_GR_HIDDEN * sizeof(float),
+                         context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations) &&
+           ensure_buffer((void **)&context->device_gr_block,
+                         &context->device_gr_block_bytes,
+                         Q38_GR_HIDDEN * sizeof(float),
+                         context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations) &&
+           ensure_buffer((void **)&context->device_gr_inject,
+                         &context->device_gr_inject_bytes,
+                         Q38_GR_BRANCHES * sizeof(float),
+                         context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations) &&
+           ensure_buffer((void **)&context->device_gr_updated,
+                         &context->device_gr_updated_bytes,
+                         width * sizeof(float), context->allocation_observer,
+                         context->allocation_observer_user,
+                         &context->cuda_allocations);
+}
+
+extern "C" bool q38_forward_cuda_gr_read_backend(
+    const q38_gguf *model, const q38_gr_weights *weights,
+    const float *residual, size_t token_count, float *input, float *normed,
+    void *user, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    size_t gamma_rows, gamma_cols, down_rows, down_cols, up_rows, up_cols;
+    if (!context || !model || !weights || !residual || !input || !normed ||
+        token_count != 1)
+        return false;
+    if (!tensor_shape(weights->hc_norm, &gamma_rows, &gamma_cols) ||
+        !tensor_shape(weights->input_mix_weight_down, &down_rows, &down_cols) ||
+        !tensor_shape(weights->input_mix_weight_up, &up_rows, &up_cols) ||
+        weights->hc_norm->type != 30 ||
+        weights->input_mix_weight_down->type != 30 ||
+        weights->input_mix_weight_up->type != 30 ||
+        gamma_rows != 1 || gamma_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
+        down_rows != Q38_GR_RANK ||
+        down_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
+        up_rows != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
+        up_cols != Q38_GR_RANK)
+        return false;
+
+    q38_exec_tensor *gamma_exec =
+        exec_tensor_for(context, model, weights->hc_norm);
+    q38_exec_tensor *down_exec =
+        exec_tensor_for(context, model, weights->input_mix_weight_down);
+    q38_exec_tensor *up_exec =
+        exec_tensor_for(context, model, weights->input_mix_weight_up);
+    if (!exec_tensor_is_resident(gamma_exec, weights->hc_norm) ||
+        !exec_tensor_is_resident(down_exec, weights->input_mix_weight_down) ||
+        !exec_tensor_is_resident(up_exec, weights->input_mix_weight_up))
+        return false;
+    if (!ensure_gr_buffers(context))
+        return fail(error, error_len, "GR-C4 read workspace allocation failed");
+
+    const unsigned available_grid =
+        gr_cooperative_grid((const void *)gr_fused_normalize_down_kernel,
+                            Q38_GR_BRANCHES);
+    const unsigned grid = available_grid > Q38_GR_RANK
+        ? Q38_GR_RANK : available_grid;
+    const unsigned lowrank_grid =
+        gr_cooperative_grid((const void *)gr_fused_lowrank_up_kernel, 1);
+    if (!grid || !lowrank_grid) return false;
+    if (cudaMemcpyAsync(context->device_gr_residual, residual,
+                        Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+        return fail(error, error_len, "GR-C4 read upload failed");
+
+    void *normalize_args[] = {
+        &context->device_gr_residual,
+        (void *)&gamma_exec->ptr,
+        (void *)&down_exec->ptr,
+        &context->device_gr_bottleneck,
+        &context->device_gr_norm,
+        &context->device_gr_down,
+    };
+    if (cudaLaunchCooperativeKernel(
+            (const void *)gr_fused_normalize_down_kernel, dim3(grid),
+            dim3(128), normalize_args, 0, context->stream) != cudaSuccess)
+        return fail(error, error_len, "GR-C4 normalize/down launch failed");
+
+    void *up_args[] = {
+        (void *)&up_exec->ptr,
+        &context->device_gr_down,
+        &context->device_gr_bottleneck,
+        &context->device_gr_up,
+    };
+    if (cudaLaunchCooperativeKernel(
+            (const void *)gr_fused_lowrank_up_kernel, dim3(lowrank_grid),
+            dim3(128), up_args, 0, context->stream) != cudaSuccess)
+        return fail(error, error_len, "GR-C4 low-rank/up launch failed");
+
+    gr_fused_branch_read_kernel<<<
+        (Q38_GR_HIDDEN + 255u) / 256u, 256, 0, context->stream>>>(
+            context->device_gr_norm, context->device_gr_up,
+            context->device_gr_input);
+    if (cudaGetLastError() != cudaSuccess ||
+        cudaMemcpyAsync(normed, context->device_gr_norm,
+                        Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
+                        cudaMemcpyDeviceToHost, context->stream) !=
+            cudaSuccess ||
+        cudaMemcpyAsync(input, context->device_gr_input,
+                        Q38_GR_HIDDEN * sizeof(float),
+                        cudaMemcpyDeviceToHost, context->stream) !=
+            cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "GR-C4 read completion failed");
+    ++context->cuda_synchronizations;
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_gr_write_backend(
+    const q38_gguf *model, const q38_gr_weights *weights,
+    const float *residual, float *normed, const float *block,
+    size_t token_count, float *updated, void *user, char *error,
+    size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    size_t inject_rows, inject_cols;
+    if (!context || !model || !weights || !residual || !normed || !block ||
+        !updated || token_count != 1 ||
+        !tensor_shape(weights->block_inject_weight, &inject_rows,
+                      &inject_cols) ||
+        weights->block_inject_weight->type != 30 ||
+        inject_rows != Q38_GR_BRANCHES ||
+        inject_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN)
+        return false;
+    q38_exec_tensor *inject_exec =
+        exec_tensor_for(context, model, weights->block_inject_weight);
+    if (!exec_tensor_is_resident(inject_exec, weights->block_inject_weight) ||
+        !ensure_gr_buffers(context))
+        return false;
+
+    const uint16_t *gamma = NULL;
+    q38_exec_tensor *gamma_exec =
+        exec_tensor_for(context, model, weights->hc_norm);
+    if (!exec_tensor_is_resident(gamma_exec, weights->hc_norm))
+        return false;
+    if (!ensure_gr_buffers(context))
+        return fail(error, error_len, "GR-C4 write workspace allocation failed");
+    gamma = (const uint16_t *)gamma_exec->ptr;
+    if (cudaMemcpyAsync(context->device_gr_residual, residual,
+                        Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(context->device_gr_block, block,
+                        Q38_GR_HIDDEN * sizeof(float),
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+        return fail(error, error_len, "GR-C4 write upload failed");
+
+    gr_normalize_kernel<<<Q38_GR_BRANCHES, 256, 0, context->stream>>>(
+        context->device_gr_residual, gamma,
+        context->device_gr_bottleneck, context->device_gr_norm);
+    if (cudaGetLastError() != cudaSuccess ||
+        !q38_cuda_bf16_matvec_configured(
+            (const uint16_t *)inject_exec->ptr, Q38_GR_BRANCHES,
+            Q38_GR_BRANCHES * Q38_GR_HIDDEN, context->device_gr_norm,
+            context->device_gr_inject, 256, context->stream, error,
+            error_len))
+        return fail(error, error_len, "GR-C4 inject launch failed");
+    gr_fused_writeback_kernel<<<
+        (Q38_GR_BRANCHES * Q38_GR_HIDDEN + 255u) / 256u, 256, 0,
+        context->stream>>>(
+        context->device_gr_residual, context->device_gr_block,
+        context->device_gr_inject, context->device_gr_updated);
+    if (cudaGetLastError() != cudaSuccess ||
+        cudaMemcpyAsync(normed, context->device_gr_norm,
+                        Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
+                        cudaMemcpyDeviceToHost, context->stream) !=
+            cudaSuccess ||
+        cudaMemcpyAsync(updated, context->device_gr_updated,
+                        Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
+                        cudaMemcpyDeviceToHost, context->stream) !=
+            cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "GR-C4 write completion failed");
+    ++context->cuda_synchronizations;
     return true;
 }
 

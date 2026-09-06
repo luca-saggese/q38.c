@@ -91,6 +91,20 @@ static void backend_context_trace(uint32_t layer, const char *logical_stage,
         (q38_forward_cuda_context *)user, layer, logical_stage);
 }
 
+static q38_forward_backend_config cuda_backend_config(worker *w) {
+    q38_forward_backend_config config = {0};
+    config.matvec = q38_forward_cuda_matvec_backend;
+    config.matrix = q38_forward_cuda_matrix_backend;
+    config.matrix_batch = q38_forward_cuda_matrix_batch_backend;
+    config.gr_read = q38_forward_cuda_gr_read_backend;
+    config.gr_write = q38_forward_cuda_gr_write_backend;
+    config.expert = q38_forward_cuda_expert_backend;
+    config.moe_layer = q38_forward_cuda_moe_layer_q2_backend;
+    config.qsa_qkv = q38_forward_cuda_qsa_qkv_backend;
+    config.user = w->cuda;
+    return config;
+}
+
 static double now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -352,12 +366,10 @@ static bool capture_hidden(worker *w, uint32_t token) {
     diagnostics.boundary_trace = capture_boundary;
     diagnostics.trace_user = &capture;
     setenv("Q38_TRACE_ALL_QSA", "1", 1);
-    const bool ok = q38_forward_full_with_matrix_moe_layer_backend(
+    const q38_forward_backend_config backend = cuda_backend_config(w);
+    const bool ok = q38_forward_full_with_backend_config(
         w->model, &w->weights, &w->state, tokens, 1, logits, VOCAB,
-        &diagnostics, q38_forward_cuda_matvec_backend,
-        q38_forward_cuda_matrix_backend, q38_forward_cuda_expert_backend,
-        q38_forward_cuda_moe_layer_q2_backend, w->cuda, error,
-        sizeof(error));
+        &diagnostics, &backend, error, sizeof(error));
     unsetenv("Q38_TRACE_ALL_QSA");
     free(logits);
     if (!capture.captured) {
@@ -523,12 +535,10 @@ static bool run_forward_tokens(worker *w, const uint32_t *tokens,
     diagnostics.qsa_qkv_backend = q38_forward_cuda_qsa_qkv_backend;
     diagnostics.qsa_qkv_backend_user = w->cuda;
     const double started = now_ms();
-    const bool ok = q38_forward_full_with_matrix_moe_layer_backend(
+    const q38_forward_backend_config backend = cuda_backend_config(w);
+    const bool ok = q38_forward_full_with_backend_config(
         w->model, &w->weights, &w->state, tokens, token_count, logits, VOCAB,
-        &diagnostics, q38_forward_cuda_matvec_backend,
-        q38_forward_cuda_matrix_backend, q38_forward_cuda_expert_backend,
-        q38_forward_cuda_moe_layer_q2_backend, w->cuda, error,
-        sizeof(error));
+        &diagnostics, &backend, error, sizeof(error));
     if (!ok)
         fprintf(stderr, "RUN_FORWARD error=%s\n", error);
     else {

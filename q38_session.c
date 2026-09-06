@@ -88,6 +88,8 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     runtime->backend.matvec = q38_forward_cuda_matvec_backend;
     runtime->backend.matrix = q38_forward_cuda_matrix_backend;
     runtime->backend.matrix_batch = q38_forward_cuda_matrix_batch_backend;
+    runtime->backend.gr_read = q38_forward_cuda_gr_read_backend;
+    runtime->backend.gr_write = q38_forward_cuda_gr_write_backend;
     runtime->backend.expert = q38_forward_cuda_expert_backend;
     runtime->backend.moe_layer = q38_forward_cuda_moe_layer_q2_backend;
     runtime->backend.qsa_qkv = q38_forward_cuda_qsa_qkv_backend;

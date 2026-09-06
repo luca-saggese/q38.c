@@ -297,6 +297,17 @@ typedef bool (*q38_forward_matrix_batch_backend)(
     size_t token_count, size_t rows, size_t cols, float *output, void *user,
     char *error, size_t error_len);
 
+typedef bool (*q38_forward_gr_read_backend)(
+    const q38_gguf *model, const q38_gr_weights *weights,
+    const float *residual, size_t token_count, float *input, float *normed,
+    void *user, char *error, size_t error_len);
+
+typedef bool (*q38_forward_gr_write_backend)(
+    const q38_gguf *model, const q38_gr_weights *weights,
+    const float *residual, float *normed, const float *block,
+    size_t token_count, float *updated, void *user, char *error,
+    size_t error_len);
+
 typedef bool (*q38_forward_expert_backend)(
     const q38_gguf *model, const q38_tensor *gate_up,
     const q38_tensor *down, size_t expert, const float *input, float *output,
@@ -312,6 +323,8 @@ typedef struct {
     q38_forward_matvec_backend matvec;
     q38_forward_matrix_backend matrix;
     q38_forward_matrix_batch_backend matrix_batch;
+    q38_forward_gr_read_backend gr_read;
+    q38_forward_gr_write_backend gr_write;
     q38_forward_expert_backend expert;
     q38_forward_moe_layer_backend moe_layer;
     q38_forward_qsa_qkv_backend qsa_qkv;

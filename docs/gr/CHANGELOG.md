@@ -215,6 +215,23 @@ This is an isolated GR-bundle promotion only: no full-model load, full-chain
 benchmark, Reference 0 rerun, MoE/GDN/QSA work, or canonical speedup claim was
 performed.
 
+## 2026-09-06 — GR-C4 production integration
+
+- **Production integration:** the promoted C4 fused read/write callbacks are
+  now installed in the `q38_forward_backend_config` used by `q38_session`.
+- **Read path:** resident BF16 normalization/down, low-rank SiLU/up, and
+  branch merge execute through the cooperative C4 kernels before one host
+  completion.
+- **Write path:** resident BF16 normalization, injection projection, and
+  residual writeback use the C4 CUDA callback before one host completion.
+- **Fallback:** token batches, unsupported tensor geometry, unavailable
+  cooperative launch support, and non-resident weights decline without
+  changing the existing matrix-backend fallback.
+- **Correctness:** the existing independent GR reference and CUDA goldens
+  remain green; no model load or full-chain benchmark was run for this
+  integration change.
+- **Production artifact:** `artifacts/perf/subsystems/gr_opt_v1.json`.
+
 ## Candidate entry template
 
 ```text

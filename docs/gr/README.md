@@ -17,7 +17,9 @@ optimization history.
 - GR-C3 has passed the model-free bundle gates and is promoted only for
   `gr_read_up`; no full-chain speedup has been claimed.
 - GR-C4 has passed the post-C3 isolated bundle gate: six launches, one host
-  synchronization, and approximately 20.7% lower GR bundle wall.
+  synchronization, and approximately 20.7% lower GR bundle wall. Its fused
+  read/write callbacks are now wired into the production `q38_session`
+  backend; the isolated artifact remains the only performance claim.
 
 The full-chain Reference 0 benchmark must not be rerun for a GR candidate
 until the candidate passes all isolated gates.
@@ -38,6 +40,11 @@ The production call chain is implemented by `full_gr_read` and
 9. Run the four-row `block_inject_weight` projection for GR write.
 10. Apply `2 * sigmoid(inject / 4)`.
 11. Add the scaled 2560-wide block output to each residual branch.
+
+When the resident CUDA backend is available for a single decode token,
+GR-C4 replaces these steps with fused cooperative read/write callbacks.
+Unsupported geometry, batched tokens, or unavailable cooperative launch
+support decline without changing the existing matrix-backend fallback.
 
 The exact contract, tensor shapes, dtype rules, and implementation
 classification are frozen in
