@@ -87,7 +87,7 @@ int q38_profile_cuda_end(q38_profile *profile,
 
 void q38_profile_nvtx_push(const char *name) {
 #if defined(Q38_PROFILE_HAS_NVTX)
-    nvtx3::nvtxRangePushA(name ? name : "");
+    nvtxRangePushA(name ? name : "");
 #else
     (void)name;
 #endif
@@ -95,6 +95,6 @@ void q38_profile_nvtx_push(const char *name) {
 
 void q38_profile_nvtx_pop(void) {
 #if defined(Q38_PROFILE_HAS_NVTX)
-    nvtx3::nvtxRangePop();
+    nvtxRangePop();
 #endif
 }

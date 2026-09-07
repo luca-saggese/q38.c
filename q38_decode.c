@@ -14,6 +14,8 @@ extern bool q38_forward_cuda_matrix_backend(
 extern bool q38_forward_cuda_greedy_argmax(
     q38_forward_cuda_context *, uint32_t *, char *, size_t)
     __attribute__((weak));
+extern void q38_profile_nvtx_push(const char *name);
+extern void q38_profile_nvtx_pop(void);
 
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
@@ -270,13 +272,18 @@ static bool q38_decode_backend(const q38_gguf *model,
         return false;
     if (timing) timing->forward_core_ms = decode_now_ms() - forward_started;
     const double argmax_started = decode_now_ms();
+    q38_profile_nvtx_push("ARGMAX");
     size_t best = 0;
     float best_value = logits[0];
-    if (!isfinite(best_value))
+    if (!isfinite(best_value)) {
+        q38_profile_nvtx_pop();
         return fail(error, error_len, "decode logits contain a non-finite value");
+    }
     for (size_t i = 1; i < Q38_DECODE_VOCAB_SIZE; ++i) {
-        if (!isfinite(logits[i]))
+        if (!isfinite(logits[i])) {
+            q38_profile_nvtx_pop();
             return fail(error, error_len, "decode logits contain a non-finite value");
+        }
         if (logits[i] > best_value) {
             best = i;
             best_value = logits[i];
@@ -291,8 +298,12 @@ static bool q38_decode_backend(const q38_gguf *model,
         uint32_t device_best = 0;
         if (!q38_forward_cuda_greedy_argmax(
                 (q38_forward_cuda_context *)backend_user, &device_best,
-                error, error_len))
+                error, error_len)) {
+            q38_profile_nvtx_pop();
             return false;
+        }
+        if (device_best >= Q38_DECODE_VOCAB_SIZE)
+            q38_profile_nvtx_pop();
         if (device_best >= Q38_DECODE_VOCAB_SIZE)
             return fail(error, error_len,
                         "CUDA greedy argmax returned an invalid token");
@@ -304,6 +315,7 @@ static bool q38_decode_backend(const q38_gguf *model,
         timing->total_ms = decode_now_ms() - total_started;
     }
     *next_token = (uint32_t)best;
+    q38_profile_nvtx_pop();
     return true;
 }
 

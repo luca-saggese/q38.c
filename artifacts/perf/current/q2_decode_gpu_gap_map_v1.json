@@ -1,0 +1,201 @@
+{
+  "format": "q2-decode-gpu-gap-map-v1",
+  "capture": {
+    "trace": "artifacts/perf/current/nsys_perf_v2a/q2_decode_4.nsys-rep",
+    "generated_tokens": 5,
+    "measured_decode_tokens": 4,
+    "startup_excluded": true,
+    "warmup_and_prefill": "excluded using the four TOKEN ranges followed by ARGMAX ranges",
+    "correctness": {
+      "generated_ids": [271, 248068, 198, 760, 1156],
+      "finite": true,
+      "fallback": false
+    }
+  },
+  "decode_only_mean_ms_per_token": {
+    "wall_envelope": 131.778028,
+    "gpu_kernel_active": 62.751792,
+    "gpu_memcpy_active": 1.452680,
+    "gpu_device_union": 64.204472,
+    "gpu_idle": 67.573556,
+    "cpu_only_pre_first_kernel": 0.122776,
+    "cpu_only_post_last_kernel": 0.007900,
+    "inter_token_idle": 0.159,
+    "reconciliation_sum": 131.778028,
+    "reconciliation_residual": 0.0,
+    "reconciliation_residual_fraction": 0.0
+  },
+  "per_token": [
+    {
+      "wall_ms": 134.024416,
+      "kernel_active_ms": 64.438432,
+      "memcpy_active_ms": 1.565440,
+      "gpu_idle_ms": 68.020544,
+      "cpu_pre_ms": 0.093424,
+      "cpu_post_ms": 0.007984,
+      "kernel_count": 858,
+      "gaps_over_20us": 736,
+      "gaps_over_20us_ms": 69.204064
+    },
+    {
+      "wall_ms": 131.062704,
+      "kernel_active_ms": 62.501920,
+      "memcpy_active_ms": 1.475712,
+      "gpu_idle_ms": 67.085072,
+      "cpu_pre_ms": 0.266560,
+      "cpu_post_ms": 0.007984,
+      "kernel_count": 858,
+      "gaps_over_20us": 733,
+      "gaps_over_20us_ms": 67.932704
+    },
+    {
+      "wall_ms": 129.834880,
+      "kernel_active_ms": 61.957472,
+      "memcpy_active_ms": 1.362496,
+      "gpu_idle_ms": 66.514912,
+      "cpu_pre_ms": 0.065984,
+      "cpu_post_ms": 0.007744,
+      "kernel_count": 858,
+      "gaps_over_20us": 732,
+      "gaps_over_20us_ms": 67.466976
+    },
+    {
+      "wall_ms": 132.190112,
+      "kernel_active_ms": 62.109344,
+      "memcpy_active_ms": 1.407072,
+      "gpu_idle_ms": 68.673696,
+      "cpu_pre_ms": 0.065136,
+      "cpu_post_ms": 0.007888,
+      "kernel_count": 858,
+      "gaps_over_20us": 736,
+      "gaps_over_20us_ms": 69.748704
+    }
+  ],
+  "device_boundaries_per_token": {
+    "q2_observer": {
+      "real_cuda_syncs": 739,
+      "telemetry_callbacks": 677,
+      "h2d_bytes": 12311808,
+      "d2h_bytes": 8843520,
+      "sync_reasons": {
+        "MATRIX_D2H": 665,
+        "MOE_GROUPED_D2H": 48,
+        "QSA_QKV": 12,
+        "MATRIX_BATCH_D2H": 12,
+        "ARGMAX": 2
+      }
+    },
+    "nsys_decode_only": {
+      "h2d_bytes": 12929088,
+      "d2h_bytes": 9974020,
+      "kernel_launches": 858,
+      "kernel_active_ms": 62.751792,
+      "memcpy_active_ms": 1.452680
+    }
+  },
+  "gap_classification": {
+    "threshold_us": 20,
+    "large_gap_count_per_token_mean": 734.25,
+    "large_gap_wall_ms_per_token": 68.588112,
+    "cpu_thread_state": "All classified large gaps overlapped HOST_WAIT_STREAM or HOST_WAIT_EVENT NVTX ranges; CPU-only pre/post windows were negligible.",
+    "dependency": "The dominant wait evidence is D2H-dependent: 665 MATRIX_D2H plus 48 MOE_GROUPED_D2H sync reasons per token. H2D preparation is present but is not the dominant classified gap source.",
+    "transition_totals_ms_over_four_tokens": {
+      "GR_WRITE_to_GR_READ": {
+        "count": 376,
+        "wall_ms": 21.188480,
+        "components": {
+          "GR_WRITE_1_to_GR_READ_2": 10.032736,
+          "GR_WRITE_2_to_GR_READ_1": 11.155744
+        }
+      },
+      "GR_READ_to_MOE_via_ROUTER": {
+        "count": 384,
+        "wall_ms": 19.241760,
+        "components": {
+          "GR_READ_2_to_ROUTER": 10.122144,
+          "ROUTER_to_MOE": 9.119616
+        }
+      },
+      "MOE_to_GR_WRITE": {
+        "count": 192,
+        "wall_ms": 12.446112
+      },
+      "MIXER_to_GR_WRITE": {
+        "count": 192,
+        "wall_ms": 11.387904,
+        "components": {
+          "MIXER_GDN_to_GR_WRITE_1": 8.697760,
+          "MIXER_QSA_to_GR_WRITE_1": 2.690144
+        }
+      },
+      "GR_READ_to_MIXER": {
+        "count": 192,
+        "wall_ms": 10.143072,
+        "components": {
+          "GR_READ_1_to_MIXER_GDN": 7.564160,
+          "GR_READ_1_to_MIXER_QSA": 2.578912
+        }
+      },
+      "LM_HEAD_to_ARGMAX": {
+        "count": 4,
+        "wall_ms": 0.717376
+      },
+      "token_to_token": {
+        "count": 3,
+        "mean_wall_ms": 0.159
+      }
+    },
+    "intra_stage_reference": {
+      "MIXER_GDN_to_MIXER_GDN": 123.139584,
+      "MIXER_QSA_to_MIXER_QSA": 49.895328,
+      "scope": "four-token aggregate; repeated internal waits dominate the total GPU idle budget"
+    }
+  },
+  "kernel_owner": {
+    "decode_only_per_token": {
+      "matrix_batch_generic_kernel": 0,
+      "bf16_matvec_kernel": 675,
+      "project_kernel": 38,
+      "q2_grouped_gate_up_kernel": 48,
+      "q2_grouped_down_private_kernel": 48,
+      "q2_grouped_deterministic_reduce_kernel": 48,
+      "argmax_kernel": 1
+    },
+    "owner_mapping": {
+      "bf16_matvec_kernel": "GR_READ/GR_WRITE, router/shared MoE projections, and LM_HEAD token-count-1 matrix path",
+      "project_kernel": "GDN mixer",
+      "q2_grouped_gate_up_kernel": "MoE routed gate/up",
+      "q2_grouped_down_private_kernel": "MoE routed down",
+      "q2_grouped_deterministic_reduce_kernel": "MoE grouped reduction",
+      "matrix_batch_generic_kernel": "Prefill LM-head batch path, not the measured token-count-1 decode path"
+    },
+    "legacy_normalization_explanation": {
+      "previous_matrix_batch_per_token": "675 / 27 = 25 was a whole-process normalization from PERF-V2, not decode-only.",
+      "previous_bf16_per_token": "6939 / 27 = 257 was a whole-process normalization from PERF-V2, not decode-only.",
+      "decode_only_result": "The four measured decode tokens contain 0 matrix_batch_generic kernels and 675 bf16_matvec kernels each."
+    }
+  },
+  "top_three_transition_boundaries": [
+    {
+      "transition": "GR_WRITE -> GR_READ",
+      "idle_ms_per_four_tokens": 21.188480,
+      "cause": "D2H/host-wait boundary between residual writes and the next GR read."
+    },
+    {
+      "transition": "GR_READ -> MOE via ROUTER",
+      "idle_ms_per_four_tokens": 19.241760,
+      "cause": "GR output must cross repeated router and grouped-MoE host/device boundaries."
+    },
+    {
+      "transition": "MOE -> GR_WRITE",
+      "idle_ms_per_four_tokens": 12.446112,
+      "cause": "Grouped MoE completion is followed by a host-wait before residual write."
+    }
+  ],
+  "notes": [
+    "No optimization was implemented.",
+    "NVTX ranges are compile-time diagnostic only and add no CUDA synchronization.",
+    "The token envelope is TOKEN forward range plus its following ARGMAX range.",
+    "The four-token wall reconciliation is exact because GPU device union and CPU pre/post gaps are measured on the same timeline."
+  ]
+}

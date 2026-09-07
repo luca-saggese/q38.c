@@ -548,6 +548,24 @@ static void full_backend_context(const q38_tensor *tensor, size_t rows,
 }
 
 #if Q38_DIAGNOSTICS
+#if Q38_DIAG_ENABLED
+extern void q38_profile_nvtx_push(const char *name);
+extern void q38_profile_nvtx_pop(void);
+
+static void full_nvtx_push_indexed(const char *prefix, uint32_t index) {
+    char name[64];
+    snprintf(name, sizeof(name), "%s %u", prefix, index);
+    q38_profile_nvtx_push(name);
+}
+#else
+static void full_nvtx_push_indexed(const char *prefix, uint32_t index) {
+    (void)prefix;
+    (void)index;
+}
+#define q38_profile_nvtx_push(name) ((void)(name))
+#define q38_profile_nvtx_pop() ((void)0)
+#endif
+
 static double full_now_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
@@ -1290,6 +1308,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         free(router_batch); free(shared_gate_batch); free(shared_up_batch);
         return full_fail(error, error_len, "MoE activation allocation failed");
     }
+    q38_profile_nvtx_push("ROUTER");
     if (!full_matvec_batch(model, weights.router, input, tokens,
                            Q38_MOE_EXPERTS, Q38_GR_HIDDEN, router_batch,
                            scratch, error, error_len, "moe_router") ||
@@ -1300,6 +1319,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                            640, Q38_GR_HIDDEN, shared_up_batch, scratch,
                            error, error_len, "moe_shared_up"))
         goto fail;
+    q38_profile_nvtx_pop();
     for (size_t t = 0; t < tokens; ++t) {
         const float *x = input + t * Q38_GR_HIDDEN;
         const q38_forward_dtype router_dtype =
@@ -2184,6 +2204,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         token_count > SIZE_MAX / Q38_FULL_QSA_SELECTED_STRIDE)
         return full_fail(error, error_len, "full forward token count overflows");
     const uint64_t timeline_position = state->qsa[0].position;
+    full_nvtx_push_indexed("TOKEN", (uint32_t)timeline_position);
     q38_ple_scheduler_record_timeline(
         state->ple_scheduler, Q38_PLE_T0_TOKEN_FORWARD_BEGIN, 0,
         timeline_position);
@@ -2255,6 +2276,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         const q38_layer_weights *layer = &weights->layer[layer_number];
         if (layer_number == 1) {
             const double ple_started = full_now_ms();
+            q38_profile_nvtx_push("PLE");
             if (!diagnostics || !diagnostics->disable_ple) {
                 if (!full_ple(model, layer, state, tokens, streams, token_count,
                               updated, scratch, diagnostics, error, error_len))
@@ -2266,7 +2288,9 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                       error_len))
                     goto fail;
             }
+            q38_profile_nvtx_pop();
         }
+        full_nvtx_push_indexed("LAYER", layer_number);
         const double layer_started = full_now_ms();
         if (!full_boundary_trace(layer_number, "layer_input", streams,
                                  token_count, width, diagnostics, error,
@@ -2279,9 +2303,11 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                               full_now_ms() - glue_started, error, error_len))
             goto fail;
         double segment_started = full_now_ms();
+        q38_profile_nvtx_push("GR_READ_1");
         if (!full_gr_read(model, &layer->attn_gr, streams, token_count,
-                          mixed, normed, down, up, scratch, error, error_len))
+                          mixed, normed, down, up, scratch, error,                           error_len))
             goto fail;
+        q38_profile_nvtx_pop();
         if (!full_emit_timing(diagnostics, "gr_read_attn", "decoder_layer",
                               "GR", layer_number,
                               full_now_ms() - segment_started, error,
@@ -2298,14 +2324,17 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  error, error_len))
             goto fail;
         segment_started = full_now_ms();
+        q38_profile_nvtx_push(layer->kind == Q38_LAYER_LINEAR_ATTENTION
+                                  ? "MIXER_GDN" : "MIXER_QSA");
         if (layer->kind == Q38_LAYER_LINEAR_ATTENTION) {
             if (!full_gdn(model, layer, state, mixed, token_count,
                           layer_number, block, scratch, error, error_len))
                 goto fail;
         } else if (!full_qsa(model, layer, &state->qsa[layer_number], mixed,
                              token_count, block, selected, counts,
-                             layer_number, diagnostics, error, error_len))
+                             layer_number, diagnostics, error,                              error_len))
             goto fail;
+        q38_profile_nvtx_pop();
         if (!full_emit_timing(
                 diagnostics,
                 layer->kind == Q38_LAYER_LINEAR_ATTENTION ? "mixer_gdn"
@@ -2328,9 +2357,11 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  error, error_len))
             goto fail;
         segment_started = full_now_ms();
+        q38_profile_nvtx_push("GR_WRITE_1");
         if (!full_gr_write(model, &layer->attn_gr, streams, block, token_count,
                            updated, normed, inject, scratch, error, error_len))
             goto fail;
+        q38_profile_nvtx_pop();
         if (!full_emit_timing(diagnostics, "gr_write_attn", "decoder_layer",
                               "GR", layer_number,
                               full_now_ms() - segment_started, error,
@@ -2347,19 +2378,23 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                               full_now_ms() - glue_started, error, error_len))
             goto fail;
         segment_started = full_now_ms();
+        q38_profile_nvtx_push("GR_READ_2");
         if (!full_gr_read(model, &layer->mlp_gr, updated, token_count, mixed,
                           normed, down, up, scratch, error, error_len))
             goto fail;
+        q38_profile_nvtx_pop();
         if (!full_emit_timing(diagnostics, "gr_read_mlp", "decoder_layer",
                               "GR", layer_number,
                               full_now_ms() - segment_started, error,
                               error_len))
             goto fail;
         segment_started = full_now_ms();
+        q38_profile_nvtx_push("MOE");
         if (!full_moe(model, layer, weights->quantized, mixed, token_count,
                       layer_number, block, scratch, diagnostics, error,
                       error_len))
             goto fail;
+        q38_profile_nvtx_pop();
         if (!full_emit_timing(diagnostics, "moe", "decoder_layer", "MoE",
                               layer_number,
                               full_now_ms() - segment_started, error,
@@ -2369,9 +2404,11 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  error, error_len))
             goto fail;
         segment_started = full_now_ms();
+        q38_profile_nvtx_push("GR_WRITE_2");
         if (!full_gr_write(model, &layer->mlp_gr, updated, block, token_count,
                            streams, normed, inject, scratch, error, error_len))
             goto fail;
+        q38_profile_nvtx_pop();
         if (!full_emit_timing(diagnostics, "gr_write_mlp", "decoder_layer",
                               "GR", layer_number,
                               full_now_ms() - segment_started, error,
@@ -2409,6 +2446,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             q38_ple_scheduler_record_timeline(
                 state->ple_scheduler, Q38_PLE_T5_LAYER1_END, 0,
                 timeline_position);
+        q38_profile_nvtx_pop();
     }
     {
         q38_gr_weights final_gr;
@@ -2419,11 +2457,13 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             full_named_global(weights, "input_mix_weight_up");
         final_gr.block_inject_weight = NULL;
         const double final_gr_started = full_now_ms();
+        q38_profile_nvtx_push("GR_READ_FINAL");
         if (!final_gr.hc_norm || !final_gr.input_mix_weight_down ||
             !final_gr.input_mix_weight_up ||
             !full_gr_read(model, &final_gr, streams, token_count, mixed,
                           normed, down, up, scratch, error, error_len))
             goto fail;
+        q38_profile_nvtx_pop();
         if (!full_emit_timing(diagnostics, "gr_read_final", NULL, "GR",
                               UINT32_MAX, full_now_ms() - final_gr_started,
                               error, error_len))
@@ -2442,6 +2482,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             full_backend_context(weights->output, 248320, Q38_GR_HIDDEN,
                                  "lm_head_projection_batch");
             const double started = full_now_ms();
+            q38_profile_nvtx_push("LM_HEAD");
             if (!full_matrix_batch_backend(
                     model, weights->output, mixed, token_count, 248320,
                     Q38_GR_HIDDEN, logits, full_backend_user, error,
@@ -2450,6 +2491,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                 if (error && error_len && error[0] != '\0') goto fail;
                 goto fail;
             }
+            q38_profile_nvtx_pop();
             Q38_DIAG_ONLY(full_backend_rows += token_count * 248320u);
             if (!full_emit_stage(full_diagnostics, "lm_head_projection_batch",
                                  token_count * 248320u, 0, 0,
@@ -2464,6 +2506,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             full_backend_context(weights->output, 248320, Q38_GR_HIDDEN,
                                  "lm_head_projection");
             const double started = full_now_ms();
+            q38_profile_nvtx_push("LM_HEAD");
             if (!full_matrix_backend(
                     model, weights->output, mixed, 248320,
                     Q38_GR_HIDDEN, logits, full_backend_user, error,
@@ -2472,6 +2515,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                 if (error && error_len && error[0] != '\0') goto fail;
                 goto fail;
             }
+            q38_profile_nvtx_pop();
             Q38_DIAG_ONLY(full_backend_rows += 248320);
             if (!full_emit_stage(full_diagnostics, "lm_head_projection",
                                  248320, 0, 0, full_now_ms() - started,
@@ -2483,6 +2527,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                 goto fail;
         } else {
             const double started = full_now_ms();
+            q38_profile_nvtx_push("LM_HEAD");
             for (size_t t = 0; t < token_count; ++t)
                 for (size_t v = 0; v < 248320; ++v)
                     if (!full_row_dot(model, weights->output, v,
@@ -2495,6 +2540,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                   UINT32_MAX, full_now_ms() - started, error,
                                   error_len))
                 goto fail;
+            q38_profile_nvtx_pop();
         }
     }
     if (Q38_DIAG_ENABLED && diagnostics) {
@@ -2508,11 +2554,14 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
     q38_ple_scheduler_record_timeline(
         state->ple_scheduler, Q38_PLE_T11_TOKEN_FORWARD_END, 0,
         timeline_position);
+    q38_profile_nvtx_pop();
     full_diagnostics = NULL;
     return true;
 fail:
     free(streams); free(mixed); free(block); free(updated); free(scratch);
     free(normed); free(down); free(up); free(inject); free(selected); free(counts);
+    q38_profile_nvtx_pop();
+    q38_profile_nvtx_pop();
     full_diagnostics = NULL;
     return false;
 }

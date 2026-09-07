@@ -24,6 +24,41 @@
 
 namespace cg = cooperative_groups;
 
+extern "C" void q38_profile_nvtx_push(const char *name);
+extern "C" void q38_profile_nvtx_pop(void);
+
+#if Q38_DIAG_ENABLED
+static cudaError_t q38_diag_memcpy_async(void *dst, const void *src,
+                                         size_t bytes, cudaMemcpyKind kind,
+                                         cudaStream_t stream) {
+    const char *name = kind == cudaMemcpyHostToDevice ? "H2D" :
+                       kind == cudaMemcpyDeviceToHost ? "D2H" :
+                       kind == cudaMemcpyDeviceToDevice ? "D2D" : "MEMCPY";
+    q38_profile_nvtx_push(name);
+    cudaError_t status = ::cudaMemcpyAsync(dst, src, bytes, kind, stream);
+    q38_profile_nvtx_pop();
+    return status;
+}
+
+static cudaError_t q38_diag_stream_synchronize(cudaStream_t stream) {
+    q38_profile_nvtx_push("HOST_WAIT_STREAM");
+    cudaError_t status = ::cudaStreamSynchronize(stream);
+    q38_profile_nvtx_pop();
+    return status;
+}
+
+static cudaError_t q38_diag_event_synchronize(cudaEvent_t event) {
+    q38_profile_nvtx_push("HOST_WAIT_EVENT");
+    cudaError_t status = ::cudaEventSynchronize(event);
+    q38_profile_nvtx_pop();
+    return status;
+}
+
+#define cudaMemcpyAsync q38_diag_memcpy_async
+#define cudaStreamSynchronize q38_diag_stream_synchronize
+#define cudaEventSynchronize q38_diag_event_synchronize
+#endif
+
 #if Q38_DIAGNOSTICS
 #define Q38_CUDA_DIAG_ONLY(statement) do { statement; } while (0)
 #else
@@ -186,6 +221,10 @@ struct q38_forward_cuda_context {
     size_t residency_stage_bytes;
     void *residency_transfer;
     size_t residency_transfer_bytes;
+    void *residency_stage_buffers[2];
+    void *residency_transfer_buffers[2];
+    cudaEvent_t residency_reuse_events[2];
+    bool residency_reuse_events_ready[2];
     uint64_t residency_transfer_calls;
     uint64_t residency_device_copies;
     uint64_t residency_final_syncs;
@@ -1291,30 +1330,70 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     for (size_t i = 0; i < plan.span_count; ++i)
         if (plan.spans[i].bytes > largest_span)
             largest_span = (size_t)plan.spans[i].bytes;
-    if (largest_span &&
-        (cudaMallocHost(&context->residency_stage, largest_span) !=
-             cudaSuccess ||
-         cudaMalloc(&context->residency_transfer, largest_span) !=
-             cudaSuccess)) {
-        cudaFreeHost(context->residency_stage);
-        cudaFree(context->residency_transfer);
-        context->persistent = entries;
-        context->persistent_count = at;
-        context->persistent_bytes = loaded_bytes;
-        context->persistent_loaded_bytes = loaded_bytes;
-        context->persistent_loaded_tensors = at;
-        context->all_non_ple_resident = false;
-        snprintf(context->persistent_failure,
-                 sizeof(context->persistent_failure),
-                 "coalesced residency staging allocation failed");
-        q38_residency_plan_destroy(&plan);
-        return fail(error, error_len, context->persistent_failure);
+    for (size_t slot = 0; slot < 2 && largest_span; ++slot) {
+        if (cudaMallocHost(&context->residency_stage_buffers[slot],
+                           largest_span) != cudaSuccess ||
+            cudaMalloc(&context->residency_transfer_buffers[slot],
+                       largest_span) != cudaSuccess) {
+            for (size_t cleanup = 0; cleanup <= slot; ++cleanup) {
+                if (context->residency_reuse_events_ready[cleanup])
+                    cudaEventDestroy(context->residency_reuse_events[cleanup]);
+                cudaFree(context->residency_transfer_buffers[cleanup]);
+                cudaFreeHost(context->residency_stage_buffers[cleanup]);
+            }
+            context->residency_stage_buffers[0] = NULL;
+            context->residency_stage_buffers[1] = NULL;
+            context->residency_transfer_buffers[0] = NULL;
+            context->residency_transfer_buffers[1] = NULL;
+            context->residency_stage = NULL;
+            context->residency_transfer = NULL;
+            context->persistent = entries;
+            context->persistent_count = at;
+            context->persistent_bytes = loaded_bytes;
+            context->persistent_loaded_bytes = loaded_bytes;
+            context->persistent_loaded_tensors = at;
+            context->all_non_ple_resident = false;
+            snprintf(context->persistent_failure,
+                     sizeof(context->persistent_failure),
+                     "coalesced residency staging allocation failed");
+            q38_residency_plan_destroy(&plan);
+            return fail(error, error_len, context->persistent_failure);
+        }
+        if (cudaEventCreateWithFlags(&context->residency_reuse_events[slot],
+                                     cudaEventDisableTiming) != cudaSuccess) {
+            for (size_t cleanup = 0; cleanup <= slot; ++cleanup) {
+                if (context->residency_reuse_events_ready[cleanup])
+                    cudaEventDestroy(context->residency_reuse_events[cleanup]);
+                cudaFree(context->residency_transfer_buffers[cleanup]);
+                cudaFreeHost(context->residency_stage_buffers[cleanup]);
+            }
+            context->residency_stage_buffers[0] = NULL;
+            context->residency_stage_buffers[1] = NULL;
+            context->residency_transfer_buffers[0] = NULL;
+            context->residency_transfer_buffers[1] = NULL;
+            context->residency_stage = NULL;
+            context->residency_transfer = NULL;
+            context->persistent = entries;
+            context->persistent_count = at;
+            context->persistent_bytes = loaded_bytes;
+            context->persistent_loaded_bytes = loaded_bytes;
+            context->persistent_loaded_tensors = at;
+            context->all_non_ple_resident = false;
+            snprintf(context->persistent_failure,
+                     sizeof(context->persistent_failure),
+                     "coalesced residency staging allocation failed");
+            q38_residency_plan_destroy(&plan);
+            return fail(error, error_len, context->persistent_failure);
+        }
+        context->residency_reuse_events_ready[slot] = true;
     }
     if (largest_span) {
-        context->residency_allocations++;
-        context->residency_allocated_bytes += largest_span;
-        context->residency_allocations++;
-        context->residency_allocated_bytes += largest_span;
+        context->residency_stage = context->residency_stage_buffers[0];
+        context->residency_transfer = context->residency_transfer_buffers[0];
+    }
+    if (largest_span) {
+        context->residency_allocations += 4;
+        context->residency_allocated_bytes += largest_span * 4;
     }
 #if Q38_DIAGNOSTICS
     context->residency_device_alloc_ms =
@@ -1326,13 +1405,23 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     context->persistent_count = at;
     for (size_t s = 0; s < plan.span_count; ++s) {
         const q38_residency_plan_span *span = &plan.spans[s];
+        const size_t slot = s % 2;
+        if (s >= 2 &&
+            cudaEventSynchronize(context->residency_reuse_events[slot]) !=
+                cudaSuccess) {
+            q38_residency_plan_destroy(&plan);
+            return fail(error, error_len,
+                        "coalesced residency staging reuse wait failed");
+        }
+        void *stage = context->residency_stage_buffers[slot];
+        void *transfer = context->residency_transfer_buffers[slot];
         const double source_started =
 #if Q38_DIAGNOSTICS
             residency_now_ms();
 #else
             0.0;
 #endif
-        memcpy(context->residency_stage,
+        memcpy(stage,
                model->map + span->file_offset, (size_t)span->bytes);
 #if Q38_DIAGNOSTICS
         const double source_ms = residency_now_ms() - source_started;
@@ -1342,8 +1431,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         context->residency_span_timings[s].source_copy_ms = source_ms;
 #endif
         context->residency_staged_bytes += (size_t)span->bytes;
-        if (cudaMemcpyAsync(context->residency_transfer,
-                            context->residency_stage, (size_t)span->bytes,
+        if (cudaMemcpyAsync(transfer, stage, (size_t)span->bytes,
                             cudaMemcpyHostToDevice, context->stream) !=
             cudaSuccess) {
             q38_residency_plan_destroy(&plan);
@@ -1372,7 +1460,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
                 planned->file_offset - span->file_offset;
             if (cudaMemcpyAsync(
                     entries[entry_index].device,
-                    (const char *)context->residency_transfer + relative,
+                    (const char *)transfer + relative,
                     (size_t)planned->bytes, cudaMemcpyDeviceToDevice,
                     context->stream) != cudaSuccess) {
                 q38_residency_plan_destroy(&plan);
@@ -1380,6 +1468,12 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
                             "coalesced residency tensor copy failed");
             }
             context->residency_device_copies++;
+        }
+        if (cudaEventRecord(context->residency_reuse_events[slot],
+                            context->stream) != cudaSuccess) {
+            q38_residency_plan_destroy(&plan);
+            return fail(error, error_len,
+                        "coalesced residency staging event failed");
         }
 #if Q38_DIAGNOSTICS
         context->residency_d2d_enqueue_ms +=
@@ -1474,8 +1568,12 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_gdn_state);
     cudaFree(context->device_gdn_history);
     cudaFree(context->device_steering);
-    cudaFree(context->residency_transfer);
-    cudaFreeHost(context->residency_stage);
+    for (size_t slot = 0; slot < 2; ++slot) {
+        if (context->residency_reuse_events_ready[slot])
+            cudaEventDestroy(context->residency_reuse_events[slot]);
+        cudaFree(context->residency_transfer_buffers[slot]);
+        cudaFreeHost(context->residency_stage_buffers[slot]);
+    }
     free(context->residency_span_timings);
     free(context->host_qsa_output);
     if (!context->lm_head_uses_persistent)
