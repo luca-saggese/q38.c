@@ -450,6 +450,17 @@ bool q38_session_prefill_chunked(
         offset += count;
         (*step_index) += count;
     }
+    /*
+     * Multi-token prefill uses the host GDN implementation because the
+     * single-token CUDA island cannot process a batch.  Seed its persistent
+     * device state before the first single-token decode switches to GDN-C3.
+     */
+    if (max_chunk > 1 &&
+        !q38_forward_cuda_load_gdn_state(
+            &session->state, session->runtime->cuda, error, error_len)) {
+        free(chunk_logits);
+        return false;
+    }
     const bool ok = session_argmax(
         logits, Q38_DECODE_VOCAB_SIZE, next_token, error, error_len);
     free(chunk_logits);
