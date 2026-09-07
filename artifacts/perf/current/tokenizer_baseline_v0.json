@@ -1,0 +1,44 @@
+{
+  "benchmark": "tests/bench_tokenizer_startup",
+  "fixture": "GREEN",
+  "tokenizer_dir": "/home/lvx/q38model",
+  "tokenizer_json_bytes": 12809320,
+  "vocab_entries": 248044,
+  "merge_entries": 247504,
+  "runs": {
+    "cold_ish": {
+      "wall_ms": 43495.562,
+      "vocab_string_alloc_ms": 43363.479,
+      "vocab_hash_build_ms": 86.540,
+      "merges_index_build_ms": 7.029,
+      "other_ms": 33.896
+    },
+    "warm_5": {
+      "wall_ms_mean": 30711.632,
+      "wall_ms_median": 27157.969,
+      "wall_ms_p95": 44191.728,
+      "vocab_string_alloc_ms_mean": 30585.439,
+      "vocab_hash_build_ms_mean": 80.564,
+      "merges_index_build_ms_mean": 7.093,
+      "other_ms_mean": 33.229
+    }
+  },
+  "allocations": {
+    "malloc_count": 250315,
+    "calloc_count": 1,
+    "realloc_count": 571,
+    "strdup_count": 247505,
+    "requested_bytes_cumulative": 2344777590427,
+    "copied_string_bytes": 6464225
+  },
+  "counters": {
+    "strlen_calls": 248077,
+    "hash_insertions": 248044,
+    "hash_lookups": 248264,
+    "string_comparisons": 110667
+  },
+  "notes": [
+    "The allocation byte counter is cumulative requested bytes, not live resident allocation.",
+    "The cold-ish and warm runs are separate processes; no model was loaded."
+  ]
+}

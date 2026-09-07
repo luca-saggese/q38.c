@@ -73,10 +73,18 @@ tests/bench_residency_startup: tests/bench_residency_startup.cu \
 
 bench-startup-residency: tests/bench_residency_startup
 
+tests/bench_tokenizer_startup: tests/bench_tokenizer_startup.c \
+		q38_tokenizer.o
+	$(CC) $(CFLAGS) -Wl,--wrap=malloc -Wl,--wrap=calloc \
+		-Wl,--wrap=realloc -Wl,--wrap=strdup -o $@ $^
+
+bench-tokenizer-startup: tests/bench_tokenizer_startup
+
 .PHONY: all q38 q38-diag q38-server q38-server-mock q38-cli q38-dev-worker spark test test-server clean tools \
 	q38-server-real \
 	bench-ple-projection-cuda \
 	bench-startup-residency \
+	bench-tokenizer-startup \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	tests/q2_forward_exclusive_attribution \
 	tests/test_s4c_ple_replay \

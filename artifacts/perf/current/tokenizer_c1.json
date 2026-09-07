@@ -1,0 +1,55 @@
+{
+  "benchmark": "tests/bench_tokenizer_startup",
+  "candidate": "TOKENIZER-C1",
+  "fixture": "GREEN",
+  "tokenizer_dir": "/home/lvx/q38model",
+  "tokenizer_json_bytes": 12809320,
+  "vocab_entries": 248044,
+  "merge_entries": 247504,
+  "baseline": {
+    "cold_wall_ms": 43495.562,
+    "warm_wall_ms_mean": 30711.632,
+    "warm_wall_ms_median": 27157.969
+  },
+  "c1": {
+    "cold_wall_ms": 84.661,
+    "warm_wall_ms_mean": 82.557,
+    "warm_wall_ms_median": 83.070,
+    "warm_wall_ms_p95": 89.415,
+    "vocab_string_alloc_ms_mean": 11.328,
+    "vocab_hash_build_ms_mean": 25.736,
+    "merges_index_build_ms_mean": 7.120,
+    "other_ms_mean": 33.646
+  },
+  "improvement": {
+    "cold_wall_percent": 99.805,
+    "warm_mean_percent": 99.731,
+    "warm_median_percent": 99.694,
+    "vocab_string_alloc_percent_vs_baseline_warm_mean": 99.963
+  },
+  "allocations": {
+    "malloc_count": 250315,
+    "calloc_count": 1,
+    "realloc_count": 571,
+    "strdup_count": 247505,
+    "requested_bytes_cumulative": 32140939,
+    "copied_string_bytes": 6464225
+  },
+  "counters": {
+    "strlen_calls": 0,
+    "hash_insertions": 248044,
+    "hash_lookups": 248264,
+    "string_comparisons": 110667
+  },
+  "acceptance": {
+    "vocab_count_identical": true,
+    "merge_count_identical": true,
+    "fixture_encode_decode_green": true,
+    "allocation_policy_changed": false,
+    "model_loaded": false
+  },
+  "notes": [
+    "C1 changes only bounded JSON string parsing; ownership, hash table, and allocation classes remain unchanged.",
+    "The old suffix strlen scan is removed from jstr()."
+  ]
+}

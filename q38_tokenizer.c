@@ -5,12 +5,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 struct q38_vocab_entry { char *s; uint32_t id; };
 struct q38_merge_entry { char *s; uint32_t rank; };
+static q38_tokenizer_profile *g_profile;
+static double tok_now_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) != 0) return 0.0;
+    return (double)ts.tv_sec * 1000.0 +
+           (double)ts.tv_nsec / 1000000.0;
+}
+void q38_tokenizer_profile_reset(q38_tokenizer_profile *p) {
+    if (p) memset(p, 0, sizeof(*p));
+}
+void q38_tokenizer_profile_set(q38_tokenizer_profile *p) { g_profile = p; }
+void q38_tokenizer_profile_note_hash_insertion(void) {
+    if (g_profile) g_profile->hash_insertions++;
+}
+void q38_tokenizer_profile_note_hash_lookup(void) {
+    if (g_profile) g_profile->hash_lookups++;
+}
+void q38_tokenizer_profile_note_string_comparison(void) {
+    if (g_profile) g_profile->string_comparisons++;
+}
+void q38_tokenizer_profile_note_strlen(void) {
+    if (g_profile) g_profile->strlen_calls++;
+}
+void q38_tokenizer_profile_note_string_copy(size_t bytes) {
+    if (g_profile) g_profile->string_copy_bytes += bytes;
+}
 static void err(char *e,size_t n,const char *s){if(e&&n)snprintf(e,n,"%s",s);}
-static char *file(const char *p,size_t *n){FILE*f=fopen(p,"rb");long z;if(!f)return 0;fseek(f,0,SEEK_END);z=ftell(f);fseek(f,0,SEEK_SET);char*b=malloc((size_t)z+1);if(!b){fclose(f);return 0;}if(fread(b,1,(size_t)z,f)!=(size_t)z){free(b);fclose(f);return 0;}fclose(f);b[z]=0;if(n)*n=(size_t)z;return b;}
-static uint64_t hs(const char*s){uint64_t h=1469598103934665603ULL;for(;*s;s++)h=(h^(unsigned char)*s)*1099511628211ULL;return h;}
+static char *file(const char *p,size_t *n){double started=tok_now_ms();FILE*f=fopen(p,"rb");long z;if(!f)return 0;fseek(f,0,SEEK_END);z=ftell(f);fseek(f,0,SEEK_SET);char*b=malloc((size_t)z+1);if(!b){fclose(f);return 0;}if(fread(b,1,(size_t)z,f)!=(size_t)z){fclose(f);free(b);return 0;}fclose(f);b[z]=0;if(n)*n=(size_t)z;if(g_profile)g_profile->file_read_ms+=tok_now_ms()-started;return b;}
+static uint64_t hs(const char*s){q38_tokenizer_profile_note_hash_lookup();uint64_t h=1469598103934665603ULL;for(;*s;s++)h=(h^(unsigned char)*s)*1099511628211ULL;return h;}
 static bool put_utf8(char *b, size_t *n, uint32_t cp) {
     if (cp < 0x80) b[(*n)++] = (char) cp;
     else if (cp < 0x800) {
@@ -28,11 +55,75 @@ static bool put_utf8(char *b, size_t *n, uint32_t cp) {
     } else return false;
     return true;
 }
-static char *jstr(const char **pp){const char*p=*pp;if(*p!='"')return 0;p++;size_t n=0;char*b=malloc(strlen(p)+1);if(!b)return 0;while(*p&&*p!='"'){if(*p=='\\'){p++;if(*p=='u'){unsigned v=0;for(int i=0;i<4;i++){char c=*++p;v=v*16+(c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c-'A'+10);}if(v>=0xd800&&v<=0xdbff&&p[1]=='\\'&&p[2]=='u'){const char*q=p+3;unsigned w=0;for(int i=0;i<4;i++){char c=q[i];w=w*16+(c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c-'A'+10);}if(w>=0xdc00&&w<=0xdfff){v=0x10000+((v-0xd800)<<10)+(w-0xdc00);p=q+3;}}if(!put_utf8(b,&n,v)){free(b);return 0;}}else{char c=*p;b[n++]=c=='n'?'\n':c=='r'?'\r':c=='t'?'\t':c=='b'?'\b':c=='f'?'\f':c=='/'?'/':c;}}else b[n++]=*p;p++;}if(*p!='"'){free(b);return 0;}b[n]=0;*pp=p+1;return b;}
+static char *jstr(const char **pp, const char *end) {
+    const char *p = *pp;
+    if (p >= end || *p != '"') return 0;
+    const char *q = p + 1;
+    while (q < end) {
+        if (*q == '\\') {
+            if (++q >= end) return 0;
+            q++;
+        } else if (*q++ == '"') {
+            break;
+        }
+    }
+    if (q > end || q[-1] != '"') return 0;
+    const double alloc_started = tok_now_ms();
+    char *b = malloc((size_t)(q - (p + 1)) + 1);
+    if (!b) return 0;
+    size_t n = 0;
+    p++;
+    while (p < end && *p != '"') {
+        if (*p == '\\') {
+            p++;
+            if (p >= end) { free(b); return 0; }
+            if (*p == 'u') {
+                unsigned v = 0;
+                if (p + 4 >= end) { free(b); return 0; }
+                for (int i = 0; i < 4; i++) {
+                    char c = *++p;
+                    v = v * 16 + (c >= '0' && c <= '9' ? c - '0' :
+                        c >= 'a' && c <= 'f' ? c - 'a' + 10 : c - 'A' + 10);
+                }
+                if (v >= 0xd800 && v <= 0xdbff &&
+                    p + 3 < end && p[1] == '\\' && p[2] == 'u') {
+                    const char *r = p + 3;
+                    unsigned w = 0;
+                    if (r + 4 <= end) {
+                        for (int i = 0; i < 4; i++) {
+                            char c = r[i];
+                            w = w * 16 + (c >= '0' && c <= '9' ? c - '0' :
+                                c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+                                c - 'A' + 10);
+                        }
+                        if (w >= 0xdc00 && w <= 0xdfff) {
+                            v = 0x10000 + ((v - 0xd800) << 10) + (w - 0xdc00);
+                            p = r + 3;
+                        }
+                    }
+                }
+                if (!put_utf8(b, &n, v)) { free(b); return 0; }
+            } else {
+                char c = *p;
+                b[n++] = c == 'n' ? '\n' : c == 'r' ? '\r' :
+                    c == 't' ? '\t' : c == 'b' ? '\b' :
+                    c == 'f' ? '\f' : c == '/' ? '/' : c;
+            }
+        } else {
+            b[n++] = *p;
+        }
+        p++;
+    }
+    b[n] = 0;
+    q38_tokenizer_profile_note_string_copy(n + 1);
+    if (g_profile) g_profile->vocab_string_alloc_ms += tok_now_ms() - alloc_started;
+    *pp = q;
+    return b;
+}
 static const char *find(const char*b,const char*k){char*q=strstr(b,k);return q?q+strlen(k):0;}
-static bool addv(q38_tokenizer*t,char*s,uint32_t id){if(t->vocab_count*2>=t->vocab_cap){size_t nc=t->vocab_cap? t->vocab_cap*2:524288; q38_vocab_entry*n=calloc(nc,sizeof(*n));if(!n)return 0;for(size_t i=0;i<t->vocab_cap;i++)if(t->vocab[i].s){size_t j=hs(t->vocab[i].s)&(nc-1);while(n[j].s)j=(j+1)&(nc-1);n[j]=t->vocab[i];}free(t->vocab);t->vocab=n;t->vocab_cap=nc;}size_t i=hs(s)&(t->vocab_cap-1);while(t->vocab[i].s&&strcmp(t->vocab[i].s,s))i=(i+1)&(t->vocab_cap-1);if(!t->vocab[i].s){t->vocab[i].s=s;t->vocab_count++;}else free(s);t->vocab[i].id=id;return 1;}
-static int lookup(const q38_tokenizer*t,const char*s){if(!t->vocab_cap)return -1;size_t i=hs(s)&(t->vocab_cap-1);while(t->vocab[i].s){if(!strcmp(t->vocab[i].s,s))return (int)t->vocab[i].id;i=(i+1)&(t->vocab_cap-1);}return -1;}
-static bool addm(q38_tokenizer*t,char*s,uint32_t r){if(t->merge_count==t->merge_cap){size_t n=t->merge_cap?t->merge_cap*2:262144;q38_merge_entry*x=realloc(t->merges,n*sizeof(*x));if(!x)return 0;t->merges=x;t->merge_cap=n;}t->merges[t->merge_count++]=(q38_merge_entry){s,r};return 1;}
+static bool addv(q38_tokenizer*t,char*s,uint32_t id){const double started=tok_now_ms();q38_tokenizer_profile_note_hash_insertion();if(t->vocab_count*2>=t->vocab_cap){size_t nc=t->vocab_cap? t->vocab_cap*2:524288; q38_vocab_entry*n=calloc(nc,sizeof(*n));if(!n)return 0;for(size_t i=0;i<t->vocab_cap;i++)if(t->vocab[i].s){size_t j=hs(t->vocab[i].s)&(nc-1);while(n[j].s)j=(j+1)&(nc-1);n[j]=t->vocab[i];}free(t->vocab);t->vocab=n;t->vocab_cap=nc;}size_t i=hs(s)&(t->vocab_cap-1);while(t->vocab[i].s&&strcmp(t->vocab[i].s,s)){q38_tokenizer_profile_note_string_comparison();i=(i+1)&(t->vocab_cap-1);}if(!t->vocab[i].s){t->vocab[i].s=s;t->vocab_count++;}else free(s);t->vocab[i].id=id;if(g_profile)g_profile->vocab_hash_build_ms+=tok_now_ms()-started;return 1;}
+static int lookup(const q38_tokenizer*t,const char*s){q38_tokenizer_profile_note_hash_lookup();if(!t->vocab_cap)return -1;size_t i=hs(s)&(t->vocab_cap-1);while(t->vocab[i].s){q38_tokenizer_profile_note_string_comparison();if(!strcmp(t->vocab[i].s,s))return (int)t->vocab[i].id;i=(i+1)&(t->vocab_cap-1);}return -1;}
+static bool addm(q38_tokenizer*t,char*s,uint32_t r){const double started=tok_now_ms();if(t->merge_count==t->merge_cap){size_t n=t->merge_cap?t->merge_cap*2:262144;q38_merge_entry*x=realloc(t->merges,n*sizeof(*x));if(!x)return 0;t->merges=x;t->merge_cap=n;}t->merges[t->merge_count++]=(q38_merge_entry){s,r};if(g_profile){g_profile->merges_index_build_ms+=tok_now_ms()-started;g_profile->merge_entries++;}return 1;}
 static int mrank(const q38_tokenizer*t,const char*a,const char*b){size_t n=strlen(a)+strlen(b)+2;char*x=malloc(n);if(!x)return -1;snprintf(x,n,"%s %s",a,b);for(size_t i=0;i<t->merge_count;i++)if(!strcmp(t->merges[i].s,x)){int r=t->merges[i].rank;free(x);return r;}free(x);return -1;}
 static bool put_utf8(char *b, size_t *n, uint32_t cp);
 static const char *bmap(unsigned c){static char u[256][5];static int init; if(!init){bool used[256]={0};for(unsigned i=33;i<=126;i++)used[i]=1;for(unsigned i=161;i<=172;i++)used[i]=1;for(unsigned i=174;i<=255;i++)used[i]=1;unsigned next=0x100;for(unsigned i=0;i<256;i++){uint32_t v;if(used[i])v=i;else{while(next<0x10000){bool taken=false;for(unsigned j=0;j<256;j++)if(used[j]&&j==next){taken=true;break;}if(!taken)break;next++;}v=next++;}size_t n=0;put_utf8(u[i],&n,v);u[i][n]=0;}init=1;}return u[c];}
@@ -240,9 +331,21 @@ static char *normalize_nfc(const char *s) {
     out[z] = 0;
     return out;
 }
-static char *json_content(const char **p);
-static char *json_field(const char**p,const char*key){const char*q=strstr(*p,key);if(!q)return strdup("");q=strchr(q,':');if(!q)return strdup("");q++;while(isspace((unsigned char)*q))q++;if(*q=='[')return json_content(&q);return jstr(&q);}
-static char *json_content(const char **p) {
+static char *json_content(const char **p, const char *end);
+static char *json_field_bounded(const char **p, const char *end, const char *key) {
+    const char *q = strstr(*p, key);
+    if (!q) return strdup("");
+    q = strchr(q, ':');
+    if (!q) return strdup("");
+    q++;
+    while (isspace((unsigned char)*q)) q++;
+    if (*q == '[') return json_content(&q, end);
+    return jstr(&q, end);
+}
+static char *json_field(const char **p, const char *key) {
+    return json_field_bounded(p, *p + strlen(*p), key);
+}
+static char *json_content(const char **p, const char *end) {
     const char *q = *p;
     if (*q != '[') {
         q = strstr(q, "\"content\"");
@@ -250,24 +353,24 @@ static char *json_content(const char **p) {
         q++;
     }
     while (isspace((unsigned char)*q)) q++;
-    if (*q == '"') return jstr(&q);
+    if (*q == '"') return jstr(&q, end);
     if (*q != '[') return strdup("");
     size_t cap = 64, used = 0;
     char *out = malloc(cap);
     if (!out) return NULL;
     int depth = 0;
     bool string = false, escape = false;
-    const char *end = q;
-    for (; *end; end++) {
+    const char *scan_end = q;
+    for (; *scan_end; scan_end++) {
         if (string) {
             if (escape) escape = false;
-            else if (*end == '\\') escape = true;
-            else if (*end == '"') string = false;
-        } else if (*end == '"') string = true;
-        else if (*end == '[') depth++;
-        else if (*end == ']' && --depth == 0) { end++; break; }
+            else if (*scan_end == '\\') escape = true;
+            else if (*scan_end == '"') string = false;
+        } else if (*scan_end == '"') string = true;
+        else if (*scan_end == '[') depth++;
+        else if (*scan_end == ']' && --depth == 0) { scan_end++; break; }
     }
-    for (const char *r = q; r < end; ) {
+    for (const char *r = q; r < scan_end; ) {
         const char *type = strstr(r, "\"type\"");
         const char *text = strstr(r, "\"text\":");
         const char *image = strstr(r, "\"image\"");
@@ -276,11 +379,11 @@ static char *json_content(const char **p) {
         if (!next || (text && text < next)) next = text;
         (void) image;
         (void) video;
-        if (!next || next >= end) break;
+        if (!next || next >= scan_end) break;
         if (next == text) {
             const char *v = strchr(next, ':');
             if (v) { v++; while (isspace((unsigned char)*v)) v++;
-                char *s = (*v == '"') ? jstr(&v) : strdup("");
+                char *s = (*v == '"') ? jstr(&v, end) : strdup("");
                 if (!s) { free(out); return NULL; }
                 size_t n = strlen(s);
                 if (used + n + 1 > cap) { while (used + n + 1 > cap) cap *= 2;
@@ -293,7 +396,7 @@ static char *json_content(const char **p) {
             if (v) {
                 v++;
                 while (isspace((unsigned char)*v)) v++;
-                kind = (*v == '"') ? jstr(&v) : strdup("");
+                kind = (*v == '"') ? jstr(&v, end) : strdup("");
             } else kind = strdup("");
             if (!kind) { free(out); return NULL; }
             const char *marker = !strcmp(kind, "text") ? "" :
@@ -310,7 +413,118 @@ static char *json_content(const char **p) {
     out[used] = 0;
     return out;
 }
-bool q38_tokenizer_init(q38_tokenizer*t,const char*dir,const char*unused,char*e,size_t en){(void)unused;if(e&&en)e[0]=0;if(!t||!dir){err(e,en,"invalid tokenizer arguments");return 0;}memset(t,0,sizeof(*t));t->model_dir=strdup(dir);char p[512];snprintf(p,sizeof(p),"%s/tokenizer.json",dir);size_t z;char*b=file(p,&z);if(!b){err(e,en,"cannot read tokenizer.json");return 0;}const char*v=find(b,"\"vocab\"");v=v?strchr(v,'{'):0;if(!v){free(b);err(e,en,"tokenizer vocab missing");return 0;}v++;while(*v&&*v!='}') {while(*v&&*v!='"')v++;if(!*v||*v=='}')break;char*s=jstr(&v);while(*v&&*v!=':')v++;v++;unsigned long id=strtoul(v,(char**)&v,10);if(!addv(t,s,(uint32_t)id)){free(b);err(e,en,"out of memory");return 0;}while(*v&&*v!=','&&*v!='}')v++;if(*v==',')v++;}char mp[512];snprintf(mp,sizeof(mp),"%s/merges.txt",dir);size_t mz;char*mb=file(mp,&mz);if(mb){char*line=mb;while(line&&*line){char*nl=strchr(line,'\n');if(nl)*nl=0;if(*line&&*line!='#'){char*s=strdup(line);if(!addm(t,s,(uint32_t)t->merge_count)){free(mb);free(b);return 0;}}line=nl?nl+1:0;}free(mb);}else{const char*m=find(b,"\"merges\"");m=m?strchr(m,'['):0;if(m)for(m++;*m&&*m!=']';){while(*m&&*m!='"'&&*m!=']')m++;if(*m==']')break;char*s=jstr(&m);if(!addm(t,s,(uint32_t)t->merge_count)){free(b);return 0;}while(*m&&*m!=','&&*m!=']')m++;if(*m==',')m++;}}const char*a=find(b,"\"added_tokens\"");a=a?strchr(a,'['):0;if(a)for(a++;*a&&*a!=']';){while(*a&&*a!='{')a++;if(*a!='{')break;const char*q=a;char*s=json_field(&q,"\"content\"");const char*idp=strstr(a,"\"id\"");if(idp&&s){uint32_t id=(uint32_t)strtoul(strchr(idp,':')+1,0,10);t->special_text=realloc(t->special_text,(t->special_count+1)*sizeof(char*));t->special_id=realloc(t->special_id,(t->special_count+1)*sizeof(uint32_t));t->special_text[t->special_count]=s;t->special_id[t->special_count++]=id;}else free(s);a=strchr(a,'}');if(a)a++;}if(!q38_tokenizer_verify_specials(t,e,en)){free(b);return 0;}free(b);return 1;}
+#define q38_tokenizer_init tokenizer_init_impl
+bool q38_tokenizer_init(q38_tokenizer *t, const char *dir, const char *unused,
+                        char *e, size_t en) {
+    (void) unused;
+    if (e && en) e[0] = 0;
+    if (!t || !dir) { err(e, en, "invalid tokenizer arguments"); return 0; }
+    memset(t, 0, sizeof(*t));
+    t->model_dir = strdup(dir);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/tokenizer.json", dir);
+    size_t size;
+    char *b = file(path, &size);
+    if (!b) { err(e, en, "cannot read tokenizer.json"); return 0; }
+    const char *end = b + size;
+    const char *v = find(b, "\"vocab\"");
+    v = v ? strchr(v, '{') : 0;
+    if (!v) { free(b); err(e, en, "tokenizer vocab missing"); return 0; }
+    v++;
+    while (*v && *v != '}') {
+        while (*v && *v != '"') v++;
+        if (!*v || *v == '}') break;
+        char *s = jstr(&v, end);
+        while (*v && *v != ':') v++;
+        v++;
+        unsigned long id = strtoul(v, (char **) &v, 10);
+        if (!addv(t, s, (uint32_t) id)) {
+            free(b); err(e, en, "out of memory"); return 0;
+        }
+        while (*v && *v != ',' && *v != '}') v++;
+        if (*v == ',') v++;
+    }
+    char merge_path[512];
+    snprintf(merge_path, sizeof(merge_path), "%s/merges.txt", dir);
+    size_t merge_size;
+    char *mb = file(merge_path, &merge_size);
+    if (mb) {
+        char *line = mb;
+        while (line && *line) {
+            char *nl = strchr(line, '\n');
+            if (nl) *nl = 0;
+            if (*line && *line != '#') {
+                char *s = strdup(line);
+                if (!addm(t, s, (uint32_t) t->merge_count)) {
+                    free(mb); free(b); return 0;
+                }
+            }
+            line = nl ? nl + 1 : 0;
+        }
+        free(mb);
+    } else {
+        const char *m = find(b, "\"merges\"");
+        m = m ? strchr(m, '[') : 0;
+        if (m) for (m++; *m && *m != ']'; ) {
+            while (*m && *m != '"' && *m != ']') m++;
+            if (*m == ']') break;
+            char *s = jstr(&m, end);
+            if (!addm(t, s, (uint32_t) t->merge_count)) {
+                free(b); return 0;
+            }
+            while (*m && *m != ',' && *m != ']') m++;
+            if (*m == ',') m++;
+        }
+    }
+    const char *a = find(b, "\"added_tokens\"");
+    a = a ? strchr(a, '[') : 0;
+    if (a) for (a++; *a && *a != ']'; ) {
+        while (*a && *a != '{') a++;
+        if (*a != '{') break;
+        const char *q = a;
+        char *s = json_field_bounded(&q, end, "\"content\"");
+        const char *idp = strstr(a, "\"id\"");
+        if (idp && s) {
+            uint32_t id = (uint32_t) strtoul(strchr(idp, ':') + 1, 0, 10);
+            t->special_text = realloc(
+                t->special_text, (t->special_count + 1) * sizeof(*t->special_text));
+            t->special_id = realloc(
+                t->special_id, (t->special_count + 1) * sizeof(*t->special_id));
+            t->special_text[t->special_count] = s;
+            t->special_id[t->special_count++] = id;
+        } else free(s);
+        a = strchr(a, '}');
+        if (a) a++;
+    }
+    if (!q38_tokenizer_verify_specials(t, e, en)) {
+        free(b); return 0;
+    }
+    free(b);
+    return 1;
+}
+#undef q38_tokenizer_init
+bool q38_tokenizer_init(q38_tokenizer *t, const char *dir, const char *unused,
+                        char *e, size_t en) {
+    const double started = tok_now_ms();
+    if (g_profile) q38_tokenizer_profile_reset(g_profile);
+    const bool ok = tokenizer_init_impl(t, dir, unused, e, en);
+    if (g_profile) {
+        g_profile->wall_ms = tok_now_ms() - started;
+        g_profile->vocab_entries = t ? t->vocab_count : 0;
+        g_profile->merge_entries = t ? t->merge_count : 0;
+        g_profile->other_ms =
+            g_profile->wall_ms - g_profile->file_read_ms -
+            g_profile->json_scan_ms - g_profile->vocab_parse_ms -
+            g_profile->vocab_string_alloc_ms -
+            g_profile->vocab_hash_build_ms - g_profile->merges_parse_ms -
+            g_profile->merges_string_alloc_ms -
+            g_profile->merges_index_build_ms -
+            g_profile->special_token_parse_ms -
+            g_profile->regex_pretokenizer_init_ms -
+            g_profile->fingerprint_ms;
+    }
+    return ok;
+}
 void q38_tokenizer_destroy(q38_tokenizer*t){if(!t)return;free(t->model_dir);for(size_t i=0;i<t->vocab_cap;i++)free(t->vocab[i].s);free(t->vocab);for(size_t i=0;i<t->merge_count;i++)free(t->merges[i].s);free(t->merges);for(size_t i=0;i<t->special_count;i++)free(t->special_text[i]);free(t->special_text);free(t->special_id);free(t->chat_template);memset(t,0,sizeof(*t));}
 bool q38_tokenizer_encode(const q38_tokenizer*t,const char*s,bool add,q38_token_batch*out,char*e,size_t en){(void)add;if(e&&en)e[0]=0;if(!t||!s||!out){err(e,en,"invalid tokenizer encode arguments");return 0;}q38_token_batch_free(out);char*n=normalize_nfc(s);if(!n){err(e,en,"out of memory");return 0;}bool ok=encode_special(t,n,out);free(n);if(!ok){q38_token_batch_free(out);err(e,en,"native tokenizer failed");return 0;}return 1;}
 static bool append_text(char **dst, size_t *used, size_t *cap, const char *text) {
