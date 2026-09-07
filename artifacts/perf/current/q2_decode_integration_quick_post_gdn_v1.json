@@ -1,0 +1,2578 @@
+{
+  "schema_version": "PERF_SCHEMA_V2",
+  "timer_schema_version": "PERF_SCHEMA_V2",
+  "timestamp_utc": "2026-09-07T10:49:47.958043+00:00",
+  "REF_ID": "Q2_DECODE_INTEGRATION_QUICK_POST_GDN_V1",
+  "ref_id": "Q2_DECODE_INTEGRATION_QUICK_POST_GDN_V1",
+  "baseline_reference": "Q2_DECODE_REFERENCE_0",
+  "benchmark_kind": "quick_integration",
+  "build": {
+    "binary": "/tmp/q2_quick_bench",
+    "binary_size_bytes": 2787088,
+    "branch": "qwen38-spark-proto",
+    "build_type": "production -O3",
+    "cflags": "-O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -pthread",
+    "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "cuda_arch": "sm_121a",
+    "git_commit": "4d1899c5c",
+    "git_dirty": true,
+    "nvcc": "nvcc: NVIDIA (R) Cuda compiler driver",
+    "nvccflags": "-O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a"
+  },
+  "commit_hash": "4d1899c5c",
+  "model": {
+    "path": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+    "file_size_bytes": 103901247456,
+    "fingerprint": {
+      "kind": "sha256",
+      "value": "68b29ce24ab62bf2cbcd8bbdeff5e6d36941e5b00e2fe34df90e92f98d51f518"
+    },
+    "quant_recipe": {
+      "manifest": "tools/quant_manifest_q2.json",
+      "sha256": "739fffc7bc1ebaccfcdf6efb621e23a1cd6d68f2cc9f6839861c3a0d774410c7"
+    }
+  },
+  "model_fingerprint": {
+    "kind": "sha256",
+    "value": "68b29ce24ab62bf2cbcd8bbdeff5e6d36941e5b00e2fe34df90e92f98d51f518"
+  },
+  "quant_recipe": {
+    "manifest": "tools/quant_manifest_q2.json",
+    "sha256": "739fffc7bc1ebaccfcdf6efb621e23a1cd6d68f2cc9f6839861c3a0d774410c7"
+  },
+  "tokenizer": {
+    "fingerprint": {
+      "files": [
+        "chat_template.jinja",
+        "merges.txt",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json"
+      ],
+      "kind": "sha256",
+      "value": "5f35fb517d3a016e4ca70d175e921ba5e9c92f7352663516a28f001b7225b93d"
+    },
+    "path": "/home/lvx/q38model"
+  },
+  "tokenizer_fingerprint": {
+    "files": [
+      "chat_template.jinja",
+      "merges.txt",
+      "tokenizer.json",
+      "tokenizer_config.json",
+      "vocab.json"
+    ],
+    "kind": "sha256",
+    "value": "5f35fb517d3a016e4ca70d175e921ba5e9c92f7352663516a28f001b7225b93d"
+  },
+  "hardware": {
+    "device": "NVIDIA GB10",
+    "gpu": "DGX Spark / GB10",
+    "cpu_arch": "aarch64",
+    "cuda_driver_version": 13000,
+    "cuda_runtime_version": 13000,
+    "cuda_total_bytes": 130596646912,
+    "unified_memory_bytes": 130596646912
+  },
+  "execution": {
+    "path": "q38_runtime -> q38_session -> q38_session_eval",
+    "sampling": "greedy, temperature=0",
+    "mtp": false,
+    "speculative_decode": false,
+    "ple_policy": "file_backed",
+    "non_ple_residency": "resident_required",
+    "timed_region": "decode token positions 1..15; no state trace",
+    "semantic_reset": "between runs",
+    "model_loads": 1,
+    "warmup_runs": 1,
+    "measured_runs": 2
+  },
+  "timer_schema": {
+    "version": "PERF_SCHEMA_V2",
+    "span_policy": {
+      "wall": "exclusive measured wall",
+      "stage": "exclusive stage timer",
+      "cuda_dispatch": "diagnostic_span_nonadditive",
+      "cuda_sync_wait": "diagnostic_span_nonadditive",
+      "memcpy": "diagnostic_span_nonadditive",
+      "PLE_elapsed": "diagnostic_span_nonadditive",
+      "PLE_overlap": "diagnostic_span_nonadditive",
+      "PLE_critical_stall": "exclusive critical-path contribution"
+    },
+    "categories": [
+      "wall",
+      "QSA",
+      "QSA.qkv",
+      "QSA.output_projection",
+      "QSA.attention",
+      "QSA.index_compress",
+      "QSA.state_glue",
+      "MoE",
+      "GDN",
+      "GR",
+      "norms_residual_glue",
+      "LM_head",
+      "argmax",
+      "host_scalar",
+      "cuda_dispatch",
+      "cuda_sync_wait",
+      "memcpy",
+      "PLE_critical_stall",
+      "other"
+    ]
+  },
+  "prompt": "Explain in simple terms why the sky appears blue during the day and red near sunset.",
+  "prompt_ids": [
+    814,
+    20139,
+    303,
+    4145,
+    3665,
+    3069,
+    279,
+    12515,
+    7701,
+    6105,
+    2261,
+    279,
+    1834,
+    321,
+    2438,
+    3043,
+    41564,
+    13
+  ],
+  "context_size": 4096,
+  "generated_count": 16,
+  "generated_ids": [
+    271,
+    248068,
+    198,
+    760,
+    1156,
+    6587,
+    264,
+    4145,
+    15673,
+    314,
+    3069,
+    279,
+    12515,
+    369,
+    6105,
+    2261
+  ],
+  "measurement_window": [
+    1,
+    15
+  ],
+  "measured_positions": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "warmup_runs": 1,
+  "measured_runs": 2,
+  "prefill": {
+    "status": "not_run"
+  },
+  "correctness": {
+    "green": true,
+    "run_consistency_green": true,
+    "generated_ids_exact": true,
+    "final_logits_hash_identical": true,
+    "final_logits_hash": "6f70a097a4b4b923",
+    "run_hashes": [
+      "6f70a097a4b4b923",
+      "6f70a097a4b4b923"
+    ],
+    "argmax_final_identical": true,
+    "nan_inf": false,
+    "fallback": false,
+    "canonical_hash_vs_previous_quick": false,
+    "previous_quick_hash": "310ca35c840ca6a7"
+  },
+  "residency": {
+    "all_non_ple_resident": true,
+    "persistent_resident_bytes": 49465890560,
+    "persistent_resident_tensors": 1157,
+    "persistent_ple_entries": 0,
+    "non_ple_upload_bytes": 0,
+    "non_ple_residency_misses": 0,
+    "q2_gate_up_fallback_calls": 0
+  },
+  "memory": {
+    "peak_cuda_bytes": 129344675840,
+    "peak_unified_rss_bytes": 48397856768
+  },
+  "runs": [
+    {
+      "run": 1,
+      "p95_wall_ms": 309.788934,
+      "min_wall_ms": 300.365664,
+      "max_wall_ms": 309.788934,
+      "summary": {
+        "wall_ms": 305.367816,
+        "forward_core_ms": 304.862513,
+        "argmax_ms": 0.504381,
+        "bookkeeping_ms": 0.000602,
+        "ple_critical_stall_ms": 0.0,
+        "ple_elapsed_ms": 0.056219,
+        "ple_overlap_ms": 0.056219,
+        "categories": {
+          "QSA": {
+            "ms": 29.611525,
+            "qkv_ms": 15.030072,
+            "output_projection_ms": 1.999051,
+            "attention_ms": 1.309176,
+            "index_compress_ms": 10.290437,
+            "state_glue_ms": 0.982789
+          },
+          "MoE": {
+            "ms": 20.006354
+          },
+          "GDN": {
+            "ms": 22.214526
+          },
+          "GR": {
+            "ms": 14.63955
+          },
+          "norms_residual_glue": {
+            "ms": 0.0
+          },
+          "LM_head": {
+            "ms": 5.336813
+          },
+          "host_scalar": {
+            "ms": 0.0
+          },
+          "cuda_dispatch": {
+            "ms": 10.00726
+          },
+          "cuda_sync_wait": {
+            "ms": 0.0
+          },
+          "memcpy": {
+            "ms": 0.724365
+          },
+          "PLE_critical_stall": {
+            "ms": 0.0
+          },
+          "other": {
+            "ms": 213.053744
+          }
+        },
+        "traffic": {
+          "kernel_launches": 13475,
+          "host_syncs": 13475,
+          "h2d_bytes": 12291328,
+          "d2h_bytes": 8792320,
+          "d2d_bytes": 0
+        }
+      },
+      "generated_ids": [
+        271,
+        248068,
+        198,
+        760,
+        1156,
+        6587,
+        264,
+        4145,
+        15673,
+        314,
+        3069,
+        279,
+        12515,
+        369,
+        6105,
+        2261
+      ],
+      "correctness": {
+        "final_logits_hash": "6f70a097a4b4b923",
+        "argmax": 2261,
+        "nan_inf": false
+      },
+      "samples": [
+        {
+          "wall_ms": 305.983776,
+          "forward_core_ms": 305.520605,
+          "argmax_ms": 0.461491,
+          "bookkeeping_ms": 0.001136,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.065168,
+          "ple_overlap_ms": 0.065168,
+          "categories": {
+            "QSA": {
+              "ms": 29.244889,
+              "qkv_ms": 15.27476,
+              "output_projection_ms": 1.953932,
+              "attention_ms": 0.987525,
+              "index_compress_ms": 10.271737,
+              "state_glue_ms": 0.756935
+            },
+            "MoE": {
+              "ms": 20.596321
+            },
+            "GDN": {
+              "ms": 22.795455
+            },
+            "GR": {
+              "ms": 14.950167
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.346686
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.270701
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.874496
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 212.587088
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 306.159313,
+          "forward_core_ms": 305.666974,
+          "argmax_ms": 0.491379,
+          "bookkeeping_ms": 0.00072,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.033984,
+          "ple_overlap_ms": 0.033984,
+          "categories": {
+            "QSA": {
+              "ms": 28.711078,
+              "qkv_ms": 14.670004,
+              "output_projection_ms": 1.934987,
+              "attention_ms": 1.036682,
+              "index_compress_ms": 10.269771,
+              "state_glue_ms": 0.799635
+            },
+            "MoE": {
+              "ms": 19.247472
+            },
+            "GDN": {
+              "ms": 21.874985
+            },
+            "GR": {
+              "ms": 14.186985
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.343086
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.405023
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.639136
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 216.303368
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 305.717934,
+          "forward_core_ms": 305.212588,
+          "argmax_ms": 0.50437,
+          "bookkeeping_ms": 0.000608,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.03216,
+          "ple_overlap_ms": 0.03216,
+          "categories": {
+            "QSA": {
+              "ms": 28.739396,
+              "qkv_ms": 14.567364,
+              "output_projection_ms": 1.967435,
+              "attention_ms": 1.103142,
+              "index_compress_ms": 10.270361,
+              "state_glue_ms": 0.831094
+            },
+            "MoE": {
+              "ms": 20.021109
+            },
+            "GDN": {
+              "ms": 21.898782
+            },
+            "GR": {
+              "ms": 14.208831
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.259326
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.556188
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.636608
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 215.085143
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 302.893455,
+          "forward_core_ms": 302.222075,
+          "argmax_ms": 0.670276,
+          "bookkeeping_ms": 0.000656,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.057488,
+          "ple_overlap_ms": 0.057488,
+          "categories": {
+            "QSA": {
+              "ms": 29.648282,
+              "qkv_ms": 15.387272,
+              "output_projection_ms": 2.000507,
+              "attention_ms": 1.130601,
+              "index_compress_ms": 10.273899,
+              "state_glue_ms": 0.856003
+            },
+            "MoE": {
+              "ms": 19.407773
+            },
+            "GDN": {
+              "ms": 21.722234
+            },
+            "GR": {
+              "ms": 14.532628
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.641792
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.58201
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.659616
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 211.269366
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 309.788934,
+          "forward_core_ms": 309.318868,
+          "argmax_ms": 0.469122,
+          "bookkeeping_ms": 0.00064,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.02392,
+          "ple_overlap_ms": 0.02392,
+          "categories": {
+            "QSA": {
+              "ms": 30.638991,
+              "qkv_ms": 15.989449,
+              "output_projection_ms": 2.090989,
+              "attention_ms": 1.181705,
+              "index_compress_ms": 10.44022,
+              "state_glue_ms": 0.936629
+            },
+            "MoE": {
+              "ms": 22.130262
+            },
+            "GDN": {
+              "ms": 22.932351
+            },
+            "GR": {
+              "ms": 15.781634
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.268959
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 11.892774
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.961536
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 212.566672
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 302.633598,
+          "forward_core_ms": 302.174699,
+          "argmax_ms": 0.458035,
+          "bookkeeping_ms": 0.000528,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.091984,
+          "ple_overlap_ms": 0.091984,
+          "categories": {
+            "QSA": {
+              "ms": 29.94337,
+              "qkv_ms": 15.491255,
+              "output_projection_ms": 2.027323,
+              "attention_ms": 1.21612,
+              "index_compress_ms": 10.277035,
+              "state_glue_ms": 0.931637
+            },
+            "MoE": {
+              "ms": 20.69087
+            },
+            "GDN": {
+              "ms": 22.658543
+            },
+            "GR": {
+              "ms": 15.226044
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.263102
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.38153
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.813568
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 208.39277
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 300.365664,
+          "forward_core_ms": 299.90059,
+          "argmax_ms": 0.464338,
+          "bookkeeping_ms": 0.00056,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.1012,
+          "ple_overlap_ms": 0.1012,
+          "categories": {
+            "QSA": {
+              "ms": 29.033558,
+              "qkv_ms": 14.629397,
+              "output_projection_ms": 1.933483,
+              "attention_ms": 1.255156,
+              "index_compress_ms": 10.264408,
+              "state_glue_ms": 0.951114
+            },
+            "MoE": {
+              "ms": 19.538475
+            },
+            "GDN": {
+              "ms": 22.248092
+            },
+            "GR": {
+              "ms": 14.465529
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.238318
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.153948
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.652096
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 209.376618
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 306.465332,
+          "forward_core_ms": 305.839888,
+          "argmax_ms": 0.624724,
+          "bookkeeping_ms": 0.0004,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.037617,
+          "ple_overlap_ms": 0.037617,
+          "categories": {
+            "QSA": {
+              "ms": 29.98438,
+              "qkv_ms": 15.452664,
+              "output_projection_ms": 1.985116,
+              "attention_ms": 1.305637,
+              "index_compress_ms": 10.269179,
+              "state_glue_ms": 0.971784
+            },
+            "MoE": {
+              "ms": 19.235323
+            },
+            "GDN": {
+              "ms": 21.7705
+            },
+            "GR": {
+              "ms": 14.056615
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.396751
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.358281
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.621056
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 215.396319
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 306.629076,
+          "forward_core_ms": 306.006353,
+          "argmax_ms": 0.621971,
+          "bookkeeping_ms": 0.000464,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.024592,
+          "ple_overlap_ms": 0.024592,
+          "categories": {
+            "QSA": {
+              "ms": 29.631734,
+              "qkv_ms": 15.059779,
+              "output_projection_ms": 1.950555,
+              "attention_ms": 1.346135,
+              "index_compress_ms": 10.277096,
+              "state_glue_ms": 0.998169
+            },
+            "MoE": {
+              "ms": 20.912953
+            },
+            "GDN": {
+              "ms": 22.735109
+            },
+            "GR": {
+              "ms": 15.097553
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.716849
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.31166
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.955712
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 211.912155
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 300.83738,
+          "forward_core_ms": 300.338289,
+          "argmax_ms": 0.498115,
+          "bookkeeping_ms": 0.00064,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.02296,
+          "ple_overlap_ms": 0.02296,
+          "categories": {
+            "QSA": {
+              "ms": 29.194361,
+              "qkv_ms": 14.470564,
+              "output_projection_ms": 2.022573,
+              "attention_ms": 1.399672,
+              "index_compress_ms": 10.264428,
+              "state_glue_ms": 1.037124
+            },
+            "MoE": {
+              "ms": 19.208026
+            },
+            "GDN": {
+              "ms": 21.718021
+            },
+            "GR": {
+              "ms": 14.057184
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.316702
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.307134
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.64736
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 210.843995
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 306.067809,
+          "forward_core_ms": 305.609967,
+          "argmax_ms": 0.457138,
+          "bookkeeping_ms": 0.000416,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.057744,
+          "ple_overlap_ms": 0.057744,
+          "categories": {
+            "QSA": {
+              "ms": 29.321353,
+              "qkv_ms": 14.615573,
+              "output_projection_ms": 1.924059,
+              "attention_ms": 1.446571,
+              "index_compress_ms": 10.280172,
+              "state_glue_ms": 1.054979
+            },
+            "MoE": {
+              "ms": 19.437058
+            },
+            "GDN": {
+              "ms": 21.919053
+            },
+            "GR": {
+              "ms": 13.949229
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.258926
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.27954
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.610528
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 215.724347
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 305.013692,
+          "forward_core_ms": 304.552473,
+          "argmax_ms": 0.460499,
+          "bookkeeping_ms": 0.0004,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.113568,
+          "ple_overlap_ms": 0.113568,
+          "categories": {
+            "QSA": {
+              "ms": 29.561433,
+              "qkv_ms": 14.634691,
+              "output_projection_ms": 2.069132,
+              "attention_ms": 1.49073,
+              "index_compress_ms": 10.278555,
+              "state_glue_ms": 1.088325
+            },
+            "MoE": {
+              "ms": 19.438777
+            },
+            "GDN": {
+              "ms": 21.785609
+            },
+            "GR": {
+              "ms": 14.128672
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.251998
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.348784
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.687296
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 214.385985
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 307.723531,
+          "forward_core_ms": 307.252361,
+          "argmax_ms": 0.470322,
+          "bookkeeping_ms": 0.000608,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.110705,
+          "ple_overlap_ms": 0.110705,
+          "categories": {
+            "QSA": {
+              "ms": 29.618904,
+              "qkv_ms": 14.674068,
+              "output_projection_ms": 1.977913,
+              "attention_ms": 1.530889,
+              "index_compress_ms": 10.286987,
+              "state_glue_ms": 1.149046
+            },
+            "MoE": {
+              "ms": 19.288093
+            },
+            "GDN": {
+              "ms": 22.229791
+            },
+            "GR": {
+              "ms": 14.039249
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.248973
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.429849
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.628896
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 216.82735
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 305.466271,
+          "forward_core_ms": 305.007516,
+          "argmax_ms": 0.457715,
+          "bookkeeping_ms": 0.000736,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.033713,
+          "ple_overlap_ms": 0.033713,
+          "categories": {
+            "QSA": {
+              "ms": 30.977536,
+              "qkv_ms": 15.764777,
+              "output_projection_ms": 2.15921,
+              "attention_ms": 1.585608,
+              "index_compress_ms": 10.273803,
+              "state_glue_ms": 1.194138
+            },
+            "MoE": {
+              "ms": 20.856788
+            },
+            "GDN": {
+              "ms": 22.307087
+            },
+            "GR": {
+              "ms": 15.181563
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.249182
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.257573
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.81808
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 210.435359
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 308.771473,
+          "forward_core_ms": 308.314447,
+          "argmax_ms": 0.456226,
+          "bookkeeping_ms": 0.000512,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.03648,
+          "ple_overlap_ms": 0.03648,
+          "categories": {
+            "QSA": {
+              "ms": 29.92361,
+              "qkv_ms": 14.769461,
+              "output_projection_ms": 1.988554,
+              "attention_ms": 1.621465,
+              "index_compress_ms": 10.358908,
+              "state_glue_ms": 1.185222
+            },
+            "MoE": {
+              "ms": 20.08601
+            },
+            "GDN": {
+              "ms": 22.622274
+            },
+            "GR": {
+              "ms": 15.731373
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.25155
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 11.573903
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.659488
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 214.69963
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "p95_wall_ms": 309.616666,
+      "min_wall_ms": 301.491402,
+      "max_wall_ms": 309.616666,
+      "summary": {
+        "wall_ms": 305.185851,
+        "forward_core_ms": 304.708614,
+        "argmax_ms": 0.476426,
+        "bookkeeping_ms": 0.000566,
+        "ple_critical_stall_ms": 0.0,
+        "ple_elapsed_ms": 0.059977,
+        "ple_overlap_ms": 0.059977,
+        "categories": {
+          "QSA": {
+            "ms": 29.421638,
+            "qkv_ms": 14.911429,
+            "output_projection_ms": 1.976174,
+            "attention_ms": 1.309041,
+            "index_compress_ms": 10.273537,
+            "state_glue_ms": 0.951457
+          },
+          "MoE": {
+            "ms": 19.675829
+          },
+          "GDN": {
+            "ms": 22.200388
+          },
+          "GR": {
+            "ms": 14.318433
+          },
+          "norms_residual_glue": {
+            "ms": 0.0
+          },
+          "LM_head": {
+            "ms": 5.366159
+          },
+          "host_scalar": {
+            "ms": 0.0
+          },
+          "cuda_dispatch": {
+            "ms": 9.733413
+          },
+          "cuda_sync_wait": {
+            "ms": 0.0
+          },
+          "memcpy": {
+            "ms": 0.693493
+          },
+          "PLE_critical_stall": {
+            "ms": 0.0
+          },
+          "other": {
+            "ms": 213.726168
+          }
+        },
+        "traffic": {
+          "kernel_launches": 13475,
+          "host_syncs": 13475,
+          "h2d_bytes": 12291328,
+          "d2h_bytes": 8792320,
+          "d2d_bytes": 0
+        }
+      },
+      "generated_ids": [
+        271,
+        248068,
+        198,
+        760,
+        1156,
+        6587,
+        264,
+        4145,
+        15673,
+        314,
+        3069,
+        279,
+        12515,
+        369,
+        6105,
+        2261
+      ],
+      "correctness": {
+        "final_logits_hash": "6f70a097a4b4b923",
+        "argmax": 2261,
+        "nan_inf": false
+      },
+      "samples": [
+        {
+          "wall_ms": 301.491402,
+          "forward_core_ms": 301.034392,
+          "argmax_ms": 0.456098,
+          "bookkeeping_ms": 0.00064,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.033073,
+          "ple_overlap_ms": 0.033073,
+          "categories": {
+            "QSA": {
+              "ms": 28.693332,
+              "qkv_ms": 14.781415,
+              "output_projection_ms": 1.939211,
+              "attention_ms": 0.995589,
+              "index_compress_ms": 10.262712,
+              "state_glue_ms": 0.714405
+            },
+            "MoE": {
+              "ms": 19.262606
+            },
+            "GDN": {
+              "ms": 22.444895
+            },
+            "GR": {
+              "ms": 14.211823
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.268591
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.562526
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.675392
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 211.153145
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 304.108105,
+          "forward_core_ms": 303.602886,
+          "argmax_ms": 0.504403,
+          "bookkeeping_ms": 0.000608,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.095617,
+          "ple_overlap_ms": 0.095617,
+          "categories": {
+            "QSA": {
+              "ms": 28.668421,
+              "qkv_ms": 14.5685,
+              "output_projection_ms": 2.023036,
+              "attention_ms": 1.045572,
+              "index_compress_ms": 10.266251,
+              "state_glue_ms": 0.765062
+            },
+            "MoE": {
+              "ms": 19.039987
+            },
+            "GDN": {
+              "ms": 21.667016
+            },
+            "GR": {
+              "ms": 14.032903
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.274046
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.288978
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.679072
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 214.920513
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 305.145055,
+          "forward_core_ms": 304.642012,
+          "argmax_ms": 0.502339,
+          "bookkeeping_ms": 0.000512,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.035745,
+          "ple_overlap_ms": 0.035745,
+          "categories": {
+            "QSA": {
+              "ms": 28.629061,
+              "qkv_ms": 14.566563,
+              "output_projection_ms": 1.927532,
+              "attention_ms": 1.079206,
+              "index_compress_ms": 10.261451,
+              "state_glue_ms": 0.794309
+            },
+            "MoE": {
+              "ms": 19.108914
+            },
+            "GDN": {
+              "ms": 21.829098
+            },
+            "GR": {
+              "ms": 14.104738
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.303486
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.23916
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.602272
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 215.666715
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 304.638717,
+          "forward_core_ms": 304.093545,
+          "argmax_ms": 0.544276,
+          "bookkeeping_ms": 0.000592,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.037472,
+          "ple_overlap_ms": 0.037472,
+          "categories": {
+            "QSA": {
+              "ms": 28.919907,
+              "qkv_ms": 14.717554,
+              "output_projection_ms": 1.958748,
+              "attention_ms": 1.132821,
+              "index_compress_ms": 10.285289,
+              "state_glue_ms": 0.825495
+            },
+            "MoE": {
+              "ms": 19.241768
+            },
+            "GDN": {
+              "ms": 21.839998
+            },
+            "GR": {
+              "ms": 13.945128
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.594831
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.268702
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.59344
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 214.551913
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 302.55992,
+          "forward_core_ms": 302.081997,
+          "argmax_ms": 0.477155,
+          "bookkeeping_ms": 0.000528,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.102992,
+          "ple_overlap_ms": 0.102992,
+          "categories": {
+            "QSA": {
+              "ms": 29.412246,
+              "qkv_ms": 15.031202,
+              "output_projection_ms": 2.080221,
+              "attention_ms": 1.168344,
+              "index_compress_ms": 10.273116,
+              "state_glue_ms": 0.859363
+            },
+            "MoE": {
+              "ms": 20.505224
+            },
+            "GDN": {
+              "ms": 22.666529
+            },
+            "GR": {
+              "ms": 14.602673
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.719808
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.164649
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.846368
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 209.175516
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 307.074267,
+          "forward_core_ms": 306.611,
+          "argmax_ms": 0.462467,
+          "bookkeeping_ms": 0.000592,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.032657,
+          "ple_overlap_ms": 0.032657,
+          "categories": {
+            "QSA": {
+              "ms": 28.938838,
+              "qkv_ms": 14.594212,
+              "output_projection_ms": 1.927387,
+              "attention_ms": 1.215575,
+              "index_compress_ms": 10.287388,
+              "state_glue_ms": 0.914275
+            },
+            "MoE": {
+              "ms": 20.277009
+            },
+            "GDN": {
+              "ms": 21.912778
+            },
+            "GR": {
+              "ms": 14.08081
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.334062
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.708053
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.64576
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 216.067503
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 308.563155,
+          "forward_core_ms": 308.092592,
+          "argmax_ms": 0.469747,
+          "bookkeeping_ms": 0.000624,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.026928,
+          "ple_overlap_ms": 0.026928,
+          "categories": {
+            "QSA": {
+              "ms": 30.091835,
+              "qkv_ms": 15.660027,
+              "output_projection_ms": 1.96518,
+              "attention_ms": 1.256517,
+              "index_compress_ms": 10.290552,
+              "state_glue_ms": 0.919559
+            },
+            "MoE": {
+              "ms": 19.186575
+            },
+            "GDN": {
+              "ms": 22.237841
+            },
+            "GR": {
+              "ms": 14.283222
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.321294
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.565026
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.699616
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 216.971825
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 301.990877,
+          "forward_core_ms": 301.526331,
+          "argmax_ms": 0.463794,
+          "bookkeeping_ms": 0.000528,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.030944,
+          "ple_overlap_ms": 0.030944,
+          "categories": {
+            "QSA": {
+              "ms": 29.077301,
+              "qkv_ms": 14.591666,
+              "output_projection_ms": 1.947579,
+              "attention_ms": 1.306219,
+              "index_compress_ms": 10.276043,
+              "state_glue_ms": 0.955793
+            },
+            "MoE": {
+              "ms": 19.588575
+            },
+            "GDN": {
+              "ms": 22.732143
+            },
+            "GR": {
+              "ms": 14.215811
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.306223
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.148884
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.648352
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 210.606278
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 309.616666,
+          "forward_core_ms": 309.157303,
+          "argmax_ms": 0.458499,
+          "bookkeeping_ms": 0.00056,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.109025,
+          "ple_overlap_ms": 0.109025,
+          "categories": {
+            "QSA": {
+              "ms": 29.951722,
+              "qkv_ms": 15.420373,
+              "output_projection_ms": 1.944523,
+              "attention_ms": 1.364489,
+              "index_compress_ms": 10.260827,
+              "state_glue_ms": 0.96151
+            },
+            "MoE": {
+              "ms": 20.359593
+            },
+            "GDN": {
+              "ms": 22.323228
+            },
+            "GR": {
+              "ms": 14.935177
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.254974
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.135221
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.81936
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 216.332608
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 303.674743,
+          "forward_core_ms": 303.17234,
+          "argmax_ms": 0.501699,
+          "bookkeeping_ms": 0.000432,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.030656,
+          "ple_overlap_ms": 0.030656,
+          "categories": {
+            "QSA": {
+              "ms": 29.716584,
+              "qkv_ms": 15.046116,
+              "output_projection_ms": 1.962988,
+              "attention_ms": 1.401799,
+              "index_compress_ms": 10.275292,
+              "state_glue_ms": 1.030388
+            },
+            "MoE": {
+              "ms": 20.468457
+            },
+            "GDN": {
+              "ms": 22.890356
+            },
+            "GR": {
+              "ms": 15.18319
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.284782
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.766173
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.759136
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 209.628971
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 302.514145,
+          "forward_core_ms": 302.053278,
+          "argmax_ms": 0.460051,
+          "bookkeeping_ms": 0.00056,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.037152,
+          "ple_overlap_ms": 0.037152,
+          "categories": {
+            "QSA": {
+              "ms": 30.438767,
+              "qkv_ms": 15.592184,
+              "output_projection_ms": 2.069339,
+              "attention_ms": 1.447818,
+              "index_compress_ms": 10.280059,
+              "state_glue_ms": 1.049368
+            },
+            "MoE": {
+              "ms": 19.327579
+            },
+            "GDN": {
+              "ms": 21.879642
+            },
+            "GR": {
+              "ms": 14.000676
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.294078
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.496119
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.67488
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 211.112535
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 305.293297,
+          "forward_core_ms": 304.833775,
+          "argmax_ms": 0.458706,
+          "bookkeeping_ms": 0.000512,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.091377,
+          "ple_overlap_ms": 0.091377,
+          "categories": {
+            "QSA": {
+              "ms": 29.275624,
+              "qkv_ms": 14.546244,
+              "output_projection_ms": 1.920938,
+              "attention_ms": 1.487402,
+              "index_compress_ms": 10.259931,
+              "state_glue_ms": 1.061109
+            },
+            "MoE": {
+              "ms": 19.105659
+            },
+            "GDN": {
+              "ms": 21.753356
+            },
+            "GR": {
+              "ms": 13.9618
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.614273
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.302716
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.591776
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 215.123063
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 308.409539,
+          "forward_core_ms": 307.935008,
+          "argmax_ms": 0.473731,
+          "bookkeeping_ms": 0.000544,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.108849,
+          "ple_overlap_ms": 0.108849,
+          "categories": {
+            "QSA": {
+              "ms": 29.416746,
+              "qkv_ms": 14.599252,
+              "output_projection_ms": 1.921259,
+              "attention_ms": 1.532393,
+              "index_compress_ms": 10.27172,
+              "state_glue_ms": 1.092121
+            },
+            "MoE": {
+              "ms": 19.264202
+            },
+            "GDN": {
+              "ms": 22.38176
+            },
+            "GR": {
+              "ms": 14.141772
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.260078
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.604263
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.646688
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 217.47045
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 306.605897,
+          "forward_core_ms": 306.147958,
+          "argmax_ms": 0.456995,
+          "bookkeeping_ms": 0.000752,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.029792,
+          "ple_overlap_ms": 0.029792,
+          "categories": {
+            "QSA": {
+              "ms": 29.909675,
+              "qkv_ms": 14.940406,
+              "output_projection_ms": 1.954091,
+              "attention_ms": 1.580568,
+              "index_compress_ms": 10.275882,
+              "state_glue_ms": 1.158727
+            },
+            "MoE": {
+              "ms": 19.198296
+            },
+            "GDN": {
+              "ms": 21.806991
+            },
+            "GR": {
+              "ms": 14.077626
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.292174
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 9.376367
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.61872
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 215.863196
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        },
+        {
+          "wall_ms": 306.101974,
+          "forward_core_ms": 305.644787,
+          "argmax_ms": 0.456435,
+          "bookkeeping_ms": 0.000512,
+          "ple_critical_stall_ms": 0.0,
+          "ple_elapsed_ms": 0.097376,
+          "ple_overlap_ms": 0.097376,
+          "categories": {
+            "QSA": {
+              "ms": 30.184508,
+              "qkv_ms": 15.015718,
+              "output_projection_ms": 2.100572,
+              "attention_ms": 1.621303,
+              "index_compress_ms": 10.276539,
+              "state_glue_ms": 1.170376
+            },
+            "MoE": {
+              "ms": 21.202984
+            },
+            "GDN": {
+              "ms": 22.640189
+            },
+            "GR": {
+              "ms": 14.999143
+            },
+            "norms_residual_glue": {
+              "ms": 0.0
+            },
+            "LM_head": {
+              "ms": 5.369679
+            },
+            "host_scalar": {
+              "ms": 0.0
+            },
+            "cuda_dispatch": {
+              "ms": 10.37436
+            },
+            "cuda_sync_wait": {
+              "ms": 0.0
+            },
+            "memcpy": {
+              "ms": 0.901568
+            },
+            "PLE_critical_stall": {
+              "ms": 0.0
+            },
+            "other": {
+              "ms": 211.248284
+            }
+          },
+          "traffic": {
+            "kernel_launches": 13475,
+            "host_syncs": 13475,
+            "h2d_bytes": 12291328,
+            "d2h_bytes": 8792320,
+            "d2d_bytes": 0
+          }
+        }
+      ]
+    }
+  ],
+  "run_summaries": [
+    {
+      "wall_ms": 305.367816,
+      "forward_core_ms": 304.862513,
+      "argmax_ms": 0.504381,
+      "bookkeeping_ms": 0.000602,
+      "ple_critical_stall_ms": 0.0,
+      "ple_elapsed_ms": 0.056219,
+      "ple_overlap_ms": 0.056219,
+      "categories": {
+        "QSA": {
+          "ms": 29.611525,
+          "qkv_ms": 15.030072,
+          "output_projection_ms": 1.999051,
+          "attention_ms": 1.309176,
+          "index_compress_ms": 10.290437,
+          "state_glue_ms": 0.982789
+        },
+        "MoE": {
+          "ms": 20.006354
+        },
+        "GDN": {
+          "ms": 22.214526
+        },
+        "GR": {
+          "ms": 14.63955
+        },
+        "norms_residual_glue": {
+          "ms": 0.0
+        },
+        "LM_head": {
+          "ms": 5.336813
+        },
+        "host_scalar": {
+          "ms": 0.0
+        },
+        "cuda_dispatch": {
+          "ms": 10.00726
+        },
+        "cuda_sync_wait": {
+          "ms": 0.0
+        },
+        "memcpy": {
+          "ms": 0.724365
+        },
+        "PLE_critical_stall": {
+          "ms": 0.0
+        },
+        "other": {
+          "ms": 213.053744
+        }
+      },
+      "traffic": {
+        "kernel_launches": 13475,
+        "host_syncs": 13475,
+        "h2d_bytes": 12291328,
+        "d2h_bytes": 8792320,
+        "d2d_bytes": 0
+      }
+    },
+    {
+      "wall_ms": 305.185851,
+      "forward_core_ms": 304.708614,
+      "argmax_ms": 0.476426,
+      "bookkeeping_ms": 0.000566,
+      "ple_critical_stall_ms": 0.0,
+      "ple_elapsed_ms": 0.059977,
+      "ple_overlap_ms": 0.059977,
+      "categories": {
+        "QSA": {
+          "ms": 29.421638,
+          "qkv_ms": 14.911429,
+          "output_projection_ms": 1.976174,
+          "attention_ms": 1.309041,
+          "index_compress_ms": 10.273537,
+          "state_glue_ms": 0.951457
+        },
+        "MoE": {
+          "ms": 19.675829
+        },
+        "GDN": {
+          "ms": 22.200388
+        },
+        "GR": {
+          "ms": 14.318433
+        },
+        "norms_residual_glue": {
+          "ms": 0.0
+        },
+        "LM_head": {
+          "ms": 5.366159
+        },
+        "host_scalar": {
+          "ms": 0.0
+        },
+        "cuda_dispatch": {
+          "ms": 9.733413
+        },
+        "cuda_sync_wait": {
+          "ms": 0.0
+        },
+        "memcpy": {
+          "ms": 0.693493
+        },
+        "PLE_critical_stall": {
+          "ms": 0.0
+        },
+        "other": {
+          "ms": 213.726168
+        }
+      },
+      "traffic": {
+        "kernel_launches": 13475,
+        "host_syncs": 13475,
+        "h2d_bytes": 12291328,
+        "d2h_bytes": 8792320,
+        "d2d_bytes": 0
+      }
+    }
+  ],
+  "metrics": {
+    "wall_ms": {
+      "median": 305.5921025,
+      "p95": 309.616666,
+      "min": 300.365664,
+      "max": 309.788934,
+      "stddev": 2.5174247682115922
+    },
+    "forward_core_ms": {
+      "median": 305.110052,
+      "p95": 309.157303,
+      "min": 299.90059,
+      "max": 309.318868,
+      "stddev": 2.5223578133662756
+    },
+    "tok_s": {
+      "median": 3.2723358745830153
+    },
+    "categories": {
+      "QSA": {
+        "median": 29.4890895,
+        "p95": 30.638991,
+        "min": 28.629061,
+        "max": 30.977536,
+        "stddev": 0.6017666369706562
+      },
+      "MoE": {
+        "median": 19.4379175,
+        "p95": 21.202984,
+        "min": 19.039987,
+        "max": 22.130262,
+        "stddev": 0.7724148286886581
+      },
+      "GDN": {
+        "median": 22.233815999999997,
+        "p95": 22.890356,
+        "min": 21.667016,
+        "max": 22.932351,
+        "stddev": 0.4099593701548757
+      },
+      "GR": {
+        "median": 14.210327,
+        "p95": 15.731373,
+        "min": 13.945128,
+        "max": 15.781634,
+        "stddev": 0.5403259772644411
+      },
+      "norms_residual_glue": {
+        "median": 0.0,
+        "p95": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "stddev": 0.0
+      },
+      "LM_head": {
+        "median": 5.293126,
+        "p95": 5.716849,
+        "min": 5.238318,
+        "max": 5.719808,
+        "stddev": 0.14353928527444626
+      },
+      "argmax": {
+        "median": 0.46673,
+        "p95": 0.624724,
+        "min": 0.456098,
+        "max": 0.670276,
+        "stddev": 0.054082060825337966
+      },
+      "host_scalar": {
+        "median": 0.0,
+        "p95": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "stddev": 0.0
+      },
+      "cuda_sync_wait": {
+        "median": 0.0,
+        "p95": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "stddev": 0.0
+      },
+      "cuda_dispatch": {
+        "median": 9.573518,
+        "p95": 11.573903,
+        "min": 9.23916,
+        "max": 11.892774,
+        "stddev": 0.6585987820403126
+      },
+      "memcpy": {
+        "median": 0.6595519999999999,
+        "p95": 0.955712,
+        "min": 0.591776,
+        "max": 0.961536,
+        "stddev": 0.10852815811543513
+      },
+      "PLE_critical_stall": {
+        "median": 0.0,
+        "p95": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "stddev": 0.0
+      },
+      "other": {
+        "median": 214.468949,
+        "p95": 216.971825,
+        "min": 208.39277,
+        "max": 217.47045,
+        "stddev": 2.6919060043833847
+      },
+      "PLE_elapsed": {
+        "median": 0.037312,
+        "p95": 0.110705,
+        "min": 0.02296,
+        "max": 0.113568,
+        "stddev": 0.03281526847564848
+      },
+      "PLE_overlap": {
+        "median": 0.037312,
+        "p95": 0.110705,
+        "min": 0.02296,
+        "max": 0.113568,
+        "stddev": 0.03281526847564848
+      }
+    },
+    "traffic_per_token": {
+      "kernel_launches": 13475.0,
+      "host_syncs": 13475.0,
+      "h2d_bytes": 12291328.0,
+      "d2h_bytes": 8792320.0,
+      "d2d_bytes": 0.0
+    },
+    "sample_count": 30,
+    "nonadditive": {
+      "PLE_elapsed_ms": {
+        "median": 0.037312,
+        "p95": 0.110705,
+        "min": 0.02296,
+        "max": 0.113568,
+        "stddev": 0.03281526847564848
+      },
+      "PLE_overlap_ms": {
+        "median": 0.037312,
+        "p95": 0.110705,
+        "min": 0.02296,
+        "max": 0.113568,
+        "stddev": 0.03281526847564848
+      }
+    }
+  },
+  "aggregate": {
+    "wall_ms": 305.276833,
+    "forward_core_ms": 304.785563,
+    "argmax_ms": 0.490404,
+    "bookkeeping_ms": 0.000584,
+    "ple_critical_stall_ms": 0.0,
+    "ple_elapsed_ms": 0.058098,
+    "ple_overlap_ms": 0.058098,
+    "categories": {
+      "QSA": {
+        "ms": 29.516581,
+        "qkv_ms": 14.97075,
+        "output_projection_ms": 1.987612,
+        "attention_ms": 1.309108,
+        "index_compress_ms": 10.281987,
+        "state_glue_ms": 0.967123
+      },
+      "MoE": {
+        "ms": 19.841091
+      },
+      "GDN": {
+        "ms": 22.207457
+      },
+      "GR": {
+        "ms": 14.478992
+      },
+      "norms_residual_glue": {
+        "ms": 0.0
+      },
+      "LM_head": {
+        "ms": 5.351486
+      },
+      "host_scalar": {
+        "ms": 0.0
+      },
+      "cuda_dispatch": {
+        "ms": 9.870336
+      },
+      "cuda_sync_wait": {
+        "ms": 0.0
+      },
+      "memcpy": {
+        "ms": 0.708929
+      },
+      "PLE_critical_stall": {
+        "ms": 0.0
+      },
+      "other": {
+        "ms": 213.389956
+      }
+    },
+    "traffic": {
+      "kernel_launches": 13475,
+      "host_syncs": 13475,
+      "h2d_bytes": 12291328,
+      "d2h_bytes": 8792320,
+      "d2d_bytes": 0
+    }
+  },
+  "p95_wall_ms": 309.616666,
+  "min_wall_ms": 300.365664,
+  "max_wall_ms": 309.788934,
+  "throughput_tok_s": 3.275715322,
+  "comparison": {
+    "reference_0": {
+      "ref_id": "Q2_DECODE_REFERENCE_0",
+      "median_ms_per_token": 590.9313245000001,
+      "p95_ms_per_token": 597.033787,
+      "throughput_tok_s": 1.6922440198040303
+    },
+    "integration_quick": {
+      "median_ms_per_token": 305.5921025,
+      "p95_ms_per_token": 309.616666,
+      "throughput_tok_s": 3.2723358745830153
+    },
+    "ms_saved_per_token": 285.33922200000006,
+    "relative_wall_reduction_percent": 48.286359204503476,
+    "speedup_factor": 1.9337257725762074,
+    "throughput_improvement_percent": 93.37257725762075,
+    "previous_green_quick": {
+      "median_ms_per_token": 396.2592775,
+      "throughput_tok_s": 2.5236002203128227,
+      "final_logits_hash": "310ca35c840ca6a7"
+    }
+  },
+  "comparison_key": {
+    "model_fingerprint": {
+      "kind": "sha256",
+      "value": "68b29ce24ab62bf2cbcd8bbdeff5e6d36941e5b00e2fe34df90e92f98d51f518"
+    },
+    "quant_recipe": {
+      "manifest": "tools/quant_manifest_q2.json",
+      "sha256": "739fffc7bc1ebaccfcdf6efb621e23a1cd6d68f2cc9f6839861c3a0d774410c7"
+    },
+    "tokenizer_fingerprint": {
+      "files": [
+        "chat_template.jinja",
+        "merges.txt",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json"
+      ],
+      "kind": "sha256",
+      "value": "5f35fb517d3a016e4ca70d175e921ba5e9c92f7352663516a28f001b7225b93d"
+    },
+    "execution_path": "q38_runtime -> q38_session -> q38_session_eval",
+    "input_token_ids": [
+      814,
+      20139,
+      303,
+      4145,
+      3665,
+      3069,
+      279,
+      12515,
+      7701,
+      6105,
+      2261,
+      279,
+      1834,
+      321,
+      2438,
+      3043,
+      41564,
+      13
+    ],
+    "context_reset": "semantic RESET between runs",
+    "residency_policy": "resident_required",
+    "build_mode": "production -O3",
+    "timer_schema_version": "PERF_SCHEMA_V2",
+    "measurement_window": [
+      1,
+      15
+    ]
+  },
+  "execution_path": "q38_runtime -> q38_session -> q38_session_eval"
+}
