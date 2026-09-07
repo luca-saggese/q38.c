@@ -6,6 +6,7 @@
 #include "q38_qsa_cuda.h"
 #include "q38_topk_cuda.h"
 #include "q38_gr_ref.h"
+#include "q38_diagnostics.h"
 
 #include <cooperative_groups.h>
 #include <cuda_fp16.h>
@@ -18,6 +19,15 @@
 #include <time.h>
 
 namespace cg = cooperative_groups;
+
+#if Q38_DIAGNOSTICS
+#define Q38_CUDA_DIAG_ONLY(statement) do { statement; } while (0)
+#else
+#define Q38_CUDA_DIAG_ONLY(statement) do { } while (0)
+#endif
+
+#define Q38_CUDA_DIAG_COLLECT(context) \
+    (Q38_DIAG_ENABLED && (context) && (context)->telemetry_observer)
 
 struct persistent_tensor {
     const void *host;
@@ -140,6 +150,9 @@ struct q38_forward_cuda_context {
     uint64_t resident_misses;
     uint64_t cuda_allocations;
     uint64_t cuda_synchronizations;
+#if Q38_DIAGNOSTICS
+    q38_forward_cuda_sync_stats sync_stats;
+#endif
     cudaStream_t stream;
     q38_qsa_candidate_fn qsa_candidate;
     q38_forward_cuda_allocation_observer allocation_observer;
@@ -507,17 +520,98 @@ static bool exec_tensor_is_resident(const q38_exec_tensor *exec,
            exec->bytes == tensor->bytes;
 }
 
+#if Q38_DIAGNOSTICS
 static double host_now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 
+static double cuda_sync_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
+
+static void record_cuda_sync(q38_forward_cuda_context *context,
+                             q38_forward_cuda_sync_reason reason,
+                             double elapsed_ms) {
+    if (!context || reason >= Q38_CUDA_SYNC_REASON_COUNT ||
+        elapsed_ms < 0.0)
+        return;
+    context->sync_stats.real_cuda_sync_count++;
+    context->sync_stats.host_blocked_on_cuda_ms += elapsed_ms;
+    context->sync_stats.reason_count[reason]++;
+    context->sync_stats.reason_ms[reason] += elapsed_ms;
+    if (elapsed_ms > context->sync_stats.reason_max_ms[reason])
+        context->sync_stats.reason_max_ms[reason] = elapsed_ms;
+}
+
+#define Q38_CUDA_SYNC_CALL(context, reason, call) \
+    ([&]() { \
+        const double q38_sync_started = cuda_sync_now_ms(); \
+        const cudaError_t q38_sync_status = (call); \
+        record_cuda_sync((context), (reason), \
+                         cuda_sync_now_ms() - q38_sync_started); \
+        return q38_sync_status; \
+    }())
+#else
+#define host_now_ms() 0.0
+#define Q38_CUDA_SYNC_CALL(context, reason, call) (call)
+#endif
+
+#if Q38_DIAGNOSTICS
 static float event_elapsed(cudaEvent_t start, cudaEvent_t stop) {
     float ms = 0.0f;
     return cudaEventElapsedTime(&ms, start, stop) == cudaSuccess ? ms : 0.0f;
 }
+#else
+#define event_elapsed(...) 0.0f
+#endif
 
+#if Q38_DIAGNOSTICS
+static bool telemetry_events_create(bool collect, cudaEvent_t *upload_start,
+                                    cudaEvent_t *upload_stop,
+                                    cudaEvent_t *kernel_start,
+                                    cudaEvent_t *kernel_stop) {
+    if (!collect) return true;
+    if (cudaEventCreate(upload_start) == cudaSuccess &&
+        cudaEventCreate(upload_stop) == cudaSuccess &&
+        cudaEventCreate(kernel_start) == cudaSuccess &&
+        cudaEventCreate(kernel_stop) == cudaSuccess)
+        return true;
+    if (*upload_start) cudaEventDestroy(*upload_start);
+    if (*upload_stop) cudaEventDestroy(*upload_stop);
+    if (*kernel_start) cudaEventDestroy(*kernel_start);
+    if (*kernel_stop) cudaEventDestroy(*kernel_stop);
+    *upload_start = NULL;
+    *upload_stop = NULL;
+    *kernel_start = NULL;
+    *kernel_stop = NULL;
+    return false;
+}
+
+static void telemetry_events_destroy(cudaEvent_t upload_start,
+                                     cudaEvent_t upload_stop,
+                                     cudaEvent_t kernel_start,
+                                     cudaEvent_t kernel_stop) {
+    if (upload_start) cudaEventDestroy(upload_start);
+    if (upload_stop) cudaEventDestroy(upload_stop);
+    if (kernel_start) cudaEventDestroy(kernel_start);
+    if (kernel_stop) cudaEventDestroy(kernel_stop);
+}
+
+static bool telemetry_event_record(bool collect, cudaEvent_t event,
+                                   cudaStream_t stream) {
+    return !collect || cudaEventRecord(event, stream) == cudaSuccess;
+}
+#else
+#define telemetry_events_create(...) true
+#define telemetry_events_destroy(...) do { } while (0)
+#define telemetry_event_record(...) true
+#endif
+
+#if Q38_DIAGNOSTICS
 static void emit_telemetry(q38_forward_cuda_context *context,
                            const q38_gguf *model, const q38_tensor *tensor,
                            size_t rows, size_t cols,
@@ -530,8 +624,8 @@ static void emit_telemetry(q38_forward_cuda_context *context,
     if (!context) return;
     const bool ple = is_ple_tensor(tensor);
     if (ple && (miss || upload_bytes)) {
-        ++context->ple_file_backed_accesses;
-        context->ple_file_bytes += upload_bytes;
+        Q38_CUDA_DIAG_ONLY(++context->ple_file_backed_accesses);
+        Q38_CUDA_DIAG_ONLY(context->ple_file_bytes += upload_bytes);
     }
     if (!context->telemetry_observer) return;
     char name[128];
@@ -554,8 +648,18 @@ static void emit_telemetry(q38_forward_cuda_context *context,
         (float)fmax(0.0, wall_ms - (double)upload_ms - (double)kernel_ms),
         allocations, syncs, syncs
     };
+#if Q38_DIAGNOSTICS
+    const double callback_started = cuda_sync_now_ms();
+#endif
     context->telemetry_observer(&record, context->telemetry_observer_user);
+#if Q38_DIAGNOSTICS
+    context->sync_stats.telemetry_callback_wall_ms +=
+        cuda_sync_now_ms() - callback_started;
+#endif
 }
+#else
+#define emit_telemetry(...) do { } while (0)
+#endif
 
 extern "C" bool q38_forward_cuda_expert_backend(
     const q38_gguf *model, const q38_tensor *gate_up,
@@ -591,27 +695,26 @@ extern "C" bool q38_forward_cuda_expert_backend(
         q38_gguf_tensor_data(model, gate_up);
     const void *down_data = use_persistent ? NULL :
         q38_gguf_tensor_data(model, down);
-    if (!use_persistent) context->gguf_name_lookup_in_decode += 2;
+    if (!use_persistent) Q38_CUDA_DIAG_ONLY(context->gguf_name_lookup_in_decode += 2);
     if (!use_persistent && (!gate_data || !down_data))
         return fail(error, error_len, "invalid CUDA routed expert payload");
     if (context->all_non_ple_resident) {
-        if (use_persistent) ++context->persistent_hits;
+        if (use_persistent) Q38_CUDA_DIAG_ONLY(++context->persistent_hits);
         else {
-            ++context->persistent_misses;
-            ++context->non_ple_residency_miss;
+            Q38_CUDA_DIAG_ONLY(++context->persistent_misses);
+            Q38_CUDA_DIAG_ONLY(++context->non_ple_residency_miss);
         }
     }
-    const double host_started = host_now_ms();
+    const bool collect_telemetry = Q38_CUDA_DIAG_COLLECT(context);
+    const double host_started = collect_telemetry ? host_now_ms() : 0.0;
     cudaEvent_t upload_start = NULL, upload_stop = NULL;
     cudaEvent_t kernel_start = NULL, kernel_stop = NULL;
     cudaEvent_t gate_start = NULL, gate_stop = NULL;
     cudaEvent_t down_start = NULL, down_stop = NULL;
-    if (cudaEventCreate(&upload_start) != cudaSuccess ||
-        cudaEventCreate(&upload_stop) != cudaSuccess ||
-        cudaEventCreate(&kernel_start) != cudaSuccess ||
-        cudaEventCreate(&kernel_stop) != cudaSuccess)
+    if (!telemetry_events_create(collect_telemetry, &upload_start,
+                                 &upload_stop, &kernel_start, &kernel_stop))
         return fail(error, error_len, "CUDA telemetry event allocation failed");
-    if (gate_up->type == Q38_QUANT_Q2_K &&
+    if (collect_telemetry && gate_up->type == Q38_QUANT_Q2_K &&
         (cudaEventCreate(&gate_start) != cudaSuccess ||
          cudaEventCreate(&gate_stop) != cudaSuccess ||
          cudaEventCreate(&down_start) != cudaSuccess ||
@@ -657,33 +760,33 @@ extern "C" bool q38_forward_cuda_expert_backend(
     void *down_storage = use_persistent
         ? (unsigned char *)down_exec->ptr + expert * 640u * down_row_bytes
         : context->device_aux;
-    if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
+    if (!telemetry_event_record(collect_telemetry, upload_start, context->stream) ||
         (!use_persistent &&
          (cudaMemcpyAsync(gate_storage, gate_src, gate_bytes,
                           cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
           cudaMemcpyAsync(down_storage, down_src, down_bytes,
                           cudaMemcpyHostToDevice, context->stream) != cudaSuccess)) ||
-        cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
+        !telemetry_event_record(collect_telemetry, upload_stop, context->stream) ||
         cudaMemcpyAsync(context->device_input, input, 2560u * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA routed expert upload failed");
     if (!use_persistent)
-        context->non_ple_upload_bytes_per_token += gate_bytes + down_bytes;
-    if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess)
+        Q38_CUDA_DIAG_ONLY(context->non_ple_upload_bytes_per_token += gate_bytes + down_bytes);
+    if (!telemetry_event_record(collect_telemetry, kernel_start, context->stream))
         return fail(error, error_len, "CUDA routed expert execution failed");
     bool launched;
     if (gate_up->type == Q38_QUANT_Q2_K) {
-        if (cudaEventRecord(gate_start, context->stream) != cudaSuccess ||
+        if (!telemetry_event_record(collect_telemetry, gate_start, context->stream) ||
             !q38_moe_cuda_q2_gate_up(
                 gate_storage, context->device_input, context->device_moe_mid,
                 context->stream, error, error_len) ||
-            cudaEventRecord(gate_stop, context->stream) != cudaSuccess ||
-            cudaEventRecord(down_start, context->stream) != cudaSuccess ||
+            !telemetry_event_record(collect_telemetry, gate_stop, context->stream) ||
+            !telemetry_event_record(collect_telemetry, down_start, context->stream) ||
             !q38_moe_cuda_q2_down(
                 down_storage, context->device_moe_mid, context->device_output,
                 context->stream, error, error_len) ||
-            cudaEventRecord(down_stop, context->stream) != cudaSuccess) {
-            ++context->q2_gate_up_fallback_calls;
+            !telemetry_event_record(collect_telemetry, down_stop, context->stream)) {
+            Q38_CUDA_DIAG_ONLY(++context->q2_gate_up_fallback_calls);
             launched = false;
         } else {
             launched = true;
@@ -696,32 +799,36 @@ extern "C" bool q38_forward_cuda_expert_backend(
     }
     if (!launched)
         return false;
-    if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess ||
+    if (!telemetry_event_record(collect_telemetry, kernel_stop, context->stream) ||
         cudaMemcpyAsync(output, context->device_output, 2560u * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_MOE_ROUTED_D2H,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "CUDA routed expert execution failed");
-    ++context->cuda_synchronizations;
-    const double expert_wall_ms = host_now_ms() - host_started;
-    context->expert_backend_total_wall_ms += expert_wall_ms;
-    ++context->expert_host_sync_count;
-    context->expert_H2D_bytes += 2560u * sizeof(float);
-    context->expert_D2H_bytes += 2560u * sizeof(float);
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
+    const double expert_wall_ms = collect_telemetry ? host_now_ms() - host_started : 0.0;
+    Q38_CUDA_DIAG_ONLY(context->expert_backend_total_wall_ms += expert_wall_ms);
+    Q38_CUDA_DIAG_ONLY(++context->expert_host_sync_count);
+    Q38_CUDA_DIAG_ONLY(context->expert_H2D_bytes += 2560u * sizeof(float));
+    Q38_CUDA_DIAG_ONLY(context->expert_D2H_bytes += 2560u * sizeof(float));
     if (gate_up->type == Q38_QUANT_Q2_K) {
-        ++context->q2_gate_up_fast_calls;
-        ++context->q2_down_calls;
+        Q38_CUDA_DIAG_ONLY(++context->q2_gate_up_fast_calls);
+        Q38_CUDA_DIAG_ONLY(++context->q2_down_calls);
         if (context->current_layer < Q38_MODEL_LAYERS)
-            ++context->expert_fast_calls_by_layer[context->current_layer];
-        context->q2_gate_up_fast_total_kernel_ms +=
-            event_elapsed(gate_start, gate_stop);
-        context->q2_down_total_kernel_ms +=
-            event_elapsed(down_start, down_stop);
+            Q38_CUDA_DIAG_ONLY(++context->expert_fast_calls_by_layer[context->current_layer]);
+        Q38_CUDA_DIAG_ONLY(if (collect_telemetry)
+            context->q2_gate_up_fast_total_kernel_ms +=
+                event_elapsed(gate_start, gate_stop));
+        Q38_CUDA_DIAG_ONLY(if (collect_telemetry)
+            context->q2_down_total_kernel_ms +=
+                event_elapsed(down_start, down_stop));
     }
     emit_telemetry(context, model, gate_up, gate_rows, gate_cols, gate_bytes,
 
                    use_persistent, !use_persistent, use_persistent ? 0 : gate_bytes,
-                   event_elapsed(upload_start, upload_stop),
-                   event_elapsed(kernel_start, kernel_stop),
+                   collect_telemetry ? event_elapsed(upload_start, upload_stop) : 0.0f,
+                   collect_telemetry ? event_elapsed(kernel_start, kernel_stop) : 0.0f,
                    expert_wall_ms,
                context->cuda_allocations - allocation_before, 1,
                "routed_expert", use_persistent
@@ -730,8 +837,8 @@ extern "C" bool q38_forward_cuda_expert_backend(
                use_persistent, !use_persistent, use_persistent ? 0 : down_bytes, 0.0f, 0.0f, 0.0,
                0, 0, "routed_expert", use_persistent
                    ? "resident_exec_tensor" : "gguf_host_upload");
-    cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-    cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                             kernel_stop);
     if (gate_start) cudaEventDestroy(gate_start);
     if (gate_stop) cudaEventDestroy(gate_stop);
     if (down_start) cudaEventDestroy(down_start);
@@ -842,20 +949,22 @@ extern "C" bool q38_forward_cuda_moe_layer_q2_backend(
         cudaMemcpyAsync(host_output, context->device_moe_accum,
                         Q38_MOE_HIDDEN * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_MOE_GROUPED_D2H,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "CUDA grouped Q2 MoE layer execution failed");
 
-    ++context->cuda_synchronizations;
-    ++context->expert_host_sync_count;
-    context->expert_backend_total_wall_ms += host_now_ms() - started;
-    context->expert_H2D_bytes +=
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
+    Q38_CUDA_DIAG_ONLY(++context->expert_host_sync_count);
+    Q38_CUDA_DIAG_ONLY(context->expert_backend_total_wall_ms += host_now_ms() - started);
+    Q38_CUDA_DIAG_ONLY(context->expert_H2D_bytes +=
         Q38_MOE_HIDDEN * sizeof(float) +
-        Q38_MOE_TOP_K * (sizeof(uint16_t) + sizeof(float));
-    context->expert_D2H_bytes += Q38_MOE_HIDDEN * sizeof(float);
-    context->q2_gate_up_fast_calls += Q38_MOE_TOP_K;
-    context->q2_down_calls += Q38_MOE_TOP_K;
-    context->expert_kernel_launches += 3;
-    context->persistent_hits += 2;
+        Q38_MOE_TOP_K * (sizeof(uint16_t) + sizeof(float)));
+    Q38_CUDA_DIAG_ONLY(context->expert_D2H_bytes += Q38_MOE_HIDDEN * sizeof(float));
+    Q38_CUDA_DIAG_ONLY(context->q2_gate_up_fast_calls += Q38_MOE_TOP_K);
+    Q38_CUDA_DIAG_ONLY(context->q2_down_calls += Q38_MOE_TOP_K);
+    Q38_CUDA_DIAG_ONLY(context->expert_kernel_launches += 3);
+    Q38_CUDA_DIAG_ONLY(context->persistent_hits += 2);
     if (context->current_layer < Q38_MODEL_LAYERS)
         context->expert_fast_calls_by_layer[context->current_layer] +=
             Q38_MOE_TOP_K;
@@ -870,8 +979,8 @@ static bool ensure_buffer(void **buffer, size_t *capacity, size_t bytes,
     *buffer = NULL;
     *capacity = 0;
     if (cudaMalloc(buffer, bytes) != cudaSuccess) return false;
-    if (observer) observer(bytes, observer_user);
-    if (allocation_count) ++*allocation_count;
+    Q38_CUDA_DIAG_ONLY(if (observer) observer(bytes, observer_user));
+    Q38_CUDA_DIAG_ONLY(if (allocation_count) ++*allocation_count);
     *capacity = bytes;
     return true;
 }
@@ -912,6 +1021,39 @@ q38_forward_cuda_reset_gdn_state(q38_forward_cuda_context *context) {
         context->device_gdn_state_initialized = true;
 }
 
+extern "C" bool q38_forward_cuda_load_gdn_state(
+    const q38_forward_state *state, void *user, char *error, size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    if (!state || !context || !state->storage.recurrent_state ||
+        !state->storage.conv_history)
+        return fail(error, error_len, "invalid GDN state upload arguments");
+    const size_t state_bytes = (size_t)state->storage.layout.recurrent.bytes;
+    const size_t history_bytes =
+        (size_t)state->storage.layout.conv_history.bytes;
+    if (!ensure_buffer((void **)&context->device_gdn_state,
+                       &context->device_gdn_state_bytes, state_bytes,
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&context->device_gdn_history,
+                       &context->device_gdn_history_bytes, history_bytes,
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
+        return fail(error, error_len, "GDN state upload storage allocation failed");
+    if (cudaMemcpyAsync(context->device_gdn_state,
+                        state->storage.recurrent_state, state_bytes,
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(context->device_gdn_history,
+                        state->storage.conv_history, history_bytes,
+                        cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+        return fail(error, error_len, "GDN state upload failed");
+    context->device_gdn_state_initialized = true;
+    return true;
+}
+
 extern "C" bool q38_forward_cuda_sync_gdn_state(
     q38_forward_state *state, void *user, char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
@@ -937,7 +1079,9 @@ extern "C" bool q38_forward_cuda_sync_gdn_state(
         cudaMemcpyAsync(state->storage.conv_history,
                         context->device_gdn_history, history_bytes,
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_GDN_TRACE_STATE,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "GDN state sync transfer failed");
     return true;
 }
@@ -953,7 +1097,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     for (uint64_t i = 0; i < model->n_tensors; ++i) {
         const q38_tensor *tensor = &model->tensors[i];
         if (is_ple_tensor(tensor)) {
-            ++context->persistent_ple_tensors;
+            Q38_CUDA_DIAG_ONLY(++context->persistent_ple_tensors);
             continue;
         }
         if (!tensor->bytes || tensor->bytes > SIZE_MAX) continue;
@@ -1004,7 +1148,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         for (size_t j = 0; j < at; ++j)
             if (host && entries[j].host == host) duplicate = true;
         if (duplicate) {
-            ++context->persistent_duplicate_tensors;
+            Q38_CUDA_DIAG_ONLY(++context->persistent_duplicate_tensors);
             for (size_t j = 0; j < at; ++j) cudaFree(entries[j].device);
             free(entries);
             return fail(error, error_len,
@@ -1040,7 +1184,9 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         exec->ptr = entries[at].device;
         ++at;
         loaded_bytes += (size_t)tensor->bytes;
-        if (cudaStreamSynchronize(context->stream) != cudaSuccess) {
+        if (Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_RESIDENCY_INIT,
+                               cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess) {
             char name[128];
             copy_tensor_name(tensor, name, sizeof(name));
             if (error && error_len)
@@ -1060,7 +1206,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
                      "all-non-PLE residency copy failed");
             return false;
         }
-        ++context->cuda_synchronizations;
+        Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
         size_t progress_free = 0, progress_total = 0;
         (void)cudaMemGetInfo(&progress_free, &progress_total);
         if (context->progress_observer)
@@ -1069,7 +1215,9 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
                 progress_free, progress_total,
                 context->progress_observer_user);
     }
-    if (cudaStreamSynchronize(context->stream) != cudaSuccess) {
+    if (Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_RESIDENCY_INIT,
+                           cudaStreamSynchronize(context->stream)) !=
+        cudaSuccess) {
         context->persistent = entries;
         context->persistent_count = at;
         context->persistent_bytes = loaded_bytes;
@@ -1082,7 +1230,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
                  cudaGetErrorString(cudaGetLastError()));
         return fail(error, error_len, context->persistent_failure);
     }
-    ++context->cuda_synchronizations;
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
     context->persistent = entries;
     context->persistent_count = at;
     context->persistent_bytes = loaded_bytes;
@@ -1168,9 +1316,11 @@ extern "C" bool q38_forward_cuda_load_directional_steering(
                         Q38_DIRECTIONAL_STEERING_BYTES,
                         cudaMemcpyHostToDevice, context->stream) !=
             cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_STEERING_INIT,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "Q38 steering CUDA upload failed");
-    ++context->cuda_synchronizations;
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
     return true;
 }
 
@@ -1248,7 +1398,9 @@ extern "C" bool q38_forward_cuda_prepare_lm_head(
     if (cudaMemcpyAsync(context->lm_head_device_weights, data, tensor->bytes,
                         cudaMemcpyHostToDevice, context->stream) !=
             cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_LM_HEAD_RESIDENCY_INIT,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "LM-head residency upload failed");
     context->lm_head_device_weights_bytes = tensor->bytes;
     context->lm_head_host_data = data;
@@ -1354,6 +1506,49 @@ extern "C" void q38_forward_cuda_get_residency_stats(
            sizeof(stats->expert_legacy_calls_by_layer));
 }
 
+extern "C" void q38_forward_cuda_get_sync_stats(
+    const q38_forward_cuda_context *context,
+    q38_forward_cuda_sync_stats *stats) {
+    if (!stats) return;
+    memset(stats, 0, sizeof(*stats));
+#if Q38_DIAGNOSTICS
+    if (context) *stats = context->sync_stats;
+#else
+    (void)context;
+#endif
+}
+
+extern "C" void q38_forward_cuda_reset_sync_stats(
+    q38_forward_cuda_context *context) {
+#if Q38_DIAGNOSTICS
+    if (context) memset(&context->sync_stats, 0, sizeof(context->sync_stats));
+#else
+    (void)context;
+#endif
+}
+
+extern "C" const char *q38_forward_cuda_sync_reason_name(
+    q38_forward_cuda_sync_reason reason) {
+    static const char *const names[Q38_CUDA_SYNC_REASON_COUNT] = {
+        "MOE_ROUTED_D2H",
+        "MOE_GROUPED_D2H",
+        "GDN_OUTPUT",
+        "GDN_TRACE_STATE",
+        "GR_READ",
+        "GR_WRITE",
+        "QSA_QKV",
+        "MATVEC_D2H",
+        "MATRIX_D2H",
+        "MATRIX_BATCH_D2H",
+        "ARGMAX",
+        "PLE_STAGE_WAIT",
+        "RESIDENCY_INIT",
+        "STEERING_INIT",
+        "LM_HEAD_RESIDENCY_INIT",
+    };
+    return reason < Q38_CUDA_SYNC_REASON_COUNT ? names[reason] : "UNKNOWN";
+}
+
 extern "C" void q38_forward_cuda_set_qsa_candidate(
     q38_forward_cuda_context *context, q38_qsa_candidate_fn candidate) {
     if (context) context->qsa_candidate = candidate;
@@ -1362,8 +1557,8 @@ extern "C" void q38_forward_cuda_set_qsa_candidate(
 extern "C" void q38_forward_cuda_record_route(
     q38_forward_cuda_context *context, uint32_t layer, size_t selected_count) {
     if (!context || layer >= Q38_MODEL_LAYERS) return;
-    ++context->routed_layers_executed;
-    context->selected_experts_total += selected_count;
+    Q38_CUDA_DIAG_ONLY(++context->routed_layers_executed);
+    Q38_CUDA_DIAG_ONLY(context->selected_experts_total += selected_count);
 }
 
 extern "C" void q38_forward_cuda_get_expert_layer_calls(
@@ -1466,7 +1661,7 @@ extern "C" bool q38_forward_cuda_matvec_backend(
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA forward matvec allocation failed");
     if (use_persistent) {
-        ++context->persistent_hits;
+        Q38_CUDA_DIAG_ONLY(++context->persistent_hits);
         const void *weight_storage =
             (const unsigned char *)exec->ptr + row * row_bytes;
         bool launched = false;
@@ -1487,17 +1682,19 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         if (!launched ||
             cudaMemcpyAsync(output, context->device_output, sizeof(float),
                             cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
-            cudaStreamSynchronize(context->stream) != cudaSuccess)
+            Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_MATVEC_D2H,
+                               cudaStreamSynchronize(context->stream)) !=
+                cudaSuccess)
             return fail(error, error_len, "CUDA resident matvec execution failed");
-        ++context->cuda_synchronizations;
+        Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
         emit_telemetry(context, model, tensor, 1, cols, weight_bytes, true,
                        false, 0, 0.0f, 0.0f, 0.0, 0, 1,
                        "matvec", "resident_exec_tensor");
         return true;
     }
     if (context->all_non_ple_resident) {
-        ++context->persistent_misses;
-        if (!is_ple_tensor(tensor)) ++context->non_ple_residency_miss;
+        Q38_CUDA_DIAG_ONLY(++context->persistent_misses);
+        if (!is_ple_tensor(tensor)) Q38_CUDA_DIAG_ONLY(++context->non_ple_residency_miss);
     }
 
     if (cudaMemcpyAsync(context->device_weights, row_data, weight_bytes,
@@ -1506,8 +1703,8 @@ extern "C" bool q38_forward_cuda_matvec_backend(
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA forward matvec upload failed");
     if (!is_ple_tensor(tensor))
-        context->non_ple_upload_bytes_per_token += weight_bytes;
-    if (!is_ple_tensor(tensor)) ++context->gguf_name_lookup_in_decode;
+        Q38_CUDA_DIAG_ONLY(context->non_ple_upload_bytes_per_token += weight_bytes);
+    if (!is_ple_tensor(tensor)) Q38_CUDA_DIAG_ONLY(++context->gguf_name_lookup_in_decode);
 
     bool launched = false;
     if (tensor->type == 30) {
@@ -1530,7 +1727,9 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         cudaMemcpyAsync(output, context->device_output, sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) !=
             cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_MATVEC_D2H,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return launched ? fail(error, error_len,
                                "CUDA forward matvec download failed")
                         : false;
@@ -1555,13 +1754,12 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     if (!tensor->bytes || rows > SIZE_MAX / sizeof(float) ||
         cols > SIZE_MAX / sizeof(float))
         return fail(error, error_len, "invalid CUDA forward matrix payload");
-    const double host_started = host_now_ms();
+    const bool collect_telemetry = Q38_CUDA_DIAG_COLLECT(context);
+    const double host_started = collect_telemetry ? host_now_ms() : 0.0;
     cudaEvent_t upload_start = NULL, upload_stop = NULL;
     cudaEvent_t kernel_start = NULL, kernel_stop = NULL;
-    if (cudaEventCreate(&upload_start) != cudaSuccess ||
-        cudaEventCreate(&upload_stop) != cudaSuccess ||
-        cudaEventCreate(&kernel_start) != cudaSuccess ||
-        cudaEventCreate(&kernel_stop) != cudaSuccess)
+    if (!telemetry_events_create(collect_telemetry, &upload_start,
+                                 &upload_stop, &kernel_start, &kernel_stop))
         return fail(error, error_len, "CUDA telemetry event allocation failed");
     const uint64_t allocation_before = context->cuda_allocations;
     q38_exec_tensor *exec = exec_tensor_for(context, model, tensor);
@@ -1569,7 +1767,7 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         exec_tensor_is_resident(exec, tensor);
     const void *data = use_exec_resident ? NULL :
         q38_gguf_tensor_data(model, tensor);
-    if (!use_exec_resident) ++context->gguf_name_lookup_in_decode;
+    if (!use_exec_resident) Q38_CUDA_DIAG_ONLY(++context->gguf_name_lookup_in_decode);
     if (context->exec_strict && !use_exec_resident && !is_ple_tensor(tensor))
         return fail(error, error_len,
                     "Q38_EXEC_STRICT: matrix tensor is not resident");
@@ -1581,15 +1779,15 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         context->lm_head_device_weights_bytes == tensor->bytes;
     const bool use_persistent_weight = use_exec_resident;
     if (use_resident_lm_head || use_persistent_weight)
-        ++context->resident_hits;
+        Q38_CUDA_DIAG_ONLY(++context->resident_hits);
     else {
-        ++context->resident_misses;
+        Q38_CUDA_DIAG_ONLY(++context->resident_misses);
         if (context->all_non_ple_resident) {
-            ++context->persistent_misses;
-            if (!is_ple_tensor(tensor)) ++context->non_ple_residency_miss;
+            Q38_CUDA_DIAG_ONLY(++context->persistent_misses);
+            if (!is_ple_tensor(tensor)) Q38_CUDA_DIAG_ONLY(++context->non_ple_residency_miss);
         }
     }
-    if (use_persistent_weight) ++context->persistent_hits;
+    if (use_persistent_weight) Q38_CUDA_DIAG_ONLY(++context->persistent_hits);
     if ((!use_resident_lm_head && !use_persistent_weight &&
          !ensure_buffer(&context->device_weights,
                         &context->device_weights_bytes, (size_t)tensor->bytes,
@@ -1607,22 +1805,22 @@ extern "C" bool q38_forward_cuda_matrix_backend(
                        context->allocation_observer_user,
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA forward matrix allocation failed");
-    if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
+    if (!telemetry_event_record(collect_telemetry, upload_start, context->stream) ||
         (!use_resident_lm_head && !use_persistent_weight &&
          cudaMemcpyAsync(context->device_weights, data, (size_t)tensor->bytes,
                          cudaMemcpyHostToDevice, context->stream) !=
              cudaSuccess) ||
-        cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
+        !telemetry_event_record(collect_telemetry, upload_stop, context->stream) ||
         cudaMemcpyAsync(context->device_input, input, cols * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA forward matrix upload failed");
-    if (cudaEventRecord(kernel_start, context->stream) != cudaSuccess)
+    if (!telemetry_event_record(collect_telemetry, kernel_start, context->stream))
         return fail(error, error_len, "CUDA matrix timing failed");
     if (!use_resident_lm_head && !use_persistent_weight)
-        context->matrix_upload_bytes += tensor->bytes;
+        Q38_CUDA_DIAG_ONLY(context->matrix_upload_bytes += tensor->bytes);
     if (!use_resident_lm_head && !use_persistent_weight &&
         !is_ple_tensor(tensor))
-        context->non_ple_upload_bytes_per_token += tensor->bytes;
+        Q38_CUDA_DIAG_ONLY(context->non_ple_upload_bytes_per_token += tensor->bytes);
     bool launched = false;
     void *weight_storage = use_resident_lm_head
                                ? context->lm_head_device_weights
@@ -1647,8 +1845,8 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         return fail(error, error_len, "unsupported CUDA forward matrix type");
     }
     if (!launched) {
-        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                                 kernel_stop);
         return false;
     }
     if (context->current_stage &&
@@ -1657,33 +1855,36 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         !apply_directional_steering_device(
             context, context->device_output, context->current_layer, rows, 1,
             context->directional_steering_attn_scale, error, error_len)) {
-        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                                 kernel_stop);
         return false;
     }
-    if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess)
+    if (!telemetry_event_record(collect_telemetry, kernel_stop, context->stream))
         return fail(error, error_len, "CUDA kernel timing failed");
     if (cudaMemcpyAsync(output, context->device_output, rows * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) !=
             cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_MATRIX_D2H,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "CUDA forward matrix download failed");
-    ++context->cuda_synchronizations;
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
     context->device_output_elements = rows;
-    float upload_ms = event_elapsed(upload_start, upload_stop);
-    float kernel_ms = event_elapsed(kernel_start, kernel_stop);
+    float upload_ms = collect_telemetry ? event_elapsed(upload_start, upload_stop) : 0.0f;
+    float kernel_ms = collect_telemetry ? event_elapsed(kernel_start, kernel_stop) : 0.0f;
     emit_telemetry(context, model, tensor, rows, cols, (size_t)tensor->bytes,
 
                    use_resident_lm_head || use_persistent_weight,
                    !(use_resident_lm_head || use_persistent_weight),
                    (use_resident_lm_head || use_persistent_weight) ? 0 :
                        (size_t)tensor->bytes,
-                   upload_ms, kernel_ms, host_now_ms() - host_started,
+                   upload_ms, kernel_ms,
+                   collect_telemetry ? host_now_ms() - host_started : 0.0,
                    context->cuda_allocations - allocation_before, 1,
                    "matrix", use_resident_lm_head || use_persistent_weight
                        ? "resident_exec_tensor" : "gguf_host_upload");
-    cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-    cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                             kernel_stop);
     return true;
 }
 
@@ -1728,25 +1929,20 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
                     "CUDA batched matrix workspace allocation failed");
     cudaEvent_t upload_start = NULL, upload_stop = NULL;
     cudaEvent_t kernel_start = NULL, kernel_stop = NULL;
-    if (cudaEventCreate(&upload_start) != cudaSuccess ||
-        cudaEventCreate(&upload_stop) != cudaSuccess ||
-        cudaEventCreate(&kernel_start) != cudaSuccess ||
-        cudaEventCreate(&kernel_stop) != cudaSuccess) {
-        if (upload_start) cudaEventDestroy(upload_start);
-        if (upload_stop) cudaEventDestroy(upload_stop);
-        if (kernel_start) cudaEventDestroy(kernel_start);
-        if (kernel_stop) cudaEventDestroy(kernel_stop);
+    const bool collect_telemetry = Q38_CUDA_DIAG_COLLECT(context);
+    if (!telemetry_events_create(collect_telemetry, &upload_start,
+                                 &upload_stop, &kernel_start, &kernel_stop)) {
         return fail(error, error_len,
                     "CUDA batched matrix telemetry event allocation failed");
     }
-    const double started = host_now_ms();
-    if (cudaEventRecord(upload_start, context->stream) != cudaSuccess ||
+    const double started = collect_telemetry ? host_now_ms() : 0.0;
+    if (!telemetry_event_record(collect_telemetry, upload_start, context->stream) ||
         cudaMemcpyAsync(context->device_input, input, input_bytes,
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
-        cudaEventRecord(upload_stop, context->stream) != cudaSuccess ||
-        cudaEventRecord(kernel_start, context->stream) != cudaSuccess) {
-        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        !telemetry_event_record(collect_telemetry, upload_stop, context->stream) ||
+        !telemetry_event_record(collect_telemetry, kernel_start, context->stream)) {
+        telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                                 kernel_stop);
         return fail(error, error_len, "CUDA batched matrix upload failed");
     }
     const bool gr_bf16_candidate =
@@ -1784,8 +1980,8 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
               rows, cols, context->device_output, context->stream, error,
               error_len);
     if (!launched) {
-        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                                 kernel_stop);
         return false;
     }
     if (context->current_stage &&
@@ -1795,36 +1991,41 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
             context, context->device_output, context->current_layer, rows,
             token_count, context->directional_steering_attn_scale, error,
             error_len)) {
-        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+        telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                                 kernel_stop);
         return false;
     }
-    if (cudaEventRecord(kernel_stop, context->stream) != cudaSuccess) {
-        cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-        cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    if (!telemetry_event_record(collect_telemetry, kernel_stop, context->stream)) {
+        telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                                 kernel_stop);
         return fail(error, error_len, "CUDA batched matrix timing failed");
     }
     if (cudaMemcpyAsync(output, context->device_output, output_bytes,
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_MATRIX_BATCH_D2H,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         {
-            cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-            cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+            telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                                     kernel_stop);
             return fail(error, error_len,
                         "CUDA batched matrix execution failed");
         }
-    ++context->cuda_synchronizations;
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
     context->device_output_elements = token_count * rows;
-    ++context->persistent_hits;
-    const float upload_ms = event_elapsed(upload_start, upload_stop);
-    const float kernel_ms = event_elapsed(kernel_start, kernel_stop);
+    Q38_CUDA_DIAG_ONLY(++context->persistent_hits);
+    const float upload_ms =
+        collect_telemetry ? event_elapsed(upload_start, upload_stop) : 0.0f;
+    const float kernel_ms =
+        collect_telemetry ? event_elapsed(kernel_start, kernel_stop) : 0.0f;
     emit_telemetry(context, model, tensor, token_count * rows, cols,
                    (size_t)tensor->bytes, true, false, 0, upload_ms, kernel_ms,
-                   host_now_ms() - started, 0, 1, "matrix_batch",
+                   collect_telemetry ? host_now_ms() - started : 0.0, 0, 1,
+                   "matrix_batch",
                    gdn_bf16_candidate ? "resident_gdn_projection"
                                      : "resident_exec_tensor");
-    cudaEventDestroy(upload_start); cudaEventDestroy(upload_stop);
-    cudaEventDestroy(kernel_start); cudaEventDestroy(kernel_stop);
+    telemetry_events_destroy(upload_start, upload_stop, kernel_start,
+                             kernel_stop);
     return true;
 }
 
@@ -1939,7 +2140,7 @@ extern "C" bool q38_forward_cuda_gdn_layer_backend(
             Q38_GDN_INPUT_DIM * sizeof(float), cudaMemcpyHostToDevice,
             context->stream) != cudaSuccess)
         return fail(error, error_len, "GDN-C3 input upload failed");
-    context->gdn_c3_h2d_bytes += Q38_GDN_INPUT_DIM * sizeof(float);
+    Q38_CUDA_DIAG_ONLY(context->gdn_c3_h2d_bytes += Q38_GDN_INPUT_DIM * sizeof(float));
     char cuda_error[256] = {};
     const auto project = [&](size_t index, size_t rows, size_t cols,
                              float *destination) {
@@ -1948,7 +2149,7 @@ extern "C" bool q38_forward_cuda_gdn_layer_backend(
                 context->device_gdn_input, 1, destination, context->stream,
                 cuda_error, sizeof(cuda_error)))
             return false;
-        ++context->gdn_c3_launches;
+        Q38_CUDA_DIAG_ONLY(++context->gdn_c3_launches);
         return true;
     };
     if (!project(0, Q38_GDN_QKV_CHANNELS, Q38_GDN_INPUT_DIM,
@@ -1978,16 +2179,18 @@ extern "C" bool q38_forward_cuda_gdn_layer_backend(
         return fail(error, error_len,
                     cuda_error[0] ? cuda_error : "GDN-C3 launch failed");
     }
-    context->gdn_c3_launches += 3;
+    Q38_CUDA_DIAG_ONLY(context->gdn_c3_launches += 3);
     if (cudaMemcpyAsync(output, context->device_output,
                         Q38_GR_HIDDEN * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_GDN_OUTPUT,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "GDN-C3 output transfer failed");
-    ++context->cuda_synchronizations;
-    ++context->gdn_c3_syncs;
-    ++context->gdn_c3_calls;
-    context->gdn_c3_d2h_bytes += Q38_GR_HIDDEN * sizeof(float);
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
+    Q38_CUDA_DIAG_ONLY(++context->gdn_c3_syncs);
+    Q38_CUDA_DIAG_ONLY(++context->gdn_c3_calls);
+    Q38_CUDA_DIAG_ONLY(context->gdn_c3_d2h_bytes += Q38_GR_HIDDEN * sizeof(float));
     return true;
 }
 
@@ -2153,9 +2356,11 @@ extern "C" bool q38_forward_cuda_gr_read_backend(
                         Q38_GR_HIDDEN * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) !=
             cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_GR_READ,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "GR-C4 read completion failed");
-    ++context->cuda_synchronizations;
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
     return true;
 }
 
@@ -2222,9 +2427,11 @@ extern "C" bool q38_forward_cuda_gr_write_backend(
                         Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
                         cudaMemcpyDeviceToHost, context->stream) !=
             cudaSuccess ||
-        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_GR_WRITE,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
         return fail(error, error_len, "GR-C4 write completion failed");
-    ++context->cuda_synchronizations;
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
     return true;
 }
 
@@ -2270,8 +2477,9 @@ extern "C" bool q38_forward_cuda_qsa_qkv_backend(
     const size_t output_elements = q_elements + k_elements + v_elements;
     const size_t input_bytes = token_count * q_cols * sizeof(float);
     const size_t output_bytes = output_elements * sizeof(float);
-    const uint64_t allocations_before = context->cuda_allocations;
-    const double started = host_now_ms();
+    const uint64_t allocations_before =
+        Q38_DIAG_ENABLED ? context->cuda_allocations : 0;
+    const double started = Q38_DIAG_ENABLED ? host_now_ms() : 0.0;
     if (!ensure_buffer((void **)&context->device_qsa_input,
                        &context->device_qsa_input_bytes, input_bytes,
                        context->allocation_observer,
@@ -2290,7 +2498,7 @@ extern "C" bool q38_forward_cuda_qsa_qkv_backend(
                         "QSA QKV host staging allocation failed");
         context->host_qsa_output = grown;
         context->host_qsa_output_bytes = output_bytes;
-        ++timing->allocations;
+        Q38_CUDA_DIAG_ONLY(++timing->allocations);
     }
     float *device_q = context->device_qsa_output;
     float *device_k = device_q + q_elements;
@@ -2318,7 +2526,10 @@ extern "C" bool q38_forward_cuda_qsa_qkv_backend(
                             output_bytes, cudaMemcpyDeviceToHost,
                             context->stream) == cudaSuccess;
     if (projection_ok)
-        projection_ok = cudaStreamSynchronize(context->stream) == cudaSuccess;
+        projection_ok =
+            Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_QSA_QKV,
+                               cudaStreamSynchronize(context->stream)) ==
+            cudaSuccess;
     if (!projection_ok) {
         if (error && error_len && error[0] == '\0')
             snprintf(error, error_len, "QSA QKV CUDA execution failed: %s",
@@ -2331,13 +2542,14 @@ extern "C" bool q38_forward_cuda_qsa_qkv_backend(
            k_elements * sizeof(float));
     memcpy(host_v, context->host_qsa_output + q_elements + k_elements,
            v_elements * sizeof(float));
-    timing->qkv_projection_ms += host_now_ms() - started;
-    timing->allocations += context->cuda_allocations - allocations_before;
-    timing->kernel_launches += 3;
-    timing->host_syncs++;
-    timing->h2d_bytes += input_bytes;
-    timing->d2h_bytes += output_bytes;
-    ++context->persistent_hits;
+    Q38_CUDA_DIAG_ONLY(timing->qkv_projection_ms += host_now_ms() - started);
+    Q38_CUDA_DIAG_ONLY(timing->allocations +=
+                       context->cuda_allocations - allocations_before);
+    Q38_CUDA_DIAG_ONLY(timing->kernel_launches += 3);
+    Q38_CUDA_DIAG_ONLY(timing->host_syncs++);
+    Q38_CUDA_DIAG_ONLY(timing->h2d_bytes += input_bytes);
+    Q38_CUDA_DIAG_ONLY(timing->d2h_bytes += output_bytes);
+    Q38_CUDA_DIAG_ONLY(++context->persistent_hits);
     return true;
 }
 
@@ -2356,6 +2568,7 @@ extern "C" bool q38_forward_cuda_greedy_argmax(
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA greedy argmax allocation failed");
     bool launched = false;
+#if Q38_DIAGNOSTICS
     cudaEvent_t start = NULL, stop = NULL;
     if (cudaEventCreate(&start) == cudaSuccess &&
         cudaEventCreate(&stop) == cudaSuccess) {
@@ -2364,19 +2577,27 @@ extern "C" bool q38_forward_cuda_greedy_argmax(
             context->device_output, 1, context->device_output_elements,
             context->device_argmax, context->stream, error, error_len);
         cudaEventRecord(stop, context->stream);
-        cudaEventSynchronize(stop);
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_ARGMAX,
+                           cudaEventSynchronize(stop));
         float elapsed = 0.0f;
         if (cudaEventElapsedTime(&elapsed, start, stop) == cudaSuccess)
-            context->gpu_argmax_kernel_ms = elapsed;
+            Q38_CUDA_DIAG_ONLY(context->gpu_argmax_kernel_ms = elapsed);
         cudaEventDestroy(start);
         cudaEventDestroy(stop);
     }
+#else
+    launched = q38_argmax_cuda(
+        context->device_output, 1, context->device_output_elements,
+        context->device_argmax, context->stream, error, error_len);
+#endif
     bool ok = launched &&
         cudaMemcpyAsync(token, context->device_argmax, sizeof(*token),
                         cudaMemcpyDeviceToHost, context->stream) == cudaSuccess &&
-        cudaStreamSynchronize(context->stream) == cudaSuccess;
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_ARGMAX,
+                           cudaStreamSynchronize(context->stream)) ==
+            cudaSuccess;
     if (!ok && (!error || !error_len || !error[0]))
         fail(error, error_len, "CUDA greedy argmax execution failed");
-    if (ok) ++context->cuda_synchronizations;
+    if (ok) Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
     return ok;
 }

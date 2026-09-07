@@ -3,6 +3,13 @@
 CC ?= cc
 CFLAGS ?= -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -pthread
 MODEL_DIR ?= /home/lvx/q38model
+BUILD_DIR ?= build
+RELEASE_OBJDIR := $(BUILD_DIR)/release
+DIAG_OBJDIR := $(BUILD_DIR)/diag
+RELEASE_CFLAGS = $(CFLAGS)
+DIAG_CFLAGS = $(CFLAGS) -DQ38_DIAGNOSTICS=1
+RELEASE_NVCCFLAGS = $(NVCCFLAGS)
+DIAG_NVCCFLAGS = $(NVCCFLAGS) -DQ38_DIAGNOSTICS=1
 
 CUDA_HOME ?= $(shell if [ -x /usr/local/cuda/bin/nvcc ]; then \
 	printf '%s' /usr/local/cuda; \
@@ -26,13 +33,15 @@ PRODUCTION_C_OBJS := \
 	q38.o q38_gguf.o q38_memory.o q38_platform.o q38_tokenizer.o \
 	q38_decode.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_quant.o \
-	q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o q38_profile.o \
+	q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o \
 	q38_residency.o q38_directional_steering.o q38_session.o
 PRODUCTION_CUDA_OBJS := \
 	q38_cuda.o q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
-	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o \
+	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o \
 	q38_topk_cuda.o
 PRODUCTION_OBJS := $(PRODUCTION_C_OBJS) $(PRODUCTION_CUDA_OBJS)
+RELEASE_OBJS := $(addprefix $(RELEASE_OBJDIR)/,$(PRODUCTION_OBJS))
+DIAG_OBJS := $(addprefix $(DIAG_OBJDIR)/,$(PRODUCTION_OBJS))
 
 CANONICAL_BENCH_C_OBJS := \
 	q38_gguf.o q38_forward.o q38_ple_prefetch.o q38_weights.o \
@@ -49,9 +58,10 @@ TEST_BINS := \
 	tests/test_platform tests/test_gguf tests/test_memory \
 	tests/test_model_config tests/test_quant_blocks tests/test_residency
 
-.PHONY: all q38 q38-server q38-server-mock q38-cli q38-dev-worker spark test test-server clean tools \
+.PHONY: all q38 q38-diag q38-server q38-server-mock q38-cli q38-dev-worker spark test test-server clean tools \
 	q38-server-real \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
+	test-prod-diag-equivalence \
 	check-perf-artifacts test-steering test-steering-cuda \
 	gr-fixtures gr-bench gr-c1-bench gr-c2-bench gr-c3-bench \
 	gr-c3-bundle gr-c4-bench test-gr test-moe bench-moe \
@@ -60,8 +70,11 @@ TEST_BINS := \
 
 all: q38
 
-q38: $(PRODUCTION_OBJS)
-	$(NVCC) $(NVCCFLAGS) -o $@ $(PRODUCTION_OBJS) $(CUDA_LDLIBS)
+q38: $(RELEASE_OBJS)
+	$(NVCC) $(RELEASE_NVCCFLAGS) -o $@ $(RELEASE_OBJS) $(CUDA_LDLIBS)
+
+q38-diag: $(DIAG_OBJS)
+	$(NVCC) $(DIAG_NVCCFLAGS) -o $@ $(DIAG_OBJS) $(CUDA_LDLIBS)
 
 SERVER_OBJS := q38_server.o q38_server_protocol.o q38_server_engine_mock.o \
 	q38_server_engine.o q38_json.o q38_kvstore.o q38_prompt.o
@@ -439,6 +452,50 @@ bench-q2-prefill: tests/q2_canonical_bench
 check-perf-artifacts:
 	@python3 tools/check_perf_artifacts.py
 
+test-prod-diag-equivalence: q38 q38-diag \
+		$(RELEASE_OBJDIR)/q38_gr_ref.o $(DIAG_OBJDIR)/q38_gr_ref.o \
+		$(RELEASE_OBJDIR)/q38_gdn_ref.o $(DIAG_OBJDIR)/q38_gdn_ref.o \
+		$(RELEASE_OBJDIR)/q38_quant.o $(DIAG_OBJDIR)/q38_quant.o
+	@set -e; \
+	mkdir -p $(RELEASE_OBJDIR)/equivalence $(DIAG_OBJDIR)/equivalence; \
+	$(CC) $(RELEASE_CFLAGS) -o $(RELEASE_OBJDIR)/equivalence/test_m3_gr_ref \
+		tests/gr/test_m3_gr_ref.c $(RELEASE_OBJDIR)/q38_gr_ref.o -lm; \
+	$(CC) $(DIAG_CFLAGS) -o $(DIAG_OBJDIR)/equivalence/test_m3_gr_ref \
+		tests/gr/test_m3_gr_ref.c $(DIAG_OBJDIR)/q38_gr_ref.o -lm; \
+	$(CC) $(RELEASE_CFLAGS) -o $(RELEASE_OBJDIR)/equivalence/test_m3_gdn_ref \
+		tests/test_m3_gdn_ref.c $(RELEASE_OBJDIR)/q38_gdn_ref.o -lm; \
+	$(CC) $(DIAG_CFLAGS) -o $(DIAG_OBJDIR)/equivalence/test_m3_gdn_ref \
+		tests/test_m3_gdn_ref.c $(DIAG_OBJDIR)/q38_gdn_ref.o -lm; \
+	$(CC) $(RELEASE_CFLAGS) -o $(RELEASE_OBJDIR)/equivalence/test_moe_reference \
+		tests/moe/test_moe_reference.c tests/moe/moe_reference.c \
+		$(RELEASE_OBJDIR)/q38_quant.o -lm; \
+	$(CC) $(DIAG_CFLAGS) -o $(DIAG_OBJDIR)/equivalence/test_moe_reference \
+		tests/moe/test_moe_reference.c tests/moe/moe_reference.c \
+		$(DIAG_OBJDIR)/q38_quant.o -lm; \
+	for test in test_m3_gr_ref test_m3_gdn_ref test_moe_reference; do \
+		prod="$$(./$(RELEASE_OBJDIR)/equivalence/$$test)"; \
+		diag="$$(./$(DIAG_OBJDIR)/equivalence/$$test)"; \
+		test "$$prod" = "$$diag"; \
+		printf '%s\n' "$$prod"; \
+	done
+
+$(RELEASE_OBJDIR) $(DIAG_OBJDIR):
+	mkdir -p $@
+
+$(RELEASE_OBJDIR)/%.o: %.c | $(RELEASE_OBJDIR)
+	$(CC) $(RELEASE_CFLAGS) -c -o $@ $<
+
+$(DIAG_OBJDIR)/%.o: %.c | $(DIAG_OBJDIR)
+	$(CC) $(DIAG_CFLAGS) -c -o $@ $<
+
+$(RELEASE_OBJDIR)/q38_%.o: cuda/q38_%.cu | $(RELEASE_OBJDIR)
+	@echo "q38: release nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(RELEASE_NVCCFLAGS) -c -o $@ $<
+
+$(DIAG_OBJDIR)/q38_%.o: cuda/q38_%.cu | $(DIAG_OBJDIR)
+	@echo "q38: diag nvcc arch flags: $(NVCC_ARCH_FLAGS)"
+	$(NVCC) $(DIAG_NVCCFLAGS) -c -o $@ $<
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -447,7 +504,8 @@ q38_%.o: cuda/q38_%.cu
 	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
 
 clean:
-	rm -f q38 q38-server q38-server-real q38-server-mock q38-cli $(PRODUCTION_OBJS) q38_session.o \
+	rm -rf $(BUILD_DIR)
+	rm -f q38 q38-diag q38-server q38-server-real q38-server-mock q38-cli $(PRODUCTION_OBJS) q38_session.o \
 		$(SERVER_OBJS) q38_server_main.o q38_server_real_main.o \
 		q38_server_engine_q38.o q38_cli.o \
 		tests/q2_canonical_bench tests/test_q38_directional_steering_cuda \

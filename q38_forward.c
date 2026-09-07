@@ -5,6 +5,7 @@
 #include "q38_moe_ref.h"
 #include "q38_ple_ref.h"
 #include "q38_quant.h"
+#include "q38_diagnostics.h"
 
 #define Q38_FULL_QSA_SELECTED_STRIDE 2051u
 
@@ -89,12 +90,16 @@ static void rope(float *x, size_t n, size_t rotary, size_t position,
     }
 }
 
+#if Q38_DIAGNOSTICS
 static double qsa_now_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
     return (double)ts.tv_sec * 1000.0 +
            (double)ts.tv_nsec / 1000000.0;
 }
+#else
+#define qsa_now_ms() 0.0
+#endif
 
 static bool project(const q38_forward_matrix *matrix, const float *input,
                     size_t tokens, float *output,
@@ -542,6 +547,7 @@ static void full_backend_context(const q38_tensor *tensor, size_t rows,
                                               : full_diagnostics->trace_user);
 }
 
+#if Q38_DIAGNOSTICS
 static double full_now_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
@@ -567,6 +573,10 @@ static bool full_emit_stage(q38_forward_diagnostics *diagnostics,
     return diagnostics->stage_trace(&usage, diagnostics->trace_user, error,
                                     error_len);
 }
+#else
+#define full_now_ms() 0.0
+#define full_emit_stage(...) true
+#endif
 
 static bool full_mul(size_t a, size_t b, size_t *out) {
     if (b && a > SIZE_MAX / b) return false;
@@ -699,10 +709,10 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
         full_backend_context(tensor, 1, count, "row_matvec");
         if (full_backend(model, tensor, row, input, count, out,
                          full_backend_user, error, error_len)) {
-            ++full_backend_rows;
+            Q38_DIAG_ONLY(++full_backend_rows);
             return true;
         }
-        ++full_backend_declines;
+        Q38_DIAG_ONLY(++full_backend_declines);
         /*
          * A backend may decline very wide diagnostic-only matrices by
          * returning false without an error.  A populated error remains a
@@ -717,7 +727,7 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
             return false;
         }
     }
-    ++full_scalar_rows;
+    Q38_DIAG_ONLY(++full_scalar_rows);
     const void *data;
     size_t rows, cols, row_bytes;
     if (!input || !out ||
@@ -797,13 +807,13 @@ static bool full_matvec(const q38_gguf *model, const q38_tensor *tensor,
         const double started = full_now_ms();
         if (full_matrix_backend(model, tensor, input, rows, cols, output,
                                 full_backend_user, error, error_len)) {
-            full_backend_rows += rows;
+            Q38_DIAG_ONLY(full_backend_rows += rows);
             return full_emit_stage(full_diagnostics, stage ? stage : "matvec",
                                    rows, 0, 0, full_now_ms() - started,
                                    error, error_len);
         }
 
-        ++full_backend_declines;
+        Q38_DIAG_ONLY(++full_backend_declines);
         if (error && error_len && error[0] != '\0') return false;
         if (full_backend_strict)
             return full_fail(error, error_len,
@@ -840,13 +850,13 @@ static bool full_matvec_batch(
         if (full_matrix_batch_backend(
                 model, tensor, input, tokens, rows, cols, output,
                 full_backend_user, error, error_len)) {
-            full_backend_rows += tokens * rows;
+            Q38_DIAG_ONLY(full_backend_rows += tokens * rows);
             return full_emit_stage(
                 full_diagnostics, stage ? stage : "matvec_batch",
                 (uint64_t)tokens * rows, 0, 0, full_now_ms() - started,
                 error, error_len);
         }
-        ++full_backend_declines;
+        Q38_DIAG_ONLY(++full_backend_declines);
         if (error && error_len && error[0] != '\0') return false;
         if (full_backend_strict)
             return full_fail(error, error_len,
@@ -934,6 +944,7 @@ static q38_tensor *full_named_ple(const q38_layer_weights *layer,
     return NULL;
 }
 
+#if Q38_DIAGNOSTICS
 static bool full_boundary_trace(uint32_t layer, const char *boundary,
                                 const float *values, size_t token_count,
                                 size_t width,
@@ -947,6 +958,9 @@ static bool full_boundary_trace(uint32_t layer, const char *boundary,
         layer, boundary, values, token_count, width,
         diagnostics->trace_user, error, error_len);
 }
+#else
+#define full_boundary_trace(...) true
+#endif
 
 static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
                          const float *residual, size_t tokens, float *input,
@@ -1274,7 +1288,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         const q38_forward_dtype router_dtype =
             weights.router->type == 30 ? Q38_FORWARD_BF16
                                         : Q38_FORWARD_F32;
-        if (layer_number == 9 && diagnostics &&
+        if (Q38_DIAG_ENABLED && layer_number == 9 && diagnostics &&
             diagnostics->pre_router_trace) {
             const q38_pre_router_trace pre_router = {
                 .router_input = x,
@@ -1315,7 +1329,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                                  logits_effective, 1, Q38_MOE_EXPERTS,
                                  diagnostics, error, error_len))
             goto fail;
-        if (diagnostics && diagnostics->router_trace &&
+        if (Q38_DIAG_ENABLED && diagnostics && diagnostics->router_trace &&
             !diagnostics->router_trace(layer_number, logits_effective,
                                        Q38_MOE_EXPERTS,
                                        diagnostics->trace_user, error,
@@ -1380,7 +1394,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
         }
         const float margin_rank10_rank11 =
             top15_value[9] - top15_value[10];
-        if (diagnostics && diagnostics->route_trace &&
+        if (Q38_DIAG_ENABLED && diagnostics && diagnostics->route_trace &&
             !diagnostics->route_trace(layer_number, route.expert, route.weight,
                                       Q38_MOE_TOP_K,
                                       diagnostics->trace_user, error,
@@ -1419,7 +1433,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                         model, weights.routed_gate_up, weights.routed_down, e,
                         x, routed, full_backend_user, error, error_len))
                     goto fail;
-                full_backend_rows += 1920;
+                Q38_DIAG_ONLY(full_backend_rows += 1920);
                 if (!full_emit_stage(full_diagnostics, "moe_routed_expert",
                                      1920, 0, 0, full_now_ms() - started,
                                      error, error_len))
@@ -1445,7 +1459,7 @@ static bool full_moe(const q38_gguf *model, const q38_layer_weights *layer,
                                  Q38_GR_HIDDEN, diagnostics, error,
                                  error_len))
             goto fail;
-        if (diagnostics && diagnostics->moe_trace) {
+        if (Q38_DIAG_ENABLED && diagnostics && diagnostics->moe_trace) {
             const q38_moe_trace trace = {
                 .router_input = x,
                 .router_input_count = Q38_GR_HIDDEN,
@@ -1940,9 +1954,11 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
             free((void *)w.index_q_norm); free((void *)w.index_k_norm);
             return full_fail(error, error_len, "QSA QKV host buffer allocation failed");
         }
-        qkv_timing.allocations = 3;
-        qkv_timing.allocation_cleanup_ms =
-            full_now_ms() - allocation_started;
+        if (Q38_DIAG_ENABLED) {
+            qkv_timing.allocations = 3;
+            qkv_timing.allocation_cleanup_ms =
+                full_now_ms() - allocation_started;
+        }
         if (!diagnostics->qsa_qkv_backend(
                 model, layer->qsa.q_proj, layer->qsa.k_proj,
                 layer->qsa.v_proj, input, tokens, precomputed.qfull,
@@ -1958,13 +1974,16 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
         qkv_timing.qkv_backend_used = true;
         precomputed_ptr = &precomputed;
     }
-    q38_forward_qsa_timing timing;
+    q38_forward_qsa_timing timing = {0};
+    q38_forward_qsa_timing *timing_ptr = Q38_DIAG_ENABLED ? &timing : NULL;
     bool ok = q38_forward_qsa_ref_impl(
         &w, qsa_state, input, tokens, output, selected,
-        Q38_FULL_QSA_SELECTED_STRIDE, counts, precomputed_ptr, &timing,
-        layer_number, diagnostics ? diagnostics->qsa_snapshot : NULL,
-        diagnostics ? diagnostics->trace_user : NULL, error, error_len);
-    if (precomputed_ptr) {
+        Q38_FULL_QSA_SELECTED_STRIDE, counts, precomputed_ptr, timing_ptr,
+        layer_number, (Q38_DIAG_ENABLED && diagnostics)
+            ? diagnostics->qsa_snapshot : NULL,
+        (Q38_DIAG_ENABLED && diagnostics) ? diagnostics->trace_user : NULL,
+        error, error_len);
+    if (Q38_DIAG_ENABLED && precomputed_ptr) {
         timing.qkv_projection_ms = qkv_timing.qkv_projection_ms;
         timing.qkv_backend_used = qkv_timing.qkv_backend_used;
         timing.q_projection_ms = qkv_timing.q_projection_ms;
@@ -1982,10 +2001,14 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
         free(precomputed.keys);
         free(precomputed.values);
         timing.allocation_cleanup_ms += full_now_ms() - cleanup_started;
+    } else if (precomputed_ptr) {
+        free(precomputed.qfull);
+        free(precomputed.keys);
+        free(precomputed.values);
     }
     const double qsa_elapsed = full_now_ms() - qsa_started;
     timing.total_ms = qsa_elapsed;
-    if (ok) {
+    if (Q38_DIAG_ENABLED && ok) {
         const char *const stages[] = {
             "qsa_qkv", "qsa_indexer_compression", "qsa_score", "qsa_top_k",
             "qsa_gather", "qsa_attention", "qsa_state_update",
@@ -2014,7 +2037,7 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
                 ok = false;
                 break;
             }
-        if (diagnostics && diagnostics->qsa_timing) {
+        if (Q38_DIAG_ENABLED && diagnostics && diagnostics->qsa_timing) {
             q38_forward_qsa_timing *total = diagnostics->qsa_timing;
             total->total_ms += qsa_elapsed;
             total->qkv_projection_ms += values[0];
@@ -2039,7 +2062,7 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
             total->d2h_bytes += timing.d2h_bytes;
             total->residency_misses += timing.residency_misses;
         }
-        if (diagnostics && diagnostics->qsa_projection_trace) {
+        if (Q38_DIAG_ENABLED && diagnostics && diagnostics->qsa_projection_trace) {
             const q38_forward_qsa_projection_trace trace = {
                 .layer = layer_number,
                 .qkv_backend_used = timing.qkv_backend_used,
@@ -2058,7 +2081,7 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
                 ok = false;
         }
     }
-    if (ok && diagnostics && diagnostics->qsa_trace)
+    if (Q38_DIAG_ENABLED && ok && diagnostics && diagnostics->qsa_trace)
         for (size_t t = 0; t < tokens; ++t)
             if (!diagnostics->qsa_trace(
                     layer_number, selected + t * Q38_FULL_QSA_SELECTED_STRIDE,
@@ -2089,9 +2112,9 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             sizeof(scheduler_error));
     }
     full_diagnostics = diagnostics;
-    full_backend_rows = 0;
-    full_scalar_rows = 0;
-    full_backend_declines = 0;
+    Q38_DIAG_ONLY(full_backend_rows = 0);
+    Q38_DIAG_ONLY(full_scalar_rows = 0);
+    Q38_DIAG_ONLY(full_backend_declines = 0);
     const size_t width = 4u * Q38_GR_HIDDEN;
     float *streams = calloc(token_count * width, sizeof(float));
     float *mixed = calloc(token_count * Q38_GR_HIDDEN, sizeof(float));
@@ -2213,11 +2236,11 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  token_count, width, diagnostics, error,
                                  error_len))
             goto fail;
-        if (diagnostics && diagnostics->trace &&
+        if (Q38_DIAG_ENABLED && diagnostics && diagnostics->trace &&
             !diagnostics->trace(layer_number, streams, token_count, width,
                                 diagnostics->trace_user, error, error_len))
             goto fail;
-        if (diagnostics)
+        if (Q38_DIAG_ENABLED && diagnostics)
             diagnostics->layer_fingerprint[layer_number] =
                 full_fingerprint(streams, token_count * width);
     }
@@ -2234,7 +2257,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
             !full_gr_read(model, &final_gr, streams, token_count, mixed,
                           normed, down, up, scratch, error, error_len))
             goto fail;
-        if (diagnostics && diagnostics->trace &&
+        if (Q38_DIAG_ENABLED && diagnostics && diagnostics->trace &&
             !diagnostics->trace(UINT32_MAX, mixed, token_count,
                                 Q38_GR_HIDDEN, diagnostics->trace_user,
                                 error, error_len))
@@ -2252,11 +2275,11 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                     model, weights->output, mixed, token_count, 248320,
                     Q38_GR_HIDDEN, logits, full_backend_user, error,
                     error_len)) {
-                ++full_backend_declines;
+                Q38_DIAG_ONLY(++full_backend_declines);
                 if (error && error_len && error[0] != '\0') goto fail;
                 goto fail;
             }
-            full_backend_rows += token_count * 248320u;
+            Q38_DIAG_ONLY(full_backend_rows += token_count * 248320u);
             if (!full_emit_stage(full_diagnostics, "lm_head_projection_batch",
                                  token_count * 248320u, 0, 0,
                                  full_now_ms() - started, error, error_len))
@@ -2270,11 +2293,11 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                     model, weights->output, mixed, 248320,
                     Q38_GR_HIDDEN, logits, full_backend_user, error,
                     error_len)) {
-                ++full_backend_declines;
+                Q38_DIAG_ONLY(++full_backend_declines);
                 if (error && error_len && error[0] != '\0') goto fail;
                 goto fail;
             }
-            full_backend_rows += 248320;
+            Q38_DIAG_ONLY(full_backend_rows += 248320);
             if (!full_emit_stage(full_diagnostics, "lm_head_projection",
                                  248320, 0, 0, full_now_ms() - started,
                                  error, error_len))
@@ -2290,7 +2313,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                         goto fail;
         }
     }
-    if (diagnostics) {
+    if (Q38_DIAG_ENABLED && diagnostics) {
         diagnostics->first_divergence_layer = UINT32_MAX;
         diagnostics->first_divergence_token = UINT32_MAX;
         diagnostics->max_abs_error = 0.0f;

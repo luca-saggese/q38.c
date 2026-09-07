@@ -11,6 +11,7 @@
 #include "q38_memory.h"
 #include "q38_platform.h"
 #include "q38_decode.h"
+#include "q38_diagnostics.h"
 #include "q38_directional_steering.h"
 #include "q38_forward_cuda.h"
 #include "q38_session.h"
@@ -23,6 +24,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#if !Q38_DIAGNOSTICS && defined(__GNUC__)
+#define Q38_DIAG_UNUSED __attribute__((unused))
+#else
+#define Q38_DIAG_UNUSED
+#endif
 
 static void usage(FILE *fp) {
     fprintf(fp,
@@ -42,7 +49,7 @@ static void usage(FILE *fp) {
         "  --ctx <n>                  Session context capacity (default: 8192)\n"
         "  --prefill-chunk <n>        CUDA prefill chunk size (default: 128)\n"
         "  --prefill-reference        Use serial prefill oracle\n"
-        "  --trace-state              Enable full semantic state snapshots\n"
+        "  --trace-state              Enable semantic state snapshots (q38-diag)\n"
         "  --max-tokens <n>           Maximum generated tokens (default: 256)\n"
         "  --disable-ple              Omit PLE output while retaining PLE state\n"
         "  --dir-steering-file FILE   Load a Q38 48x2560 f32 direction\n"
@@ -375,7 +382,7 @@ static q38_stage_account *generate_stage_account(
     return account;
 }
 
-static void generate_cuda_telemetry(
+static void Q38_DIAG_UNUSED generate_cuda_telemetry(
     const q38_forward_cuda_telemetry *telemetry, void *opaque) {
     q38_generate_evidence *evidence = opaque;
     if (!evidence || !telemetry) return;
@@ -510,7 +517,7 @@ static bool generate_stage_trace(const q38_forward_stage_usage *usage,
     return true;
 }
 
-static double generate_observed_forward_ms(
+static double Q38_DIAG_UNUSED generate_observed_forward_ms(
     const q38_generate_evidence *evidence) {
     if (!evidence) return 0.0;
     if (!evidence->generated_seen) return evidence->prefill_ms;
@@ -523,6 +530,10 @@ static double generate_observed_forward_ms(
 
 static void print_generate_instrumentation_json(
     const q38_generate_evidence *evidence) {
+#if !Q38_DIAGNOSTICS
+    (void)evidence;
+    printf("\"instrumentation\":null");
+#else
     if (!evidence) {
         printf("\"instrumentation\":null");
         return;
@@ -574,6 +585,7 @@ static void print_generate_instrumentation_json(
                stage->backend_declines);
     }
     printf("]}");
+#endif
 }
 
 static bool generate_trace(const q38_decode_step *step, void *opaque,
@@ -823,7 +835,7 @@ static void print_ids_json(const uint32_t *ids, size_t count) {
     putchar(']');
 }
 
-static int cmd_generate_legacy(const q38_options *opt) {
+static int Q38_DIAG_UNUSED cmd_generate_legacy(const q38_options *opt) {
     if (!opt->model_path || !opt->tokenizer_path || !opt->prompt ||
         !opt->prompt[0] || !opt->max_tokens) {
         fprintf(stderr, "q38: --generate requires --tokenizer, --prompt, and "
@@ -891,6 +903,12 @@ static int cmd_generate_legacy(const q38_options *opt) {
 
     q38_generate_evidence evidence;
     memset(&evidence, 0, sizeof(evidence));
+    evidence.per_token_capacity = opt->max_tokens;
+    evidence.per_token_ms = calloc(opt->max_tokens, sizeof(*evidence.per_token_ms));
+    if (!evidence.per_token_ms) {
+        fprintf(stderr, "q38: legacy timing buffer allocation failed\n");
+        goto cleanup;
+    }
     evidence.started_ms = monotonic_ms();
     evidence.initial_cuda_free = platform.cuda_free_bytes;
     evidence.min_cuda_free = platform.cuda_free_bytes;
@@ -1076,6 +1094,7 @@ static int cmd_generate_legacy(const q38_options *opt) {
 
 cleanup:
     free(generated_text);
+    free(evidence.per_token_ms);
     free(generated);
     free(logits);
     if (cuda) q38_forward_cuda_context_destroy(cuda);
@@ -1114,9 +1133,18 @@ static int cmd_generate(const q38_options *opt) {
     size_t generated_text_len = 0;
     size_t generated_count = 0;
     int rc = 1;
+#if Q38_DIAGNOSTICS
     const bool trace_state = opt->trace_state ||
         (getenv("Q38_DIAGNOSTIC_STATE_TRACE") &&
          strcmp(getenv("Q38_DIAGNOSTIC_STATE_TRACE"), "0") != 0);
+#else
+    const bool trace_state = false;
+    if (opt->trace_state || opt->steering_dump_dir) {
+        fprintf(stderr,
+                "q38: diagnostic traces require the q38-diag binary\n");
+        return 2;
+    }
+#endif
 
     if (!q38_runtime_init(&runtime, opt->model_path, opt->tokenizer_path,
                           error, sizeof(error)) ||
@@ -1193,21 +1221,22 @@ static int cmd_generate(const q38_options *opt) {
     evidence.target_forward_index = prompt.token_count;
     q38_memory_tracker_init(&evidence.memory);
     sample_generate_memory(&evidence, runtime.model->size);
-    q38_forward_cuda_set_telemetry_observer(
-        runtime.cuda, generate_cuda_telemetry, &evidence);
+    Q38_DIAG_ONLY(q38_forward_cuda_set_telemetry_observer(
+        runtime.cuda, generate_cuda_telemetry, &evidence));
 
     q38_forward_diagnostics diagnostics;
     memset(&diagnostics, 0, sizeof(diagnostics));
-    diagnostics.stage_trace = generate_stage_trace;
-    diagnostics.boundary_trace =
-        (trace_state || opt->steering_dump_dir) ? generate_boundary_trace : NULL;
+    Q38_DIAG_ONLY(diagnostics.stage_trace = generate_stage_trace);
+    Q38_DIAG_ONLY(diagnostics.boundary_trace =
+        (trace_state || opt->steering_dump_dir) ? generate_boundary_trace : NULL);
     diagnostics.trace_user = &evidence;
     diagnostics.disable_ple = opt->disable_ple;
     size_t step_index = 0;
     uint32_t next_token = runtime.tokenizer.eos_id;
     const double prefill_started = monotonic_ms();
-    q38_decode_trace state_trace = trace_state ? generate_trace : NULL;
-    void *state_trace_user = trace_state ? &evidence : NULL;
+    q38_decode_trace state_trace =
+        Q38_DIAG_EXPR(trace_state ? generate_trace : NULL, NULL);
+    void *state_trace_user = Q38_DIAG_EXPR(trace_state ? &evidence : NULL, NULL);
     const bool prefill_ok = opt->prefill_reference
         ? q38_session_prefill_reference(
               &session, prompt.tokens, prompt.token_count, logits,
@@ -1231,10 +1260,15 @@ static int cmd_generate(const q38_options *opt) {
     if (generation_limit) {
         generated[0] = next_token;
         generated_count = 1;
+#if Q38_DIAGNOSTICS
         if (!q38_session_emit(&session, logits, next_token, state_trace,
                               state_trace_user, &step_index, error,
-                              sizeof(error)) ||
-            (!opt->json &&
+                              sizeof(error))) {
+            fprintf(stderr, "q38: first token emission: %s\n", error);
+            goto cleanup;
+        }
+#endif
+        if ((!opt->json &&
              !q38_session_stream_token(&session, next_token, stream_piece,
                                         NULL, error, sizeof(error)))) {
             fprintf(stderr, "q38: first token emission: %s\n", error);
@@ -1244,6 +1278,7 @@ static int cmd_generate(const q38_options *opt) {
                generated[generated_count - 1] !=
                    q38_session_eos_token(&session)) {
             const uint32_t input = generated[generated_count - 1];
+#if Q38_DIAGNOSTICS
             q38_decode_timing step_timing = {0};
             q38_ple_scheduler_stats step_ple = {0};
             const double eval_started = monotonic_ms();
@@ -1268,6 +1303,16 @@ static int cmd_generate(const q38_options *opt) {
                 evidence.per_token_ple_stall_ms[generated_count] =
                     step_ple.wait_ms;
             }
+#else
+            if (!q38_session_eval(
+                    &session, input, logits, Q38_DECODE_VOCAB_SIZE,
+                    &next_token, &diagnostics,
+                    Q38_DECODE_TRACE_GENERATED_CONSUME, next_token, input,
+                    NULL, NULL, &step_index, error, sizeof(error))) {
+                fprintf(stderr, "q38: decode: %s\n", error);
+                goto cleanup;
+            }
+#endif
             generated[generated_count++] = next_token;
             if (!opt->json &&
                 !q38_session_stream_token(&session, next_token, stream_piece,
@@ -1279,7 +1324,7 @@ static int cmd_generate(const q38_options *opt) {
         if (!opt->json) putchar('\n');
     }
     evidence.generated_seen = generated_count;
-    if (generated_count) {
+    if (Q38_DIAG_ENABLED && trace_state && generated_count) {
         const double diagnostic_started = monotonic_ms();
         if (!q38_session_emit(
                 &session, logits, generated[generated_count - 1],
@@ -1597,7 +1642,14 @@ int main(int argc, char **argv) {
         rc = cmd_memory_plan(&opt);
         break;
     case Q38_MODE_GENERATE:
+#if Q38_DIAGNOSTICS
+        rc = (getenv("Q38_USE_LEGACY_GENERATE") &&
+              strcmp(getenv("Q38_USE_LEGACY_GENERATE"), "0") != 0)
+            ? cmd_generate_legacy(&opt)
+            : cmd_generate(&opt);
+#else
         rc = cmd_generate(&opt);
+#endif
         break;
     default:
         rc = 2;

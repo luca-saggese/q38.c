@@ -44,11 +44,18 @@ typedef struct {
     double host_scalar_ms;
     double cuda_dispatch_ms;
     double cuda_sync_wait_ms;
+    double telemetry_callback_wall_ms;
+    double backend_host_work_ms;
     double memcpy_ms;
     double other_ms;
     uint64_t telemetry_callbacks;
     uint64_t kernel_launches;
     uint64_t host_syncs;
+    uint64_t real_cuda_sync_count;
+    double host_blocked_on_cuda_ms;
+    uint64_t sync_reason_count[Q38_CUDA_SYNC_REASON_COUNT];
+    double sync_reason_ms[Q38_CUDA_SYNC_REASON_COUNT];
+    double sync_reason_max_ms[Q38_CUDA_SYNC_REASON_COUNT];
     uint64_t h2d_bytes;
     uint64_t d2h_bytes;
     uint64_t d2d_bytes;
@@ -59,6 +66,7 @@ typedef struct {
 typedef struct {
     q2_sample sample;
     q38_forward_qsa_timing qsa_timing;
+    q38_forward_cuda_sync_stats sync_before;
 } q2_capture;
 
 typedef struct {
@@ -311,11 +319,22 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     ADD(host_scalar_ms);
     ADD(cuda_dispatch_ms);
     ADD(cuda_sync_wait_ms);
+    ADD(telemetry_callback_wall_ms);
+    ADD(backend_host_work_ms);
     ADD(memcpy_ms);
     ADD(other_ms);
     sum->telemetry_callbacks += sample->telemetry_callbacks;
     sum->kernel_launches += sample->kernel_launches;
     sum->host_syncs += sample->host_syncs;
+    sum->real_cuda_sync_count += sample->real_cuda_sync_count;
+    sum->host_blocked_on_cuda_ms += sample->host_blocked_on_cuda_ms;
+    for (size_t i = 0; i < Q38_CUDA_SYNC_REASON_COUNT; ++i) {
+        sum->sync_reason_count[i] += sample->sync_reason_count[i];
+        sum->sync_reason_ms[i] += sample->sync_reason_ms[i];
+        if (sample->sync_reason_max_ms[i] >
+            sum->sync_reason_max_ms[i])
+            sum->sync_reason_max_ms[i] = sample->sync_reason_max_ms[i];
+    }
     sum->h2d_bytes += sample->h2d_bytes;
     sum->d2h_bytes += sample->d2h_bytes;
     sum->d2d_bytes += sample->d2d_bytes;
@@ -348,6 +367,8 @@ static void divide_sample(q2_sample *sample, double divisor) {
     DIV(host_scalar_ms);
     DIV(cuda_dispatch_ms);
     DIV(cuda_sync_wait_ms);
+    DIV(telemetry_callback_wall_ms);
+    DIV(backend_host_work_ms);
     DIV(memcpy_ms);
     DIV(other_ms);
 #undef DIV
@@ -357,6 +378,14 @@ static void divide_sample(q2_sample *sample, double divisor) {
         (double)sample->kernel_launches / divisor);
     sample->host_syncs = (uint64_t)(
         (double)sample->host_syncs / divisor);
+    sample->real_cuda_sync_count = (uint64_t)(
+        (double)sample->real_cuda_sync_count / divisor);
+    sample->host_blocked_on_cuda_ms /= divisor;
+    for (size_t i = 0; i < Q38_CUDA_SYNC_REASON_COUNT; ++i) {
+        sample->sync_reason_count[i] = (uint64_t)(
+            (double)sample->sync_reason_count[i] / divisor);
+        sample->sync_reason_ms[i] /= divisor;
+    }
     sample->h2d_bytes = (uint64_t)((double)sample->h2d_bytes / divisor);
     sample->d2h_bytes = (uint64_t)((double)sample->d2h_bytes / divisor);
     sample->d2d_bytes = (uint64_t)((double)sample->d2d_bytes / divisor);
@@ -390,7 +419,7 @@ static bool parse_size_list(const char *value, q2_options *options) {
 
 static void usage(FILE *stream) {
     fprintf(stream,
-            "usage: q2_canonical_bench --mode decode|prefill|reference0 "
+            "usage: q2_canonical_bench --mode decode|prefill|reference0|quick "
             "--model MODEL --tokenizer DIR --prompt TEXT [options]\n"
             "  --generated N       decode generated token count (default 128)\n"
             "  --ctx N             session context (default 4096)\n"
@@ -444,7 +473,8 @@ static bool parse_options(int argc, char **argv, q2_options *options) {
     return options->model_path && options->tokenizer_path && options->prompt &&
            options->mode && (!strcmp(options->mode, "decode") ||
                              !strcmp(options->mode, "prefill") ||
-                             !strcmp(options->mode, "reference0")) &&
+                             !strcmp(options->mode, "reference0") ||
+                             !strcmp(options->mode, "quick")) &&
            options->generated_count && options->context_size &&
            options->prefill_chunk;
 }
@@ -494,6 +524,33 @@ static void add_telemetry_delta(q2_sample *sample,
     sample->memcpy_ms = after->upload_ms - before->upload_ms;
 }
 
+static void add_sync_delta(
+    q2_sample *sample, const q38_forward_cuda_sync_stats *before,
+    const q38_forward_cuda_sync_stats *after, double backend_overhead_ms) {
+    if (!sample || !before || !after) return;
+    sample->real_cuda_sync_count =
+        after->real_cuda_sync_count - before->real_cuda_sync_count;
+    sample->host_blocked_on_cuda_ms =
+        after->host_blocked_on_cuda_ms - before->host_blocked_on_cuda_ms;
+    sample->cuda_sync_wait_ms = sample->host_blocked_on_cuda_ms;
+    sample->telemetry_callback_wall_ms =
+        after->telemetry_callback_wall_ms -
+        before->telemetry_callback_wall_ms;
+    sample->backend_host_work_ms = backend_overhead_ms >
+        sample->host_blocked_on_cuda_ms +
+        sample->telemetry_callback_wall_ms
+        ? backend_overhead_ms - sample->host_blocked_on_cuda_ms -
+          sample->telemetry_callback_wall_ms
+        : 0.0;
+    for (size_t i = 0; i < Q38_CUDA_SYNC_REASON_COUNT; ++i) {
+        sample->sync_reason_count[i] =
+            after->reason_count[i] - before->reason_count[i];
+        sample->sync_reason_ms[i] =
+            after->reason_ms[i] - before->reason_ms[i];
+        sample->sync_reason_max_ms[i] = after->reason_max_ms[i];
+    }
+}
+
 static void finalize_other(q2_sample *sample) {
     double accounted;
     double total;
@@ -539,6 +596,9 @@ static bool run_decode(q38_session *session, const q2_options *options,
     memset(&prefill_capture, 0, sizeof(prefill_capture));
     diagnostics.trace_user = &prefill_capture;
     diagnostics.qsa_timing = &prefill_capture.qsa_timing;
+    q38_forward_cuda_reset_sync_stats(session->runtime->cuda);
+    q38_forward_cuda_get_sync_stats(session->runtime->cuda,
+                                    &prefill_capture.sync_before);
     if (!q38_session_prefill_chunked(
             session, prompt->tokens, prompt->token_count,
             options->prefill_chunk, logits, VOCAB_SIZE, &next_token,
@@ -557,6 +617,9 @@ static bool run_decode(q38_session *session, const q2_options *options,
         q38_ple_scheduler_stats ple = {0};
         const double started = now_ms();
         memset(&capture, 0, sizeof(capture));
+        q38_forward_cuda_reset_sync_stats(session->runtime->cuda);
+        q38_forward_cuda_get_sync_stats(session->runtime->cuda,
+                                        &capture.sync_before);
         diagnostics.trace_user = &capture;
         diagnostics.qsa_timing = &capture.qsa_timing;
         telemetry_before = *telemetry;
@@ -577,6 +640,11 @@ static bool run_decode(q38_session *session, const q2_options *options,
         capture.sample.ple_overlap_ms = ple.overlap_ms;
         apply_qsa_timing(&capture.sample, &capture.qsa_timing);
         add_telemetry_delta(&capture.sample, &telemetry_before, telemetry);
+        q38_forward_cuda_sync_stats sync_after;
+        q38_forward_cuda_get_sync_stats(session->runtime->cuda,
+                                        &sync_after);
+        add_sync_delta(&capture.sample, &capture.sync_before, &sync_after,
+                       capture.sample.cuda_dispatch_ms);
         finalize_other(&capture.sample);
         generated[index] = next_token;
         if (index >= options->measure_first &&
@@ -616,6 +684,9 @@ static bool run_prefill_case(
     diagnostics.stage_trace = stage_trace;
     diagnostics.trace_user = &capture;
     diagnostics.qsa_timing = &qsa_timing;
+    q38_forward_cuda_reset_sync_stats(session->runtime->cuda);
+    q38_forward_cuda_get_sync_stats(session->runtime->cuda,
+                                    &capture.sync_before);
     q38_forward_cuda_set_telemetry_observer(
         session->runtime->cuda, telemetry_observer, telemetry);
     before = *telemetry;
@@ -627,6 +698,10 @@ static bool run_prefill_case(
     sample->wall_ms = now_ms() - started;
     apply_qsa_timing(sample, &qsa_timing);
     add_telemetry_delta(sample, &before, telemetry);
+    q38_forward_cuda_sync_stats sync_after;
+    q38_forward_cuda_get_sync_stats(session->runtime->cuda, &sync_after);
+    add_sync_delta(sample, &capture.sync_before, &sync_after,
+                   sample->cuda_dispatch_ms);
     finalize_other(sample);
     *logits_hash = hash_bytes(logits, VOCAB_SIZE * sizeof(*logits));
     *finite = true;
@@ -708,6 +783,238 @@ static bool reference_correct_prefill(
            warm_hash == reference->logits_hashes[0];
 }
 
+static int compare_double_values(const void *left, const void *right) {
+    const double a = *(const double *)left;
+    const double b = *(const double *)right;
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+static double decode_sample_percentile(const q2_decode_run *run,
+                                       const q2_options *options,
+                                       double percentile) {
+    const size_t count = options->measure_last - options->measure_first + 1;
+    double *values = calloc(count, sizeof(*values));
+    if (!values) return 0.0;
+    size_t index = 0;
+    for (size_t i = options->measure_first;
+         i <= options->measure_last; ++i)
+        values[index++] = run->samples[i].wall_ms;
+    qsort(values, count, sizeof(*values), compare_double_values);
+    size_t rank = (size_t)ceil(percentile * (double)count);
+    if (!rank) rank = 1;
+    if (rank > count) rank = count;
+    const double result = values[rank - 1];
+    free(values);
+    return result;
+}
+
+static double quick_percentile(const q2_decode_run *runs, size_t run_count,
+                               const q2_options *options, double percentile) {
+    const size_t per_run =
+        options->measure_last - options->measure_first + 1;
+    const size_t count = run_count * per_run;
+    double *values = calloc(count, sizeof(*values));
+    if (!values) return 0.0;
+    size_t index = 0;
+    for (size_t run = 0; run < run_count; ++run)
+        for (size_t i = options->measure_first;
+             i <= options->measure_last; ++i)
+            values[index++] = runs[run].samples[i].wall_ms;
+    qsort(values, count, sizeof(*values), compare_double_values);
+    size_t rank = (size_t)ceil(percentile * (double)count);
+    if (!rank) rank = 1;
+    if (rank > count) rank = count;
+    const double result = values[rank - 1];
+    free(values);
+    return result;
+}
+
+static void free_decode_run(q2_decode_run *run);
+
+static void print_sync_stats_json(const q38_forward_cuda_sync_stats *stats) {
+    printf("{\"real_cuda_sync_count\":%" PRIu64
+           ",\"host_blocked_on_cuda_ms\":%.6f,"
+           "\"telemetry_callback_wall_ms\":%.6f,\"reasons\":[",
+           stats ? stats->real_cuda_sync_count : 0,
+           stats ? stats->host_blocked_on_cuda_ms : 0.0,
+           stats ? stats->telemetry_callback_wall_ms : 0.0);
+    for (size_t i = 0; i < Q38_CUDA_SYNC_REASON_COUNT; ++i) {
+        if (i) putchar(',');
+        printf("{\"reason\":");
+        json_string(q38_forward_cuda_sync_reason_name(
+            (q38_forward_cuda_sync_reason)i));
+        printf(",\"count\":%" PRIu64 ",\"total_ms\":%.6f,"
+               "\"mean_us\":%.6f,\"max_us\":%.6f}",
+               stats ? stats->reason_count[i] : 0,
+               stats ? stats->reason_ms[i] : 0.0,
+               stats && stats->reason_count[i]
+                   ? stats->reason_ms[i] * 1000.0 /
+                         (double)stats->reason_count[i]
+                   : 0.0,
+               stats ? stats->reason_max_ms[i] * 1000.0 : 0.0);
+    }
+    printf("]}");
+}
+
+static bool run_quick(
+    q38_session *session, const q2_options *options,
+    const q38_token_batch *seed, float *logits,
+    const q38_forward_cuda_sync_stats *init_sync,
+    char *error, size_t error_len) {
+    enum { QUICK_RUNS = 2 };
+    q2_telemetry telemetry = {0};
+    q2_memory memory = {0};
+    q2_decode_run warmup = {0};
+    q2_decode_run runs[QUICK_RUNS] = {{0}};
+    q2_sample aggregate = {0};
+    q38_forward_cuda_residency_stats residency = {0};
+    q2_hardware hardware;
+    bool generated_ids_identical = false;
+    bool final_hash_identical = false;
+    bool all_finite = false;
+    bool green = false;
+    query_hardware(&hardware);
+    observe_memory(&memory);
+    q38_session_reset(session);
+    if (!run_decode(session, options, seed, logits, &telemetry,
+                    &warmup.summary, &warmup.samples, &warmup.generated,
+                    &warmup.final_hash, &warmup.finite, error, error_len))
+        goto cleanup;
+    for (size_t run = 0; run < QUICK_RUNS; ++run) {
+        q38_session_reset(session);
+        if (!run_decode(session, options, seed, logits, &telemetry,
+                        &runs[run].summary, &runs[run].samples,
+                        &runs[run].generated, &runs[run].final_hash,
+                        &runs[run].finite, error, error_len))
+            goto cleanup;
+        add_sample(&aggregate, &runs[run].summary);
+    }
+    divide_sample(&aggregate, QUICK_RUNS);
+    double min_wall = runs[0].samples[options->measure_first].wall_ms;
+    double max_wall = min_wall;
+    for (size_t run = 0; run < QUICK_RUNS; ++run)
+        for (size_t i = options->measure_first;
+             i <= options->measure_last; ++i) {
+            min_wall = fmin(min_wall, runs[run].samples[i].wall_ms);
+            max_wall = fmax(max_wall, runs[run].samples[i].wall_ms);
+        }
+    generated_ids_identical = reference_correct_decode(
+        runs, QUICK_RUNS, &warmup, options);
+    final_hash_identical = runs[0].final_hash == runs[1].final_hash;
+    all_finite = warmup.finite && runs[0].finite && runs[1].finite;
+    q38_forward_cuda_get_residency_stats(session->runtime->cuda, &residency);
+    const bool fallback_zero = residency.q2_gate_up_fallback_calls == 0;
+    const bool upload_zero = telemetry.non_ple_upload_bytes == 0;
+    const bool miss_zero = telemetry.non_ple_residency_misses == 0;
+    const bool ple_stall_zero = aggregate.ple_critical_stall_ms == 0.0;
+    green = generated_ids_identical && final_hash_identical && all_finite &&
+            fallback_zero && upload_zero && miss_zero && ple_stall_zero &&
+            residency.all_non_ple_resident;
+    printf("{\"format\":\"q2-cuda-wait-attribution-raw-v1\","
+           "\"reference_id\":\"Q2_CUDA_WAIT_ATTRIBUTION_V1\","
+           "\"baseline_reference\":\"Q2_DECODE_REFERENCE_0\","
+           "\"benchmark_kind\":\"quick_integration_attribution\","
+           "\"prompt\":");
+    json_string(options->prompt);
+    printf(",\"prompt_ids\":");
+    print_ids(seed->tokens, seed->token_count);
+    printf(",\"context_size\":%zu,\"generated_count\":%zu,"
+           "\"measure_first\":%zu,\"measure_last\":%zu,"
+           "\"warmup_runs\":1,\"measured_runs\":%d,"
+           "\"init_sync\":",
+           options->context_size, options->generated_count,
+           options->measure_first, options->measure_last, QUICK_RUNS);
+    print_sync_stats_json(init_sync);
+    printf(",\"runs\":[");
+    for (size_t run = 0; run < QUICK_RUNS; ++run) {
+        double run_min = runs[run].samples[options->measure_first].wall_ms;
+        double run_max = run_min;
+        if (run) putchar(',');
+        for (size_t i = options->measure_first + 1;
+             i <= options->measure_last; ++i) {
+            run_min = fmin(run_min, runs[run].samples[i].wall_ms);
+            run_max = fmax(run_max, runs[run].samples[i].wall_ms);
+        }
+        printf("{\"run\":%zu,\"p95_wall_ms\":%.6f,"
+               "\"min_wall_ms\":%.6f,\"max_wall_ms\":%.6f,",
+               run + 1,
+               decode_sample_percentile(&runs[run], options, 0.95),
+               run_min, run_max);
+        print_decode_run(&runs[run], options);
+    }
+    printf("],\"aggregate\":");
+    print_sample(&aggregate);
+    printf(",\"throughput_tok_s\":%.9f,\"p95_wall_ms\":%.6f,"
+           "\"min_wall_ms\":%.6f,\"max_wall_ms\":%.6f,"
+           "\"correctness\":{\"green\":%s,"
+           "\"generated_ids_identical\":%s,\"final_logits_hash_identical\":%s,"
+           "\"argmax_final_identical\":%s,\"nan_inf\":%s,"
+           "\"fallback\":%s,\"non_ple_upload_bytes\":%" PRIu64
+           ",\"non_ple_residency_misses\":%" PRIu64
+           ",\"ple_critical_stall_ms\":%.6f},"
+           "\"prefill\":{\"status\":\"not_run\"},"
+           "\"residency\":{\"all_non_ple_resident\":%s,"
+           "\"persistent_resident_bytes\":%zu,"
+           "\"persistent_resident_tensors\":%" PRIu64
+           ",\"persistent_ple_entries\":%" PRIu64
+           ",\"non_ple_upload_bytes\":%" PRIu64
+           ",\"non_ple_residency_misses\":%" PRIu64
+           ",\"q2_gate_up_fallback_calls\":%" PRIu64 "},",
+           aggregate.wall_ms > 0.0 ? 1000.0 / aggregate.wall_ms : 0.0,
+           quick_percentile(runs, QUICK_RUNS, options, 0.95),
+           min_wall, max_wall,
+           green ? "true" : "false",
+           generated_ids_identical ? "true" : "false",
+           final_hash_identical ? "true" : "false",
+           generated_ids_identical ? "true" : "false",
+           all_finite ? "false" : "true", fallback_zero ? "false" : "true",
+           telemetry.non_ple_upload_bytes,
+           telemetry.non_ple_residency_misses,
+           aggregate.ple_critical_stall_ms,
+           residency.all_non_ple_resident ? "true" : "false",
+           residency.persistent_resident_bytes,
+           residency.persistent_resident_tensors,
+           residency.persistent_ple_entries,
+           telemetry.non_ple_upload_bytes,
+           telemetry.non_ple_residency_misses,
+           residency.q2_gate_up_fallback_calls);
+    print_hardware(&hardware);
+    putchar(',');
+    print_memory(&memory);
+    printf("}\n");
+cleanup:
+    free_decode_run(&warmup);
+    for (size_t run = 0; run < QUICK_RUNS; ++run)
+        free_decode_run(&runs[run]);
+    return green;
+}
+
+static void print_sync_attribution(const q2_sample *sample) {
+    printf("\"sync_attribution\":{\"real_cuda_sync_count\":%" PRIu64
+           ",\"host_blocked_on_cuda_ms\":%.6f,"
+           "\"telemetry_callback_wall_ms\":%.6f,"
+           "\"backend_host_work_ms\":%.6f,\"reasons\":[",
+           sample->real_cuda_sync_count, sample->host_blocked_on_cuda_ms,
+           sample->telemetry_callback_wall_ms,
+           sample->backend_host_work_ms);
+    for (size_t i = 0; i < Q38_CUDA_SYNC_REASON_COUNT; ++i) {
+        if (i) putchar(',');
+        printf("{\"reason\":");
+        json_string(q38_forward_cuda_sync_reason_name(
+            (q38_forward_cuda_sync_reason)i));
+        printf(",\"count\":%" PRIu64 ",\"total_ms\":%.6f,"
+               "\"mean_us\":%.6f,\"max_us\":%.6f}",
+               sample->sync_reason_count[i],
+               sample->sync_reason_ms[i],
+               sample->sync_reason_count[i]
+                   ? sample->sync_reason_ms[i] * 1000.0 /
+                         (double)sample->sync_reason_count[i]
+                   : 0.0,
+               sample->sync_reason_max_ms[i] * 1000.0);
+    }
+    printf("]}");
+}
+
 static void print_sample(const q2_sample *sample) {
     printf("{\"wall_ms\":%.6f,\"forward_core_ms\":%.6f,"
            "\"argmax_ms\":%.6f,\"bookkeeping_ms\":%.6f,"
@@ -724,9 +1031,11 @@ static void print_sample(const q2_sample *sample) {
            "\"memcpy\":{\"ms\":%.6f},"
            "\"PLE_critical_stall\":{\"ms\":%.6f},"
            "\"other\":{\"ms\":%.6f}},"
-           "\"traffic\":{\"kernel_launches\":%" PRIu64
-           ",\"host_syncs\":%" PRIu64 ",\"h2d_bytes\":%" PRIu64
-           ",\"d2h_bytes\":%" PRIu64 ",\"d2d_bytes\":%" PRIu64 "}}",
+           "\"traffic\":{\"kernel_launches\":null,\"host_syncs\":null,"
+           "\"legacy_kernel_launches\":%" PRIu64
+           ",\"legacy_host_syncs\":%" PRIu64
+           ",\"telemetry_callbacks\":%" PRIu64 ",\"h2d_bytes\":%" PRIu64
+           ",\"d2h_bytes\":%" PRIu64 ",\"d2d_bytes\":%" PRIu64 "}",
            sample->wall_ms, sample->forward_ms, sample->argmax_ms,
            sample->bookkeeping_ms, sample->ple_critical_stall_ms,
            sample->ple_elapsed_ms, sample->ple_overlap_ms, sample->qsa_ms,
@@ -738,8 +1047,12 @@ static void print_sample(const q2_sample *sample) {
            sample->cuda_dispatch_ms, sample->cuda_sync_wait_ms,
            sample->memcpy_ms, sample->ple_critical_stall_ms,
            sample->other_ms,
-           sample->kernel_launches, sample->host_syncs, sample->h2d_bytes,
+           sample->kernel_launches, sample->host_syncs,
+           sample->telemetry_callbacks, sample->h2d_bytes,
            sample->d2h_bytes, sample->d2d_bytes);
+    putchar(',');
+    print_sync_attribution(sample);
+    putchar('}');
 }
 
 static void free_decode_run(q2_decode_run *run) {
@@ -900,6 +1213,7 @@ static int run(const q2_options *options) {
     q38_token_batch seed = {0};
     float *logits = NULL;
     q2_telemetry telemetry = {0};
+    q38_forward_cuda_sync_stats init_sync = {0};
     bool session_ready = false;
     int result = 1;
     if (!q38_runtime_init(&runtime, options->model_path,
@@ -911,11 +1225,13 @@ static int run(const q2_options *options) {
                 error);
         goto cleanup;
     }
+    q38_forward_cuda_reset_sync_stats(runtime.cuda);
     if (!q38_session_create(&session, &runtime, (uint32_t)options->context_size,
                             error, sizeof(error))) {
         fprintf(stderr, "canonical benchmark session failed: %s\n", error);
         goto cleanup;
     }
+    q38_forward_cuda_get_sync_stats(runtime.cuda, &init_sync);
     session_ready = true;
     logits = calloc(VOCAB_SIZE, sizeof(*logits));
     if (!logits) goto cleanup;
@@ -924,6 +1240,13 @@ static int run(const q2_options *options) {
         if (!run_reference0(&session, options, &seed, logits, &residency,
                             error, sizeof(error))) {
             fprintf(stderr, "canonical reference 0 failed: %s\n", error);
+            goto cleanup;
+        }
+    } else if (!strcmp(options->mode, "quick")) {
+        if (!run_quick(&session, options, &seed, logits, &init_sync,
+                       error, sizeof(error))) {
+            fprintf(stderr, "canonical CUDA wait attribution failed: %s\n",
+                    error);
             goto cleanup;
         }
     } else if (!strcmp(options->mode, "decode")) {

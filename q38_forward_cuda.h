@@ -3,7 +3,9 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
+#include "q38_diagnostics.h"
 #include "q38_forward.h"
 #include "q38_qsa_candidate.h"
 #include "q38_directional_steering.h"
@@ -14,6 +16,35 @@ extern "C" {
 
 typedef struct q38_forward_cuda_context q38_forward_cuda_context;
 typedef void (*q38_forward_cuda_allocation_observer)(size_t bytes, void *user);
+
+typedef enum {
+    Q38_CUDA_SYNC_MOE_ROUTED_D2H = 0,
+    Q38_CUDA_SYNC_MOE_GROUPED_D2H,
+    Q38_CUDA_SYNC_GDN_OUTPUT,
+    Q38_CUDA_SYNC_GDN_TRACE_STATE,
+    Q38_CUDA_SYNC_GR_READ,
+    Q38_CUDA_SYNC_GR_WRITE,
+    Q38_CUDA_SYNC_QSA_QKV,
+    Q38_CUDA_SYNC_MATVEC_D2H,
+    Q38_CUDA_SYNC_MATRIX_D2H,
+    Q38_CUDA_SYNC_MATRIX_BATCH_D2H,
+    Q38_CUDA_SYNC_ARGMAX,
+    Q38_CUDA_SYNC_PLE_STAGE_WAIT,
+    Q38_CUDA_SYNC_RESIDENCY_INIT,
+    Q38_CUDA_SYNC_STEERING_INIT,
+    Q38_CUDA_SYNC_LM_HEAD_RESIDENCY_INIT,
+    Q38_CUDA_SYNC_REASON_COUNT
+} q38_forward_cuda_sync_reason;
+
+typedef struct {
+    uint64_t real_cuda_sync_count;
+    double host_blocked_on_cuda_ms;
+    double telemetry_callback_wall_ms;
+    uint64_t reason_count[Q38_CUDA_SYNC_REASON_COUNT];
+    double reason_ms[Q38_CUDA_SYNC_REASON_COUNT];
+    double reason_max_ms[Q38_CUDA_SYNC_REASON_COUNT];
+} q38_forward_cuda_sync_stats;
+
 typedef struct q38_forward_cuda_telemetry {
     const char *subsystem;
     uint32_t layer;
@@ -134,6 +165,12 @@ bool q38_forward_cuda_prepare_lm_head(
 void q38_forward_cuda_get_residency_stats(
     const q38_forward_cuda_context *context,
     q38_forward_cuda_residency_stats *stats);
+void q38_forward_cuda_get_sync_stats(
+    const q38_forward_cuda_context *context,
+    q38_forward_cuda_sync_stats *stats);
+void q38_forward_cuda_reset_sync_stats(q38_forward_cuda_context *context);
+const char *q38_forward_cuda_sync_reason_name(
+    q38_forward_cuda_sync_reason reason);
 void q38_forward_cuda_set_qsa_candidate(
     q38_forward_cuda_context *context, q38_qsa_candidate_fn candidate);
 void q38_forward_cuda_record_route(
@@ -142,6 +179,8 @@ void q38_forward_cuda_get_expert_layer_calls(
     const q38_forward_cuda_context *context, uint32_t layer,
     uint64_t *fast_calls, uint64_t *legacy_calls);
 void q38_forward_cuda_reset_gdn_state(q38_forward_cuda_context *context);
+bool q38_forward_cuda_load_gdn_state(
+    const q38_forward_state *state, void *user, char *error, size_t error_len);
 bool q38_forward_cuda_sync_gdn_state(
     q38_forward_state *state, void *user, char *error, size_t error_len);
 

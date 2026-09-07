@@ -45,7 +45,7 @@ typedef struct {
     bool platform;        /* --platform */
     bool disable_ple;     /* --disable-ple diagnostic */
     bool prefill_reference;
-    bool trace_state;     /* --trace-state / Q38_DIAGNOSTIC_STATE_TRACE */
+    bool trace_state;     /* q38-diag --trace-state / Q38_DIAGNOSTIC_STATE_TRACE */
     bool json;            /* --json */
     bool verbose;         /* --verbose */
     const char *directional_steering_file;

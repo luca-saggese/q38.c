@@ -66,7 +66,7 @@ Reference 0 commit.
 
 ## BUILD
 
-The default build is production CUDA build mode:
+The default `q38` build is production CUDA build mode:
 
 ```text
 CC: cc
@@ -74,12 +74,27 @@ CFLAGS: -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -p
 NVCC: /usr/local/cuda/bin/nvcc
 NVCC flags: -O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a
 CUDA architecture: sm_121a
-Build type: production -O3
+Build target: make q38
+Object directory: build/release
+Build type: production -O3, Q38_DIAGNOSTICS=0
 PERF_SCHEMA: PERF_SCHEMA_V2
 ```
 
-No full-state trace, semantic state snapshot, or invasive diagnostic probe may
-be enabled in the timed region.
+The `q38` binary is the only binary for production performance claims. It must
+be built from the shared runtime source tree with `Q38_DIAGNOSTICS=0`, which
+compiles fine-grained attribution callbacks, state snapshots, CUDA event timing,
+and hot-path diagnostic counters out of the release objects.
+
+The `q38-diag` target uses the same runtime source files and execution path, but
+stores objects under `build/diag` and compiles with `Q38_DIAGNOSTICS=1`.
+`q38-diag` is for attribution and investigation only. Its `--trace-state` flag
+is optional and off by default; enabling it collects semantic state snapshots
+outside the production performance protocol.
+
+No full-state trace, semantic state snapshot, attribution telemetry callback, or
+invasive diagnostic probe may be enabled in a production timed region. If an
+attribution run is needed, label it as a diagnostic benchmark and do not compare
+its wall time directly against production `q38` results.
 
 ## HARDWARE
 
@@ -189,6 +204,14 @@ Decode artifacts report:
 
 - wall median, p95, minimum, maximum, and standard deviation;
 - tokens per second;
+
+Production performance artifacts are authoritative for wall time and throughput.
+They may include only correctness, residency-contract pass/fail summaries, and
+coarse run metadata that do not add hot-path instrumentation.
+
+Attribution benchmark artifacts are produced with `q38-diag` and may additionally
+report:
+
 - QSA;
 - MoE;
 - GDN;

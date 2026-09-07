@@ -1,15 +1,26 @@
 #include "q38_decode.h"
+#include "q38_diagnostics.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+typedef struct q38_forward_cuda_context q38_forward_cuda_context;
+extern bool q38_forward_cuda_matrix_backend(
+    const q38_gguf *, const q38_tensor *, const float *, size_t, size_t,
+    float *, void *, char *, size_t) __attribute__((weak));
+extern bool q38_forward_cuda_greedy_argmax(
+    q38_forward_cuda_context *, uint32_t *, char *, size_t)
+    __attribute__((weak));
 
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
     return false;
 }
 
+#if Q38_DIAGNOSTICS
 static double decode_now_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
@@ -215,6 +226,9 @@ static bool snapshot_state(const q38_forward_state *state,
     }
     return true;
 }
+#else
+#define decode_now_ms() 0.0
+#endif
 
 static bool q38_decode_backend(const q38_gguf *model,
                 const q38_weights *weights,
@@ -269,11 +283,22 @@ static bool q38_decode_backend(const q38_gguf *model,
         }
     }
     if (timing) timing->argmax_cpu_ms = decode_now_ms() - argmax_started;
-    /*
-     * Keep the token decision tied to the validated host logits.  The CUDA
-     * backend may retain a separate device output buffer, so replacing this
-     * result with a device-side argmax can select a stale previous projection.
-     */
+    if (!getenv("Q38_NO_GPU_ARGMAX") &&
+        q38_forward_cuda_matrix_backend &&
+        q38_forward_cuda_greedy_argmax &&
+        matrix_backend == q38_forward_cuda_matrix_backend) {
+        const double gpu_started = decode_now_ms();
+        uint32_t device_best = 0;
+        if (!q38_forward_cuda_greedy_argmax(
+                (q38_forward_cuda_context *)backend_user, &device_best,
+                error, error_len))
+            return false;
+        if (device_best >= Q38_DECODE_VOCAB_SIZE)
+            return fail(error, error_len,
+                        "CUDA greedy argmax returned an invalid token");
+        best = device_best;
+        if (timing) timing->argmax_gpu_ms = decode_now_ms() - gpu_started;
+    }
     if (timing) {
         timing->argmax_ms = decode_now_ms() - argmax_started;
         timing->total_ms = decode_now_ms() - total_started;
@@ -282,11 +307,15 @@ static bool q38_decode_backend(const q38_gguf *model,
     return true;
 }
 
+#if Q38_DIAGNOSTICS
 static bool q38_decode_trace_step(
     const q38_forward_state *state, const float *logits, size_t step_index,
     q38_decode_trace_kind kind, uint32_t input_token, uint32_t next_token,
     uint32_t emitted_token, uint32_t consumed_token, bool state_committed,
     q38_decode_trace trace, void *trace_user, char *error, size_t error_len);
+#else
+#define q38_decode_trace_step(...) true
+#endif
 
 bool q38_decode_step_with_matrix_moe_layer_backend(
     const q38_gguf *model, const q38_weights *weights,
@@ -417,6 +446,7 @@ bool q38_decode_emit_trace(
         error, error_len);
 }
 
+#if Q38_DIAGNOSTICS
 static bool q38_decode_trace_step(
     const q38_forward_state *state, const float *logits, size_t step_index,
     q38_decode_trace_kind kind, uint32_t input_token, uint32_t next_token,
@@ -454,6 +484,7 @@ static bool q38_decode_trace_step(
                     "decode logits contain a non-finite value");
     return trace(&snapshot, trace_user, error, error_len);
 }
+#endif
 
 bool q38_decode_stream_with_matrix_backend(
     const q38_gguf *model, const q38_weights *weights,

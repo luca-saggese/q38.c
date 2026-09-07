@@ -1,4 +1,5 @@
 #include "q38_session.h"
+#include "q38_diagnostics.h"
 #include "q38_forward_cuda.h"
 #include "q38_gr_ref.h"
 
@@ -50,12 +51,16 @@ static bool fail(char *error, size_t error_len, const char *message) {
     return false;
 }
 
+#if Q38_DIAGNOSTICS
 static double session_now_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
     return (double)ts.tv_sec * 1000.0 +
            (double)ts.tv_nsec / 1000000.0;
 }
+#else
+#define session_now_ms() 0.0
+#endif
 
 static void runtime_zero(q38_runtime *runtime) {
     if (runtime) memset(runtime, 0, sizeof(*runtime));

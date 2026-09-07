@@ -1,0 +1,484 @@
+{
+  "schema_version": "PERF_SCHEMA_V2",
+  "timer_schema_version": "PERF_SCHEMA_V2",
+  "timestamp_utc": "2026-09-07T11:29:15.478213+00:00",
+  "REF_ID": "Q2_CUDA_WAIT_ATTRIBUTION_V1",
+  "ref_id": "Q2_CUDA_WAIT_ATTRIBUTION_V1",
+  "baseline_reference": "Q2_DECODE_REFERENCE_0",
+  "benchmark_kind": "cuda_wait_attribution_quick",
+  "comparison_key": {
+    "model_fingerprint": "68b29ce24ab62bf2cbcd8bbdeff5e6d36941e5b00e2fe34df90e92f98d51f518",
+    "quant_recipe": "739fffc7bc1ebaccfcdf6efb621e23a1cd6d68f2cc9f6839861c3a0d774410c7",
+    "tokenizer_fingerprint": "5f35fb517d3a016e4ca70d175e921ba5e9c92f7352663516a28f001b7225b93d",
+    "execution_path": "q38_runtime -> q38_session -> q38_session_eval",
+    "sampling": "greedy, temperature=0",
+    "measurement_window": "generated positions 1..15"
+  },
+  "build": {
+    "binary": "/tmp/q2_canonical_bench_diag",
+    "branch": "qwen38-spark-proto",
+    "build_type": "diagnostic -O3",
+    "cflags": "-O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -I. -pthread -DQ38_DIAGNOSTICS=1",
+    "nvccflags": "-O3 -g -lineinfo --use_fast_math -gencode arch=compute_121a,code=sm_121a -DQ38_DIAGNOSTICS=1",
+    "cuda_arch": "sm_121a",
+    "git_commit": "178a937ffb048a477e1938de3c6c521088a86ba1",
+    "git_dirty": true
+  },
+  "model": {
+    "path": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+    "fingerprint": {
+      "kind": "sha256",
+      "value": "68b29ce24ab62bf2cbcd8bbdeff5e6d36941e5b00e2fe34df90e92f98d51f518"
+    },
+    "quant_recipe": {
+      "manifest": "tools/quant_manifest_q2.json",
+      "sha256": "739fffc7bc1ebaccfcdf6efb621e23a1cd6d68f2cc9f6839861c3a0d774410c7"
+    }
+  },
+  "model_fingerprint": {
+    "kind": "sha256",
+    "value": "68b29ce24ab62bf2cbcd8bbdeff5e6d36941e5b00e2fe34df90e92f98d51f518"
+  },
+  "quant_recipe": {
+    "manifest": "tools/quant_manifest_q2.json",
+    "sha256": "739fffc7bc1ebaccfcdf6efb621e23a1cd6d68f2cc9f6839861c3a0d774410c7"
+  },
+  "tokenizer": {
+    "path": "/home/lvx/q38model",
+    "fingerprint": {
+      "kind": "sha256",
+      "value": "5f35fb517d3a016e4ca70d175e921ba5e9c92f7352663516a28f001b7225b93d"
+    }
+  },
+  "tokenizer_fingerprint": {
+    "kind": "sha256",
+    "value": "5f35fb517d3a016e4ca70d175e921ba5e9c92f7352663516a28f001b7225b93d"
+  },
+  "hardware": {
+    "device": "NVIDIA GB10",
+    "gpu": "DGX Spark / GB10",
+    "cpu_arch": "aarch64",
+    "cuda_driver_version": 13000,
+    "cuda_runtime_version": 13000,
+    "cuda_total_bytes": 130596646912,
+    "unified_memory_bytes": 130596646912
+  },
+  "execution": {
+    "path": "q38_runtime -> q38_session -> q38_session_eval",
+    "sampling": "greedy, temperature=0",
+    "mtp": false,
+    "speculative_decode": false,
+    "ple_policy": "file_backed",
+    "non_ple_residency": "resident_required",
+    "model_loads": 1,
+    "warmup_runs": 1,
+    "measured_runs": 2,
+    "context_size": 4096,
+    "generated_count": 16,
+    "measurement_window": {
+      "first": 1,
+      "last": 15,
+      "count": 30
+    },
+    "trace_state": false,
+    "semantic_reset": "between runs"
+  },
+  "prompt": "Explain in simple terms why the sky appears blue during the day and red near sunset.",
+  "prompt_ids": [
+    814,
+    20139,
+    303,
+    4145,
+    3665,
+    3069,
+    279,
+    12515,
+    7701,
+    6105,
+    2261,
+    279,
+    1834,
+    321,
+    2438,
+    3043,
+    41564,
+    13
+  ],
+  "generated_ids": [
+    271,
+    248068,
+    198,
+    760,
+    1156,
+    6587,
+    264,
+    4145,
+    15673,
+    314,
+    3069,
+    279,
+    12515,
+    369,
+    6105,
+    2261
+  ],
+  "correctness": {
+    "green": true,
+    "generated_ids_identical": true,
+    "final_logits_hash_identical": true,
+    "final_logits_hash": "6f70a097a4b4b923",
+    "argmax_final_identical": true,
+    "argmax_final_token": 2261,
+    "nan_inf": false,
+    "fallback": false,
+    "non_ple_upload_bytes": 0,
+    "non_ple_residency_misses": 0,
+    "ple_critical_stall_ms": 0.0
+  },
+  "timings": {
+    "wall_ms_per_token": {
+      "median": 304.3425595,
+      "p95": 310.108543,
+      "min": 299.88633,
+      "max": 311.784986,
+      "mean": 304.5895892,
+      "stddev": 2.806196791780033
+    },
+    "throughput_tok_s": 3.283106302570896,
+    "per_run": [
+      {
+        "run": 1,
+        "wall_ms_per_token": 304.800257,
+        "p95_wall_ms": 311.784986,
+        "min_wall_ms": 299.88633,
+        "max_wall_ms": 311.784986
+      },
+      {
+        "run": 2,
+        "wall_ms_per_token": 304.378921,
+        "p95_wall_ms": 307.936767,
+        "min_wall_ms": 300.034122,
+        "max_wall_ms": 307.936767
+      }
+    ]
+  },
+  "subsystem_breakdown_ms_per_token": {
+    "QSA": 29.331878,
+    "MoE": 19.8727455,
+    "GDN": 22.4507395,
+    "GR": 14.2350515,
+    "LM_head": 5.482189,
+    "argmax": 0.5109285714285714,
+    "cuda_dispatch": 9.4482265,
+    "memcpy": 0.6872095,
+    "cuda_sync_wait": 2.997002,
+    "PLE_critical_stall": 0.0,
+    "other_legacy_residual": 212.70606700000002
+  },
+  "qsa_breakdown_ms_per_token": {
+    "ms": 29.331878,
+    "qkv_ms": 14.7584625,
+    "output_projection_ms": 2.0095255,
+    "attention_ms": 1.3147665000000002,
+    "index_compress_ms": 10.291872999999999,
+    "state_glue_ms": 0.9572499999999999
+  },
+  "sync_attribution": {
+    "clock": "CLOCK_MONOTONIC_RAW",
+    "existing_synchronizations_only": true,
+    "new_cuda_sync_calls_added": 0,
+    "real_cuda_sync_count": {
+      "total_measured_tokens": 406110,
+      "per_measured_token": 13537.0
+    },
+    "host_blocked_on_cuda_ms": {
+      "total_measured_tokens": 89.91007,
+      "per_measured_token": 2.9970023333333335
+    },
+    "telemetry_callback_wall_ms": {
+      "total_measured_tokens": 11.230537,
+      "per_measured_token": 0.3743512333333333
+    },
+    "backend_host_work_ms_residual_estimate": {
+      "total_measured_tokens": 182.306196,
+      "per_measured_token": 6.0768732
+    },
+    "reason_count_sum_check": {
+      "sum_reason_counts": 406110,
+      "real_cuda_sync_count": 406110,
+      "passed": true
+    },
+    "reason_elapsed_sum_check": {
+      "sum_reason_ms": 89.910069,
+      "host_blocked_on_cuda_ms": 89.91007,
+      "absolute_difference_ms": 1.0000000116860974e-06,
+      "passed": true
+    },
+    "reasons": {
+      "MOE_ROUTED_D2H": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      },
+      "MOE_GROUPED_D2H": {
+        "count_total": 1440,
+        "count_per_measured_token": 48.0,
+        "total_ms_total": 0.335344,
+        "total_ms_per_measured_token": 0.011178133333333333,
+        "mean_us_per_wait": 0.23287777777777777,
+        "max_us_per_wait": 2.815962
+      },
+      "GDN_OUTPUT": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      },
+      "GDN_TRACE_STATE": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      },
+      "GR_READ": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      },
+      "GR_WRITE": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      },
+      "QSA_QKV": {
+        "count_total": 360,
+        "count_per_measured_token": 12.0,
+        "total_ms_total": 0.094304,
+        "total_ms_per_measured_token": 0.0031434666666666665,
+        "mean_us_per_wait": 0.26195555555555555,
+        "max_us_per_wait": 0.656009
+      },
+      "MATVEC_D2H": {
+        "count_total": 384000,
+        "count_per_measured_token": 12800.0,
+        "total_ms_total": 73.424967,
+        "total_ms_per_measured_token": 2.4474989,
+        "mean_us_per_wait": 0.19121085156249998,
+        "max_us_per_wait": 7.007957
+      },
+      "MATRIX_D2H": {
+        "count_total": 19890,
+        "count_per_measured_token": 663.0,
+        "total_ms_total": 4.2049259999999995,
+        "total_ms_per_measured_token": 0.1401642,
+        "mean_us_per_wait": 0.21140904977375563,
+        "max_us_per_wait": 12.207985
+      },
+      "MATRIX_BATCH_D2H": {
+        "count_total": 360,
+        "count_per_measured_token": 12.0,
+        "total_ms_total": 0.105872,
+        "total_ms_per_measured_token": 0.0035290666666666663,
+        "mean_us_per_wait": 0.2940888888888889,
+        "max_us_per_wait": 0.49603
+      },
+      "ARGMAX": {
+        "count_total": 60,
+        "count_per_measured_token": 2.0,
+        "total_ms_total": 11.744655999999999,
+        "total_ms_per_measured_token": 0.3914885333333333,
+        "mean_us_per_wait": 195.74426666666665,
+        "max_us_per_wait": 432.896018
+      },
+      "PLE_STAGE_WAIT": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      },
+      "RESIDENCY_INIT": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      },
+      "STEERING_INIT": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      },
+      "LM_HEAD_RESIDENCY_INIT": {
+        "count_total": 0,
+        "count_per_measured_token": 0.0,
+        "total_ms_total": 0.0,
+        "total_ms_per_measured_token": 0.0,
+        "mean_us_per_wait": 0.0,
+        "max_us_per_wait": 0.0
+      }
+    }
+  },
+  "legacy_telemetry_classification": {
+    "legacy_kernel_launches_per_token": 13475.0,
+    "legacy_host_syncs_per_token": 13475.0,
+    "telemetry_callbacks_per_token": 13475.0,
+    "host_syncs_semantics": "MISLABELED_CALLBACK_OR_LOGICAL_COMPLETION_COUNTER",
+    "actual_cuda_launches": "unavailable"
+  },
+  "traffic_per_token": {
+    "h2d_bytes": 12291328.0,
+    "d2h_bytes": 8792320.0,
+    "d2d_bytes": 0.0,
+    "legacy_kernel_launches": 13475.0,
+    "legacy_host_syncs": 13475.0,
+    "telemetry_callbacks": 13475.0
+  },
+  "init_sync": {
+    "real_cuda_sync_count": 0,
+    "host_blocked_on_cuda_ms": 0.0,
+    "telemetry_callback_wall_ms": 0.0,
+    "reasons": [
+      {
+        "reason": "MOE_ROUTED_D2H",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "MOE_GROUPED_D2H",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "GDN_OUTPUT",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "GDN_TRACE_STATE",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "GR_READ",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "GR_WRITE",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "QSA_QKV",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "MATVEC_D2H",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "MATRIX_D2H",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "MATRIX_BATCH_D2H",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "ARGMAX",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "PLE_STAGE_WAIT",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "RESIDENCY_INIT",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "STEERING_INIT",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      },
+      {
+        "reason": "LM_HEAD_RESIDENCY_INIT",
+        "count": 0,
+        "total_ms": 0.0,
+        "mean_us": 0.0,
+        "max_us": 0.0
+      }
+    ]
+  },
+  "residency": {
+    "all_non_ple_resident": true,
+    "persistent_resident_bytes": 49465890560,
+    "persistent_resident_tensors": 1157,
+    "persistent_ple_entries": 0,
+    "non_ple_upload_bytes": 0,
+    "non_ple_residency_misses": 0,
+    "q2_gate_up_fallback_calls": 0
+  },
+  "accounting_notes": {
+    "subsystem_spans": "diagnostic spans are non-additive with wall and with each other",
+    "other_bucket": "legacy residual from existing finalize_other; not reinterpreted in S4A",
+    "backend_host_work": "residual estimate after direct wait and telemetry callback timing",
+    "ple_stage_wait": "zero in this no-trace-state production path"
+  },
+  "raw_source": "/tmp/q2_cuda_wait_attribution_raw.json",
+  "execution_path": "q38_runtime -> q38_session -> q38_session_eval"
+}
