@@ -18,6 +18,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/resource.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 namespace cg = cooperative_groups;
 
@@ -187,6 +190,25 @@ struct q38_forward_cuda_context {
     uint64_t residency_device_copies;
     uint64_t residency_final_syncs;
     uint64_t residency_planned_spans;
+    size_t residency_planned_bytes;
+    size_t residency_staged_bytes;
+    size_t residency_h2d_bytes;
+    double residency_plan_ms;
+    double residency_device_alloc_ms;
+    double residency_source_copy_ms;
+    double residency_h2d_enqueue_ms;
+    double residency_d2d_enqueue_ms;
+    double residency_final_wait_ms;
+    uint64_t residency_allocations;
+    size_t residency_allocated_bytes;
+    uint64_t residency_mincore_pages_before;
+    uint64_t residency_mincore_pages_after;
+    long residency_minor_faults_before;
+    long residency_minor_faults_after;
+    long residency_major_faults_before;
+    long residency_major_faults_after;
+    q38_residency_span_timing *residency_span_timings;
+    size_t residency_span_timing_count;
     const q38_gguf *exec_model;
     q38_exec_tensor *exec_tensors;
     size_t exec_tensor_count;
@@ -494,6 +516,37 @@ static bool residency_plan_is_ple(const q38_tensor *tensor, void *user) {
     (void)user;
     return is_ple_embedding_table(tensor);
 }
+
+#if Q38_DIAGNOSTICS
+static double residency_now_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) != 0) return 0.0;
+    return (double)ts.tv_sec * 1000.0 +
+           (double)ts.tv_nsec / 1000000.0;
+}
+
+static uint64_t residency_mincore_pages(const q38_gguf *model) {
+    if (!model || !model->map || !model->size) return 0;
+    const size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    const uintptr_t address = (uintptr_t)model->map;
+    const uintptr_t base = address & ~(uintptr_t)(page - 1);
+    const size_t offset = (size_t)(address - base);
+    const size_t pages = (offset + model->size + page - 1) / page;
+    unsigned char *vec = (unsigned char *)calloc(pages, 1);
+    if (!vec) return 0;
+    const uint64_t result =
+        mincore((void *)base, pages * page, vec) == 0
+            ? [&]() {
+                uint64_t resident = 0;
+                for (size_t i = 0; i < pages; ++i)
+                    resident += (vec[i] & 1u) != 0;
+                return resident;
+            }()
+            : 0;
+    free(vec);
+    return result;
+}
+#endif
 
 static const char *residency_group(const q38_tensor *tensor) {
     if (!tensor || !tensor->name.ptr) return "unknown";
@@ -1114,12 +1167,30 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     if (!context || !model)
         return fail(error, error_len, "invalid all-non-PLE residency arguments");
     if (context->all_non_ple_resident) return true;
+#if Q38_DIAGNOSTICS
+    struct rusage usage_before = {};
+    getrusage(RUSAGE_SELF, &usage_before);
+    context->residency_mincore_pages_before = residency_mincore_pages(model);
+    const double plan_started = residency_now_ms();
+#endif
     q38_residency_plan plan;
     q38_residency_plan_init(&plan);
     if (!q38_residency_plan_build(
             model, residency_plan_is_ple, NULL, 64u * 1024u,
             256u * 1024u * 1024u, &plan, error, error_len))
         return false;
+#if Q38_DIAGNOSTICS
+    context->residency_plan_ms = residency_now_ms() - plan_started;
+    context->residency_planned_bytes = (size_t)plan.resident_bytes;
+    context->residency_span_timing_count = plan.span_count;
+    context->residency_span_timings = (q38_residency_span_timing *)calloc(
+        plan.span_count ? plan.span_count : 1,
+        sizeof(*context->residency_span_timings));
+    if (!context->residency_span_timings) {
+        q38_residency_plan_destroy(&plan);
+        return fail(error, error_len, "residency timing allocation failed");
+    }
+#endif
     const size_t count = plan.entry_count;
     if (plan.resident_bytes > SIZE_MAX) {
         q38_residency_plan_destroy(&plan);
@@ -1165,6 +1236,9 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     }
     size_t at = 0;
     size_t loaded_bytes = 0;
+#if Q38_DIAGNOSTICS
+    const double allocation_started = residency_now_ms();
+#endif
     for (size_t p = 0; p < plan.entry_count; ++p) {
         const q38_residency_plan_entry *planned = &plan.entries[p];
         const uint32_t tensor_index = planned->tensor_index;
@@ -1205,6 +1279,8 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
             q38_residency_plan_destroy(&plan);
             return false;
         }
+        context->residency_allocations++;
+        context->residency_allocated_bytes += (size_t)tensor->bytes;
         entries[at].host = host;
         entries[at].bytes = (size_t)tensor->bytes;
         exec->ptr = entries[at].device;
@@ -1234,14 +1310,38 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         q38_residency_plan_destroy(&plan);
         return fail(error, error_len, context->persistent_failure);
     }
+    if (largest_span) {
+        context->residency_allocations++;
+        context->residency_allocated_bytes += largest_span;
+        context->residency_allocations++;
+        context->residency_allocated_bytes += largest_span;
+    }
+#if Q38_DIAGNOSTICS
+    context->residency_device_alloc_ms =
+        residency_now_ms() - allocation_started;
+#endif
     context->residency_stage_bytes = largest_span;
     context->residency_transfer_bytes = largest_span;
     context->persistent = entries;
     context->persistent_count = at;
     for (size_t s = 0; s < plan.span_count; ++s) {
         const q38_residency_plan_span *span = &plan.spans[s];
+        const double source_started =
+#if Q38_DIAGNOSTICS
+            residency_now_ms();
+#else
+            0.0;
+#endif
         memcpy(context->residency_stage,
                model->map + span->file_offset, (size_t)span->bytes);
+#if Q38_DIAGNOSTICS
+        const double source_ms = residency_now_ms() - source_started;
+        context->residency_source_copy_ms += source_ms;
+        context->residency_span_timings[s].source_offset = span->file_offset;
+        context->residency_span_timings[s].bytes = (size_t)span->bytes;
+        context->residency_span_timings[s].source_copy_ms = source_ms;
+#endif
+        context->residency_staged_bytes += (size_t)span->bytes;
         if (cudaMemcpyAsync(context->residency_transfer,
                             context->residency_stage, (size_t)span->bytes,
                             cudaMemcpyHostToDevice, context->stream) !=
@@ -1250,7 +1350,20 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
             return fail(error, error_len,
                         "coalesced residency H2D upload failed");
         }
+#if Q38_DIAGNOSTICS
+        context->residency_span_timings[s].h2d_enqueue_ms =
+            residency_now_ms() - source_started - source_ms;
+        context->residency_h2d_enqueue_ms +=
+            context->residency_span_timings[s].h2d_enqueue_ms;
+#endif
+        context->residency_h2d_bytes += (size_t)span->bytes;
         context->residency_transfer_calls++;
+        const double d2d_started =
+#if Q38_DIAGNOSTICS
+            residency_now_ms();
+#else
+            0.0;
+#endif
         for (size_t j = 0; j < span->entry_count; ++j) {
             const q38_residency_plan_entry *planned =
                 &plan.entries[span->first_entry + j];
@@ -1268,7 +1381,17 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
             }
             context->residency_device_copies++;
         }
+#if Q38_DIAGNOSTICS
+        context->residency_d2d_enqueue_ms +=
+            residency_now_ms() - d2d_started;
+#endif
     }
+    const double final_wait_started =
+#if Q38_DIAGNOSTICS
+        residency_now_ms();
+#else
+        0.0;
+#endif
     if (Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_RESIDENCY_INIT,
                            cudaStreamSynchronize(context->stream)) !=
         cudaSuccess) {
@@ -1276,6 +1399,17 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         return fail(error, error_len,
                     "coalesced residency synchronization failed");
     }
+#if Q38_DIAGNOSTICS
+    context->residency_final_wait_ms =
+        residency_now_ms() - final_wait_started;
+    struct rusage usage_after = {};
+    getrusage(RUSAGE_SELF, &usage_after);
+    context->residency_minor_faults_before = usage_before.ru_minflt;
+    context->residency_minor_faults_after = usage_after.ru_minflt;
+    context->residency_major_faults_before = usage_before.ru_majflt;
+    context->residency_major_faults_after = usage_after.ru_majflt;
+    context->residency_mincore_pages_after = residency_mincore_pages(model);
+#endif
     context->residency_final_syncs++;
     Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
     size_t progress_free = 0, progress_total = 0;
@@ -1342,6 +1476,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_steering);
     cudaFree(context->residency_transfer);
     cudaFreeHost(context->residency_stage);
+    free(context->residency_span_timings);
     free(context->host_qsa_output);
     if (!context->lm_head_uses_persistent)
         cudaFree(context->lm_head_device_weights);
@@ -1529,6 +1664,32 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->residency_device_copies = context->residency_device_copies;
     stats->residency_final_syncs = context->residency_final_syncs;
     stats->residency_stage_bytes = context->residency_stage_bytes;
+    stats->residency_planned_bytes = context->residency_planned_bytes;
+    stats->residency_staged_bytes = context->residency_staged_bytes;
+    stats->residency_h2d_bytes = context->residency_h2d_bytes;
+    stats->residency_plan_ms = context->residency_plan_ms;
+    stats->residency_device_alloc_ms = context->residency_device_alloc_ms;
+    stats->residency_source_copy_ms = context->residency_source_copy_ms;
+    stats->residency_h2d_enqueue_ms = context->residency_h2d_enqueue_ms;
+    stats->residency_d2d_enqueue_ms = context->residency_d2d_enqueue_ms;
+    stats->residency_final_wait_ms = context->residency_final_wait_ms;
+    stats->residency_allocations = context->residency_allocations;
+    stats->residency_allocated_bytes = context->residency_allocated_bytes;
+    stats->residency_mincore_pages_before =
+        context->residency_mincore_pages_before;
+    stats->residency_mincore_pages_after =
+        context->residency_mincore_pages_after;
+    stats->residency_minor_faults_before =
+        context->residency_minor_faults_before;
+    stats->residency_minor_faults_after =
+        context->residency_minor_faults_after;
+    stats->residency_major_faults_before =
+        context->residency_major_faults_before;
+    stats->residency_major_faults_after =
+        context->residency_major_faults_after;
+    stats->residency_span_timings = context->residency_span_timings;
+    stats->residency_span_timing_count =
+        context->residency_span_timing_count;
     stats->exec_strict = context->exec_strict;
     stats->resident_lookup_in_decode = context->resident_lookup_in_decode;
     stats->gguf_name_lookup_in_decode = context->gguf_name_lookup_in_decode;

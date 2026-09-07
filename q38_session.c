@@ -55,7 +55,7 @@ static bool fail(char *error, size_t error_len, const char *message) {
 #if Q38_DIAGNOSTICS
 static double session_now_ms(void) {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) != 0) return 0.0;
     return (double)ts.tv_sec * 1000.0 +
            (double)ts.tv_nsec / 1000000.0;
 }
@@ -146,16 +146,67 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
             "q38: startup_timing {\"gguf_open_ms\":%.3f,"
             "\"tokenizer_ms\":%.3f,\"binding_ms\":%.3f,"
             "\"cuda_prepare_ms\":%.3f,\"runtime_init_ms\":%.3f,"
+            "\"residency_plan_ms\":%.3f,"
+            "\"residency_device_alloc_ms\":%.3f,"
+            "\"residency_source_copy_ms\":%.3f,"
+            "\"residency_h2d_enqueue_ms\":%.3f,"
+            "\"residency_d2d_enqueue_ms\":%.3f,"
+            "\"residency_final_wait_ms\":%.3f,"
+            "\"residency_other_ms\":%.3f,"
+            "\"residency_planned_bytes\":%zu,"
+            "\"residency_staged_bytes\":%zu,"
+            "\"residency_h2d_bytes\":%zu,"
             "\"residency_planned_spans\":%" PRIu64 ","
             "\"residency_transfer_calls\":%" PRIu64 ","
             "\"residency_final_syncs\":%" PRIu64 ","
-            "\"residency_stage_bytes\":%zu}\n",
+            "\"residency_stage_bytes\":%zu,"
+            "\"residency_allocations\":%" PRIu64 ","
+            "\"residency_allocated_bytes\":%zu,"
+            "\"mincore_pages_before\":%" PRIu64 ","
+            "\"mincore_pages_after\":%" PRIu64 ","
+            "\"minor_faults_before\":%ld,\"minor_faults_after\":%ld,"
+            "\"major_faults_before\":%ld,\"major_faults_after\":%ld,"
+            "\"span_timings\":[",
             gguf_open_ms, tokenizer_ms, binding_ms, cuda_prepare_ms,
             session_now_ms() - init_started,
+            startup_stats.residency_plan_ms,
+            startup_stats.residency_device_alloc_ms,
+            startup_stats.residency_source_copy_ms,
+            startup_stats.residency_h2d_enqueue_ms,
+            startup_stats.residency_d2d_enqueue_ms,
+            startup_stats.residency_final_wait_ms,
+            cuda_prepare_ms -
+                startup_stats.residency_plan_ms -
+                startup_stats.residency_device_alloc_ms -
+                startup_stats.residency_source_copy_ms -
+                startup_stats.residency_h2d_enqueue_ms -
+                startup_stats.residency_d2d_enqueue_ms -
+                startup_stats.residency_final_wait_ms,
+            startup_stats.residency_planned_bytes,
+            startup_stats.residency_staged_bytes,
+            startup_stats.residency_h2d_bytes,
             startup_stats.residency_planned_spans,
             startup_stats.residency_transfer_calls,
             startup_stats.residency_final_syncs,
-            startup_stats.residency_stage_bytes);
+            startup_stats.residency_stage_bytes,
+            startup_stats.residency_allocations,
+            startup_stats.residency_allocated_bytes,
+            startup_stats.residency_mincore_pages_before,
+            startup_stats.residency_mincore_pages_after,
+            startup_stats.residency_minor_faults_before,
+            startup_stats.residency_minor_faults_after,
+            startup_stats.residency_major_faults_before,
+            startup_stats.residency_major_faults_after);
+    for (size_t i = 0; i < startup_stats.residency_span_timing_count; ++i) {
+        const q38_residency_span_timing *span =
+            &startup_stats.residency_span_timings[i];
+        fprintf(stderr, "%s{\"source_offset\":%" PRIu64
+                ",\"bytes\":%zu,\"source_copy_ms\":%.3f,"
+                "\"h2d_enqueue_ms\":%.3f}",
+                i ? "," : "", span->source_offset, span->bytes,
+                span->source_copy_ms, span->h2d_enqueue_ms);
+    }
+    fprintf(stderr, "]}\n");
 #endif
     runtime->backend.matvec = q38_forward_cuda_matvec_backend;
     runtime->backend.matrix = q38_forward_cuda_matrix_backend;

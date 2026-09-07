@@ -82,6 +82,12 @@ typedef void (*q38_forward_cuda_residency_progress_observer)(
     const char *group, const q38_tensor *tensor, size_t cumulative_bytes,
     size_t free_bytes, size_t total_bytes, void *user);
 typedef struct {
+    uint64_t source_offset;
+    size_t bytes;
+    double source_copy_ms;
+    double h2d_enqueue_ms;
+} q38_residency_span_timing;
+typedef struct {
     size_t matrix_upload_bytes;
     uint64_t resident_hits;
     uint64_t resident_misses;
@@ -111,6 +117,25 @@ typedef struct {
     uint64_t residency_device_copies;
     uint64_t residency_final_syncs;
     size_t residency_stage_bytes;
+    size_t residency_planned_bytes;
+    size_t residency_staged_bytes;
+    size_t residency_h2d_bytes;
+    double residency_plan_ms;
+    double residency_device_alloc_ms;
+    double residency_source_copy_ms;
+    double residency_h2d_enqueue_ms;
+    double residency_d2d_enqueue_ms;
+    double residency_final_wait_ms;
+    uint64_t residency_allocations;
+    size_t residency_allocated_bytes;
+    uint64_t residency_mincore_pages_before;
+    uint64_t residency_mincore_pages_after;
+    long residency_minor_faults_before;
+    long residency_minor_faults_after;
+    long residency_major_faults_before;
+    long residency_major_faults_after;
+    const q38_residency_span_timing *residency_span_timings;
+    size_t residency_span_timing_count;
     bool exec_strict;
     uint64_t resident_lookup_in_decode;
     uint64_t gguf_name_lookup_in_decode;
