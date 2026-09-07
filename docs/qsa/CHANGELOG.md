@@ -9,3 +9,7 @@
   single-token output-projection candidate.
 - Wired QSA-C1 into the production single-token forward path and promoted it
   as `QSA_OPT_V1` after the three fixture gates passed.
+- Recomputed the post-C1 breakdown: QKV is the remaining dominant stage, but
+  the fixture path already uses grouped device-only Q/K/V execution and no
+  additional candidate with a measured >=10% complete-layer gain remains.
+  Frozen `QSA_OPT_V1`.

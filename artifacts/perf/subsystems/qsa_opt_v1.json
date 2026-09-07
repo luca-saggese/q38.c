@@ -430,5 +430,25 @@
         "nonfinite": 0
       }
     }
-  ]
+  ],
+  "status": "QSA_OPT_V1_FROZEN",
+  "post_c1": {
+    "dominant": "qkv",
+    "dominant_median_us_by_fixture": [
+      {
+        "fixture": "early",
+        "median_us": 1192.195923
+      },
+      {
+        "fixture": "middle",
+        "median_us": 1165.859009
+      },
+      {
+        "fixture": "late",
+        "median_us": 1194.098999
+      }
+    ],
+    "fixture_qkv_path": "grouped device-only Q/K/V projection",
+    "next_candidate": "none demonstrated >=10% in the fixture scope"
+  }
 }
