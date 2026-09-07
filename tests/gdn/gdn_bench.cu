@@ -78,6 +78,7 @@ enum class BenchMode {
     C1,
     C2,
     C3,
+    ChainC1,
 };
 
 struct Sample {
@@ -934,7 +935,7 @@ static bool benchmark_fixture(const std::string &dir, BenchMode mode,
                               std::string *json, std::string *error) {
     const bool candidate = mode != BenchMode::Production;
     const bool c2 = mode == BenchMode::C2;
-    const bool c3 = mode == BenchMode::C3;
+    const bool c3 = mode == BenchMode::C3 || mode == BenchMode::ChainC1;
     Fixture fixture;
     if (!load_fixture(dir, &fixture, error)) return false;
     Device device;
@@ -1070,7 +1071,8 @@ static bool benchmark_fixture(const std::string &dir, BenchMode mode,
     output << std::fixed << std::setprecision(3);
     output << "{\"layer\":" << fixture.layer
            << ",\"mode\":\""
-           << (mode == BenchMode::C3 ? "gdn_c3" :
+           << (mode == BenchMode::ChainC1 ? "gdn_chain_c1" :
+               mode == BenchMode::C3 ? "gdn_c3" :
                mode == BenchMode::C2 ? "gdn_c2" :
                candidate ? "gdn_c1" : "production")
            << "\",\"warmup\":" << kWarmup << ",\"samples\":" << kSamples
@@ -1147,7 +1149,7 @@ int main(int argc, char **argv) {
     if (argc < 3 || argc > 4) {
         std::fprintf(stderr,
                      "usage: gdn_bench FIXTURE_ROOT ARTIFACT "
-                     "[gdn_c1|gdn_c2|gdn_c3]\n");
+                     "[gdn_c1|gdn_c2|gdn_c3|gdn_chain_c1]\n");
         return 2;
     }
     BenchMode mode = BenchMode::Production;
@@ -1157,12 +1159,15 @@ int main(int argc, char **argv) {
         mode = BenchMode::C2;
     else if (argc == 4 && std::strcmp(argv[3], "gdn_c3") == 0)
         mode = BenchMode::C3;
+    else if (argc == 4 && std::strcmp(argv[3], "gdn_chain_c1") == 0)
+        mode = BenchMode::ChainC1;
     else if (argc == 4) {
         std::fprintf(stderr, "gdn_bench: unknown mode %s\n", argv[3]);
         return 2;
     }
     const bool candidate = mode != BenchMode::Production;
-    const char *mode_name = mode == BenchMode::C3 ? "gdn_c3" :
+    const char *mode_name = mode == BenchMode::ChainC1 ? "gdn_chain_c1" :
+                            mode == BenchMode::C3 ? "gdn_c3" :
                             mode == BenchMode::C2 ? "gdn_c2" :
                             candidate ? "gdn_c1" : "production";
     const char *names[] = {"early", "middle", "late"};
@@ -1182,7 +1187,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     artifact << "{\"format\":\"q38-gdn-subsystem-v1\",\"status\":\""
-             << (mode == BenchMode::C3 ? "S3-C3" :
+             << (mode == BenchMode::ChainC1 ? "GDN_CHAIN_C1" :
+                 mode == BenchMode::C3 ? "S3-C3" :
                  mode == BenchMode::C2 ? "S3-C2" :
                  candidate ? "S3-C1" : "S3-BASELINE")
              << "\",\"mode\":\"" << mode_name

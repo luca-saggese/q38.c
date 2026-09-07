@@ -6,7 +6,7 @@ MODEL_DIR ?= /home/lvx/q38model
 BUILD_DIR ?= build
 RELEASE_OBJDIR := $(BUILD_DIR)/release
 DIAG_OBJDIR := $(BUILD_DIR)/diag
-RELEASE_CFLAGS = $(CFLAGS)
+RELEASE_CFLAGS = $(CFLAGS) -DQ38_DIAGNOSTICS=1
 DIAG_CFLAGS = $(CFLAGS) -DQ38_DIAGNOSTICS=1 -DQ38_ENABLE_NVTX=1
 RELEASE_NVCCFLAGS = $(NVCCFLAGS)
 DIAG_NVCCFLAGS = $(NVCCFLAGS) -DQ38_DIAGNOSTICS=1 -DQ38_ENABLE_NVTX=1
@@ -39,7 +39,7 @@ PRODUCTION_C_OBJS := \
 	q38_residency.o q38_directional_steering.o q38_session.o q38_residency_plan.o
 PRODUCTION_CUDA_OBJS := \
 	q38_cuda.o q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
-	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o \
+	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o \
 	q38_topk_cuda.o
 PRODUCTION_OBJS := $(PRODUCTION_C_OBJS) $(PRODUCTION_CUDA_OBJS)
 RELEASE_OBJS := $(addprefix $(RELEASE_OBJDIR)/,$(PRODUCTION_OBJS))

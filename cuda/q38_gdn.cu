@@ -499,6 +499,7 @@ extern "C" bool q38_cuda_gdn_project(
         set_error(error, error_len, "invalid GDN projection arguments");
         return false;
     }
+
     if (weight_type == Q38_QUANT_Q2_K) {
         if (cols % Q38_QUANT_QK_K) {
             set_error(error, error_len, "Q2 GDN projection cols are not block aligned");
@@ -537,6 +538,13 @@ extern "C" bool q38_cuda_gdn_project(
         return false;
     }
     return true;
+}
+
+extern "C" bool q38_cuda_bf16_matvec_device(
+    const uint16_t *weights, size_t rows, size_t cols, const float *input,
+    float *output, cudaStream_t stream, char *error, size_t error_len) {
+    return q38_cuda_bf16_matvec(weights, rows, cols, input, output, stream,
+                                error, error_len);
 }
 
 extern "C" bool q38_cuda_gdn_conv(

@@ -2470,9 +2470,9 @@ extern "C" bool q38_forward_cuda_gdn_layer_backend(
     char cuda_error[256] = {};
     const auto project = [&](size_t index, size_t rows, size_t cols,
                              float *destination) {
-        if (!q38_cuda_gdn_project(
-                Q38_GDN_WEIGHT_BF16, exec[index]->ptr, rows, cols,
-                context->device_gdn_input, 1, destination, context->stream,
+        if (!q38_cuda_bf16_matvec_device(
+                (const uint16_t *)exec[index]->ptr, rows, cols,
+                context->device_gdn_input, destination, context->stream,
                 cuda_error, sizeof(cuda_error)))
             return false;
         Q38_CUDA_DIAG_ONLY(++context->gdn_c3_launches);
@@ -2497,9 +2497,9 @@ extern "C" bool q38_forward_cuda_gdn_layer_backend(
             context->device_gdn_qkv, 1, Q38_GDN_QKV_CHANNELS,
             Q38_GDN_CONV_KERNEL, device_history, context->stream, cuda_error,
             sizeof(cuda_error)) ||
-        !q38_cuda_gdn_project(
-            Q38_GDN_WEIGHT_BF16, exec[8]->ptr, Q38_GR_HIDDEN,
-            Q38_GDN_Z_CHANNELS, context->device_gdn_gated, 1,
+        !q38_cuda_bf16_matvec_device(
+            (const uint16_t *)exec[8]->ptr, Q38_GR_HIDDEN,
+            Q38_GDN_Z_CHANNELS, context->device_gdn_gated,
             context->device_output, context->stream, cuda_error,
             sizeof(cuda_error))) {
         return fail(error, error_len,

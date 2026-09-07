@@ -50,6 +50,16 @@ bool q38_cuda_gdn_project(uint32_t weight_type, const void *weights,
                           char *error, size_t error_len);
 
 /*
+ * Device-output BF16 matvec contract used by resident GDN chains.  Both
+ * activations and weights are device-resident; this function only enqueues
+ * the existing BF16 matvec kernel and never allocates, copies, or waits.
+ */
+bool q38_cuda_bf16_matvec_device(const uint16_t *weights, size_t rows,
+                                 size_t cols, const float *input,
+                                 float *output, cudaStream_t stream,
+                                 char *error, size_t error_len);
+
+/*
  * Causal depthwise convolution over logical input [tokens, channels] with
  * logical kernel [tap, channel].  history is persistent [kernel-1, channels]
  * and is updated to the final tail after the raw convolution completes.
