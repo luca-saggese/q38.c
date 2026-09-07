@@ -216,6 +216,8 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     runtime->backend.expert = q38_forward_cuda_expert_backend;
     runtime->backend.moe_layer = q38_forward_cuda_moe_layer_q2_backend;
     runtime->backend.gdn_layer = q38_forward_cuda_gdn_layer_backend;
+    runtime->backend.decoder_layer_chain =
+        q38_forward_cuda_decoder_layer_chain_backend;
     runtime->backend.sync_state = q38_forward_cuda_sync_gdn_state;
     runtime->backend.qsa_qkv = q38_forward_cuda_qsa_qkv_backend;
     runtime->backend.qsa_chain = q38_forward_cuda_qsa_chain_backend;
@@ -528,6 +530,10 @@ bool q38_session_prefill_chunked(
         max_chunk * Q38_DECODE_VOCAB_SIZE, sizeof(float));
     if (!chunk_logits)
         return fail(error, error_len, "chunked prefill logits allocation failed");
+    q38_forward_backend_config prefill_backend = session->runtime->backend;
+    prefill_backend.decoder_layer_chain = NULL;
+    prefill_backend.qsa_chain = NULL;
+    prefill_backend.qsa_qkv = NULL;
     if (diagnostics) {
         diagnostics->backend_context = runtime_backend_context;
         diagnostics->backend_context_user = session->runtime->backend.user;
@@ -550,7 +556,7 @@ bool q38_session_prefill_chunked(
                 session->runtime->model, &session->runtime->weights,
                 &session->state, tokens + offset, count, chunk_logits,
                 Q38_DECODE_VOCAB_SIZE, diagnostics,
-                &session->runtime->backend, error, error_len)) {
+                &prefill_backend, error, error_len)) {
             free(chunk_logits);
             return false;
         }
@@ -572,6 +578,11 @@ bool q38_session_prefill_chunked(
      */
     if (max_chunk > 1 &&
         !q38_forward_cuda_load_gdn_state(
+            &session->state, session->runtime->cuda, error, error_len)) {
+        free(chunk_logits);
+        return false;
+    }
+    if (!q38_forward_cuda_load_qsa_state(
             &session->state, session->runtime->cuda, error, error_len)) {
         free(chunk_logits);
         return false;

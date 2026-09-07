@@ -528,6 +528,8 @@ static q38_forward_gr_write_backend full_gr_write_backend;
 static q38_forward_expert_backend full_expert_backend;
 static q38_forward_moe_layer_backend full_moe_layer_backend;
 static q38_forward_gdn_layer_backend full_gdn_layer_backend;
+static q38_forward_decoder_layer_chain_backend
+    full_decoder_layer_chain_backend;
 static void *full_backend_user;
 static bool full_backend_strict;
 static uint64_t full_backend_rows;
@@ -2312,6 +2314,31 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         }
         full_nvtx_push_indexed("LAYER", layer_number);
         const double layer_started = full_now_ms();
+        if (token_count == 1 && full_decoder_layer_chain_backend) {
+            if (!full_decoder_layer_chain_backend(
+                    model, layer, state, layer_number, streams, updated,
+                    full_backend_user, error, error_len))
+                goto fail;
+            memcpy(streams, updated, width * sizeof(float));
+            if (!full_emit_timing(diagnostics, "decoder_layer", NULL,
+                                  "OTHER_LAYER", layer_number,
+                                  full_now_ms() - layer_started, error,
+                                  error_len))
+                goto fail;
+            if (Q38_DIAG_ENABLED && diagnostics)
+                diagnostics->layer_fingerprint[layer_number] =
+                    full_fingerprint(streams, width);
+            q38_profile_nvtx_pop();
+            if (layer_number == 0)
+                q38_ple_scheduler_record_timeline(
+                    state->ple_scheduler, Q38_PLE_T3_LAYER0_END, 0,
+                    timeline_position);
+            if (layer_number == 1)
+                q38_ple_scheduler_record_timeline(
+                    state->ple_scheduler, Q38_PLE_T5_LAYER1_END, 0,
+                    timeline_position);
+            continue;
+        }
         if (!full_boundary_trace(layer_number, "layer_input", streams,
                                  token_count, width, diagnostics, error,
                                  error_len))
@@ -2627,6 +2654,7 @@ static bool full_with_matrix_batch_moe_layer_backend_ex(
     q38_forward_expert_backend expert_backend,
     q38_forward_moe_layer_backend moe_layer_backend,
     q38_forward_gdn_layer_backend gdn_layer_backend,
+    q38_forward_decoder_layer_chain_backend decoder_layer_chain_backend,
     void *backend_user, char *error, size_t error_len) {
     const q38_forward_matvec_backend previous_backend = full_backend;
     const q38_forward_matrix_backend previous_matrix_backend =
@@ -2643,6 +2671,9 @@ static bool full_with_matrix_batch_moe_layer_backend_ex(
         full_moe_layer_backend;
     const q38_forward_gdn_layer_backend previous_gdn_layer_backend =
         full_gdn_layer_backend;
+    const q38_forward_decoder_layer_chain_backend
+        previous_decoder_layer_chain_backend =
+            full_decoder_layer_chain_backend;
     void *const previous_user = full_backend_user;
     const bool previous_strict = full_backend_strict;
     full_backend = backend;
@@ -2653,13 +2684,15 @@ static bool full_with_matrix_batch_moe_layer_backend_ex(
     full_expert_backend = expert_backend;
     full_moe_layer_backend = moe_layer_backend;
     full_gdn_layer_backend = gdn_layer_backend;
+    full_decoder_layer_chain_backend = decoder_layer_chain_backend;
     full_backend_user = backend_user;
     const char *strict = getenv("Q38_PERF_STRICT");
     const bool previous_perf_strict = full_perf_strict;
     full_perf_strict = strict && strict[0] != '\0' && strcmp(strict, "0") != 0;
     full_backend_strict = backend != NULL || matrix_backend != NULL ||
                           expert_backend != NULL || moe_layer_backend != NULL ||
-                          gdn_layer_backend != NULL;
+                          gdn_layer_backend != NULL ||
+                          decoder_layer_chain_backend != NULL;
     const bool ok = q38_forward_full(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, error, error_len);
@@ -2671,6 +2704,8 @@ static bool full_with_matrix_batch_moe_layer_backend_ex(
     full_expert_backend = previous_expert_backend;
     full_moe_layer_backend = previous_moe_layer_backend;
     full_gdn_layer_backend = previous_gdn_layer_backend;
+    full_decoder_layer_chain_backend =
+        previous_decoder_layer_chain_backend;
     full_backend_user = previous_user;
     full_backend_strict = previous_strict;
     full_perf_strict = previous_perf_strict;
@@ -2690,7 +2725,7 @@ bool q38_forward_full_with_matrix_batch_moe_layer_backend(
     return full_with_matrix_batch_moe_layer_backend_ex(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, backend, matrix_backend, matrix_batch_backend, NULL, NULL,
-        expert_backend, moe_layer_backend, NULL, backend_user, error,
+        expert_backend, moe_layer_backend, NULL, NULL, backend_user, error,
         error_len);
 }
 
@@ -2711,7 +2746,8 @@ bool q38_forward_full_with_backend_config(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, config->matvec, config->matrix, config->matrix_batch,
         config->gr_read, config->gr_write, config->expert, config->moe_layer,
-        config->gdn_layer, config->user, error, error_len);
+        config->gdn_layer, config->decoder_layer_chain, config->user, error,
+        error_len);
 }
 
 bool q38_forward_full_with_backend(

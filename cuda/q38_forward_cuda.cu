@@ -99,6 +99,10 @@ struct q38_forward_cuda_context {
     float *device_output;
     size_t device_output_bytes;
     size_t device_output_elements;
+    float *device_hidden_a;
+    size_t device_hidden_a_bytes;
+    float *device_hidden_b;
+    size_t device_hidden_b_bytes;
     uint32_t *device_argmax;
     size_t device_argmax_bytes;
     void *device_aux;
@@ -109,12 +113,24 @@ struct q38_forward_cuda_context {
     size_t device_moe_grouped_mid_bytes;
     uint16_t *device_moe_route_ids;
     size_t device_moe_route_ids_bytes;
+    uint32_t *device_moe_route_indices;
+    size_t device_moe_route_indices_bytes;
     float *device_moe_route_weights;
     size_t device_moe_route_weights_bytes;
     float *device_moe_accum;
     size_t device_moe_accum_bytes;
     float *device_moe_expert_outputs;
     size_t device_moe_expert_outputs_bytes;
+    float *device_moe_logits;
+    size_t device_moe_logits_bytes;
+    float *device_moe_shared_gate;
+    size_t device_moe_shared_gate_bytes;
+    float *device_moe_shared_up;
+    size_t device_moe_shared_up_bytes;
+    float *device_moe_shared_output;
+    size_t device_moe_shared_output_bytes;
+    float *device_moe_shared_weight;
+    size_t device_moe_shared_weight_bytes;
     float *device_gr_residual;
     size_t device_gr_residual_bytes;
     float *device_gr_norm;
@@ -472,6 +488,23 @@ __global__ static void gr_fused_writeback_kernel(
         (1.0f + expf(-inject[branch] / 4.0f));
     updated[index] = residual[index] +
                      scale * block[index % Q38_GR_HIDDEN];
+}
+
+__global__ static void moe_shared_silu_mul_kernel(
+    const float *gate, const float *up, float *output, size_t elements) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= elements) return;
+    const float value = gate[index];
+    output[index] = value / (1.0f + expf(-value)) * up[index];
+}
+
+__global__ static void moe_shared_add_kernel(
+    const float *routed, const float *shared, const float *gate,
+    float *output, size_t elements) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= elements) return;
+    const float scale = 1.0f / (1.0f + expf(-gate[0]));
+    output[index] = routed[index] + scale * shared[index];
 }
 
 static bool fail(char *error, size_t error_len, const char *message) {
@@ -1209,6 +1242,44 @@ extern "C" bool q38_forward_cuda_sync_gdn_state(
     return true;
 }
 
+extern "C" bool q38_forward_cuda_load_qsa_state(
+    const q38_forward_state *state, void *user, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    if (!state || !context)
+        return fail(error, error_len, "invalid QSA state upload arguments");
+    for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
+        const q38_qsa_state *host = &state->qsa[layer];
+        q38_qsa_cuda_chain_state *device = &context->qsa_chain_state[layer];
+        if (!host->position) {
+            q38_qsa_cuda_chain_reset(device);
+            continue;
+        }
+        if (host->main_k.count != host->position ||
+            host->main_v.count != host->position ||
+            host->index_k.count != host->position ||
+            !q38_qsa_cuda_chain_reserve(
+                device, host->position, context->stream, error, error_len) ||
+            cudaMemcpyAsync(
+                device->main_k, host->main_k.data,
+                host->main_k.count * host->main_k.row_bytes,
+                cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+            cudaMemcpyAsync(
+                device->main_v, host->main_v.data,
+                host->main_v.count * host->main_v.row_bytes,
+                cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+            cudaMemcpyAsync(
+                device->index_k, host->index_k.data,
+                host->index_k.count * host->index_k.row_bytes,
+                cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+            return fail(error, error_len, "QSA state upload failed");
+        device->count = host->position;
+        device->position = host->position;
+    }
+    return true;
+}
+
 extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     q38_forward_cuda_context *context, const q38_gguf *model,
     char *error, size_t error_len) {
@@ -1543,14 +1614,22 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_weights);
     cudaFree(context->device_input);
     cudaFree(context->device_output);
+    cudaFree(context->device_hidden_a);
+    cudaFree(context->device_hidden_b);
     cudaFree(context->device_argmax);
     cudaFree(context->device_aux);
     cudaFree(context->device_moe_mid);
     cudaFree(context->device_moe_grouped_mid);
     cudaFree(context->device_moe_route_ids);
+    cudaFree(context->device_moe_route_indices);
     cudaFree(context->device_moe_route_weights);
     cudaFree(context->device_moe_accum);
     cudaFree(context->device_moe_expert_outputs);
+    cudaFree(context->device_moe_logits);
+    cudaFree(context->device_moe_shared_gate);
+    cudaFree(context->device_moe_shared_up);
+    cudaFree(context->device_moe_shared_output);
+    cudaFree(context->device_moe_shared_weight);
     cudaFree(context->device_gr_residual);
     cudaFree(context->device_gr_norm);
     cudaFree(context->device_gr_down);
@@ -1752,11 +1831,14 @@ extern "C" void q38_forward_cuda_get_residency_stats(
         (uintptr_t)context->device_moe_mid,
         (uintptr_t)context->device_moe_grouped_mid,
         (uintptr_t)context->device_moe_route_ids,
+        (uintptr_t)context->device_moe_route_indices,
         (uintptr_t)context->device_moe_route_weights,
         (uintptr_t)context->device_moe_accum,
         (uintptr_t)context->device_moe_expert_outputs,
         (uintptr_t)context->device_qsa_input,
         (uintptr_t)context->device_qsa_output,
+        (uintptr_t)context->device_hidden_a,
+        (uintptr_t)context->device_hidden_b,
         (uintptr_t)context->host_qsa_output,
     };
     for (size_t i = 0; i < sizeof(workspace_pointers) /
@@ -2552,6 +2634,143 @@ extern "C" bool q38_forward_cuda_gdn_layer_backend(
     return true;
 }
 
+extern "C" bool q38_forward_cuda_gdn_layer_device(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_layer_weights *layer, q38_forward_state *state,
+    const float *device_input, uint32_t layer_number, float *device_output,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!context || !model || !layer || !state || !device_input ||
+        !device_output || layer_number >= Q38_MODEL_LAYERS)
+        return false;
+    const q38_tensor *tensors[] = {
+        layer->gdn.in_proj_qkv, layer->gdn.in_proj_z,
+        layer->gdn.in_proj_a, layer->gdn.in_proj_b, layer->gdn.conv1d,
+        layer->gdn.A_log, layer->gdn.dt_bias, layer->gdn.norm,
+        layer->gdn.out_proj,
+    };
+    for (const q38_tensor *tensor : tensors)
+        if (!tensor || tensor->type != Q38_GDN_WEIGHT_BF16)
+            return fail(error, error_len,
+                        "GDN device chain requires BF16 tensors");
+    const int slot = q38_gdn_slot_for_layer(
+        &state->storage.layout, layer_number);
+    if (slot < 0 || (uint32_t)slot >= Q38_GDN_LAYER_COUNT)
+        return fail(error, error_len, "invalid GDN device chain slot");
+    q38_exec_tensor *exec[9] = {};
+    for (size_t i = 0; i < 9; ++i) {
+        exec[i] = exec_tensor_for(context, model, tensors[i]);
+        if (!exec[i] || !exec_tensor_is_resident(exec[i], tensors[i]))
+            return fail(error, error_len,
+                        "GDN device chain requires resident tensors");
+    }
+    const size_t state_slot_elements =
+        (size_t)Q38_GDN_VALUE_HEADS * Q38_GDN_HEAD_DIM * Q38_GDN_HEAD_DIM;
+    const size_t history_slot_elements =
+        (size_t)(Q38_GDN_CONV_KERNEL - 1u) * Q38_GDN_CONV_CHANNELS;
+    const size_t state_bytes =
+        (size_t)Q38_GDN_LAYER_COUNT * state_slot_elements * sizeof(float);
+    const size_t history_bytes =
+        (size_t)Q38_GDN_LAYER_COUNT * history_slot_elements * sizeof(float);
+    const auto ensure = [&](void **buffer, size_t *capacity, size_t bytes) {
+        return ensure_buffer(buffer, capacity, bytes,
+                             context->allocation_observer,
+                             context->allocation_observer_user,
+                             &context->cuda_allocations);
+    };
+    if (!ensure((void **)&context->device_gdn_input,
+                &context->device_gdn_input_bytes,
+                Q38_GDN_INPUT_DIM * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_qkv,
+                &context->device_gdn_qkv_bytes,
+                Q38_GDN_QKV_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_z,
+                &context->device_gdn_z_bytes,
+                Q38_GDN_Z_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_a,
+                &context->device_gdn_a_bytes,
+                Q38_GDN_VALUE_HEADS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_b,
+                &context->device_gdn_b_bytes,
+                Q38_GDN_VALUE_HEADS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_conv,
+                &context->device_gdn_conv_bytes,
+                Q38_GDN_QKV_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_q,
+                &context->device_gdn_q_bytes,
+                Q38_GDN_VALUE_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_k,
+                &context->device_gdn_k_bytes,
+                Q38_GDN_VALUE_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_v,
+                &context->device_gdn_v_bytes,
+                Q38_GDN_VALUE_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_decay,
+                &context->device_gdn_decay_bytes,
+                Q38_GDN_VALUE_HEADS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_beta,
+                &context->device_gdn_beta_bytes,
+                Q38_GDN_VALUE_HEADS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_recurrent,
+                &context->device_gdn_recurrent_bytes,
+                Q38_GDN_VALUE_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_gated,
+                &context->device_gdn_gated_bytes,
+                Q38_GDN_Z_CHANNELS * sizeof(float)) ||
+        !ensure((void **)&context->device_gdn_state,
+                &context->device_gdn_state_bytes, state_bytes) ||
+        !ensure((void **)&context->device_gdn_history,
+                &context->device_gdn_history_bytes, history_bytes))
+        return fail(error, error_len, "GDN device chain workspace allocation failed");
+    if (!context->device_gdn_state_initialized) {
+        if (cudaMemsetAsync(context->device_gdn_state, 0, state_bytes,
+                            context->stream) != cudaSuccess ||
+            cudaMemsetAsync(context->device_gdn_history, 0, history_bytes,
+                            context->stream) != cudaSuccess)
+            return fail(error, error_len, "GDN device chain state init failed");
+        context->device_gdn_state_initialized = true;
+    }
+    float *device_state =
+        context->device_gdn_state + (size_t)slot * state_slot_elements;
+    float *device_history =
+        context->device_gdn_history + (size_t)slot * history_slot_elements;
+    char cuda_error[256] = {};
+    const auto project = [&](size_t index, size_t rows, size_t cols,
+                             float *destination) {
+        return q38_cuda_bf16_matvec_device(
+            (const uint16_t *)exec[index]->ptr, rows, cols, device_input,
+            destination, context->stream, cuda_error, sizeof(cuda_error));
+    };
+    if (!project(0, Q38_GDN_QKV_CHANNELS, Q38_GDN_INPUT_DIM,
+                 context->device_gdn_qkv) ||
+        !project(1, Q38_GDN_Z_CHANNELS, Q38_GDN_INPUT_DIM,
+                 context->device_gdn_z) ||
+        !project(2, Q38_GDN_VALUE_HEADS, Q38_GDN_INPUT_DIM,
+                 context->device_gdn_a) ||
+        !project(3, Q38_GDN_VALUE_HEADS, Q38_GDN_INPUT_DIM,
+                 context->device_gdn_b) ||
+        !q38_cuda_gdn_fused_recurrent(
+            context->device_gdn_qkv, context->device_gdn_z,
+            context->device_gdn_a, context->device_gdn_b, Q38_GDN_WEIGHT_BF16,
+            exec[4]->ptr, Q38_GDN_WEIGHT_BF16, exec[5]->ptr, exec[6]->ptr,
+            Q38_GDN_WEIGHT_BF16, exec[7]->ptr, device_state, device_history,
+            context->device_gdn_gated, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_cuda_gdn_history_update(
+            context->device_gdn_qkv, 1, Q38_GDN_QKV_CHANNELS,
+            Q38_GDN_CONV_KERNEL, device_history, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_cuda_bf16_matvec_device(
+            (const uint16_t *)exec[8]->ptr, Q38_GR_HIDDEN,
+            Q38_GDN_Z_CHANNELS, context->device_gdn_gated, device_output,
+            context->stream, cuda_error, sizeof(cuda_error)))
+        return fail(error, error_len,
+                    cuda_error[0] ? cuda_error : "GDN device chain launch failed");
+    Q38_CUDA_DIAG_ONLY(++context->gdn_c3_calls);
+    Q38_CUDA_DIAG_ONLY(context->gdn_c3_launches += 7);
+    return true;
+}
+
 static unsigned gr_cooperative_grid(const void *kernel, unsigned minimum) {
     int device = 0;
     int multiprocessors = 0;
@@ -2625,6 +2844,406 @@ static bool ensure_gr_buffers(q38_forward_cuda_context *context) {
                          width * sizeof(float), context->allocation_observer,
                          context->allocation_observer_user,
                          &context->cuda_allocations);
+}
+
+static bool gr_read_device_impl(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_gr_weights *weights, const float *device_residual,
+    float *device_input, float *device_normed, char *error, size_t error_len) {
+    size_t gamma_rows, gamma_cols, down_rows, down_cols, up_rows, up_cols;
+    if (!context || !model || !weights || !device_residual || !device_input ||
+        !device_normed ||
+        !tensor_shape(weights->hc_norm, &gamma_rows, &gamma_cols) ||
+        !tensor_shape(weights->input_mix_weight_down, &down_rows, &down_cols) ||
+        !tensor_shape(weights->input_mix_weight_up, &up_rows, &up_cols) ||
+        weights->hc_norm->type != 30 ||
+        weights->input_mix_weight_down->type != 30 ||
+        weights->input_mix_weight_up->type != 30 ||
+        gamma_rows != 1 || gamma_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
+        down_rows != Q38_GR_RANK ||
+        down_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
+        up_rows != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
+        up_cols != Q38_GR_RANK)
+        return false;
+    q38_exec_tensor *gamma_exec =
+        exec_tensor_for(context, model, weights->hc_norm);
+    q38_exec_tensor *down_exec =
+        exec_tensor_for(context, model, weights->input_mix_weight_down);
+    q38_exec_tensor *up_exec =
+        exec_tensor_for(context, model, weights->input_mix_weight_up);
+    if (!exec_tensor_is_resident(gamma_exec, weights->hc_norm) ||
+        !exec_tensor_is_resident(down_exec, weights->input_mix_weight_down) ||
+        !exec_tensor_is_resident(up_exec, weights->input_mix_weight_up) ||
+        !ensure_gr_buffers(context))
+        return false;
+    const unsigned available_grid =
+        gr_cooperative_grid((const void *)gr_fused_normalize_down_kernel,
+                                          Q38_GR_BRANCHES);
+    const unsigned grid = available_grid > Q38_GR_RANK
+        ? Q38_GR_RANK : available_grid;
+    const unsigned lowrank_grid =
+        gr_cooperative_grid((const void *)gr_fused_lowrank_up_kernel, 1);
+    if (!grid || !lowrank_grid)
+        return fail(error, error_len, "GR-C4 cooperative launch unavailable");
+    void *normalize_args[] = {
+        (void *)&device_residual, (void *)&gamma_exec->ptr,
+        (void *)&down_exec->ptr, &context->device_gr_bottleneck,
+        &context->device_gr_norm, &context->device_gr_down,
+    };
+    if (cudaLaunchCooperativeKernel(
+                          (const void *)gr_fused_normalize_down_kernel, dim3(grid),
+                          dim3(128), normalize_args, 0, context->stream) != cudaSuccess)
+        return fail(error, error_len, "GR-C4 normalize/down launch failed");
+    void *up_args[] = {
+        (void *)&up_exec->ptr, &context->device_gr_down,
+        &context->device_gr_bottleneck, &context->device_gr_up,
+    };
+    if (cudaLaunchCooperativeKernel(
+                          (const void *)gr_fused_lowrank_up_kernel, dim3(lowrank_grid),
+                          dim3(128), up_args, 0, context->stream) != cudaSuccess)
+        return fail(error, error_len, "GR-C4 low-rank/up launch failed");
+    gr_fused_branch_read_kernel<<<
+        (Q38_GR_HIDDEN + 255u) / 256u, 256, 0, context->stream>>>(
+        context->device_gr_norm, context->device_gr_up, device_input);
+    return cudaGetLastError() == cudaSuccess ||
+                         fail(error, error_len, "GR-C4 branch read launch failed");
+}
+
+static bool gr_write_device_impl(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_gr_weights *weights, const float *device_residual,
+    float *device_normed, const float *device_block, float *device_updated,
+    char *error, size_t error_len) {
+    size_t inject_rows, inject_cols;
+    if (!context || !model || !weights || !device_residual ||
+        !device_normed || !device_block || !device_updated ||
+        !tensor_shape(weights->block_inject_weight, &inject_rows,
+                                    &inject_cols) ||
+        weights->block_inject_weight->type != 30 ||
+        inject_rows != Q38_GR_BRANCHES ||
+        inject_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN)
+        return false;
+    q38_exec_tensor *inject_exec =
+        exec_tensor_for(context, model, weights->block_inject_weight);
+    q38_exec_tensor *gamma_exec =
+        exec_tensor_for(context, model, weights->hc_norm);
+    if (!exec_tensor_is_resident(inject_exec, weights->block_inject_weight) ||
+        !exec_tensor_is_resident(gamma_exec, weights->hc_norm) ||
+        !ensure_gr_buffers(context))
+        return false;
+    gr_normalize_kernel<<<Q38_GR_BRANCHES, 256, 0, context->stream>>>(
+        device_residual, (const uint16_t *)gamma_exec->ptr,
+        context->device_gr_bottleneck, device_normed);
+    if (cudaGetLastError() != cudaSuccess ||
+        !q38_cuda_bf16_matvec_configured(
+                          (const uint16_t *)inject_exec->ptr, Q38_GR_BRANCHES,
+                          Q38_GR_BRANCHES * Q38_GR_HIDDEN, device_normed,
+                          context->device_gr_inject, 256, context->stream, error,
+                          error_len))
+        return fail(error, error_len, "GR-C4 inject launch failed");
+    gr_fused_writeback_kernel<<<
+        (Q38_GR_BRANCHES * Q38_GR_HIDDEN + 255u) / 256u, 256, 0,
+        context->stream>>>(
+        device_residual, device_block, context->device_gr_inject,
+        device_updated);
+    return cudaGetLastError() == cudaSuccess ||
+                         fail(error, error_len, "GR-C4 writeback launch failed");
+}
+
+static bool ensure_qsa_chain_workspace(q38_forward_cuda_context *context,
+                                                     char *error, size_t error_len);
+static bool qsa_chain_tensor(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_tensor *tensor, size_t rows, size_t cols,
+    const uint16_t **pointer, char *error, size_t error_len);
+
+extern "C" bool q38_forward_cuda_gr_read_device(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_gr_weights *weights, const float *device_residual,
+    float *device_input, float *device_normed, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    return gr_read_device_impl(context, model, weights, device_residual,
+                                             device_input, device_normed, error, error_len);
+}
+
+extern "C" bool q38_forward_cuda_gr_write_device(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_gr_weights *weights, const float *device_residual,
+    float *device_normed, const float *device_block, float *device_updated,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    return gr_write_device_impl(context, model, weights, device_residual,
+                                              device_normed, device_block, device_updated,
+                                              error, error_len);
+}
+
+extern "C" bool q38_forward_cuda_qsa_chain_device(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_layer_weights *layer, q38_qsa_state *host_state,
+    const float *device_input, uint32_t layer_number, float *device_output,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!context || !model || !layer || !host_state || !device_input ||
+        !device_output || layer_number >= Q38_MODEL_LAYERS)
+        return false;
+    q38_qsa_cuda_chain_state *chain =
+        &context->qsa_chain_state[layer_number];
+    if (host_state->position == 0 && chain->position != 0)
+        q38_qsa_cuda_chain_reset(chain);
+    if (chain->position != host_state->position)
+        return fail(error, error_len,
+                    "QSA device chain state is not seeded for this position");
+    const q38_qsa_weights *weights = &layer->qsa;
+    const uint16_t *q_proj, *k_proj, *v_proj, *index_proj, *o_proj;
+    const uint16_t *q_norm, *k_norm, *index_q_norm, *index_k_norm;
+    if (!qsa_chain_tensor(context, model, weights->q_proj, 12288, 2560,
+                          &q_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->k_proj, 512, 2560,
+                          &k_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->v_proj, 512, 2560,
+                          &v_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->index_qk_proj, 640, 2560,
+                          &index_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->o_proj, 2560, 6144,
+                          &o_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->q_norm, 1, 256,
+                          &q_norm, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->k_norm, 1, 256,
+                          &k_norm, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->index_q_norm, 1, 128,
+                          &index_q_norm, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->index_k_norm, 1, 128,
+                          &index_k_norm, error, error_len) ||
+        !ensure_qsa_chain_workspace(context, error, error_len))
+        return false;
+    const size_t required = chain->count + 1u;
+    size_t capacity = chain->capacity ? chain->capacity * 2u : 16u;
+    if (capacity < required) capacity = required;
+    if (!q38_qsa_cuda_chain_reserve(chain, capacity, context->stream,
+                                                  error, error_len))
+        return false;
+    if (!q38_qsa_cuda_chain_decode(
+            q_proj, k_proj, v_proj, index_proj, o_proj, q_norm, k_norm,
+            index_q_norm, index_k_norm, device_input, device_output,
+            host_state->position, chain, &context->qsa_chain_workspace,
+            context->stream, error, error_len))
+        return false;
+    if (!q38_qsa_state_advance_device(host_state, 1, error, error_len))
+        return false;
+    ++context->qsa_chain_calls;
+    context->qsa_chain_kernel_launches += 9;
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_forward_state *state, uint32_t layer_number, const float *host_input,
+    float *host_output, void *user, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    if (!context || !model || !layer || !state || !host_input || !host_output ||
+        layer_number >= Q38_MODEL_LAYERS)
+        return fail(error, error_len, "invalid decoder layer chain arguments");
+    const auto ensure = [&](void **buffer, size_t *capacity, size_t bytes) {
+        return ensure_buffer(buffer, capacity, bytes,
+                             context->allocation_observer,
+                             context->allocation_observer_user,
+                             &context->cuda_allocations);
+    };
+    if (!ensure((void **)&context->device_hidden_a,
+                &context->device_hidden_a_bytes,
+                Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float)) ||
+        !ensure((void **)&context->device_hidden_b,
+                &context->device_hidden_b_bytes,
+                Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_logits,
+                &context->device_moe_logits_bytes,
+                Q38_MOE_EXPERTS * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_route_indices,
+                &context->device_moe_route_indices_bytes,
+                Q38_MOE_TOP_K * sizeof(uint32_t)) ||
+        !ensure((void **)&context->device_moe_route_ids,
+                &context->device_moe_route_ids_bytes,
+                Q38_MOE_TOP_K * sizeof(uint16_t)) ||
+        !ensure((void **)&context->device_moe_route_weights,
+                &context->device_moe_route_weights_bytes,
+                Q38_MOE_TOP_K * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_accum,
+                &context->device_moe_accum_bytes,
+                Q38_MOE_HIDDEN * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_grouped_mid,
+                &context->device_moe_grouped_mid_bytes,
+                Q38_MOE_TOP_K * Q38_MOE_INTERMEDIATE * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_expert_outputs,
+                &context->device_moe_expert_outputs_bytes,
+                Q38_MOE_TOP_K * Q38_MOE_HIDDEN * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_shared_gate,
+                &context->device_moe_shared_gate_bytes,
+                Q38_MOE_INTERMEDIATE * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_shared_up,
+                &context->device_moe_shared_up_bytes,
+                Q38_MOE_INTERMEDIATE * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_shared_output,
+                &context->device_moe_shared_output_bytes,
+                Q38_MOE_HIDDEN * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_shared_weight,
+                &context->device_moe_shared_weight_bytes, sizeof(float)))
+        return fail(error, error_len, "decoder layer chain workspace allocation failed");
+    if (cudaMemcpyAsync(
+            context->device_hidden_a, host_input,
+            Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
+            cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+        return fail(error, error_len, "decoder layer chain input upload failed");
+
+    if (!q38_forward_cuda_gr_read_device(
+            context, model, &layer->attn_gr, context->device_hidden_a,
+            context->device_gr_input, context->device_gr_norm, error,
+            error_len))
+        return false;
+    if (layer->kind == Q38_LAYER_LINEAR_ATTENTION) {
+        if (!q38_forward_cuda_gdn_layer_device(
+                context, model, layer, state, context->device_gr_input,
+                layer_number, context->device_gr_block, error, error_len))
+            return false;
+    } else {
+        if (!q38_forward_cuda_qsa_chain_device(
+                context, model, layer, &state->qsa[layer_number],
+                context->device_gr_input, layer_number,
+                context->device_gr_block, error, error_len))
+            return false;
+    }
+    if (!q38_forward_cuda_gr_write_device(
+            context, model, &layer->attn_gr, context->device_hidden_a,
+            context->device_gr_norm, context->device_gr_block,
+            context->device_hidden_b, error, error_len))
+        return false;
+    if (!q38_forward_cuda_gr_read_device(
+            context, model, &layer->mlp_gr, context->device_hidden_b,
+            context->device_gr_input, context->device_gr_norm, error,
+            error_len))
+        return false;
+
+    const q38_tensor *router = layer->router;
+    const q38_tensor *gate_up = layer->experts.bank_count
+        ? layer->experts.bank[0].gate_up : NULL;
+    const q38_tensor *down = layer->experts.bank_count
+        ? layer->experts.bank[0].down : NULL;
+    const q38_tensor *shared_gate_proj = layer->shared_gate_proj;
+    const q38_tensor *shared_up_proj = layer->shared_up_proj;
+    const q38_tensor *shared_down_proj = layer->shared_down_proj;
+    const q38_tensor *shared_gate = layer->shared_expert_gate;
+    const q38_tensor *moe_tensors[] = {
+        router, gate_up, down, shared_gate_proj, shared_up_proj,
+        shared_down_proj, shared_gate,
+    };
+    for (const q38_tensor *tensor : moe_tensors)
+        if (!tensor)
+            return fail(error, error_len,
+                        "decoder layer chain MoE tensor set is incomplete");
+    q38_exec_tensor *router_exec = exec_tensor_for(context, model, router);
+    q38_exec_tensor *gate_exec = exec_tensor_for(context, model, gate_up);
+    q38_exec_tensor *down_exec = exec_tensor_for(context, model, down);
+    q38_exec_tensor *shared_gate_exec =
+        exec_tensor_for(context, model, shared_gate_proj);
+    q38_exec_tensor *shared_up_exec =
+        exec_tensor_for(context, model, shared_up_proj);
+    q38_exec_tensor *shared_down_exec =
+        exec_tensor_for(context, model, shared_down_proj);
+    q38_exec_tensor *shared_weight_exec =
+        exec_tensor_for(context, model, shared_gate);
+    if (router->type != Q38_GDN_WEIGHT_BF16 ||
+        gate_up->type != Q38_QUANT_Q2_K || down->type != Q38_QUANT_Q2_K ||
+        shared_gate_proj->type != Q38_GDN_WEIGHT_BF16 ||
+        shared_up_proj->type != Q38_GDN_WEIGHT_BF16 ||
+        shared_down_proj->type != Q38_GDN_WEIGHT_BF16 ||
+        shared_gate->type != Q38_GDN_WEIGHT_BF16 ||
+        !exec_tensor_is_resident(router_exec, router) ||
+        !exec_tensor_is_resident(gate_exec, gate_up) ||
+        !exec_tensor_is_resident(down_exec, down) ||
+        !exec_tensor_is_resident(shared_gate_exec, shared_gate_proj) ||
+        !exec_tensor_is_resident(shared_up_exec, shared_up_proj) ||
+        !exec_tensor_is_resident(shared_down_exec, shared_down_proj) ||
+        !exec_tensor_is_resident(shared_weight_exec, shared_gate))
+        return fail(error, error_len,
+                    "decoder layer chain requires resident MoE tensors");
+    char cuda_error[256] = {};
+    if (!q38_cuda_bf16_matvec_device(
+            (const uint16_t *)router_exec->ptr, Q38_MOE_EXPERTS,
+            Q38_MOE_HIDDEN, context->device_gr_input,
+            context->device_moe_logits, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_moe_cuda_route_weights(
+            context->device_moe_logits, 1,
+            context->device_moe_route_indices, context->device_moe_route_ids,
+            context->device_moe_route_weights, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_moe_cuda_q2_grouped_indexed_deterministic(
+            gate_exec->ptr, down_exec->ptr, context->device_gr_input,
+            context->device_moe_route_ids, context->device_moe_route_weights,
+            Q38_MOE_TOP_K, 1280u * 10u, 640u * 10u,
+            context->device_moe_accum, context->device_moe_grouped_mid,
+            context->device_moe_expert_outputs, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_cuda_bf16_matvec_device(
+            (const uint16_t *)shared_gate_exec->ptr, Q38_MOE_INTERMEDIATE,
+            Q38_MOE_HIDDEN, context->device_gr_input,
+            context->device_moe_shared_gate, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_cuda_bf16_matvec_device(
+            (const uint16_t *)shared_up_exec->ptr, Q38_MOE_INTERMEDIATE,
+            Q38_MOE_HIDDEN, context->device_gr_input,
+            context->device_moe_shared_up, context->stream, cuda_error,
+            sizeof(cuda_error)))
+        return fail(error, error_len,
+                    cuda_error[0] ? cuda_error : "decoder MoE launch failed");
+    moe_shared_silu_mul_kernel<<<
+        (Q38_MOE_INTERMEDIATE + 255u) / 256u, 256, 0, context->stream>>>(
+        context->device_moe_shared_gate, context->device_moe_shared_up,
+        context->device_moe_mid, Q38_MOE_INTERMEDIATE);
+    if (cudaGetLastError() != cudaSuccess ||
+        !q38_cuda_bf16_matvec_device(
+            (const uint16_t *)shared_down_exec->ptr, Q38_MOE_HIDDEN,
+            Q38_MOE_INTERMEDIATE, context->device_moe_mid,
+            context->device_moe_shared_output, context->stream, cuda_error,
+            sizeof(cuda_error)) ||
+        !q38_cuda_bf16_matvec_device(
+            (const uint16_t *)shared_weight_exec->ptr, 1, Q38_MOE_HIDDEN,
+            context->device_gr_input, context->device_moe_shared_weight,
+            context->stream, cuda_error, sizeof(cuda_error)))
+        return fail(error, error_len,
+                    cuda_error[0] ? cuda_error : "decoder shared MoE launch failed");
+    moe_shared_add_kernel<<<
+        (Q38_MOE_HIDDEN + 255u) / 256u, 256, 0, context->stream>>>(
+        context->device_moe_accum, context->device_moe_shared_output,
+        context->device_moe_shared_weight, context->device_gr_block,
+        Q38_MOE_HIDDEN);
+    if (cudaGetLastError() != cudaSuccess)
+        return fail(error, error_len, "decoder MoE reduction launch failed");
+    Q38_CUDA_DIAG_ONLY(++context->routed_layers_executed);
+    Q38_CUDA_DIAG_ONLY(context->selected_experts_total += Q38_MOE_TOP_K);
+    Q38_CUDA_DIAG_ONLY(context->q2_gate_up_fast_calls += Q38_MOE_TOP_K);
+    Q38_CUDA_DIAG_ONLY(context->q2_down_calls += Q38_MOE_TOP_K);
+    Q38_CUDA_DIAG_ONLY(context->expert_kernel_launches += 5);
+    if (!apply_directional_steering_device(
+            context, context->device_gr_block, layer_number,
+            Q38_GR_HIDDEN, 1, context->directional_steering_ffn_scale, error,
+            error_len) ||
+        !q38_forward_cuda_gr_write_device(
+            context, model, &layer->mlp_gr, context->device_hidden_b,
+            context->device_gr_norm, context->device_gr_block,
+            context->device_hidden_a, error, error_len))
+        return false;
+    if (cudaMemcpyAsync(
+            host_output, context->device_hidden_a,
+            Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
+            cudaMemcpyDeviceToHost, context->stream) != cudaSuccess ||
+        Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_GR_WRITE,
+                           cudaStreamSynchronize(context->stream)) !=
+            cudaSuccess)
+        return fail(error, error_len, "decoder layer chain output download failed");
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
+    return true;
 }
 
 extern "C" bool q38_forward_cuda_gr_read_backend(

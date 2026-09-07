@@ -1,6 +1,7 @@
 #include "q38_moe_cuda.h"
 #include "q38_moe_ref.h"
 #include "q38_quant.h"
+#include "q38_topk_cuda.h"
 
 #include <cuda_runtime.h>
 
@@ -8,10 +9,40 @@
 #include <stdlib.h>
 #include <cmath>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 
 static bool fail(char *error, size_t error_len, const char *message) {
     if (error && error_len) snprintf(error, error_len, "%s", message);
     return false;
+}
+
+__global__ static void route_weights_kernel(
+    const float *logits, const uint32_t *indices, size_t tokens,
+    uint16_t *expert_ids, float *weights) {
+    const size_t token = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (token >= tokens) return;
+    const float *row = logits + token * Q38_MOE_EXPERTS;
+    float max_value = -INFINITY;
+    for (size_t e = 0; e < Q38_MOE_EXPERTS; ++e) {
+        const float value = __bfloat162float(__float2bfloat16_rn(row[e]));
+        max_value = fmaxf(max_value, value);
+    }
+    float selected_sum = 0.0f;
+    for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
+        const uint32_t expert = indices[token * Q38_MOE_TOP_K + k];
+        expert_ids[token * Q38_MOE_TOP_K + k] = (uint16_t)expert;
+        const float value =
+            __bfloat162float(__float2bfloat16_rn(row[expert]));
+        selected_sum += expf(value - max_value);
+    }
+    for (size_t k = 0; k < Q38_MOE_TOP_K; ++k) {
+        const uint32_t expert = indices[token * Q38_MOE_TOP_K + k];
+        const float value =
+            __bfloat162float(__float2bfloat16_rn(row[expert]));
+        const float normalized = expf(value - max_value) / selected_sum;
+        weights[token * Q38_MOE_TOP_K + k] =
+            __bfloat162float(__float2bfloat16_rn(normalized));
+    }
 }
 
 __global__ static void router_kernel(const float *hidden, size_t tokens,
@@ -44,6 +75,27 @@ extern "C" bool q38_moe_cuda_router(const float *device_hidden,
     if (status != cudaSuccess)
         return fail(error, error_len, cudaGetErrorString(status));
     return true;
+}
+
+extern "C" bool q38_moe_cuda_route_weights(
+    const float *device_logits, size_t token_count, uint32_t *device_indices,
+    uint16_t *device_expert_ids, float *device_weights, cudaStream_t stream,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!device_logits || !token_count || !device_indices ||
+        !device_expert_ids || !device_weights)
+        return fail(error, error_len, "invalid CUDA route weight arguments");
+    if (!q38_topk_cuda(device_logits, token_count, Q38_MOE_EXPERTS,
+                       Q38_MOE_TOP_K, device_indices, stream, error,
+                       error_len))
+        return false;
+    route_weights_kernel<<<(unsigned)((token_count + 255) / 256), 256, 0,
+                            stream>>>(
+        device_logits, device_indices, token_count, device_expert_ids,
+        device_weights);
+    const cudaError_t status = cudaGetLastError();
+    return status == cudaSuccess ||
+           fail(error, error_len, cudaGetErrorString(status));
 }
 
 extern "C" bool q38_moe_cuda_route(

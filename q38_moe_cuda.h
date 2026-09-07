@@ -18,6 +18,14 @@ bool q38_moe_cuda_router(const float *device_hidden, size_t token_count,
                          const float *device_router, float *device_logits,
                          cudaStream_t stream, char *error, size_t error_len);
 
+/* Complete device-side top-k route selection.  Logits are selected using the
+ * reference pre-cast ordering; returned weights use BF16 effective logits and
+ * the canonical selected-set renormalization. */
+bool q38_moe_cuda_route_weights(
+    const float *device_logits, size_t token_count, uint32_t *device_indices,
+    uint16_t *device_expert_ids, float *device_weights, cudaStream_t stream,
+    char *error, size_t error_len);
+
 bool q38_moe_cuda_route(const float *device_hidden, size_t token_count,
                         const float *device_router, float *device_logits,
                         q38_moe_route10 *host_routes, cudaStream_t stream,

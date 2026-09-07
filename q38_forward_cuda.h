@@ -222,6 +222,8 @@ bool q38_forward_cuda_load_gdn_state(
     const q38_forward_state *state, void *user, char *error, size_t error_len);
 bool q38_forward_cuda_sync_gdn_state(
     q38_forward_state *state, void *user, char *error, size_t error_len);
+bool q38_forward_cuda_load_qsa_state(
+    const q38_forward_state *state, void *user, char *error, size_t error_len);
 
 bool q38_forward_cuda_matvec_backend(
     const q38_gguf *model, const q38_tensor *tensor, size_t row,
@@ -281,6 +283,37 @@ bool q38_forward_cuda_gdn_layer_backend(
     q38_forward_state *state, const float *input, size_t token_count,
     uint32_t layer_number, float *output, void *user, char *error,
     size_t error_len);
+
+/* Device-only layer primitives.  These enqueue work on the context stream;
+ * ownership of the boundary transfer and final wait remains with the caller. */
+bool q38_forward_cuda_gr_read_device(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_gr_weights *weights, const float *device_residual,
+    float *device_input, float *device_normed, char *error, size_t error_len);
+bool q38_forward_cuda_gr_write_device(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_gr_weights *weights, const float *device_residual,
+    float *device_normed, const float *device_block, float *device_updated,
+    char *error, size_t error_len);
+bool q38_forward_cuda_gdn_layer_device(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_layer_weights *layer, q38_forward_state *state,
+    const float *device_input, uint32_t layer_number, float *device_output,
+    char *error, size_t error_len);
+bool q38_forward_cuda_qsa_chain_device(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_layer_weights *layer, q38_qsa_state *state,
+    const float *device_input, uint32_t layer_number, float *device_output,
+    char *error, size_t error_len);
+
+typedef bool (*q38_forward_cuda_decoder_layer_chain_fn)(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_forward_state *state, uint32_t layer_number, const float *host_input,
+    float *host_output, void *user, char *error, size_t error_len);
+bool q38_forward_cuda_decoder_layer_chain_backend(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_forward_state *state, uint32_t layer_number, const float *host_input,
+    float *host_output, void *user, char *error, size_t error_len);
 
 #ifdef __cplusplus
 }
