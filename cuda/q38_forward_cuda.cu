@@ -7,6 +7,7 @@
 #include "q38_topk_cuda.h"
 #include "q38_gr_ref.h"
 #include "q38_diagnostics.h"
+#include "q38_residency_plan.h"
 
 #include <cooperative_groups.h>
 #include <cuda_fp16.h>
@@ -178,6 +179,14 @@ struct q38_forward_cuda_context {
     size_t persistent_loaded_bytes;
     uint64_t persistent_loaded_tensors;
     bool exec_strict;
+    void *residency_stage;
+    size_t residency_stage_bytes;
+    void *residency_transfer;
+    size_t residency_transfer_bytes;
+    uint64_t residency_transfer_calls;
+    uint64_t residency_device_copies;
+    uint64_t residency_final_syncs;
+    uint64_t residency_planned_spans;
     const q38_gguf *exec_model;
     q38_exec_tensor *exec_tensors;
     size_t exec_tensor_count;
@@ -479,6 +488,11 @@ static bool is_ple_embedding_table(const q38_tensor *tensor) {
     return len >= 41 &&
            memmem(name, len,
                   ".ple.ple_embedding.ngram_embedding.shard_", 41) != NULL;
+}
+
+static bool residency_plan_is_ple(const q38_tensor *tensor, void *user) {
+    (void)user;
+    return is_ple_embedding_table(tensor);
 }
 
 static const char *residency_group(const q38_tensor *tensor) {
@@ -1100,21 +1114,22 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     if (!context || !model)
         return fail(error, error_len, "invalid all-non-PLE residency arguments");
     if (context->all_non_ple_resident) return true;
-    size_t count = 0, total = 0;
-    for (uint64_t i = 0; i < model->n_tensors; ++i) {
-        const q38_tensor *tensor = &model->tensors[i];
-        if (is_ple_embedding_table(tensor)) {
-            Q38_CUDA_DIAG_ONLY(++context->persistent_ple_tensors);
-            continue;
-        }
-        if (!tensor->bytes || tensor->bytes > SIZE_MAX) continue;
-        if (count == SIZE_MAX || total > SIZE_MAX - (size_t)tensor->bytes)
-            return fail(error, error_len, "all-non-PLE residency size overflow");
-        ++count;
-        total += (size_t)tensor->bytes;
+    q38_residency_plan plan;
+    q38_residency_plan_init(&plan);
+    if (!q38_residency_plan_build(
+            model, residency_plan_is_ple, NULL, 64u * 1024u,
+            256u * 1024u * 1024u, &plan, error, error_len))
+        return false;
+    const size_t count = plan.entry_count;
+    if (plan.resident_bytes > SIZE_MAX) {
+        q38_residency_plan_destroy(&plan);
+        return fail(error, error_len, "all-non-PLE residency size overflow");
     }
+    const size_t total = (size_t)plan.resident_bytes;
     context->persistent_expected_tensors = count;
     context->persistent_expected_bytes = total;
+    context->persistent_ple_tensors = plan.excluded_ple_tensors;
+    context->residency_planned_spans = plan.span_count;
     /*
      * On unified-memory systems, cudaMemGetInfo() reports immediately free
      * device pages and excludes reclaimable host page cache.  Do not reject
@@ -1133,8 +1148,6 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     }
     context->exec_model = model;
     context->exec_tensor_count = (size_t)model->n_tensors;
-    size_t at = 0;
-    size_t loaded_bytes = 0;
     for (uint64_t i = 0; i < model->n_tensors; ++i) {
         const q38_tensor *tensor = &model->tensors[i];
         q38_exec_tensor *exec = &context->exec_tensors[i];
@@ -1149,7 +1162,14 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         exec->name = tensor->name.ptr;
         exec->storage = is_ple_embedding_table(tensor)
             ? Q38_STORAGE_FILE_BACKED_PLE : Q38_STORAGE_RESIDENT;
-        if (is_ple_embedding_table(tensor) || !tensor->bytes) continue;
+    }
+    size_t at = 0;
+    size_t loaded_bytes = 0;
+    for (size_t p = 0; p < plan.entry_count; ++p) {
+        const q38_residency_plan_entry *planned = &plan.entries[p];
+        const uint32_t tensor_index = planned->tensor_index;
+        const q38_tensor *tensor = &model->tensors[tensor_index];
+        q38_exec_tensor *exec = &context->exec_tensors[tensor_index];
         const void *host = q38_gguf_tensor_data(model, tensor);
         bool duplicate = false;
         for (size_t j = 0; j < at; ++j)
@@ -1158,14 +1178,12 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
             Q38_CUDA_DIAG_ONLY(++context->persistent_duplicate_tensors);
             for (size_t j = 0; j < at; ++j) cudaFree(entries[j].device);
             free(entries);
+            q38_residency_plan_destroy(&plan);
             return fail(error, error_len,
                         "duplicate tensor in all-non-PLE residency set");
         }
         if (!host || cudaMalloc(&entries[at].device, (size_t)tensor->bytes) !=
-                         cudaSuccess ||
-            cudaMemcpyAsync(entries[at].device, host, (size_t)tensor->bytes,
-                            cudaMemcpyHostToDevice, context->stream) !=
-                cudaSuccess) {
+                         cudaSuccess) {
             cudaFree(entries[at].device);
             context->persistent = entries;
             context->persistent_count = at;
@@ -1184,6 +1202,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
                 "all-non-PLE residency upload failed";
             snprintf(context->persistent_failure,
                      sizeof(context->persistent_failure), "%s", detail);
+            q38_residency_plan_destroy(&plan);
             return false;
         }
         entries[at].host = host;
@@ -1191,40 +1210,18 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         exec->ptr = entries[at].device;
         ++at;
         loaded_bytes += (size_t)tensor->bytes;
-        if (Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_RESIDENCY_INIT,
-                               cudaStreamSynchronize(context->stream)) !=
-            cudaSuccess) {
-            char name[128];
-            copy_tensor_name(tensor, name, sizeof(name));
-            if (error && error_len)
-                snprintf(error, error_len,
-                         "all-non-PLE residency copy failed at %s/%s: %s",
-                         residency_group(tensor), name,
-                         cudaGetErrorString(cudaGetLastError()));
-            context->persistent = entries;
-            context->persistent_count = at;
-            context->persistent_bytes = loaded_bytes;
-            context->persistent_loaded_bytes = loaded_bytes;
-            context->persistent_loaded_tensors = at;
-            context->all_non_ple_resident = false;
-            snprintf(context->persistent_failure,
-                     sizeof(context->persistent_failure), "%s",
-                     error && error_len ? error :
-                     "all-non-PLE residency copy failed");
-            return false;
-        }
-        Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
-        size_t progress_free = 0, progress_total = 0;
-        (void)cudaMemGetInfo(&progress_free, &progress_total);
-        if (context->progress_observer)
-            context->progress_observer(
-                residency_group(tensor), tensor, loaded_bytes,
-                progress_free, progress_total,
-                context->progress_observer_user);
     }
-    if (Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_RESIDENCY_INIT,
-                           cudaStreamSynchronize(context->stream)) !=
-        cudaSuccess) {
+    size_t largest_span = 0;
+    for (size_t i = 0; i < plan.span_count; ++i)
+        if (plan.spans[i].bytes > largest_span)
+            largest_span = (size_t)plan.spans[i].bytes;
+    if (largest_span &&
+        (cudaMallocHost(&context->residency_stage, largest_span) !=
+             cudaSuccess ||
+         cudaMalloc(&context->residency_transfer, largest_span) !=
+             cudaSuccess)) {
+        cudaFreeHost(context->residency_stage);
+        cudaFree(context->residency_transfer);
         context->persistent = entries;
         context->persistent_count = at;
         context->persistent_bytes = loaded_bytes;
@@ -1233,13 +1230,61 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         context->all_non_ple_resident = false;
         snprintf(context->persistent_failure,
                  sizeof(context->persistent_failure),
-                 "all-non-PLE residency synchronization failed: %s",
-                 cudaGetErrorString(cudaGetLastError()));
+                 "coalesced residency staging allocation failed");
+        q38_residency_plan_destroy(&plan);
         return fail(error, error_len, context->persistent_failure);
     }
-    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
+    context->residency_stage_bytes = largest_span;
+    context->residency_transfer_bytes = largest_span;
     context->persistent = entries;
     context->persistent_count = at;
+    for (size_t s = 0; s < plan.span_count; ++s) {
+        const q38_residency_plan_span *span = &plan.spans[s];
+        memcpy(context->residency_stage,
+               model->map + span->file_offset, (size_t)span->bytes);
+        if (cudaMemcpyAsync(context->residency_transfer,
+                            context->residency_stage, (size_t)span->bytes,
+                            cudaMemcpyHostToDevice, context->stream) !=
+            cudaSuccess) {
+            q38_residency_plan_destroy(&plan);
+            return fail(error, error_len,
+                        "coalesced residency H2D upload failed");
+        }
+        context->residency_transfer_calls++;
+        for (size_t j = 0; j < span->entry_count; ++j) {
+            const q38_residency_plan_entry *planned =
+                &plan.entries[span->first_entry + j];
+            const size_t entry_index = span->first_entry + j;
+            const uint64_t relative =
+                planned->file_offset - span->file_offset;
+            if (cudaMemcpyAsync(
+                    entries[entry_index].device,
+                    (const char *)context->residency_transfer + relative,
+                    (size_t)planned->bytes, cudaMemcpyDeviceToDevice,
+                    context->stream) != cudaSuccess) {
+                q38_residency_plan_destroy(&plan);
+                return fail(error, error_len,
+                            "coalesced residency tensor copy failed");
+            }
+            context->residency_device_copies++;
+        }
+    }
+    if (Q38_CUDA_SYNC_CALL(context, Q38_CUDA_SYNC_RESIDENCY_INIT,
+                           cudaStreamSynchronize(context->stream)) !=
+        cudaSuccess) {
+        q38_residency_plan_destroy(&plan);
+        return fail(error, error_len,
+                    "coalesced residency synchronization failed");
+    }
+    context->residency_final_syncs++;
+    Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
+    size_t progress_free = 0, progress_total = 0;
+    (void)cudaMemGetInfo(&progress_free, &progress_total);
+    if (context->progress_observer)
+        context->progress_observer("coalesced", NULL, loaded_bytes,
+                                   progress_free, progress_total,
+                                   context->progress_observer_user);
+    q38_residency_plan_destroy(&plan);
     context->persistent_bytes = loaded_bytes;
     context->persistent_loaded_bytes = loaded_bytes;
     context->persistent_loaded_tensors = at;
@@ -1295,6 +1340,8 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_gdn_state);
     cudaFree(context->device_gdn_history);
     cudaFree(context->device_steering);
+    cudaFree(context->residency_transfer);
+    cudaFreeHost(context->residency_stage);
     free(context->host_qsa_output);
     if (!context->lm_head_uses_persistent)
         cudaFree(context->lm_head_device_weights);
@@ -1477,6 +1524,11 @@ extern "C" void q38_forward_cuda_get_residency_stats(
         ? context->persistent_failure : NULL;
     stats->persistent_loaded_bytes = context->persistent_loaded_bytes;
     stats->persistent_loaded_tensors = context->persistent_loaded_tensors;
+    stats->residency_planned_spans = context->residency_planned_spans;
+    stats->residency_transfer_calls = context->residency_transfer_calls;
+    stats->residency_device_copies = context->residency_device_copies;
+    stats->residency_final_syncs = context->residency_final_syncs;
+    stats->residency_stage_bytes = context->residency_stage_bytes;
     stats->exec_strict = context->exec_strict;
     stats->resident_lookup_in_decode = context->resident_lookup_in_decode;
     stats->gguf_name_lookup_in_decode = context->gguf_name_lookup_in_decode;

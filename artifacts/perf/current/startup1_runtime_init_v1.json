@@ -1,0 +1,1 @@
+{"phase":"STARTUP-1","model_loaded":true,"decode_benchmark":false,"startup":{"gguf_open_ms":0.126,"tokenizer_ms":44053.158,"binding_ms":1.518,"cuda_prepare_ms":5880.083,"runtime_init_ms":49934.893,"residency_planned_spans":148,"residency_transfer_calls":148,"residency_final_syncs":1,"residency_stage_bytes":1271398400},"post_init_status":"prefill_not_run_as_benchmark"}

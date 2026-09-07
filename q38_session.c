@@ -4,6 +4,7 @@
 #include "q38_gr_ref.h"
 
 #include <math.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -83,18 +84,52 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     if (!runtime || !model_path || !tokenizer_path || !tokenizer_path[0])
         return fail(error, error_len, "invalid runtime initialization arguments");
     runtime_zero(runtime);
+#if Q38_DIAGNOSTICS
+    const double init_started = session_now_ms();
+    double gguf_open_ms = 0.0;
+    double tokenizer_ms = 0.0;
+    double binding_ms = 0.0;
+    double cuda_prepare_ms = 0.0;
+#endif
     runtime->model = q38_gguf_open(model_path, error, error_len);
+#if Q38_DIAGNOSTICS
+    gguf_open_ms = session_now_ms() - init_started;
+#endif
     if (!runtime->model)
         goto fail_runtime;
+    const double tokenizer_started =
+#if Q38_DIAGNOSTICS
+        session_now_ms();
+#else
+        0.0;
+#endif
     if (!q38_tokenizer_init(&runtime->tokenizer, tokenizer_path, NULL,
                             error, error_len))
         goto fail_runtime;
     runtime->tokenizer_initialized = true;
+#if Q38_DIAGNOSTICS
+    tokenizer_ms = session_now_ms() - tokenizer_started;
+#endif
+    const double binding_started =
+#if Q38_DIAGNOSTICS
+        session_now_ms();
+#else
+        0.0;
+#endif
     if (!q38_weights_bind_subset(runtime->model, 47, &runtime->weights,
                                  error, error_len))
         goto fail_runtime;
+#if Q38_DIAGNOSTICS
+    binding_ms = session_now_ms() - binding_started;
+#endif
     if (!validate_lm_head_geometry(runtime->weights.output, error, error_len))
         goto fail_runtime;
+    const double cuda_prepare_started =
+#if Q38_DIAGNOSTICS
+        session_now_ms();
+#else
+        0.0;
+#endif
     runtime->cuda = q38_forward_cuda_context_create(error, error_len);
     if (!runtime->cuda ||
         !q38_forward_cuda_enable_all_non_ple_residency(
@@ -103,6 +138,25 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
             runtime->cuda, runtime->model, runtime->weights.output,
             error, error_len))
         goto fail_runtime;
+#if Q38_DIAGNOSTICS
+    cuda_prepare_ms = session_now_ms() - cuda_prepare_started;
+    q38_forward_cuda_residency_stats startup_stats;
+    q38_forward_cuda_get_residency_stats(runtime->cuda, &startup_stats);
+    fprintf(stderr,
+            "q38: startup_timing {\"gguf_open_ms\":%.3f,"
+            "\"tokenizer_ms\":%.3f,\"binding_ms\":%.3f,"
+            "\"cuda_prepare_ms\":%.3f,\"runtime_init_ms\":%.3f,"
+            "\"residency_planned_spans\":%" PRIu64 ","
+            "\"residency_transfer_calls\":%" PRIu64 ","
+            "\"residency_final_syncs\":%" PRIu64 ","
+            "\"residency_stage_bytes\":%zu}\n",
+            gguf_open_ms, tokenizer_ms, binding_ms, cuda_prepare_ms,
+            session_now_ms() - init_started,
+            startup_stats.residency_planned_spans,
+            startup_stats.residency_transfer_calls,
+            startup_stats.residency_final_syncs,
+            startup_stats.residency_stage_bytes);
+#endif
     runtime->backend.matvec = q38_forward_cuda_matvec_backend;
     runtime->backend.matrix = q38_forward_cuda_matrix_backend;
     runtime->backend.matrix_batch = q38_forward_cuda_matrix_batch_backend;

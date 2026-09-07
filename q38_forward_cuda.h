@@ -106,6 +106,11 @@ typedef struct {
     const char *persistent_failure;
     size_t persistent_loaded_bytes;
     uint64_t persistent_loaded_tensors;
+    uint64_t residency_planned_spans;
+    uint64_t residency_transfer_calls;
+    uint64_t residency_device_copies;
+    uint64_t residency_final_syncs;
+    size_t residency_stage_bytes;
     bool exec_strict;
     uint64_t resident_lookup_in_decode;
     uint64_t gguf_name_lookup_in_decode;

@@ -34,7 +34,7 @@ PRODUCTION_C_OBJS := \
 	q38_decode.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_quant.o \
 	q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o \
-	q38_residency.o q38_directional_steering.o q38_session.o
+	q38_residency.o q38_directional_steering.o q38_session.o q38_residency_plan.o
 PRODUCTION_CUDA_OBJS := \
 	q38_cuda.o q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o \
@@ -58,7 +58,8 @@ S4B_DIAG_CUDA_OBJS := $(addprefix $(DIAG_OBJDIR)/,$(CANONICAL_BENCH_CUDA_OBJS))
 
 TEST_BINS := \
 	tests/test_platform tests/test_gguf tests/test_memory \
-	tests/test_model_config tests/test_quant_blocks tests/test_residency
+	tests/test_model_config tests/test_quant_blocks tests/test_residency \
+	tests/test_residency_plan
 
 tests/bench_ple_projection_cuda: tests/bench_ple_projection.cu \
 		build/release/q38_gdn.o build/release/q38_cuda_primitives.o
@@ -66,9 +67,16 @@ tests/bench_ple_projection_cuda: tests/bench_ple_projection.cu \
 
 bench-ple-projection-cuda: tests/bench_ple_projection_cuda
 
+tests/bench_residency_startup: tests/bench_residency_startup.cu \
+		q38_residency_plan.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
+
+bench-startup-residency: tests/bench_residency_startup
+
 .PHONY: all q38 q38-diag q38-server q38-server-mock q38-cli q38-dev-worker spark test test-server clean tools \
 	q38-server-real \
 	bench-ple-projection-cuda \
+	bench-startup-residency \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	tests/q2_forward_exclusive_attribution \
 	tests/test_s4c_ple_replay \
@@ -212,6 +220,11 @@ tests/test_quant_blocks: tests/test_quant_blocks.c \
 tests/test_residency: tests/test_residency.c q38_residency.o \
 		q38_residency.h
 	$(CC) $(CFLAGS) -o $@ tests/test_residency.c q38_residency.o
+
+tests/test_residency_plan: tests/test_residency_plan.c \
+		q38_residency_plan.o q38_gguf.h q38_residency_plan.h
+	$(CC) $(CFLAGS) -o $@ tests/test_residency_plan.c \
+		q38_residency_plan.o
 
 GR_FIXTURE_DIR := tests/fixtures/gr
 GR_REFERENCE_ARTIFACT := artifacts/perf/subsystems/gr_reference.json
