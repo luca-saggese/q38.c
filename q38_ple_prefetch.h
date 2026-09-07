@@ -39,6 +39,7 @@ typedef struct {
     uint64_t unique_rows;
     uint64_t unique_physical_blocks;
     uint64_t file_read_ops;
+    uint64_t madvise_calls;
     uint64_t logical_bytes;
     uint64_t physical_bytes;
     uint64_t cache_hits;

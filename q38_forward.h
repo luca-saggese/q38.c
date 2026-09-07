@@ -238,6 +238,20 @@ typedef bool (*q38_forward_timing_trace)(
     const q38_forward_timing_usage *usage, void *user, char *error,
     size_t error_len);
 
+typedef struct {
+    double wall_ms;
+    double wait_ms;
+    double id_build_ms;
+    double row_lookup_copy_ms;
+    double row_decode_ms;
+    double projection_ms;
+    double gate_ms;
+    double convolution_ms;
+    double accumulation_ms;
+    double hidden_injection_ms;
+    double misc_ms;
+} q38_ple_cost_timing;
+
 typedef void (*q38_forward_backend_context_trace)(
     uint32_t layer, const char *logical_stage, const q38_tensor *tensor,
     size_t rows, size_t cols, void *user);
@@ -287,6 +301,7 @@ typedef struct {
     q38_forward_qsa_snapshot_fn qsa_snapshot;
     q38_forward_qsa_qkv_backend qsa_qkv_backend;
     void *qsa_qkv_backend_user;
+    q38_ple_cost_timing *ple_cost;
     const q38_directional_steering *directional_steering;
     float directional_steering_ffn_scale;
     float directional_steering_attn_scale;

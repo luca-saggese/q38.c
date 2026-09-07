@@ -83,8 +83,25 @@ typedef struct {
     double ple_injection_ms;
     double ple_wait_at_injection_ms;
     uint64_t ple_file_read_ops;
+    uint64_t ple_madvise_calls;
     uint64_t ple_file_read_min_bytes;
     uint64_t ple_file_read_max_bytes;
+    uint64_t ple_logical_bytes;
+    uint64_t ple_pread_bytes;
+    uint64_t ple_cache_hits;
+    uint64_t ple_cache_misses;
+    double ple_cost_wall_ms;
+    double ple_cost_wait_ms;
+    double ple_cost_id_build_ms;
+    double ple_cost_row_lookup_copy_ms;
+    double ple_cost_row_decode_ms;
+    double ple_cost_projection_ms;
+    double ple_cost_gate_ms;
+    double ple_cost_convolution_ms;
+    double ple_cost_accumulation_ms;
+    double ple_cost_hidden_injection_ms;
+    double ple_cost_misc_ms;
+    double layer_wall_ms[Q38_MODEL_LAYERS];
     uint64_t ple_request_id;
     uint64_t ple_token_position;
     uint64_t ple_submit_position;
@@ -147,6 +164,7 @@ typedef struct {
 
 typedef struct {
     q2_sample sample;
+    q38_ple_cost_timing ple_cost;
     q38_forward_qsa_timing qsa_timing;
     q38_forward_cuda_sync_stats sync_before;
     q2_timing_event timing_events[Q2_MAX_TIMING_EVENTS];
@@ -197,6 +215,7 @@ typedef struct {
     size_t prefill_chunk;
     size_t measure_first;
     size_t measure_last;
+    bool disable_ple;
     size_t prefill_sizes[MAX_PREFILL_CASES];
     size_t prefill_count;
 } q2_options;
@@ -418,6 +437,9 @@ static bool timing_trace(const q38_forward_timing_usage *usage, void *opaque,
             return true;
         }
     }
+    if (!strcmp(usage->name, "decoder_layer") &&
+        usage->layer < Q38_MODEL_LAYERS)
+        capture->sample.layer_wall_ms[usage->layer] += usage->elapsed_ms;
     if (capture->timing_event_count >= Q2_MAX_TIMING_EVENTS) {
         if (error && error_len)
             snprintf(error, error_len, "forward timing tree capacity exceeded");
@@ -539,6 +561,17 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     ADD(ple_result_publish_ms);
     ADD(ple_injection_ms);
     ADD(ple_wait_at_injection_ms);
+    ADD(ple_cost_wall_ms);
+    ADD(ple_cost_wait_ms);
+    ADD(ple_cost_id_build_ms);
+    ADD(ple_cost_row_lookup_copy_ms);
+    ADD(ple_cost_row_decode_ms);
+    ADD(ple_cost_projection_ms);
+    ADD(ple_cost_gate_ms);
+    ADD(ple_cost_convolution_ms);
+    ADD(ple_cost_accumulation_ms);
+    ADD(ple_cost_hidden_injection_ms);
+    ADD(ple_cost_misc_ms);
     ADD(qsa_ms);
     ADD(qsa_qkv_ms);
     ADD(qsa_output_projection_ms);
@@ -585,6 +618,13 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     ADD(timing_other_layer_ms);
     ADD(timing_unexplained_ms);
     sum->ple_file_read_ops += sample->ple_file_read_ops;
+    sum->ple_madvise_calls += sample->ple_madvise_calls;
+    sum->ple_logical_bytes += sample->ple_logical_bytes;
+    sum->ple_pread_bytes += sample->ple_pread_bytes;
+    sum->ple_cache_hits += sample->ple_cache_hits;
+    sum->ple_cache_misses += sample->ple_cache_misses;
+    for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
+        sum->layer_wall_ms[i] += sample->layer_wall_ms[i];
     if (sample->ple_file_read_min_bytes != 0 &&
         (sum->ple_file_read_min_bytes == 0 ||
          sample->ple_file_read_min_bytes < sum->ple_file_read_min_bytes))
@@ -624,6 +664,17 @@ static void divide_sample(q2_sample *sample, double divisor) {
     DIV(ple_result_publish_ms);
     DIV(ple_injection_ms);
     DIV(ple_wait_at_injection_ms);
+    DIV(ple_cost_wall_ms);
+    DIV(ple_cost_wait_ms);
+    DIV(ple_cost_id_build_ms);
+    DIV(ple_cost_row_lookup_copy_ms);
+    DIV(ple_cost_row_decode_ms);
+    DIV(ple_cost_projection_ms);
+    DIV(ple_cost_gate_ms);
+    DIV(ple_cost_convolution_ms);
+    DIV(ple_cost_accumulation_ms);
+    DIV(ple_cost_hidden_injection_ms);
+    DIV(ple_cost_misc_ms);
     DIV(qsa_ms);
     DIV(qsa_qkv_ms);
     DIV(qsa_output_projection_ms);
@@ -676,6 +727,18 @@ static void divide_sample(q2_sample *sample, double divisor) {
         (double)sample->non_ple_residency_misses / divisor);
     sample->ple_file_read_ops = (uint64_t)(
         (double)sample->ple_file_read_ops / divisor);
+    sample->ple_madvise_calls = (uint64_t)(
+        (double)sample->ple_madvise_calls / divisor);
+    sample->ple_logical_bytes = (uint64_t)(
+        (double)sample->ple_logical_bytes / divisor);
+    sample->ple_pread_bytes = (uint64_t)(
+        (double)sample->ple_pread_bytes / divisor);
+    sample->ple_cache_hits = (uint64_t)(
+        (double)sample->ple_cache_hits / divisor);
+    sample->ple_cache_misses = (uint64_t)(
+        (double)sample->ple_cache_misses / divisor);
+    for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
+        sample->layer_wall_ms[i] /= divisor;
     sample->ple_file_read_min_bytes = (uint64_t)(
         (double)sample->ple_file_read_min_bytes / divisor);
     sample->ple_file_read_max_bytes = (uint64_t)(
@@ -723,6 +786,7 @@ static void usage(FILE *stream) {
             "  --prefill-chunk N   prefill chunk (default 128)\n"
             "  --measure-first N   first measured generated index (default 16)\n"
             "  --measure-last N    last measured generated index (default 127)\n"
+            "  --disable-ple       skip PLE prefetch and injection\n"
             "  --prefill-sizes A,B,C  prefill sizes (default 128,512,2048)\n");
 }
 
@@ -757,6 +821,8 @@ static bool parse_options(int argc, char **argv, q2_options *options) {
             options->measure_first = strtoull(argv[++i], NULL, 10);
         else if (!strcmp(arg, "--measure-last") && i + 1 < argc)
             options->measure_last = strtoull(argv[++i], NULL, 10);
+        else if (!strcmp(arg, "--disable-ple"))
+            options->disable_ple = true;
         else if (!strcmp(arg, "--prefill-sizes") && i + 1 < argc) {
             options->prefill_count = 0;
             if (!parse_size_list(argv[++i], options)) return false;
@@ -905,8 +971,10 @@ static bool run_decode(q38_session *session, const q2_options *options,
         return false;
     }
     memset(&diagnostics, 0, sizeof(diagnostics));
+    diagnostics.disable_ple = options->disable_ple;
     diagnostics.stage_trace = stage_trace;
     diagnostics.timing_trace = timing_trace;
+    diagnostics.ple_cost = &prefill_capture.ple_cost;
     memset(&prefill_capture, 0, sizeof(prefill_capture));
     diagnostics.trace_user = &prefill_capture;
     diagnostics.qsa_timing = &prefill_capture.qsa_timing;
@@ -932,6 +1000,7 @@ static bool run_decode(q38_session *session, const q2_options *options,
         const double started = now_ms();
         memset(&capture, 0, sizeof(capture));
         diagnostics.timing_trace = timing_trace;
+        diagnostics.ple_cost = &capture.ple_cost;
         q38_forward_cuda_reset_sync_stats(session->runtime->cuda);
         q38_forward_cuda_get_sync_stats(session->runtime->cuda,
                                         &capture.sync_before);
@@ -966,6 +1035,27 @@ static bool run_decode(q38_session *session, const q2_options *options,
         capture.sample.ple_injection_ms = ple.injection_ms;
         capture.sample.ple_wait_at_injection_ms = ple.wait_at_injection_ms;
         capture.sample.ple_file_read_ops = ple.file_read_ops;
+        capture.sample.ple_madvise_calls = ple.madvise_calls;
+        capture.sample.ple_logical_bytes = ple.logical_bytes;
+        capture.sample.ple_pread_bytes = ple.physical_bytes;
+        capture.sample.ple_cache_hits = ple.cache_hits;
+        capture.sample.ple_cache_misses = ple.cache_misses;
+        capture.sample.ple_cost_wall_ms = capture.ple_cost.wall_ms;
+        capture.sample.ple_cost_wait_ms = capture.ple_cost.wait_ms;
+        capture.sample.ple_cost_id_build_ms = capture.ple_cost.id_build_ms;
+        capture.sample.ple_cost_row_lookup_copy_ms =
+            capture.ple_cost.row_lookup_copy_ms;
+        capture.sample.ple_cost_row_decode_ms =
+            capture.ple_cost.row_decode_ms;
+        capture.sample.ple_cost_projection_ms = capture.ple_cost.projection_ms;
+        capture.sample.ple_cost_gate_ms = capture.ple_cost.gate_ms;
+        capture.sample.ple_cost_convolution_ms =
+            capture.ple_cost.convolution_ms;
+        capture.sample.ple_cost_accumulation_ms =
+            capture.ple_cost.accumulation_ms;
+        capture.sample.ple_cost_hidden_injection_ms =
+            capture.ple_cost.hidden_injection_ms;
+        capture.sample.ple_cost_misc_ms = capture.ple_cost.misc_ms;
         capture.sample.ple_file_read_min_bytes = ple.file_read_min_bytes;
         capture.sample.ple_file_read_max_bytes = ple.file_read_max_bytes;
         capture.sample.ple_request_id = ple.request_id;
@@ -1448,7 +1538,18 @@ static void print_sample(const q2_sample *sample) {
            "\"wait_at_injection_ms\":%.6f,\"file_read_ops\":%" PRIu64
            ",\"file_read_min_bytes\":%" PRIu64
            ",\"file_read_max_bytes\":%" PRIu64
-           "},\"timeline\":{\"request_id\":%" PRIu64
+           "},\"ple_cost\":{\"wall_ms\":%.6f,\"wait_ms\":%.6f,"
+           "\"id_build_ms\":%.6f,\"row_lookup_copy_ms\":%.6f,"
+           "\"row_decode_ms\":%.6f,\"projection_ms\":%.6f,"
+           "\"gate_ms\":%.6f,\"convolution_ms\":%.6f,"
+           "\"accumulation_ms\":%.6f,\"hidden_injection_ms\":%.6f,"
+           "\"misc_ms\":%.6f},"
+           "\"ple_file_activity\":{\"logical_bytes\":%" PRIu64
+           ",\"pread_bytes\":%" PRIu64
+           ",\"cache_hits\":%" PRIu64
+           ",\"cache_misses\":%" PRIu64
+           ",\"madvise_calls\":%" PRIu64 "},"
+           "\"timeline\":{\"request_id\":%" PRIu64
            ",\"token_position\":%" PRIu64
            ",\"submit_position\":%" PRIu64
            ",\"injection_position\":%" PRIu64
@@ -1473,7 +1574,8 @@ static void print_sample(const q2_sample *sample) {
            "\"legacy_kernel_launches\":%" PRIu64
            ",\"legacy_host_syncs\":%" PRIu64
            ",\"telemetry_callbacks\":%" PRIu64 ",\"h2d_bytes\":%" PRIu64
-           ",\"d2h_bytes\":%" PRIu64 ",\"d2d_bytes\":%" PRIu64 "}",
+           ",\"d2h_bytes\":%" PRIu64 ",\"d2d_bytes\":%" PRIu64 "},"
+           "\"layer_wall_ms\":[",
            sample->wall_ms, sample->forward_ms, sample->argmax_ms,
            sample->bookkeeping_ms, sample->ple_critical_stall_ms,
            sample->ple_elapsed_ms, sample->ple_overlap_ms,
@@ -1485,6 +1587,15 @@ static void print_sample(const q2_sample *sample) {
            sample->ple_injection_ms,
            sample->ple_wait_at_injection_ms, sample->ple_file_read_ops,
            sample->ple_file_read_min_bytes, sample->ple_file_read_max_bytes,
+           sample->ple_cost_wall_ms, sample->ple_cost_wait_ms,
+           sample->ple_cost_id_build_ms, sample->ple_cost_row_lookup_copy_ms,
+           sample->ple_cost_row_decode_ms, sample->ple_cost_projection_ms,
+           sample->ple_cost_gate_ms, sample->ple_cost_convolution_ms,
+           sample->ple_cost_accumulation_ms,
+           sample->ple_cost_hidden_injection_ms, sample->ple_cost_misc_ms,
+           sample->ple_logical_bytes, sample->ple_pread_bytes,
+           sample->ple_cache_hits, sample->ple_cache_misses,
+           sample->ple_madvise_calls,
            sample->ple_request_id, sample->ple_token_position,
            sample->ple_submit_position, sample->ple_injection_position,
            sample->ple_t0_ms, sample->ple_t1_ms, sample->ple_t2_ms,
@@ -1506,6 +1617,9 @@ static void print_sample(const q2_sample *sample) {
            sample->kernel_launches, sample->host_syncs,
            sample->telemetry_callbacks, sample->h2d_bytes,
            sample->d2h_bytes, sample->d2d_bytes);
+    for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
+        printf("%s%.6f", i ? "," : "", sample->layer_wall_ms[i]);
+    printf("]");
     putchar(',');
     printf("\"exclusive_forward_timing\":{\"embedding_ms\":%.6f,"
     "\"ple_async_window_ms\":%.6f,\"QSA_ms\":%.6f,\"GDN_ms\":%.6f,"

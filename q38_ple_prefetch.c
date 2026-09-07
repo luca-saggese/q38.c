@@ -135,6 +135,7 @@ static void warm_block(q38_ple_scheduler *scheduler,
         return;
     }
     ++stats->cache_misses;
+    ++stats->madvise_calls;
     (void)madvise((void *)(scheduler->store.model->map + page), length,
                   MADV_WILLNEED);
 

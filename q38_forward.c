@@ -1661,6 +1661,9 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                      const float *hidden, size_t token_count, float *after,
                      float *scratch, q38_forward_diagnostics *diagnostics,
                      char *error, size_t error_len) {
+    q38_ple_cost_timing *cost = diagnostics ? diagnostics->ple_cost : NULL;
+    const double wall_started = full_now_ms();
+    if (cost) memset(cost, 0, sizeof(*cost));
     double ple_started = 0.0;
     double decode_dequant_ms = 0.0;
     double accumulation_ms = 0.0;
@@ -1678,13 +1681,18 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
     if (!full_boundary_trace(1, "hidden_before_ple", hidden, token_count,
                              width, diagnostics, error, error_len))
         return false;
+    const double id_started = full_now_ms();
     q38_ple_hash_config hash;
     if (!full_ple_hash_config(model, layer, &hash, error, error_len))
         return false;
+    if (cost) cost->id_build_ms += full_now_ms() - id_started;
+    const double wait_started = full_now_ms();
     if (!q38_forward_state_wait_ple(state, error, error_len))
         return false;
+    if (cost) cost->wait_ms = full_now_ms() - wait_started;
     q38_ple_scheduler_record_injection_begin(state->ple_scheduler);
     ple_started = full_now_ms();
+    const double misc_started = full_now_ms();
     float *embedding = calloc(token_count * emb_width, sizeof(float));
     float *key = calloc(token_count * width, sizeof(float));
     float *value = calloc(token_count * Q38_GR_HIDDEN, sizeof(float));
@@ -1698,18 +1706,24 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
         free(normalized); free(conv_out);
         return full_fail(error, error_len, "PLE activation allocation failed");
     }
+    if (cost) cost->misc_ms += full_now_ms() - misc_started;
     uint32_t ids[16];
     float row[160];
-    const double decode_started = full_now_ms();
     for (size_t t = 0; t < token_count; ++t) {
+        const double ids_started = full_now_ms();
         if (!q38_ple_ngram_ids_ref(&hash, &state->token_history, tokens[t],
                                    state->eos_token, ids, 16, error,
                                    error_len))
             goto fail;
+        if (cost) cost->id_build_ms += full_now_ms() - ids_started;
         for (size_t h = 0; h < 16; ++h) {
+            const double lookup_started = full_now_ms();
             if (!q38_ple_store_read_row(&layer->ple_store, ids[h], row,
                                         sizeof(row), error, error_len))
                 goto fail;
+            if (cost) cost->row_lookup_copy_ms +=
+                full_now_ms() - lookup_started;
+            const double decode_started = full_now_ms();
             if (layer->ple_store.qtype == 30) {
                 for (size_t d = 0; d < 160; ++d) {
                     uint16_t bits;
@@ -1735,6 +1749,7 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                 full_fail(error, error_len, "unsupported PLE row tensor type");
                 goto fail;
             }
+            if (cost) cost->row_decode_ms += full_now_ms() - decode_started;
         }
         if (!full_boundary_trace(1, "ple_embedding",
                                  embedding + t * emb_width, 1, emb_width,
@@ -1742,6 +1757,7 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
             goto fail;
         q38_ngram_history_append(&state->token_history, tokens[t],
                                  state->eos_token);
+        const double projection_started = full_now_ms();
         if (!full_matvec(model, key_proj, embedding + t * emb_width,
                          width, emb_width, key + t * width, scratch, error,
                          error_len, "ple_key_projection") ||
@@ -1750,6 +1766,7 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                          value + t * Q38_GR_HIDDEN, scratch, error,
                          error_len, "ple_value_projection"))
             goto fail;
+        if (cost) cost->projection_ms += full_now_ms() - projection_started;
         if (!full_boundary_trace(1, "ple_key_projection",
                                  key + t * width, 1, width, diagnostics,
                                  error, error_len) ||
@@ -1760,8 +1777,9 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
             goto fail;
         memcpy(query + t * width, hidden + t * width, width * sizeof(float));
     }
-    decode_dequant_ms = full_now_ms() - decode_started;
+    decode_dequant_ms = cost ? cost->row_decode_ms : 0.0;
     {
+        const double gate_started = full_now_ms();
         float nk[10240], nq[10240], nc[10240];
         if (!full_decode_vector(model, norm_key, nk, width, error, error_len) ||
             !full_decode_vector(model, norm_query, nq, width, error, error_len) ||
@@ -1805,8 +1823,9 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                                      diagnostics, error, error_len))
                 goto fail;
         }
+        if (cost) cost->gate_ms += full_now_ms() - gate_started;
     }
-    const double accumulation_started = full_now_ms();
+    const double convolution_started = full_now_ms();
     for (size_t t = 0; t < token_count; ++t)
         for (size_t c = 0; c < width; ++c) {
             float sum = 0.0f;
@@ -1820,17 +1839,21 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
             }
             conv_out[t * width + c] = sum / (1.0f + expf(-sum));
         }
-    accumulation_ms = full_now_ms() - accumulation_started;
+    if (cost) cost->convolution_ms += full_now_ms() - convolution_started;
+    const double accumulation_started = full_now_ms();
     if (!full_boundary_trace(1, "ple_conv_output", conv_out, token_count,
                              width, diagnostics, error, error_len))
         goto fail;
     for (size_t i = 0; i < token_count * width; ++i)
         after[i] = gated[i] + conv_out[i];
+    accumulation_ms = full_now_ms() - accumulation_started;
+    if (cost) cost->accumulation_ms += accumulation_ms;
     if (!full_boundary_trace(1, "ple_contribution", after, token_count,
                              width, diagnostics, error, error_len))
         goto fail;
     if (diagnostics && diagnostics->disable_ple)
         memset(after, 0, token_count * width * sizeof(*after));
+    const double injection_started = full_now_ms();
     for (size_t i = 0; i < token_count * width; ++i)
         after[i] += hidden[i];
     if (!full_boundary_trace(1, "hidden_after_ple", after, token_count,
@@ -1845,9 +1868,19 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                     normalized + (source - 9) * width,
                     width * sizeof(float));
     }
+    if (cost) cost->hidden_injection_ms += full_now_ms() - injection_started;
     q38_ple_scheduler_record_injection_timing(
         state->ple_scheduler, decode_dequant_ms, accumulation_ms,
         full_now_ms() - ple_started);
+    if (cost) {
+        cost->wall_ms = full_now_ms() - wall_started;
+        const double explicit_ms = cost->wait_ms + cost->id_build_ms +
+            cost->row_lookup_copy_ms + cost->row_decode_ms +
+            cost->projection_ms + cost->gate_ms + cost->convolution_ms +
+            cost->accumulation_ms + cost->hidden_injection_ms;
+        cost->misc_ms += cost->wall_ms - explicit_ms - cost->misc_ms;
+        if (cost->misc_ms < 0.0) cost->misc_ms = 0.0;
+    }
     free(embedding); free(key); free(value); free(query); free(gated);
     free(normalized); free(conv_out);
     return true;
@@ -2155,7 +2188,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
     q38_ple_scheduler_record_timeline(
         state->ple_scheduler, Q38_PLE_T0_TOKEN_FORWARD_BEGIN, 0,
         timeline_position);
-    {
+    if (!diagnostics || !diagnostics->disable_ple) {
         char scheduler_error[128];
         (void)q38_forward_state_prefetch_ple(
             weights, state, tokens, token_count, scheduler_error,
@@ -2223,15 +2256,17 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         const q38_layer_weights *layer = &weights->layer[layer_number];
         if (layer_number == 1) {
             const double ple_started = full_now_ms();
-            if (!full_ple(model, layer, state, tokens, streams, token_count,
-                          updated, scratch, diagnostics, error, error_len))
-                goto fail;
-            memcpy(streams, updated, token_count * width * sizeof(float));
-            if (!full_emit_timing(diagnostics, "ple_injection", NULL, "PLE",
-                                  layer_number,
-                                  full_now_ms() - ple_started, error,
-                                  error_len))
-                goto fail;
+            if (!diagnostics || !diagnostics->disable_ple) {
+                if (!full_ple(model, layer, state, tokens, streams, token_count,
+                              updated, scratch, diagnostics, error, error_len))
+                    goto fail;
+                memcpy(streams, updated, token_count * width * sizeof(float));
+                if (!full_emit_timing(diagnostics, "ple_injection", NULL, "PLE",
+                                      layer_number,
+                                      full_now_ms() - ple_started, error,
+                                      error_len))
+                    goto fail;
+            }
         }
         const double layer_started = full_now_ms();
         if (!full_boundary_trace(layer_number, "layer_input", streams,
