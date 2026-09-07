@@ -1661,7 +1661,7 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                      const float *hidden, size_t token_count, float *after,
                      float *scratch, q38_forward_diagnostics *diagnostics,
                      char *error, size_t error_len) {
-    const double ple_started = full_now_ms();
+    double ple_started = 0.0;
     double decode_dequant_ms = 0.0;
     double accumulation_ms = 0.0;
     const size_t width = 4u * Q38_GR_HIDDEN;
@@ -1683,6 +1683,7 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
         return false;
     if (!q38_forward_state_wait_ple(state, error, error_len))
         return false;
+    ple_started = full_now_ms();
     float *embedding = calloc(token_count * emb_width, sizeof(float));
     float *key = calloc(token_count * width, sizeof(float));
     float *value = calloc(token_count * Q38_GR_HIDDEN, sizeof(float));

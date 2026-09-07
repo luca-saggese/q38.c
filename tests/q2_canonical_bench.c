@@ -74,6 +74,7 @@ typedef struct {
     double ple_accumulation_ms;
     double ple_async_submit_ms;
     double ple_worker_exec_ms;
+    double ple_worker_cpu_ms;
     double ple_result_publish_ms;
     double ple_injection_ms;
     double ple_wait_at_injection_ms;
@@ -112,7 +113,7 @@ typedef struct {
     uint64_t non_ple_upload_bytes;
     uint64_t non_ple_residency_misses;
     double timing_embedding_ms;
-    double timing_ple_ms;
+    double timing_ple_async_window_ms;
     double timing_qsa_ms;
     double timing_gdn_ms;
     double timing_moe_ms;
@@ -432,7 +433,8 @@ static void add_timing_owner(q2_sample *sample, const char *name,
                              const char *owner, double elapsed_ms) {
     if (!sample || !owner || elapsed_ms <= 0.0) return;
     if (!strcmp(owner, "EMBEDDING")) sample->timing_embedding_ms += elapsed_ms;
-    else if (!strcmp(owner, "PLE")) sample->timing_ple_ms += elapsed_ms;
+    else if (!strcmp(owner, "PLE"))
+        sample->timing_ple_async_window_ms += elapsed_ms;
     else if (!strcmp(owner, "QSA")) sample->timing_qsa_ms += elapsed_ms;
     else if (!strcmp(owner, "GDN")) sample->timing_gdn_ms += elapsed_ms;
     else if (!strcmp(owner, "MoE")) sample->timing_moe_ms += elapsed_ms;
@@ -456,7 +458,8 @@ static void finalize_timing_tree(q2_sample *sample,
         double exclusive = event->elapsed_ms - timing_child_ms(capture, event);
         if (exclusive < 0.0) exclusive = 0.0;
         add_timing_owner(sample, event->name, event->owner, exclusive);
-        accounted += exclusive;
+        if (strcmp(event->owner, "PLE") != 0)
+            accounted += exclusive;
     }
     for (size_t i = 0; i < capture->timing_event_count; ++i) {
         const q2_timing_event *event = &capture->timing_events[i];
@@ -465,6 +468,7 @@ static void finalize_timing_tree(q2_sample *sample,
     }
     const double total = sample->forward_ms > 0.0
         ? sample->forward_ms : sample->wall_ms;
+    accounted += sample->ple_injection_ms + sample->ple_critical_stall_ms;
     sample->timing_unexplained_ms = total > accounted ? total - accounted : 0.0;
 }
 
@@ -511,6 +515,7 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     ADD(ple_accumulation_ms);
     ADD(ple_async_submit_ms);
     ADD(ple_worker_exec_ms);
+    ADD(ple_worker_cpu_ms);
     ADD(ple_result_publish_ms);
     ADD(ple_injection_ms);
     ADD(ple_wait_at_injection_ms);
@@ -550,7 +555,7 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     sum->non_ple_upload_bytes += sample->non_ple_upload_bytes;
     sum->non_ple_residency_misses += sample->non_ple_residency_misses;
     ADD(timing_embedding_ms);
-    ADD(timing_ple_ms);
+    ADD(timing_ple_async_window_ms);
     ADD(timing_qsa_ms);
     ADD(timing_gdn_ms);
     ADD(timing_moe_ms);
@@ -595,6 +600,7 @@ static void divide_sample(q2_sample *sample, double divisor) {
     DIV(ple_accumulation_ms);
     DIV(ple_async_submit_ms);
     DIV(ple_worker_exec_ms);
+    DIV(ple_worker_cpu_ms);
     DIV(ple_result_publish_ms);
     DIV(ple_injection_ms);
     DIV(ple_wait_at_injection_ms);
@@ -617,7 +623,7 @@ static void divide_sample(q2_sample *sample, double divisor) {
     DIV(memcpy_ms);
     DIV(other_ms);
     DIV(timing_embedding_ms);
-    DIV(timing_ple_ms);
+    DIV(timing_ple_async_window_ms);
     DIV(timing_qsa_ms);
     DIV(timing_gdn_ms);
     DIV(timing_moe_ms);
@@ -935,6 +941,7 @@ static bool run_decode(q38_session *session, const q2_options *options,
         capture.sample.ple_accumulation_ms = ple.accumulation_ms;
         capture.sample.ple_async_submit_ms = ple.async_submit_ms;
         capture.sample.ple_worker_exec_ms = ple.elapsed_ms;
+        capture.sample.ple_worker_cpu_ms = ple.worker_cpu_ms;
         capture.sample.ple_result_publish_ms = ple.result_publish_ms;
         capture.sample.ple_injection_ms = ple.injection_ms;
         capture.sample.ple_wait_at_injection_ms = ple.wait_at_injection_ms;
@@ -1004,7 +1011,8 @@ static bool run_prefill_case(
     apply_qsa_timing(sample, &qsa_timing);
     finalize_timing_tree(&capture.sample, &capture);
     sample->timing_embedding_ms = capture.sample.timing_embedding_ms;
-    sample->timing_ple_ms = capture.sample.timing_ple_ms;
+    sample->timing_ple_async_window_ms =
+        capture.sample.timing_ple_async_window_ms;
     sample->timing_qsa_ms = capture.sample.timing_qsa_ms;
     sample->timing_gdn_ms = capture.sample.timing_gdn_ms;
     sample->timing_moe_ms = capture.sample.timing_moe_ms;
@@ -1271,7 +1279,8 @@ static bool run_quick(
            ",\"non_ple_residency_misses\":%" PRIu64
            ",\"ple_critical_stall_ms\":%.6f},"
            "\"accounting\":{\"wall_ms\":%.6f,"
-           "\"embedding_ms\":%.6f,\"ple_ms\":%.6f,\"QSA_ms\":%.6f,"
+           "\"embedding_ms\":%.6f,\"ple_async_window_ms\":%.6f,"
+           "\"QSA_ms\":%.6f,"
            "\"GDN_ms\":%.6f,\"MoE_ms\":%.6f,\"GR_ms\":%.6f,"
            "\"LM_head_ms\":%.6f,\"norms_residual_glue_ms\":%.6f,"
            "\"other_layer_ms\":%.6f,\"host_blocked_on_cuda_ms\":%.6f,"
@@ -1297,7 +1306,8 @@ static bool run_quick(
            telemetry.non_ple_residency_misses,
            aggregate.ple_critical_stall_ms,
            aggregate.forward_ms > 0.0 ? aggregate.forward_ms : aggregate.wall_ms,
-           aggregate.timing_embedding_ms, aggregate.timing_ple_ms,
+           aggregate.timing_embedding_ms,
+           aggregate.timing_ple_async_window_ms,
            aggregate.timing_qsa_ms, aggregate.timing_gdn_ms,
            aggregate.timing_moe_ms, aggregate.timing_gr_ms,
            aggregate.timing_lm_head_ms,
@@ -1390,8 +1400,9 @@ static void print_sample(const q2_sample *sample) {
            "\"request_build_ms\":%.6f,\"history_ngram_ms\":%.6f,"
            "\"index_lookup_ms\":%.6f,\"file_io_ms\":%.6f,"
            "\"decode_dequant_ms\":%.6f,\"accumulation_ms\":%.6f,"
-           "\"async_submit_ms\":%.6f,\"worker_exec_ms\":%.6f,"
-           "\"result_publish_ms\":%.6f,\"injection_ms\":%.6f,"
+           "\"async_submit_ms\":%.6f,\"worker_elapsed_ms\":%.6f,"
+           "\"worker_cpu_ms\":%.6f,\"result_publish_ms\":%.6f,"
+           "\"ple_injection_main_thread_ms\":%.6f,"
            "\"wait_at_injection_ms\":%.6f,\"file_read_ops\":%" PRIu64
            ",\"file_read_min_bytes\":%" PRIu64
            ",\"file_read_max_bytes\":%" PRIu64 "},\"categories\":{"
@@ -1418,7 +1429,8 @@ static void print_sample(const q2_sample *sample) {
            sample->ple_index_lookup_ms, sample->ple_file_io_ms,
            sample->ple_decode_dequant_ms, sample->ple_accumulation_ms,
            sample->ple_async_submit_ms, sample->ple_worker_exec_ms,
-           sample->ple_result_publish_ms, sample->ple_injection_ms,
+           sample->ple_worker_cpu_ms, sample->ple_result_publish_ms,
+           sample->ple_injection_ms,
            sample->ple_wait_at_injection_ms, sample->ple_file_read_ops,
            sample->ple_file_read_min_bytes, sample->ple_file_read_max_bytes,
            sample->qsa_ms,
@@ -1435,11 +1447,11 @@ static void print_sample(const q2_sample *sample) {
            sample->d2h_bytes, sample->d2d_bytes);
     putchar(',');
     printf("\"exclusive_forward_timing\":{\"embedding_ms\":%.6f,"
-           "\"ple_ms\":%.6f,\"QSA_ms\":%.6f,\"GDN_ms\":%.6f,"
+    "\"ple_async_window_ms\":%.6f,\"QSA_ms\":%.6f,\"GDN_ms\":%.6f,"
            "\"MoE_ms\":%.6f,\"GR_ms\":%.6f,\"LM_head_ms\":%.6f,"
            "\"norms_residual_glue_ms\":%.6f,\"other_layer_ms\":%.6f,"
            "\"unexplained_ms\":%.6f},",
-           sample->timing_embedding_ms, sample->timing_ple_ms,
+           sample->timing_embedding_ms, sample->timing_ple_async_window_ms,
            sample->timing_qsa_ms, sample->timing_gdn_ms,
            sample->timing_moe_ms, sample->timing_gr_ms,
            sample->timing_lm_head_ms,

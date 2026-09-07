@@ -5,18 +5,18 @@ separate. They are not interchangeable:
 
 | Field | Scope | Additive to wall? |
 |---|---|---|
-| `exclusive_forward_timing.ple_ms` | Exclusive CPU wall span of the `ple_injection` timing-tree node after child spans are subtracted | Yes, as the forward timing-tree category |
+| `exclusive_forward_timing.ple_async_window_ms` | Exclusive wall interval formerly emitted as the `ple_injection` timing-tree node | **No**; overlap-only diagnostic |
 | `ple_elapsed_ms` | Async prefetch worker elapsed time from job start to page-cache warming completion | No |
 | `ple_overlap_ms` | Worker elapsed time overlapped by the main thread before the injection wait | No |
 | `ple_critical_stall_ms` | Main-thread wait at `q38_forward_state_wait_ple` | Yes |
 
-Therefore `ple_ms ~= 177.5 ms`, `ple_elapsed_ms ~= 0.055 ms`, and
+Therefore `ple_async_window_ms ~= 177.5 ms`, `ple_elapsed_ms ~= 0.055 ms`, and
 `ple_critical_stall_ms == 0` can coexist: the first includes the full PLE
 injection computation and file-backed row consumption on the forward path,
 the second covers only the asynchronous prefetch worker, and the third says
 the worker completed before the consumer reached its wait.
 
-The S4C attribution fields are:
+The S4C/S4D attribution fields are:
 
 - request construction: `request_build_ms`, `history_ngram_ms`,
   `index_lookup_ms`;
@@ -26,8 +26,9 @@ The S4C attribution fields are:
   `wait_at_injection_ms`.
 
 Worker fields are reported separately and must not be added to the main
-critical path. `wait_at_injection_ms` is the only scheduler wait that enters
-critical-path accounting. The PLE table remains mmap/file-backed; the
+critical path. `injection_ms` is synchronous main-thread work and
+`wait_at_injection_ms` is the only scheduler wait that enters critical-path
+accounting. The PLE table remains mmap/file-backed; the
 scheduler stores row IDs and transient 64 KiB read buffers only.
 
 The `UNKNOWN` matrix traffic is classified as PLE file-backed lookup when its

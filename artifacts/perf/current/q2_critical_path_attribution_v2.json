@@ -1,0 +1,173 @@
+{
+  "format": "q2-critical-path-attribution-v2",
+  "PERF_SCHEMA": "PERF_SCHEMA_V2",
+  "source_artifact": "artifacts/perf/current/q2_forward_exclusive_attribution_v1.json",
+  "replay_artifact": "artifacts/perf/current/s4c_ple_replay.json",
+  "model_run": false,
+  "status": "pass",
+  "critical_path_semantics": {
+    "additive_sum_ms": 302.913074,
+    "token_wall_ms": 302.913074,
+    "residual_unexplained_ms": 0.116372,
+    "residual_unexplained_fraction": 0.0003841762207992383,
+    "overlap_buckets_excluded": true,
+    "acceptance_unexplained_below_3_percent": true
+  },
+  "partition": {
+    "embedding_ms": 0.012128,
+    "decoder_layer_execution": {
+      "GR_ms": 21.451242,
+      "GDN_QSA_ms": 78.05383,
+      "MoE_ms": 19.393167,
+      "norm_residual_glue_ms": 0.019174,
+      "orchestration_backend_gaps_ms": 177.619038,
+      "other_layer_ms": 0.481608
+    },
+    "ple_actual_synchronous_injection_ms": 0.0,
+    "final_norm_ms": 0.0,
+    "LM_head_ms": 5.451043,
+    "argmax_ms": 0.429583,
+    "bookkeeping_ms": 0.002261
+  },
+  "ple": {
+    "async_window_ms": 177.521596,
+    "async_window_semantics": "NON_ADDITIVE_OVERLAPPED_INTERVAL",
+    "worker_elapsed_ms": 0.054729,
+    "worker_cpu_ms": 0.135872,
+    "critical_wait_ms": 0.0,
+    "wait_at_injection_ms": 0.0,
+    "synchronous_injection_ms": 0.0,
+    "measurement_note": "Frozen v1 has no dedicated synchronous injection boundary; the old parent interval is excluded and retained only as a non-additive window. A future diagnostic run can split decoder_before/actual_PLE/decoder_after boundaries."
+  },
+  "matrix_owner_attribution": [
+    {
+      "owner": "QSA",
+      "calls": 12,
+      "callback_cpu_wall_ms": 1.932445,
+      "kernel_enqueue_ms": 1.734135,
+      "host_pre_post_ms": 0.131702,
+      "host_wait_ms": 0.006946,
+      "bytes_read": 377487360
+    },
+    {
+      "owner": "GDN",
+      "calls": 180,
+      "callback_cpu_wall_ms": 22.037729,
+      "kernel_enqueue_ms": 19.350991,
+      "host_pre_post_ms": 2.475768,
+      "host_wait_ms": 0.03956,
+      "bytes_read": 4170055680
+    },
+    {
+      "owner": "MoE",
+      "calls": 144,
+      "callback_cpu_wall_ms": 5.076847,
+      "kernel_enqueue_ms": 3.124028,
+      "host_pre_post_ms": 1.778488,
+      "host_wait_ms": 0.042093,
+      "bytes_read": 471859200
+    },
+    {
+      "owner": "GR",
+      "calls": 290,
+      "callback_cpu_wall_ms": 14.011429,
+      "kernel_enqueue_ms": 9.34976,
+      "host_pre_post_ms": 4.318629,
+      "host_wait_ms": 0.06147,
+      "bytes_read": 1279262720
+    },
+    {
+      "owner": "PLE",
+      "calls": 0,
+      "callback_cpu_wall_ms": 0.0,
+      "kernel_enqueue_ms": 0.0,
+      "host_pre_post_ms": 0.0,
+      "host_wait_ms": 0.0,
+      "bytes_read": 0
+    },
+    {
+      "owner": "LM_HEAD",
+      "calls": 1,
+      "callback_cpu_wall_ms": 5.449899,
+      "kernel_enqueue_ms": 5.415291,
+      "host_pre_post_ms": 0.033584,
+      "host_wait_ms": 0.000225,
+      "bytes_read": 1271398400
+    },
+    {
+      "owner": "NORM",
+      "calls": 0,
+      "callback_cpu_wall_ms": 0.0,
+      "kernel_enqueue_ms": 0.0,
+      "host_pre_post_ms": 0.0,
+      "host_wait_ms": 0.0,
+      "bytes_read": 0
+    },
+    {
+      "owner": "ROUTER",
+      "calls": 48,
+      "callback_cpu_wall_ms": 1.551639,
+      "kernel_enqueue_ms": 0.922213,
+      "host_pre_post_ms": 0.573088,
+      "host_wait_ms": 0.009933,
+      "bytes_read": 125829120
+    },
+    {
+      "owner": "OTHER_LAYER",
+      "calls": 0,
+      "callback_cpu_wall_ms": 0.0,
+      "kernel_enqueue_ms": 0.0,
+      "host_pre_post_ms": 0.0,
+      "host_wait_ms": 0.0,
+      "bytes_read": 0
+    },
+    {
+      "owner": "PLE_FILE_BACKED_LOOKUP",
+      "calls": 12800,
+      "callback_cpu_wall_ms": 0.0,
+      "kernel_enqueue_ms": 0.0,
+      "host_pre_post_ms": 0.0,
+      "host_wait_ms": 2.431511,
+      "bytes_read": 34816000,
+      "classification": "confirmed_by_ple_traffic_signature"
+    }
+  ],
+  "replay": {
+    "format": "q38_s4c_ple_replay_v1",
+    "status": "pass",
+    "source": "artifacts/m4/ple_injection_vectors.json",
+    "accesses": 64,
+    "unique_rows": 64,
+    "bytes": 10880,
+    "file_read_ops": 0,
+    "file_read_min_bytes": 0,
+    "file_read_max_bytes": 0,
+    "file_io_ms": 0.0,
+    "worker_elapsed_ms": 0.137153,
+    "worker_cpu_ms": 0.135872,
+    "cache_hits": 64,
+    "cache_misses": 0,
+    "sequential": true,
+    "mode": "buffered_pread_transient"
+  },
+  "correctness": {
+    "green": true,
+    "generated_ids_identical": true,
+    "final_logits_hash_identical": true,
+    "argmax_final_identical": true,
+    "nan_inf": false,
+    "fallback": false,
+    "non_ple_upload_bytes": 0,
+    "non_ple_residency_misses": 0,
+    "ple_critical_stall_ms": 0.0
+  },
+  "hardware": {
+    "device": "NVIDIA GB10",
+    "gpu": "DGX Spark / GB10",
+    "cpu_arch": "aarch64",
+    "cuda_driver_version": 13000,
+    "cuda_runtime_version": 13000,
+    "cuda_total_bytes": 130596646912,
+    "unified_memory_bytes": 130596646912
+  }
+}
