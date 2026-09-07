@@ -799,14 +799,12 @@ static bool full_row_dot(const q38_gguf *model, const q38_tensor *tensor,
     return true;
 }
 
-static bool full_is_file_backed_ple(const q38_tensor *tensor) {
+static bool full_is_file_backed_ple_embedding(const q38_tensor *tensor) {
     if (!tensor || !tensor->name.ptr) return false;
     const size_t len = (size_t)tensor->name.len;
-    return (len >= 4 && memmem(tensor->name.ptr, len, ".ple", 4) != NULL) ||
-           (len >= 11 &&
-            memmem(tensor->name.ptr, len, "ngram_heads", 11) != NULL) ||
-           (len >= 17 &&
-            memmem(tensor->name.ptr, len, "layer_multipliers", 17) != NULL);
+    return len >= 41 &&
+           memmem(tensor->name.ptr, len,
+                  ".ple.ple_embedding.ngram_embedding.shard_", 41) != NULL;
 }
 
 static bool full_matvec(const q38_gguf *model, const q38_tensor *tensor,
@@ -820,7 +818,7 @@ static bool full_matvec(const q38_gguf *model, const q38_tensor *tensor,
                           &row_bytes) ||
         actual_rows != rows || actual_cols != cols)
         return full_fail(error, error_len, "tensor matrix shape mismatch");
-    if (full_matrix_backend && !full_is_file_backed_ple(tensor)) {
+    if (full_matrix_backend && !full_is_file_backed_ple_embedding(tensor)) {
         full_backend_context(tensor, rows, cols, stage ? stage : "matvec");
         const double started = full_now_ms();
         if (full_matrix_backend(model, tensor, input, rows, cols, output,
@@ -861,7 +859,8 @@ static bool full_matvec_batch(
     if (tokens == 1)
         return full_matvec(model, tensor, input, rows, cols, output, scratch,
                            error, error_len, stage);
-    if (full_matrix_batch_backend && !full_is_file_backed_ple(tensor)) {
+    if (full_matrix_batch_backend &&
+        !full_is_file_backed_ple_embedding(tensor)) {
         full_backend_context(tensor, rows, cols,
                              stage ? stage : "matvec_batch");
         const double started = full_now_ms();

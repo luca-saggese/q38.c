@@ -60,8 +60,15 @@ TEST_BINS := \
 	tests/test_platform tests/test_gguf tests/test_memory \
 	tests/test_model_config tests/test_quant_blocks tests/test_residency
 
+tests/bench_ple_projection_cuda: tests/bench_ple_projection.cu \
+		build/release/q38_gdn.o build/release/q38_cuda_primitives.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS) -lm
+
+bench-ple-projection-cuda: tests/bench_ple_projection_cuda
+
 .PHONY: all q38 q38-diag q38-server q38-server-mock q38-cli q38-dev-worker spark test test-server clean tools \
 	q38-server-real \
+	bench-ple-projection-cuda \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	tests/q2_forward_exclusive_attribution \
 	tests/test_s4c_ple_replay \

@@ -472,13 +472,13 @@ static uint32_t tensor_id_for(const q38_forward_cuda_context *context,
     return context->exec_tensors[tensor - model->tensors].tensor_id;
 }
 
-static bool is_ple_tensor(const q38_tensor *tensor) {
+static bool is_ple_embedding_table(const q38_tensor *tensor) {
     if (!tensor || !tensor->name.ptr) return false;
     const char *name = tensor->name.ptr;
     const size_t len = (size_t)tensor->name.len;
-    return (len >= 4 && memmem(name, len, ".ple", 4)) ||
-           (len >= 11 && memmem(name, len, "ngram_heads", 11)) ||
-           (len >= 17 && memmem(name, len, "layer_multipliers", 17));
+    return len >= 41 &&
+           memmem(name, len,
+                  ".ple.ple_embedding.ngram_embedding.shard_", 41) != NULL;
 }
 
 static const char *residency_group(const q38_tensor *tensor) {
@@ -624,7 +624,7 @@ static void emit_telemetry(q38_forward_cuda_context *context,
                            const char *operation,
                            const char *fallback_path) {
     if (!context) return;
-    const bool ple = is_ple_tensor(tensor);
+    const bool ple = is_ple_embedding_table(tensor);
     if (ple && (miss || upload_bytes)) {
         Q38_CUDA_DIAG_ONLY(++context->ple_file_backed_accesses);
         Q38_CUDA_DIAG_ONLY(context->ple_file_bytes += upload_bytes);
@@ -1103,7 +1103,7 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     size_t count = 0, total = 0;
     for (uint64_t i = 0; i < model->n_tensors; ++i) {
         const q38_tensor *tensor = &model->tensors[i];
-        if (is_ple_tensor(tensor)) {
+        if (is_ple_embedding_table(tensor)) {
             Q38_CUDA_DIAG_ONLY(++context->persistent_ple_tensors);
             continue;
         }
@@ -1147,9 +1147,9 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
         exec->tensor_id = (uint32_t)i;
         exec->gguf_offset = tensor->abs_offset;
         exec->name = tensor->name.ptr;
-        exec->storage = is_ple_tensor(tensor)
+        exec->storage = is_ple_embedding_table(tensor)
             ? Q38_STORAGE_FILE_BACKED_PLE : Q38_STORAGE_RESIDENT;
-        if (is_ple_tensor(tensor) || !tensor->bytes) continue;
+        if (is_ple_embedding_table(tensor) || !tensor->bytes) continue;
         const void *host = q38_gguf_tensor_data(model, tensor);
         bool duplicate = false;
         for (size_t j = 0; j < at; ++j)
@@ -1637,7 +1637,8 @@ extern "C" bool q38_forward_cuda_matvec_backend(
     q38_exec_tensor *exec = exec_tensor_for(context, model, tensor);
     const bool use_persistent = context->all_non_ple_resident &&
         exec_tensor_is_resident(exec, tensor);
-    if (context->exec_strict && !use_persistent && !is_ple_tensor(tensor))
+    if (context->exec_strict && !use_persistent &&
+        !is_ple_embedding_table(tensor))
         return fail(error, error_len,
                     "Q38_EXEC_STRICT: matvec tensor is not resident");
     const void *data = use_persistent ? NULL :
@@ -1704,7 +1705,8 @@ extern "C" bool q38_forward_cuda_matvec_backend(
     }
     if (context->all_non_ple_resident) {
         Q38_CUDA_DIAG_ONLY(++context->persistent_misses);
-        if (!is_ple_tensor(tensor)) Q38_CUDA_DIAG_ONLY(++context->non_ple_residency_miss);
+        if (!is_ple_embedding_table(tensor))
+            Q38_CUDA_DIAG_ONLY(++context->non_ple_residency_miss);
     }
 
     if (cudaMemcpyAsync(context->device_weights, row_data, weight_bytes,
@@ -1712,9 +1714,10 @@ extern "C" bool q38_forward_cuda_matvec_backend(
         cudaMemcpyAsync(context->device_input, input, cols * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
         return fail(error, error_len, "CUDA forward matvec upload failed");
-    if (!is_ple_tensor(tensor))
+    if (!is_ple_embedding_table(tensor))
         Q38_CUDA_DIAG_ONLY(context->non_ple_upload_bytes_per_token += weight_bytes);
-    if (!is_ple_tensor(tensor)) Q38_CUDA_DIAG_ONLY(++context->gguf_name_lookup_in_decode);
+    if (!is_ple_embedding_table(tensor))
+        Q38_CUDA_DIAG_ONLY(++context->gguf_name_lookup_in_decode);
 
     bool launched = false;
     if (tensor->type == 30) {
@@ -1778,7 +1781,8 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     const void *data = use_exec_resident ? NULL :
         q38_gguf_tensor_data(model, tensor);
     if (!use_exec_resident) Q38_CUDA_DIAG_ONLY(++context->gguf_name_lookup_in_decode);
-    if (context->exec_strict && !use_exec_resident && !is_ple_tensor(tensor))
+    if (context->exec_strict && !use_exec_resident &&
+        !is_ple_embedding_table(tensor))
         return fail(error, error_len,
                     "Q38_EXEC_STRICT: matrix tensor is not resident");
     if (!use_exec_resident && !data)
@@ -1794,7 +1798,8 @@ extern "C" bool q38_forward_cuda_matrix_backend(
         Q38_CUDA_DIAG_ONLY(++context->resident_misses);
         if (context->all_non_ple_resident) {
             Q38_CUDA_DIAG_ONLY(++context->persistent_misses);
-            if (!is_ple_tensor(tensor)) Q38_CUDA_DIAG_ONLY(++context->non_ple_residency_miss);
+            if (!is_ple_embedding_table(tensor))
+                Q38_CUDA_DIAG_ONLY(++context->non_ple_residency_miss);
         }
     }
     if (use_persistent_weight) Q38_CUDA_DIAG_ONLY(++context->persistent_hits);
@@ -1829,7 +1834,7 @@ extern "C" bool q38_forward_cuda_matrix_backend(
     if (!use_resident_lm_head && !use_persistent_weight)
         Q38_CUDA_DIAG_ONLY(context->matrix_upload_bytes += tensor->bytes);
     if (!use_resident_lm_head && !use_persistent_weight &&
-        !is_ple_tensor(tensor))
+        !is_ple_embedding_table(tensor))
         Q38_CUDA_DIAG_ONLY(context->non_ple_upload_bytes_per_token += tensor->bytes);
     bool launched = false;
     void *weight_storage = use_resident_lm_head

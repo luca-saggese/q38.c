@@ -1,12 +1,11 @@
 {
-  "format": "q38-ple-projection-fixture-v0",
+  "format": "q38-ple-projection-q8-fixture-v1",
+  "oracle": "PLE_PROJ_Q8_ORACLE_V1",
   "cases": [
     "early",
     "middle",
     "late"
   ],
-  "source_vectors": "artifacts/m4/ple_injection_vectors.json",
-  "source_layer": 1,
   "tokens": [
     248044,
     9707,
@@ -68,15 +67,11 @@
       307105688
     ]
   ],
-  "rows_shape": [
-    3,
-    16,
-    160
-  ],
-  "hidden_shape": [
-    3,
-    10240
-  ],
+  "source_gguf": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+  "source_weight_type": "Q8_0",
+  "row_type": "Q8_0",
+  "row_width": 160,
+  "embedding_width": 2560,
   "key_shape": [
     10240,
     2560
@@ -85,40 +80,28 @@
     2560,
     2560
   ],
-  "source_dtype": "BF16",
-  "stored_weight_dtype": "BF16 raw uint16",
-  "stored_activation_dtype": "F32",
-  "row_width": 160,
-  "heads_per_token": 16,
-  "embedding_width": 2560,
-  "key_output_width": 10240,
-  "value_output_width": 2560,
-  "projection_calls_per_case": 2,
-  "row_matvecs_per_case": 12800,
+  "key_row_bytes": 2720,
+  "value_row_bytes": 2720,
   "files": {
-    "hidden_f32.bin": {
-      "bytes": 122880,
-      "sha256": "76f5d93d88139d1f84b8f326d2514b6e4460525fe42ab5eb1b5148a8258d74ae"
-    },
     "key_expected_f32.bin": {
       "bytes": 122880,
-      "sha256": "4345c2bf1e407901c7c1637043ced740a9e464399a6b96f94e65d36873c9313e"
+      "sha256": "501ed7509ca9cd5c140013ef05235a253b75bea0b66fe1e6686a7696a11f6a56"
     },
-    "key_proj_bf16.bin": {
-      "bytes": 52428800,
-      "sha256": "f431e2b51311b4bbea97ea0e02b6c35944033490dd5dc76bb5cc5b594f7af7de"
+    "key_proj_q8.bin": {
+      "bytes": 27852800,
+      "sha256": "b1b73f20df73659605d971b3c3ef9b99849751173e158328f9815b9365d4506a"
     },
-    "rows_f32.bin": {
+    "rows_q8_f32.bin": {
       "bytes": 30720,
-      "sha256": "83fc18769c9eb6c5607b36a6ff4ba8ca457248fbfec38078c1a6ef2c29382d4d"
+      "sha256": "128771a8c2392304d96454a6bb43931e05d1ba28e8ea04c57f2a92f0c162d15e"
     },
     "value_expected_f32.bin": {
       "bytes": 30720,
-      "sha256": "b75202199b5e888af0dd07286ad8a9e6947be85cce0fd935a8dcb997811f82bc"
+      "sha256": "7b139aca99550bdbc6648e0860eb88355ec6bba71cf3eb3e7cfe67e8916e1406"
     },
-    "value_proj_bf16.bin": {
-      "bytes": 13107200,
-      "sha256": "d25aabbce09091bf133d776b41d5b3e0802c4d2523b9ca97003491c28db3c437"
+    "value_proj_q8.bin": {
+      "bytes": 6963200,
+      "sha256": "513b9ee0dcb5cad48fdb20b51554ebe8872e708514b16e006074e9fc0076fbfc"
     }
   }
 }

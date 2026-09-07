@@ -1,0 +1,113 @@
+{
+  "format": "q38-ple-projection-c1-v1",
+  "baseline": "PLE_PROJ_C1",
+  "fixture": "artifacts/m4/ple_projection_fixture",
+  "iterations": 100,
+  "weights_h2d_bytes_before_timing": 34816000,
+  "cases": [
+    {
+      "case": "early",
+      "correctness": "GREEN",
+      "max_abs": 5.96046448e-08,
+      "rmse": 2.31864019e-09,
+      "complete_projection_wall_ms": 33.94424,
+      "complete_projection_wall_ms_per_iteration": 0.339442,
+      "cuda_execution_ms_total": 0.493408,
+      "cuda_execution_ms_per_iteration": 0.004934,
+      "enqueue_api_wall_ms_total": 0.670816,
+      "enqueue_api_wall_ms_per_iteration": 0.006708,
+      "h2d_bytes_per_iteration": 10240,
+      "d2h_bytes_per_iteration": 51200,
+      "sync_count_per_iteration": 1,
+      "matrix_calls_per_iteration": 2,
+      "row_callbacks_per_iteration": 0,
+      "weights_h2d_bytes_during_timing": 0,
+      "oracle": "PLE_PROJ_Q8_ORACLE_V1"
+    },
+    {
+      "case": "middle",
+      "correctness": "GREEN",
+      "max_abs": 1.1920929e-07,
+      "rmse": 2.59718736e-09,
+      "complete_projection_wall_ms": 33.374288,
+      "complete_projection_wall_ms_per_iteration": 0.333743,
+      "cuda_execution_ms_total": 0.31328,
+      "cuda_execution_ms_per_iteration": 0.003133,
+      "enqueue_api_wall_ms_total": 0.661216,
+      "enqueue_api_wall_ms_per_iteration": 0.006612,
+      "h2d_bytes_per_iteration": 10240,
+      "d2h_bytes_per_iteration": 51200,
+      "sync_count_per_iteration": 1,
+      "matrix_calls_per_iteration": 2,
+      "row_callbacks_per_iteration": 0,
+      "weights_h2d_bytes_during_timing": 0,
+      "oracle": "PLE_PROJ_Q8_ORACLE_V1"
+    },
+    {
+      "case": "late",
+      "correctness": "GREEN",
+      "max_abs": 1.1920929e-07,
+      "rmse": 2.40674827e-09,
+      "complete_projection_wall_ms": 34.05368,
+      "complete_projection_wall_ms_per_iteration": 0.340537,
+      "cuda_execution_ms_total": 0.312544,
+      "cuda_execution_ms_per_iteration": 0.003125,
+      "enqueue_api_wall_ms_total": 0.63816,
+      "enqueue_api_wall_ms_per_iteration": 0.006382,
+      "h2d_bytes_per_iteration": 10240,
+      "d2h_bytes_per_iteration": 51200,
+      "sync_count_per_iteration": 1,
+      "matrix_calls_per_iteration": 2,
+      "row_callbacks_per_iteration": 0,
+      "weights_h2d_bytes_during_timing": 0,
+      "oracle": "PLE_PROJ_Q8_ORACLE_V1"
+    }
+  ],
+  "promotion": "PLE_PROJ_C1",
+  "no_model_load": true,
+  "full_chain_benchmark": false,
+  "baseline_production_projection_ms_per_token": 176.868638,
+  "isolated_mean_complete_wall_ms_per_iteration": 0.33790733333333334,
+  "isolated_improvement_fraction": 0.9980895011283271,
+  "formal_gate": {
+    "correctness": "GREEN",
+    "minimum_improvement_fraction": 0.1,
+    "passed": true
+  },
+  "contract": {
+    "key_shape": [
+      10240,
+      2560
+    ],
+    "value_shape": [
+      2560,
+      2560
+    ],
+    "weight_type": "Q8_0",
+    "projection_calls_per_token": 2,
+    "row_callbacks_per_token": 0,
+    "weight_h2d_bytes_during_timing": 0,
+    "input_h2d_bytes_per_iteration": 10240,
+    "output_d2h_bytes_per_iteration": 51200,
+    "sync_count_per_iteration": 1
+  },
+  "residency": {
+    "PLE_EMBEDDING_TABLE": "permanently_file_backed",
+    "PLE_DENSE_WEIGHTS": "ordinary_persistent_cuda_residency",
+    "metadata": "ordinary_small_tensors"
+  },
+  "oracle_contract": {
+    "name": "PLE_PROJ_Q8_ORACLE_V1",
+    "decode": "Q8_0 FP16 scale plus signed int8 values",
+    "implementation": "independent CPU row decode and FP32 dot",
+    "finite": true,
+    "deterministic": true
+  },
+  "backend_reuse": {
+    "matrix_backend_supported": true,
+    "backend": "q38_forward_cuda_matrix_backend -> q38_cuda_gdn_project",
+    "new_kernel": false,
+    "grouping": "one complete matrix call per projection"
+  },
+  "source": "production GGUF direct slice extraction"
+}
