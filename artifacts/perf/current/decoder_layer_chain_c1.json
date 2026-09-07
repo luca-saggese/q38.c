@@ -1,0 +1,30 @@
+{
+  "benchmark": "decoder_layer_chain_c1",
+  "status": "correctness_green_performance_gate_blocked",
+  "source": "canonical q38 integration",
+  "chain_enabled": true,
+  "structural_contract": {
+    "hidden_h2d_internal": 0,
+    "hidden_d2h_internal": 0,
+    "stream_sync_internal": 0,
+    "layer_boundary_h2d": 1,
+    "layer_boundary_d2h": 1,
+    "layer_boundary_final_sync": 1
+  },
+  "integration": {
+    "generated_tokens": 16,
+    "generated_ids_identical_to_stable_path": true,
+    "nan_count": 0,
+    "inf_count": 0,
+    "fallback": false,
+    "ple_wait_ms": 0.0,
+    "decode_median_ms_per_token": 151.020,
+    "generation_tokens_per_second": 6.622
+  },
+  "promotion": {
+    "correctness": "GREEN",
+    "performance": "BLOCKED",
+    "reason": "The measured chain median is slower than the stable path (151.020 vs 130.207 ms/token)."
+  },
+  "telemetry_note": "The q2 canonical attribution harness did not produce a valid record because its CUDA wait attribution gate failed; no unavailable counters are fabricated here."
+}

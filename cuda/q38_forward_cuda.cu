@@ -2852,30 +2852,47 @@ static bool gr_read_device_impl(
     float *device_input, float *device_normed, char *error, size_t error_len) {
     size_t gamma_rows, gamma_cols, down_rows, down_cols, up_rows, up_cols;
     if (!context || !model || !weights || !device_residual || !device_input ||
-        !device_normed ||
-        !tensor_shape(weights->hc_norm, &gamma_rows, &gamma_cols) ||
-        !tensor_shape(weights->input_mix_weight_down, &down_rows, &down_cols) ||
-        !tensor_shape(weights->input_mix_weight_up, &up_rows, &up_cols) ||
-        weights->hc_norm->type != 30 ||
+        !device_normed)
+        return fail(error, error_len, "GR-C4 invalid arguments");
+    if (!tensor_shape(weights->hc_norm, &gamma_rows, &gamma_cols))
+        return fail(error, error_len, "GR-C4 invalid hc_norm tensor shape");
+    if (!tensor_shape(weights->input_mix_weight_down, &down_rows, &down_cols))
+        return fail(error, error_len, "GR-C4 invalid down tensor shape");
+    if (!tensor_shape(weights->input_mix_weight_up, &up_rows, &up_cols))
+        return fail(error, error_len, "GR-C4 invalid up tensor shape");
+    if (weights->hc_norm->type != 30 ||
         weights->input_mix_weight_down->type != 30 ||
-        weights->input_mix_weight_up->type != 30 ||
-        gamma_rows != 1 || gamma_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
+        weights->input_mix_weight_up->type != 30)
+        return fail(error, error_len, "GR-C4 weights are not BF16");
+    if (gamma_rows != 1 ||
+        gamma_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
         down_rows != Q38_GR_RANK ||
         down_cols != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
         up_rows != Q38_GR_BRANCHES * Q38_GR_HIDDEN ||
-        up_cols != Q38_GR_RANK)
-        return false;
+        up_cols != Q38_GR_RANK) {
+        char shape_error[256];
+        snprintf(shape_error, sizeof(shape_error),
+                 "GR-C4 shape mismatch gamma=%zux%zu down=%zux%zu up=%zux%zu expected gamma=1x%u down=%ux%u up=%ux%u",
+                 gamma_rows, gamma_cols, down_rows, down_cols, up_rows, up_cols,
+                 Q38_GR_BRANCHES * Q38_GR_HIDDEN, Q38_GR_RANK,
+                 Q38_GR_BRANCHES * Q38_GR_HIDDEN,
+                 Q38_GR_BRANCHES * Q38_GR_HIDDEN, Q38_GR_RANK);
+        return fail(error, error_len, shape_error);
+    }
     q38_exec_tensor *gamma_exec =
         exec_tensor_for(context, model, weights->hc_norm);
     q38_exec_tensor *down_exec =
         exec_tensor_for(context, model, weights->input_mix_weight_down);
     q38_exec_tensor *up_exec =
         exec_tensor_for(context, model, weights->input_mix_weight_up);
-    if (!exec_tensor_is_resident(gamma_exec, weights->hc_norm) ||
-        !exec_tensor_is_resident(down_exec, weights->input_mix_weight_down) ||
-        !exec_tensor_is_resident(up_exec, weights->input_mix_weight_up) ||
-        !ensure_gr_buffers(context))
-        return false;
+    if (!exec_tensor_is_resident(gamma_exec, weights->hc_norm))
+        return fail(error, error_len, "GR-C4 hc_norm is not resident");
+    if (!exec_tensor_is_resident(down_exec, weights->input_mix_weight_down))
+        return fail(error, error_len, "GR-C4 down weights are not resident");
+    if (!exec_tensor_is_resident(up_exec, weights->input_mix_weight_up))
+        return fail(error, error_len, "GR-C4 up weights are not resident");
+    if (!ensure_gr_buffers(context))
+        return fail(error, error_len, "GR-C4 workspace allocation failed");
     const unsigned available_grid =
         gr_cooperative_grid((const void *)gr_fused_normalize_down_kernel,
                                           Q38_GR_BRANCHES);
@@ -3094,6 +3111,8 @@ extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
         !ensure((void **)&context->device_moe_shared_weight,
                 &context->device_moe_shared_weight_bytes, sizeof(float)))
         return fail(error, error_len, "decoder layer chain workspace allocation failed");
+    if (!ensure_gr_buffers(context))
+        return fail(error, error_len, "decoder layer chain GR workspace allocation failed");
     if (cudaMemcpyAsync(
             context->device_hidden_a, host_input,
             Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),

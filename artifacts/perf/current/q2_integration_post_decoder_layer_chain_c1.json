@@ -1,0 +1,36 @@
+{
+  "benchmark": "q2_integration_post_decoder_layer_chain_c1",
+  "model": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+  "tokenizer": "/home/lvx/q38model",
+  "prompt": "Explain in simple terms why the sky appears blue during the day and red near sunset.",
+  "max_tokens": 16,
+  "chain": {
+    "enabled": true,
+    "generated_ids": [271, 248068, 198, 760, 1156, 6587, 264, 4145, 15673, 314, 3069, 279, 12515, 369, 6105, 2261],
+    "prefill_ms": 1993.170,
+    "decode_median_ms_per_token": 151.020,
+    "decode_p95_ms_per_token": 8849.265,
+    "generation_tokens_per_second": 6.622,
+    "nan_count": 0,
+    "inf_count": 0,
+    "fallback": false,
+    "ple_wait_ms": 0.0
+  },
+  "stable_path": {
+    "enabled": false,
+    "generated_ids": [271, 248068, 198, 760, 1156, 6587, 264, 4145, 15673, 314, 3069, 279, 12515, 369, 6105, 2261],
+    "prefill_ms": 1999.528,
+    "decode_median_ms_per_token": 130.207,
+    "decode_p95_ms_per_token": 6355.892,
+    "generation_tokens_per_second": 7.680,
+    "nan_count": 0,
+    "inf_count": 0,
+    "fallback": false,
+    "ple_wait_ms": 0.0
+  },
+  "correctness": {
+    "generated_ids_identical": true,
+    "finite": true,
+    "promotion_gate": "BLOCKED_PERFORMANCE"
+  }
+}

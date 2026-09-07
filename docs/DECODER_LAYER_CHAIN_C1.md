@@ -21,8 +21,13 @@ The new device entry points only expose their resident workspaces to the
 layer orchestrator.  File-backed PLE remains at the existing layer boundary.
 
 The existing GDN and QSA three-fixture gates remain green after this change.
-The canonical full-model integration could not be accepted in this environment:
-the one-load diagnostic run terminated with a bus error during the 97 GiB
-model execution, before producing a correctness record.  The same failure is
-reproducible with the chain disabled, so no chain-specific correctness,
-telemetry, or performance result is claimed.
+The full-model canonical integration now completes with the chain enabled.
+The 16-token generated IDs are bit-identical to the stable host-boundary
+path, with no NaN/Inf, fallback, or PLE stall.
+
+The current measured chain run is functionally GREEN but does not pass the
+performance promotion gate yet: its 16-token decode median was 151.020
+ms/token versus 130.207 ms/token for the stable path.  The chain remains
+enabled for correctness validation, but it must not be presented as a
+performance promotion until a complete-layer fixture and a representative
+microbenchmark demonstrate the required improvement.
