@@ -101,8 +101,9 @@ static bool project(const q38_forward_matrix *matrix, const float *input,
                     q38_forward_qsa_matrix_batch_backend backend,
                     void *backend_user, char *error, size_t error_len) {
     if (!matrix_ok(matrix, matrix->rows, matrix->cols)) return false;
-    if (backend && backend(matrix, input, tokens, output, backend_user,
-                           error, error_len))
+    if (backend && tokens > 1 &&
+        backend(matrix, input, tokens, output, backend_user,
+                error, error_len))
         return true;
     for (size_t t = 0; t < tokens; ++t)
         for (size_t r = 0; r < matrix->rows; ++r) {
@@ -414,17 +415,18 @@ static bool q38_forward_qsa_ref_impl(
                 timing->attention_ms += qsa_now_ms() - attention_started;
             free(numerator);
         }
-        const double output_started = qsa_now_ms();
-        if (timing)
-            timing->output_projection_backend_used =
-                w->matrix_batch_backend != NULL;
-        if (w->matrix_batch_backend &&
-            !w->matrix_batch_backend(
-                &w->o_proj, attention + t * attention_width, 1,
-                output + t * w->hidden, w->matrix_batch_user, error,
-                error_len))
+    }
+    const double output_started = qsa_now_ms();
+    if (timing)
+        timing->output_projection_backend_used =
+            w->matrix_batch_backend != NULL && token_count > 1;
+    if (w->matrix_batch_backend && token_count > 1) {
+        if (!w->matrix_batch_backend(
+                &w->o_proj, attention, token_count, output,
+                w->matrix_batch_user, error, error_len))
             return false;
-        if (!w->matrix_batch_backend) {
+    } else {
+        for (size_t t = 0; t < token_count; ++t) {
             float *projected = output + t * w->hidden;
             for (size_t r = 0; r < w->o_proj.rows; ++r) {
                 projected[r] = 0.0f;
@@ -433,10 +435,9 @@ static bool q38_forward_qsa_ref_impl(
                                      attention[t * attention_width + c];
             }
         }
-        if (timing) {
-            timing->output_projection_ms += qsa_now_ms() - output_started;
-        }
     }
+    if (timing)
+        timing->output_projection_ms += qsa_now_ms() - output_started;
     const double cleanup_started = qsa_now_ms();
     if (!precomputed) {
         free(qfull); free(keys); free(values);
@@ -799,6 +800,9 @@ static bool full_matvec_batch(
     char *error, size_t error_len, const char *stage) {
     if (!tokens || !rows || !cols || !input || !output)
         return full_fail(error, error_len, "invalid batched matvec arguments");
+    if (tokens == 1)
+        return full_matvec(model, tensor, input, rows, cols, output, scratch,
+                           error, error_len, stage);
     if (full_matrix_batch_backend && !full_is_file_backed_ple(tensor)) {
         full_backend_context(tensor, rows, cols,
                              stage ? stage : "matvec_batch");
@@ -948,10 +952,7 @@ static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
     }
     if (!full_matvec_batch(model, weights->input_mix_weight_down, normed,
                            tokens, 320, width, down_batch, scratch, error,
-                           error_len, "gr_read_down") ||
-        !full_matvec_batch(model, weights->input_mix_weight_up, down_batch,
-                           tokens, width, 320, up_batch, scratch, error,
-                           error_len, "gr_read_up")) {
+                           error_len, "gr_read_down")) {
         free(down_batch);
         free(up_batch);
         return false;
@@ -961,6 +962,15 @@ static bool full_gr_read(const q38_gguf *model, const q38_gr_weights *weights,
             down_batch[t * 320u + r] =
                 down_batch[t * 320u + r] / 4.0f /
                 (1.0f + expf(-down_batch[t * 320u + r] / 4.0f));
+    }
+    if (!full_matvec_batch(model, weights->input_mix_weight_up, down_batch,
+                           tokens, width, 320, up_batch, scratch, error,
+                           error_len, "gr_read_up")) {
+        free(down_batch);
+        free(up_batch);
+        return false;
+    }
+    for (size_t t = 0; t < tokens; ++t) {
         memcpy(up, up_batch + t * width, width * sizeof(float));
         memcpy(down, down_batch + t * 320u, 320u * sizeof(float));
         for (size_t s = 0; s < 4; ++s)
@@ -1858,7 +1868,7 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
     full_qsa_batch_user batch_user = {
         model, full_matrix_batch_backend, full_backend_user
     };
-    if (full_matrix_batch_backend) {
+    if (full_matrix_batch_backend && tokens > 1) {
         w.matrix_batch_backend = full_qsa_matrix_batch;
         w.matrix_batch_user = &batch_user;
     }
