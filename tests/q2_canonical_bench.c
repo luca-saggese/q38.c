@@ -139,6 +139,9 @@ typedef struct {
     uint64_t telemetry_callbacks;
     uint64_t kernel_launches;
     uint64_t host_syncs;
+    uint64_t ple_projection_matrix_calls;
+    uint64_t ple_projection_row_callbacks;
+    uint64_t ple_projection_weight_upload_bytes;
     uint64_t real_cuda_sync_count;
     double host_blocked_on_cuda_ms;
     uint64_t sync_reason_count[Q38_CUDA_SYNC_REASON_COUNT];
@@ -197,6 +200,9 @@ typedef struct {
     uint64_t d2d_bytes;
     uint64_t non_ple_upload_bytes;
     uint64_t non_ple_residency_misses;
+    uint64_t ple_projection_matrix_calls;
+    uint64_t ple_projection_row_callbacks;
+    uint64_t ple_projection_weight_upload_bytes;
     double kernel_ms;
     double backend_overhead_ms;
     double upload_ms;
@@ -403,6 +409,16 @@ static void telemetry_observer(const q38_forward_cuda_telemetry *record,
     telemetry->upload_ms += record->upload_ms;
     telemetry->callback_wall_ms += record->callback_wall_ms;
     telemetry->host_wait_ms += record->host_wait_ms;
+    if (record->subsystem && !strcmp(record->subsystem, "ple") &&
+        record->logical_stage &&
+        (!strcmp(record->logical_stage, "ple_key_projection") ||
+         !strcmp(record->logical_stage, "ple_value_projection"))) {
+        if (record->operation && !strcmp(record->operation, "matrix"))
+            telemetry->ple_projection_matrix_calls++;
+        else if (record->operation && !strcmp(record->operation, "matvec"))
+            telemetry->ple_projection_row_callbacks++;
+        telemetry->ple_projection_weight_upload_bytes += record->upload_bytes;
+    }
     q2_owner_stat *owner = &telemetry->owners[owner_for_record(record)];
     owner->calls++;
     owner->callback_wall_ms += record->callback_wall_ms;
@@ -593,6 +609,10 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     sum->telemetry_callbacks += sample->telemetry_callbacks;
     sum->kernel_launches += sample->kernel_launches;
     sum->host_syncs += sample->host_syncs;
+    sum->ple_projection_matrix_calls += sample->ple_projection_matrix_calls;
+    sum->ple_projection_row_callbacks += sample->ple_projection_row_callbacks;
+    sum->ple_projection_weight_upload_bytes +=
+        sample->ple_projection_weight_upload_bytes;
     sum->real_cuda_sync_count += sample->real_cuda_sync_count;
     sum->host_blocked_on_cuda_ms += sample->host_blocked_on_cuda_ms;
     for (size_t i = 0; i < Q38_CUDA_SYNC_REASON_COUNT; ++i) {
@@ -710,6 +730,12 @@ static void divide_sample(q2_sample *sample, double divisor) {
         (double)sample->kernel_launches / divisor);
     sample->host_syncs = (uint64_t)(
         (double)sample->host_syncs / divisor);
+    sample->ple_projection_matrix_calls = (uint64_t)(
+        (double)sample->ple_projection_matrix_calls / divisor);
+    sample->ple_projection_row_callbacks = (uint64_t)(
+        (double)sample->ple_projection_row_callbacks / divisor);
+    sample->ple_projection_weight_upload_bytes = (uint64_t)(
+        (double)sample->ple_projection_weight_upload_bytes / divisor);
     sample->real_cuda_sync_count = (uint64_t)(
         (double)sample->real_cuda_sync_count / divisor);
     sample->host_blocked_on_cuda_ms /= divisor;
@@ -882,6 +908,15 @@ static void add_telemetry_delta(q2_sample *sample,
                                    before->non_ple_upload_bytes;
     sample->non_ple_residency_misses =
         after->non_ple_residency_misses - before->non_ple_residency_misses;
+    sample->ple_projection_matrix_calls =
+        after->ple_projection_matrix_calls -
+        before->ple_projection_matrix_calls;
+    sample->ple_projection_row_callbacks =
+        after->ple_projection_row_callbacks -
+        before->ple_projection_row_callbacks;
+    sample->ple_projection_weight_upload_bytes =
+        after->ple_projection_weight_upload_bytes -
+        before->ple_projection_weight_upload_bytes;
     sample->cuda_dispatch_ms = after->backend_overhead_ms -
                                before->backend_overhead_ms;
     sample->memcpy_ms = after->upload_ms - before->upload_ms;
@@ -1364,9 +1399,13 @@ static bool run_quick(
     const bool upload_zero = telemetry.non_ple_upload_bytes == 0;
     const bool miss_zero = telemetry.non_ple_residency_misses == 0;
     const bool ple_stall_zero = aggregate.ple_critical_stall_ms == 0.0;
+    const bool ple_projection_c1 =
+        aggregate.ple_projection_matrix_calls == 2 &&
+        aggregate.ple_projection_row_callbacks == 0 &&
+        aggregate.ple_projection_weight_upload_bytes == 0;
     green = generated_ids_identical && final_hash_identical && all_finite &&
             fallback_zero && upload_zero && miss_zero && ple_stall_zero &&
-            residency.all_non_ple_resident;
+            residency.all_non_ple_resident && ple_projection_c1;
     printf("{\"format\":\"q2-forward-exclusive-attribution-raw-v1\","
            "\"PERF_SCHEMA\":\"PERF_SCHEMA_V2\","
            "\"REF_ID\":\"Q2_FORWARD_EXCLUSIVE_ATTRIBUTION_V1\","
@@ -1409,7 +1448,10 @@ static bool run_quick(
            "\"argmax_final_identical\":%s,\"nan_inf\":%s,"
            "\"fallback\":%s,\"non_ple_upload_bytes\":%" PRIu64
            ",\"non_ple_residency_misses\":%" PRIu64
-           ",\"ple_critical_stall_ms\":%.6f},"
+           ",\"ple_critical_stall_ms\":%.6f,"
+           "\"ple_projection_matrix_calls\":%" PRIu64
+           ",\"ple_projection_row_callbacks\":%" PRIu64
+           ",\"ple_projection_weight_upload_bytes\":%" PRIu64 "},"
            "\"accounting\":{\"wall_ms\":%.6f,"
            "\"embedding_ms\":%.6f,\"ple_async_window_ms\":%.6f,"
            "\"QSA_ms\":%.6f,"
@@ -1437,6 +1479,9 @@ static bool run_quick(
            telemetry.non_ple_upload_bytes,
            telemetry.non_ple_residency_misses,
            aggregate.ple_critical_stall_ms,
+           aggregate.ple_projection_matrix_calls,
+           aggregate.ple_projection_row_callbacks,
+           aggregate.ple_projection_weight_upload_bytes,
            aggregate.forward_ms > 0.0 ? aggregate.forward_ms : aggregate.wall_ms,
            aggregate.timing_embedding_ms,
            aggregate.timing_ple_async_window_ms,
@@ -1575,6 +1620,9 @@ static void print_sample(const q2_sample *sample) {
            ",\"legacy_host_syncs\":%" PRIu64
            ",\"telemetry_callbacks\":%" PRIu64 ",\"h2d_bytes\":%" PRIu64
            ",\"d2h_bytes\":%" PRIu64 ",\"d2d_bytes\":%" PRIu64 "},"
+           "\"ple_projection\":{\"matrix_calls\":%" PRIu64
+           ",\"row_callbacks\":%" PRIu64
+           ",\"weight_upload_bytes\":%" PRIu64 "},"
            "\"layer_wall_ms\":[",
            sample->wall_ms, sample->forward_ms, sample->argmax_ms,
            sample->bookkeeping_ms, sample->ple_critical_stall_ms,
@@ -1616,7 +1664,10 @@ static void print_sample(const q2_sample *sample) {
            sample->other_ms,
            sample->kernel_launches, sample->host_syncs,
            sample->telemetry_callbacks, sample->h2d_bytes,
-           sample->d2h_bytes, sample->d2d_bytes);
+           sample->d2h_bytes, sample->d2d_bytes,
+           sample->ple_projection_matrix_calls,
+           sample->ple_projection_row_callbacks,
+           sample->ple_projection_weight_upload_bytes);
     for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
         printf("%s%.6f", i ? "," : "", sample->layer_wall_ms[i]);
     printf("]");
