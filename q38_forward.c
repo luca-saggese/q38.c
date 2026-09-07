@@ -93,7 +93,7 @@ static void rope(float *x, size_t n, size_t rotary, size_t position,
 #if Q38_DIAGNOSTICS
 static double qsa_now_ms(void) {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) != 0) return 0.0;
     return (double)ts.tv_sec * 1000.0 +
            (double)ts.tv_nsec / 1000000.0;
 }
@@ -1683,6 +1683,7 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
         return false;
     if (!q38_forward_state_wait_ple(state, error, error_len))
         return false;
+    q38_ple_scheduler_record_injection_begin(state->ple_scheduler);
     ple_started = full_now_ms();
     float *embedding = calloc(token_count * emb_width, sizeof(float));
     float *key = calloc(token_count * width, sizeof(float));
@@ -2150,6 +2151,10 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
     if (token_count > SIZE_MAX / (4u * Q38_GR_HIDDEN) ||
         token_count > SIZE_MAX / Q38_FULL_QSA_SELECTED_STRIDE)
         return full_fail(error, error_len, "full forward token count overflows");
+    const uint64_t timeline_position = state->qsa[0].position;
+    q38_ple_scheduler_record_timeline(
+        state->ple_scheduler, Q38_PLE_T0_TOKEN_FORWARD_BEGIN, 0,
+        timeline_position);
     {
         char scheduler_error[128];
         (void)q38_forward_state_prefetch_ple(
@@ -2207,6 +2212,14 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
     for (uint32_t layer_number = 0; layer_number < Q38_MODEL_LAYERS;
          ++layer_number) {
         full_current_layer = layer_number;
+        if (layer_number == 0)
+            q38_ple_scheduler_record_timeline(
+                state->ple_scheduler, Q38_PLE_T2_LAYER0_BEGIN, 0,
+                timeline_position);
+        if (layer_number == 1)
+            q38_ple_scheduler_record_timeline(
+                state->ple_scheduler, Q38_PLE_T4_LAYER1_BEGIN, 0,
+                timeline_position);
         const q38_layer_weights *layer = &weights->layer[layer_number];
         if (layer_number == 1) {
             const double ple_started = full_now_ms();
@@ -2354,6 +2367,14 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                               "OTHER_LAYER", layer_number,
                               full_now_ms() - layer_started, error, error_len))
             goto fail;
+        if (layer_number == 0)
+            q38_ple_scheduler_record_timeline(
+                state->ple_scheduler, Q38_PLE_T3_LAYER0_END, 0,
+                timeline_position);
+        if (layer_number == 1)
+            q38_ple_scheduler_record_timeline(
+                state->ple_scheduler, Q38_PLE_T5_LAYER1_END, 0,
+                timeline_position);
     }
     {
         q38_gr_weights final_gr;
@@ -2450,6 +2471,9 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
     }
     free(streams); free(mixed); free(block); free(updated); free(scratch);
     free(normed); free(down); free(up); free(inject); free(selected); free(counts);
+    q38_ple_scheduler_record_timeline(
+        state->ple_scheduler, Q38_PLE_T11_TOKEN_FORWARD_END, 0,
+        timeline_position);
     full_diagnostics = NULL;
     return true;
 fail:

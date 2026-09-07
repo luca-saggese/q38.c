@@ -42,11 +42,12 @@ struct q38_ple_scheduler {
     double decode_dequant_ms;
     double accumulation_ms;
     double injection_ms;
+    uint64_t next_request_id;
 };
 
 static double scheduler_now_ms(void) {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) != 0) return 0.0;
     return (double)ts.tv_sec * 1000.0 +
            (double)ts.tv_nsec / 1000000.0;
 }
@@ -202,6 +203,7 @@ static void *scheduler_worker(void *arg) {
         for (size_t i = 0; i < block_count; ++i)
             warm_block(scheduler, &blocks[i], &stats);
         stats.ready_ms = scheduler_now_ms();
+        stats.t6_ple_injection_arrival_ms = stats.ready_ms;
         stats.elapsed_ms = stats.ready_ms - stats.start_ms;
         stats.worker_cpu_ms = scheduler_thread_cpu_ms() - cpu_start;
         stats.result_publish_ms = 0.0;
@@ -403,7 +405,11 @@ bool q38_ple_scheduler_submit(q38_ple_scheduler *scheduler,
     scheduler->row_count = unique_count;
     scheduler->blocks = blocks;
     scheduler->block_count = coalesced;
+    const double t0 = scheduler->stats.t0_token_forward_begin_ms;
+    const uint64_t token_position = scheduler->stats.token_position;
     memset(&scheduler->stats, 0, sizeof(scheduler->stats));
+    scheduler->stats.t0_token_forward_begin_ms = t0;
+    scheduler->stats.token_position = token_position;
     scheduler->stats.logical_accesses = row_count;
     scheduler->stats.unique_rows = unique_count;
     scheduler->stats.unique_physical_blocks = coalesced;
@@ -416,6 +422,8 @@ bool q38_ple_scheduler_submit(q38_ple_scheduler *scheduler,
     scheduler->stats.logical_bytes = (uint64_t)row_count *
                                      scheduler->store.row_bytes;
     scheduler->stats.file_reads_sequential = true;
+    scheduler->stats.request_id = ++scheduler->next_request_id;
+    scheduler->stats.t1_ple_request_submit_ms = scheduler_now_ms();
     scheduler->pending = true;
     scheduler->ready = false;
     pthread_cond_signal(&scheduler->work);
@@ -433,13 +441,18 @@ bool q38_ple_scheduler_wait(q38_ple_scheduler *scheduler,
         return true;
     }
     const double consume_ms = scheduler_now_ms();
+    scheduler->stats.t7_ple_wait_begin_ms = consume_ms;
     while (!scheduler->ready)
         pthread_cond_wait(&scheduler->done, &scheduler->mutex);
     scheduler->stats.consume_ms = consume_ms;
     scheduler->stats.wait_ms =
         scheduler->stats.ready_ms > consume_ms
         ? scheduler->stats.ready_ms - consume_ms : 0.0;
-    scheduler->stats.wait_at_injection_ms = scheduler->stats.wait_ms;
+    scheduler->stats.t8_ple_wait_end_ms = scheduler_now_ms();
+    scheduler->stats.wait_at_injection_ms =
+        scheduler->stats.t8_ple_wait_end_ms -
+        scheduler->stats.t7_ple_wait_begin_ms;
+    scheduler->stats.wait_ms = scheduler->stats.wait_at_injection_ms;
     scheduler->stats.overlap_ms =
         scheduler->stats.elapsed_ms > scheduler->stats.wait_ms
         ? scheduler->stats.elapsed_ms - scheduler->stats.wait_ms : 0.0;
@@ -478,6 +491,54 @@ bool q38_ple_scheduler_record_injection_timing(
     scheduler->stats.decode_dequant_ms = decode_dequant_ms;
     scheduler->stats.accumulation_ms = accumulation_ms;
     scheduler->stats.injection_ms = injection_ms;
+    scheduler->stats.t10_ple_injection_end_ms = scheduler_now_ms();
+    pthread_mutex_unlock(&scheduler->mutex);
+    return true;
+}
+
+bool q38_ple_scheduler_record_injection_begin(
+    q38_ple_scheduler *scheduler) {
+    if (!scheduler) return false;
+    pthread_mutex_lock(&scheduler->mutex);
+    scheduler->stats.t9_ple_injection_begin_ms = scheduler_now_ms();
+    pthread_mutex_unlock(&scheduler->mutex);
+    return true;
+}
+
+bool q38_ple_scheduler_record_timeline(
+    q38_ple_scheduler *scheduler, q38_ple_timeline_boundary boundary,
+    uint64_t request_id, uint64_t token_position) {
+    if (!scheduler || boundary < Q38_PLE_T0_TOKEN_FORWARD_BEGIN ||
+        boundary > Q38_PLE_T11_TOKEN_FORWARD_END)
+        return false;
+    pthread_mutex_lock(&scheduler->mutex);
+    if (request_id != 0) scheduler->stats.request_id = request_id;
+    scheduler->stats.token_position = token_position;
+    scheduler->stats.submit_position = token_position;
+    scheduler->stats.injection_position = token_position;
+    const double timestamp = scheduler_now_ms();
+    switch (boundary) {
+    case Q38_PLE_T0_TOKEN_FORWARD_BEGIN:
+        scheduler->stats.t0_token_forward_begin_ms = timestamp;
+        break;
+    case Q38_PLE_T2_LAYER0_BEGIN:
+        scheduler->stats.t2_layer0_begin_ms = timestamp;
+        break;
+    case Q38_PLE_T3_LAYER0_END:
+        scheduler->stats.t3_layer0_end_ms = timestamp;
+        break;
+    case Q38_PLE_T4_LAYER1_BEGIN:
+        scheduler->stats.t4_layer1_begin_ms = timestamp;
+        break;
+    case Q38_PLE_T5_LAYER1_END:
+        scheduler->stats.t5_layer1_end_ms = timestamp;
+        break;
+    case Q38_PLE_T11_TOKEN_FORWARD_END:
+        scheduler->stats.t11_token_forward_end_ms = timestamp;
+        break;
+    default:
+        break;
+    }
     pthread_mutex_unlock(&scheduler->mutex);
     return true;
 }

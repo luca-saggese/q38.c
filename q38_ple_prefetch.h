@@ -25,6 +25,15 @@ typedef struct {
 
 typedef struct q38_ple_scheduler q38_ple_scheduler;
 
+typedef enum {
+    Q38_PLE_T0_TOKEN_FORWARD_BEGIN = 0,
+    Q38_PLE_T2_LAYER0_BEGIN,
+    Q38_PLE_T3_LAYER0_END,
+    Q38_PLE_T4_LAYER1_BEGIN,
+    Q38_PLE_T5_LAYER1_END,
+    Q38_PLE_T11_TOKEN_FORWARD_END
+} q38_ple_timeline_boundary;
+
 typedef struct {
     uint64_t logical_accesses;
     uint64_t unique_rows;
@@ -54,6 +63,22 @@ typedef struct {
     uint64_t file_read_min_bytes;
     uint64_t file_read_max_bytes;
     bool file_reads_sequential;
+    uint64_t request_id;
+    uint64_t token_position;
+    uint64_t submit_position;
+    uint64_t injection_position;
+    double t0_token_forward_begin_ms;
+    double t1_ple_request_submit_ms;
+    double t2_layer0_begin_ms;
+    double t3_layer0_end_ms;
+    double t4_layer1_begin_ms;
+    double t5_layer1_end_ms;
+    double t6_ple_injection_arrival_ms;
+    double t7_ple_wait_begin_ms;
+    double t8_ple_wait_end_ms;
+    double t9_ple_injection_begin_ms;
+    double t10_ple_injection_end_ms;
+    double t11_token_forward_end_ms;
 } q38_ple_scheduler_stats;
 
 /*
@@ -89,6 +114,11 @@ bool q38_ple_scheduler_record_request_timing(
 bool q38_ple_scheduler_record_injection_timing(
     q38_ple_scheduler *scheduler, double decode_dequant_ms,
     double accumulation_ms, double injection_ms);
+bool q38_ple_scheduler_record_injection_begin(
+    q38_ple_scheduler *scheduler);
+bool q38_ple_scheduler_record_timeline(
+    q38_ple_scheduler *scheduler, q38_ple_timeline_boundary boundary,
+    uint64_t request_id, uint64_t token_position);
 
 #ifdef __cplusplus
 }

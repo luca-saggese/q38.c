@@ -48,10 +48,25 @@ int main(int argc, char **argv) {
         q38_gguf_close(model);
         return 1;
     }
+    const uint64_t token_position = 7;
+    q38_ple_scheduler_record_timeline(
+        scheduler, Q38_PLE_T0_TOKEN_FORWARD_BEGIN, 0, token_position);
     if (!q38_ple_scheduler_submit(scheduler, captured_rows,
                                   sizeof(captured_rows) / sizeof(*captured_rows),
                                   error, sizeof(error)) ||
-        !q38_ple_scheduler_wait(scheduler, error, sizeof(error))) {
+        !q38_ple_scheduler_record_timeline(
+            scheduler, Q38_PLE_T2_LAYER0_BEGIN, 0, token_position) ||
+        !q38_ple_scheduler_record_timeline(
+            scheduler, Q38_PLE_T3_LAYER0_END, 0, token_position) ||
+        !q38_ple_scheduler_record_timeline(
+            scheduler, Q38_PLE_T4_LAYER1_BEGIN, 0, token_position) ||
+        !q38_ple_scheduler_wait(scheduler, error, sizeof(error)) ||
+        !q38_ple_scheduler_record_injection_begin(scheduler) ||
+        !q38_ple_scheduler_record_injection_timing(scheduler, 0.0, 0.0, 0.0) ||
+        !q38_ple_scheduler_record_timeline(
+            scheduler, Q38_PLE_T5_LAYER1_END, 0, token_position) ||
+        !q38_ple_scheduler_record_timeline(
+            scheduler, Q38_PLE_T11_TOKEN_FORWARD_END, 0, token_position)) {
         fprintf(stderr, "replay failed: %s\n", error);
         q38_ple_scheduler_destroy(scheduler);
         q38_gguf_close(model);
@@ -60,6 +75,29 @@ int main(int argc, char **argv) {
     q38_ple_scheduler_stats stats;
     if (!q38_ple_scheduler_get_stats(scheduler, &stats)) {
         fprintf(stderr, "stats unavailable\n");
+        q38_ple_scheduler_destroy(scheduler);
+        q38_gguf_close(model);
+        return 1;
+    }
+    const double token_wall =
+        stats.t11_token_forward_end_ms - stats.t0_token_forward_begin_ms;
+    const double true_overlap =
+        stats.t6_ple_injection_arrival_ms -
+        stats.t1_ple_request_submit_ms;
+    if (stats.request_id == 0 || stats.token_position != token_position ||
+        stats.submit_position != token_position ||
+        stats.injection_position != token_position ||
+        stats.t0_token_forward_begin_ms > stats.t1_ple_request_submit_ms ||
+        stats.t1_ple_request_submit_ms >
+            stats.t6_ple_injection_arrival_ms ||
+        stats.t6_ple_injection_arrival_ms >
+            stats.t11_token_forward_end_ms ||
+        stats.t8_ple_wait_end_ms < stats.t7_ple_wait_begin_ms ||
+        stats.t10_ple_injection_end_ms <
+            stats.t9_ple_injection_begin_ms ||
+        true_overlap < 0.0 || token_wall <= 0.0 ||
+        true_overlap >= token_wall) {
+        fprintf(stderr, "invalid PLE timeline boundaries\n");
         q38_ple_scheduler_destroy(scheduler);
         q38_gguf_close(model);
         return 1;
@@ -81,12 +119,45 @@ int main(int argc, char **argv) {
             ",\"file_io_ms\":%.6f,\"worker_elapsed_ms\":%.6f,"
             "\"worker_cpu_ms\":%.6f,\"cache_hits\":%" PRIu64
             ",\"cache_misses\":%" PRIu64
-            ",\"sequential\":%s,\"mode\":\"buffered_pread_transient\"}\n",
+            ",\"sequential\":%s,\"mode\":\"buffered_pread_transient\","
+            "\"timeline\":{\"request_id\":%" PRIu64
+            ",\"token_position\":%" PRIu64
+            ",\"submit_position\":%" PRIu64
+            ",\"injection_position\":%" PRIu64
+            ",\"T0_token_forward_begin_ms\":%.6f"
+            ",\"T1_ple_request_submit_ms\":%.6f"
+            ",\"T2_layer0_begin_ms\":%.6f"
+            ",\"T3_layer0_end_ms\":%.6f"
+            ",\"T4_layer1_begin_ms\":%.6f"
+            ",\"T5_layer1_end_ms\":%.6f"
+            ",\"T6_ple_injection_arrival_ms\":%.6f"
+            ",\"T7_ple_wait_begin_ms\":%.6f"
+            ",\"T8_ple_wait_end_ms\":%.6f"
+            ",\"T9_ple_injection_begin_ms\":%.6f"
+            ",\"T10_ple_injection_end_ms\":%.6f"
+            ",\"T11_token_forward_end_ms\":%.6f"
+            ",\"true_ple_overlap_window_ms\":%.6f"
+            ",\"token_wall_ms\":%.6f,\"wait_at_injection_ms\":%.6f"
+            ",\"synchronous_injection_ms\":%.6f,\"overlap_fraction\":%.6f"
+            ",\"overlap_small\":%s,\"boundaries_valid\":true}}\n",
             stats.logical_accesses, stats.unique_rows, stats.logical_bytes,
             stats.file_read_ops, stats.file_read_min_bytes,
             stats.file_read_max_bytes, stats.file_io_ms, stats.elapsed_ms,
             stats.worker_cpu_ms, stats.cache_hits, stats.cache_misses,
-            stats.file_reads_sequential ? "true" : "false");
+            stats.file_reads_sequential ? "true" : "false",
+            stats.request_id, stats.token_position, stats.submit_position,
+            stats.injection_position, stats.t0_token_forward_begin_ms,
+            stats.t1_ple_request_submit_ms, stats.t2_layer0_begin_ms,
+            stats.t3_layer0_end_ms, stats.t4_layer1_begin_ms,
+            stats.t5_layer1_end_ms, stats.t6_ple_injection_arrival_ms,
+            stats.t7_ple_wait_begin_ms, stats.t8_ple_wait_end_ms,
+            stats.t9_ple_injection_begin_ms,
+            stats.t10_ple_injection_end_ms,
+            stats.t11_token_forward_end_ms, true_overlap, token_wall,
+            stats.wait_at_injection_ms, stats.injection_ms,
+            token_wall > 0.0 ? true_overlap / token_wall : 0.0,
+            token_wall > 0.0 && true_overlap / token_wall < 0.25
+                ? "true" : "false");
     fclose(out);
     q38_ple_scheduler_destroy(scheduler);
     q38_gguf_close(model);
