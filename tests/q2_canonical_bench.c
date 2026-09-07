@@ -23,7 +23,7 @@ enum {
 };
 
 enum {
-    Q2_MAX_TIMING_EVENTS = 96,
+    Q2_MAX_TIMING_EVENTS = 1024,
     Q2_OWNER_COUNT = 10
 };
 
