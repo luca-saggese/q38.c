@@ -1,0 +1,112 @@
+{
+  "format": "q38-ple-projection-baseline-v0",
+  "baseline": "PLE_PROJ_BASELINE_0",
+  "no_model_load": true,
+  "full_chain_benchmark": false,
+  "fixture": "artifacts/m4/ple_projection_fixture",
+  "fixture_cases": [
+    "early",
+    "middle",
+    "late"
+  ],
+  "contract": {
+    "projection_calls_per_token": 2,
+    "key_shape": [
+      10240,
+      2560
+    ],
+    "value_shape": [
+      2560,
+      2560
+    ],
+    "embedding_width": 2560,
+    "runtime_weight_dtype": "Q8_0",
+    "fixture_source_weight_dtype": "BF16",
+    "row_matvecs_per_token": 12800,
+    "matrix_backend_calls_per_token": 0,
+    "split_ngram_parts": 128,
+    "split_ngram_parts_used_by_projection": false
+  },
+  "mystery_counter": {
+    "events_per_token": 12800,
+    "bytes_per_token": 34816000,
+    "bytes_per_event": 2720,
+    "classification": "PLE_PROJECTION_Q8_0_ROW_MATVEC",
+    "row_lookup_bytes_per_token": 2720
+  },
+  "oracle": {
+    "implementation": "independent scalar BF16-to-F32 row dot",
+    "finite": true,
+    "deterministic": true,
+    "max_abs_tolerance": 0.02
+  },
+  "backend": {
+    "production": "CUDA row matvec",
+    "projection_matrix_backend": "bypassed_for_file_backed_ple",
+    "runtime_transfers_per_row": {
+      "h2d_weight_bytes": 2720,
+      "h2d_input_bytes": 10240,
+      "d2h_output_bytes": 4,
+      "stream_wait": true
+    },
+    "fixture_cuda_status": "not_run_fixture_only"
+  },
+  "cases": [
+    {
+      "case": "early",
+      "iterations": 100,
+      "cpu_wall_ms": 177.123892,
+      "cpu_wall_ms_per_iteration": 1.77123892,
+      "key_max_abs_error": 5.960464477539063e-08,
+      "value_max_abs_error": 9.313225746154785e-09,
+      "cuda_enqueue_ms": null,
+      "cuda_execution_ms": null,
+      "h2d_bytes": 0,
+      "d2h_bytes": 0,
+      "wait_ms": 0,
+      "projection_calls": 2,
+      "row_matvecs_per_iteration": 12800,
+      "cuda_status": "not_run_fixture_only"
+    },
+    {
+      "case": "middle",
+      "iterations": 100,
+      "cpu_wall_ms": 100.180493,
+      "cpu_wall_ms_per_iteration": 1.00180493,
+      "key_max_abs_error": 2.9802322387695312e-08,
+      "value_max_abs_error": 1.4901161193847656e-08,
+      "cuda_enqueue_ms": null,
+      "cuda_execution_ms": null,
+      "h2d_bytes": 0,
+      "d2h_bytes": 0,
+      "wait_ms": 0,
+      "projection_calls": 2,
+      "row_matvecs_per_iteration": 12800,
+      "cuda_status": "not_run_fixture_only"
+    },
+    {
+      "case": "late",
+      "iterations": 100,
+      "cpu_wall_ms": 158.33851,
+      "cpu_wall_ms_per_iteration": 1.5833851,
+      "key_max_abs_error": 5.960464477539063e-08,
+      "value_max_abs_error": 1.0244548320770264e-08,
+      "cuda_enqueue_ms": null,
+      "cuda_execution_ms": null,
+      "h2d_bytes": 0,
+      "d2h_bytes": 0,
+      "wait_ms": 0,
+      "projection_calls": 2,
+      "row_matvecs_per_iteration": 12800,
+      "cuda_status": "not_run_fixture_only"
+    }
+  ],
+  "source": {
+    "vectors": "artifacts/m4/ple_injection_vectors.json",
+    "projection_shards": [
+      "model-00005-of-00131.safetensors",
+      "model-00037-of-00131.safetensors"
+    ],
+    "extraction": "slice-only safetensors extraction; no model runtime load"
+  }
+}

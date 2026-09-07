@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Fixture-only PLE projection baseline.
+
+This intentionally does not open a GGUF/model runtime.  It loads the extracted
+BF16 projection weights and production-captured activations only.
+"""
+
+import argparse
+import json
+import mmap
+import time
+from pathlib import Path
+
+import numpy as np
+
+
+def bf16_to_f32(values: np.ndarray) -> np.ndarray:
+    return (values.astype(np.uint32) << 16).view(np.float32)
+
+
+def scalar_row_dot(matrix: np.ndarray, vector: np.ndarray, rows: int) -> np.ndarray:
+    output = np.empty(rows, dtype=np.float32)
+    for row in range(rows):
+        total = 0.0
+        for column, value in enumerate(vector):
+            total += float(matrix[row, column]) * float(value)
+        output[row] = total
+    return output
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--fixture",
+        default="artifacts/m4/ple_projection_fixture",
+        type=Path,
+    )
+    parser.add_argument("--iterations", default=100, type=int)
+    args = parser.parse_args()
+    fixture = args.fixture
+    metadata = json.loads((fixture / "fixture.json").read_text())
+    rows = np.fromfile(fixture / "rows_f32.bin", dtype=np.float32).reshape(
+        metadata["rows_shape"]
+    )
+    hidden = np.fromfile(fixture / "hidden_f32.bin", dtype=np.float32).reshape(
+        metadata["hidden_shape"]
+    )
+    expected_key = np.fromfile(
+        fixture / "key_expected_f32.bin", dtype=np.float32
+    ).reshape((3, metadata["key_output_width"]))
+    expected_value = np.fromfile(
+        fixture / "value_expected_f32.bin", dtype=np.float32
+    ).reshape((3, metadata["value_output_width"]))
+
+    # Keep the extracted weights resident for the complete benchmark.
+    key_bf16 = np.fromfile(fixture / "key_proj_bf16.bin", dtype=np.uint16).reshape(
+        metadata["key_shape"]
+    )
+    value_bf16 = np.fromfile(
+        fixture / "value_proj_bf16.bin", dtype=np.uint16
+    ).reshape(metadata["value_shape"])
+    key = bf16_to_f32(key_bf16)
+    value = bf16_to_f32(value_bf16)
+    embedding = rows.reshape((3, metadata["embedding_width"]))
+
+    # Independent scalar oracle: only a small deterministic sample is needed
+    # to validate the stored outputs without reusing the benchmark matmul.
+    oracle_indices = (0, 1, 2)
+    for case in range(3):
+        oracle_key = scalar_row_dot(key, embedding[case], 3)
+        oracle_value = scalar_row_dot(value, embedding[case], 3)
+        if not np.allclose(oracle_key, expected_key[case, oracle_indices], atol=2e-2):
+            raise SystemExit("key projection oracle mismatch")
+        if not np.allclose(
+            oracle_value, expected_value[case, oracle_indices], atol=2e-2
+        ):
+            raise SystemExit("value projection oracle mismatch")
+
+    results = []
+    for case_name, case in zip(metadata["cases"], range(3)):
+        for _ in range(5):
+            embedding[case] @ key.T
+            embedding[case] @ value.T
+        start = time.perf_counter_ns()
+        for _ in range(args.iterations):
+            actual_key = embedding[case] @ key.T
+            actual_value = embedding[case] @ value.T
+        elapsed_ms = (time.perf_counter_ns() - start) / 1e6
+        key_error = float(np.max(np.abs(actual_key - expected_key[case])))
+        value_error = float(np.max(np.abs(actual_value - expected_value[case])))
+        if not np.isfinite(actual_key).all() or not np.isfinite(actual_value).all():
+            raise SystemExit("projection produced NaN/Inf")
+        results.append(
+            {
+                "case": case_name,
+                "iterations": args.iterations,
+                "projection_calls": 2,
+                "row_matvecs_per_iteration": 12800,
+                "cpu_wall_ms": elapsed_ms,
+                "cpu_wall_ms_per_iteration": elapsed_ms / args.iterations,
+                "key_max_abs_error": key_error,
+                "value_max_abs_error": value_error,
+                "cuda_enqueue_ms": None,
+                "cuda_execution_ms": None,
+                "h2d_bytes": 0,
+                "d2h_bytes": 0,
+                "wait_ms": 0,
+                "cuda_status": "not_run_fixture_only",
+            }
+        )
+
+    output = {
+        "format": "q38-ple-projection-baseline-v0",
+        "baseline": "PLE_PROJ_BASELINE_0",
+        "fixture": str(fixture),
+        "no_model_load": True,
+        "cases": results,
+        "oracle": {
+            "implementation": "independent scalar BF16-to-F32 row dot",
+            "deterministic": True,
+            "finite": True,
+            "max_abs_tolerance": 2e-2,
+        },
+    }
+    print(json.dumps(output, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

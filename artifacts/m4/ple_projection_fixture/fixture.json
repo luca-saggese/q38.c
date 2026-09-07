@@ -1,0 +1,124 @@
+{
+  "format": "q38-ple-projection-fixture-v0",
+  "cases": [
+    "early",
+    "middle",
+    "late"
+  ],
+  "source_vectors": "artifacts/m4/ple_injection_vectors.json",
+  "source_layer": 1,
+  "tokens": [
+    248044,
+    9707,
+    576
+  ],
+  "row_ids": [
+    [
+      12109452,
+      28254228,
+      43544568,
+      75552284,
+      80806652,
+      109462696,
+      138237652,
+      156144216,
+      168329152,
+      190666072,
+      201666848,
+      225260208,
+      254098352,
+      272035424,
+      292035584,
+      319593848
+    ],
+    [
+      18499624,
+      22365860,
+      54738584,
+      64328860,
+      90760884,
+      100379048,
+      130401008,
+      151656052,
+      160449792,
+      192426524,
+      209290172,
+      239256296,
+      245223472,
+      278778304,
+      298778464,
+      303161068
+    ],
+    [
+      1403032,
+      30638676,
+      54340568,
+      61757356,
+      87331412,
+      109191656,
+      131052980,
+      154778860,
+      160985664,
+      190280976,
+      209434008,
+      227779860,
+      257651064,
+      277413056,
+      297413216,
+      307105688
+    ]
+  ],
+  "rows_shape": [
+    3,
+    16,
+    160
+  ],
+  "hidden_shape": [
+    3,
+    10240
+  ],
+  "key_shape": [
+    10240,
+    2560
+  ],
+  "value_shape": [
+    2560,
+    2560
+  ],
+  "source_dtype": "BF16",
+  "stored_weight_dtype": "BF16 raw uint16",
+  "stored_activation_dtype": "F32",
+  "row_width": 160,
+  "heads_per_token": 16,
+  "embedding_width": 2560,
+  "key_output_width": 10240,
+  "value_output_width": 2560,
+  "projection_calls_per_case": 2,
+  "row_matvecs_per_case": 12800,
+  "files": {
+    "hidden_f32.bin": {
+      "bytes": 122880,
+      "sha256": "76f5d93d88139d1f84b8f326d2514b6e4460525fe42ab5eb1b5148a8258d74ae"
+    },
+    "key_expected_f32.bin": {
+      "bytes": 122880,
+      "sha256": "4345c2bf1e407901c7c1637043ced740a9e464399a6b96f94e65d36873c9313e"
+    },
+    "key_proj_bf16.bin": {
+      "bytes": 52428800,
+      "sha256": "f431e2b51311b4bbea97ea0e02b6c35944033490dd5dc76bb5cc5b594f7af7de"
+    },
+    "rows_f32.bin": {
+      "bytes": 30720,
+      "sha256": "83fc18769c9eb6c5607b36a6ff4ba8ca457248fbfec38078c1a6ef2c29382d4d"
+    },
+    "value_expected_f32.bin": {
+      "bytes": 30720,
+      "sha256": "b75202199b5e888af0dd07286ad8a9e6947be85cce0fd935a8dcb997811f82bc"
+    },
+    "value_proj_bf16.bin": {
+      "bytes": 13107200,
+      "sha256": "d25aabbce09091bf133d776b41d5b3e0802c4d2523b9ca97003491c28db3c437"
+    }
+  }
+}
