@@ -66,6 +66,20 @@ typedef struct {
     double ple_critical_stall_ms;
     double ple_elapsed_ms;
     double ple_overlap_ms;
+    double ple_request_build_ms;
+    double ple_history_ngram_ms;
+    double ple_index_lookup_ms;
+    double ple_file_io_ms;
+    double ple_decode_dequant_ms;
+    double ple_accumulation_ms;
+    double ple_async_submit_ms;
+    double ple_worker_exec_ms;
+    double ple_result_publish_ms;
+    double ple_injection_ms;
+    double ple_wait_at_injection_ms;
+    uint64_t ple_file_read_ops;
+    uint64_t ple_file_read_min_bytes;
+    uint64_t ple_file_read_max_bytes;
     double qsa_ms;
     double qsa_qkv_ms;
     double qsa_output_projection_ms;
@@ -322,6 +336,8 @@ static q2_owner owner_for_record(const q38_forward_cuda_telemetry *record) {
         return Q2_OWNER_GR;
     if (subsystem && !strcmp(subsystem, "ple"))
         return Q2_OWNER_PLE;
+    if (record && record->ple_file_backed_access)
+        return Q2_OWNER_PLE;
     if (subsystem && !strcmp(subsystem, "lm_head"))
         return Q2_OWNER_LM_HEAD;
     /*
@@ -487,6 +503,17 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     ADD(ple_critical_stall_ms);
     ADD(ple_elapsed_ms);
     ADD(ple_overlap_ms);
+    ADD(ple_request_build_ms);
+    ADD(ple_history_ngram_ms);
+    ADD(ple_index_lookup_ms);
+    ADD(ple_file_io_ms);
+    ADD(ple_decode_dequant_ms);
+    ADD(ple_accumulation_ms);
+    ADD(ple_async_submit_ms);
+    ADD(ple_worker_exec_ms);
+    ADD(ple_result_publish_ms);
+    ADD(ple_injection_ms);
+    ADD(ple_wait_at_injection_ms);
     ADD(qsa_ms);
     ADD(qsa_qkv_ms);
     ADD(qsa_output_projection_ms);
@@ -532,6 +559,13 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     ADD(timing_norms_residual_glue_ms);
     ADD(timing_other_layer_ms);
     ADD(timing_unexplained_ms);
+    sum->ple_file_read_ops += sample->ple_file_read_ops;
+    if (sample->ple_file_read_min_bytes != 0 &&
+        (sum->ple_file_read_min_bytes == 0 ||
+         sample->ple_file_read_min_bytes < sum->ple_file_read_min_bytes))
+        sum->ple_file_read_min_bytes = sample->ple_file_read_min_bytes;
+    if (sample->ple_file_read_max_bytes > sum->ple_file_read_max_bytes)
+        sum->ple_file_read_max_bytes = sample->ple_file_read_max_bytes;
     for (size_t i = 0; i < Q2_OWNER_COUNT; ++i) {
         sum->owners[i].calls += sample->owners[i].calls;
         sum->owners[i].callback_wall_ms += sample->owners[i].callback_wall_ms;
@@ -553,6 +587,17 @@ static void divide_sample(q2_sample *sample, double divisor) {
     DIV(ple_critical_stall_ms);
     DIV(ple_elapsed_ms);
     DIV(ple_overlap_ms);
+    DIV(ple_request_build_ms);
+    DIV(ple_history_ngram_ms);
+    DIV(ple_index_lookup_ms);
+    DIV(ple_file_io_ms);
+    DIV(ple_decode_dequant_ms);
+    DIV(ple_accumulation_ms);
+    DIV(ple_async_submit_ms);
+    DIV(ple_worker_exec_ms);
+    DIV(ple_result_publish_ms);
+    DIV(ple_injection_ms);
+    DIV(ple_wait_at_injection_ms);
     DIV(qsa_ms);
     DIV(qsa_qkv_ms);
     DIV(qsa_output_projection_ms);
@@ -603,6 +648,12 @@ static void divide_sample(q2_sample *sample, double divisor) {
         (double)sample->non_ple_upload_bytes / divisor);
     sample->non_ple_residency_misses = (uint64_t)(
         (double)sample->non_ple_residency_misses / divisor);
+    sample->ple_file_read_ops = (uint64_t)(
+        (double)sample->ple_file_read_ops / divisor);
+    sample->ple_file_read_min_bytes = (uint64_t)(
+        (double)sample->ple_file_read_min_bytes / divisor);
+    sample->ple_file_read_max_bytes = (uint64_t)(
+        (double)sample->ple_file_read_max_bytes / divisor);
     for (size_t i = 0; i < Q2_OWNER_COUNT; ++i) {
         sample->owners[i].calls = (uint64_t)(
             (double)sample->owners[i].calls / divisor);
@@ -876,6 +927,20 @@ static bool run_decode(q38_session *session, const q2_options *options,
         capture.sample.ple_critical_stall_ms = ple.wait_ms;
         capture.sample.ple_elapsed_ms = ple.elapsed_ms;
         capture.sample.ple_overlap_ms = ple.overlap_ms;
+        capture.sample.ple_request_build_ms = ple.request_build_ms;
+        capture.sample.ple_history_ngram_ms = ple.history_ngram_ms;
+        capture.sample.ple_index_lookup_ms = ple.index_lookup_ms;
+        capture.sample.ple_file_io_ms = ple.file_io_ms;
+        capture.sample.ple_decode_dequant_ms = ple.decode_dequant_ms;
+        capture.sample.ple_accumulation_ms = ple.accumulation_ms;
+        capture.sample.ple_async_submit_ms = ple.async_submit_ms;
+        capture.sample.ple_worker_exec_ms = ple.elapsed_ms;
+        capture.sample.ple_result_publish_ms = ple.result_publish_ms;
+        capture.sample.ple_injection_ms = ple.injection_ms;
+        capture.sample.ple_wait_at_injection_ms = ple.wait_at_injection_ms;
+        capture.sample.ple_file_read_ops = ple.file_read_ops;
+        capture.sample.ple_file_read_min_bytes = ple.file_read_min_bytes;
+        capture.sample.ple_file_read_max_bytes = ple.file_read_max_bytes;
         apply_qsa_timing(&capture.sample, &capture.qsa_timing);
         finalize_timing_tree(&capture.sample, &capture);
         add_telemetry_delta(&capture.sample, &telemetry_before, telemetry);
@@ -1321,7 +1386,15 @@ static void print_sample(const q2_sample *sample) {
     printf("{\"wall_ms\":%.6f,\"forward_core_ms\":%.6f,"
            "\"argmax_ms\":%.6f,\"bookkeeping_ms\":%.6f,"
            "\"ple_critical_stall_ms\":%.6f,\"ple_elapsed_ms\":%.6f,"
-           "\"ple_overlap_ms\":%.6f,\"categories\":{"
+           "\"ple_overlap_ms\":%.6f,\"ple_attribution\":{"
+           "\"request_build_ms\":%.6f,\"history_ngram_ms\":%.6f,"
+           "\"index_lookup_ms\":%.6f,\"file_io_ms\":%.6f,"
+           "\"decode_dequant_ms\":%.6f,\"accumulation_ms\":%.6f,"
+           "\"async_submit_ms\":%.6f,\"worker_exec_ms\":%.6f,"
+           "\"result_publish_ms\":%.6f,\"injection_ms\":%.6f,"
+           "\"wait_at_injection_ms\":%.6f,\"file_read_ops\":%" PRIu64
+           ",\"file_read_min_bytes\":%" PRIu64
+           ",\"file_read_max_bytes\":%" PRIu64 "},\"categories\":{"
            "\"QSA\":{\"ms\":%.6f,\"qkv_ms\":%.6f,"
            "\"output_projection_ms\":%.6f,\"attention_ms\":%.6f,"
            "\"index_compress_ms\":%.6f,\"state_glue_ms\":%.6f},"
@@ -1340,7 +1413,15 @@ static void print_sample(const q2_sample *sample) {
            ",\"d2h_bytes\":%" PRIu64 ",\"d2d_bytes\":%" PRIu64 "}",
            sample->wall_ms, sample->forward_ms, sample->argmax_ms,
            sample->bookkeeping_ms, sample->ple_critical_stall_ms,
-           sample->ple_elapsed_ms, sample->ple_overlap_ms, sample->qsa_ms,
+           sample->ple_elapsed_ms, sample->ple_overlap_ms,
+           sample->ple_request_build_ms, sample->ple_history_ngram_ms,
+           sample->ple_index_lookup_ms, sample->ple_file_io_ms,
+           sample->ple_decode_dequant_ms, sample->ple_accumulation_ms,
+           sample->ple_async_submit_ms, sample->ple_worker_exec_ms,
+           sample->ple_result_publish_ms, sample->ple_injection_ms,
+           sample->ple_wait_at_injection_ms, sample->ple_file_read_ops,
+           sample->ple_file_read_min_bytes, sample->ple_file_read_max_bytes,
+           sample->qsa_ms,
            sample->qsa_qkv_ms, sample->qsa_output_projection_ms,
            sample->qsa_attention_ms, sample->qsa_index_compress_ms,
            sample->qsa_state_glue_ms, sample->moe_ms, sample->gdn_ms,

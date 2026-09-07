@@ -64,6 +64,7 @@ TEST_BINS := \
 	q38-server-real \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
 	tests/q2_forward_exclusive_attribution \
+	tests/test_s4c_ple_replay \
 	test-prod-diag-equivalence \
 	check-perf-artifacts test-steering test-steering-cuda \
 	gr-fixtures gr-bench gr-c1-bench gr-c2-bench gr-c3-bench \
@@ -428,6 +429,10 @@ tests/q2_forward_exclusive_attribution: tests/q2_canonical_bench.c \
 	$(NVCC) $(DIAG_NVCCFLAGS) -o $@ tests/q2_canonical_bench.c \
 		$(S4B_DIAG_C_OBJS) $(S4B_DIAG_CUDA_OBJS) \
 		$(CUDA_LDLIBS) -lm
+
+tests/test_s4c_ple_replay: tests/test_s4c_ple_replay.c \
+		q38_gguf.o q38_ple.o q38_ple_prefetch.o
+	$(CC) $(CFLAGS) -o $@ $^ -pthread
 
 bench-q2-reference-0: tests/q2_canonical_bench
 	@test ! -e $(Q2_REFERENCE_OUTPUT_DIR)/q2_decode_reference_0.json

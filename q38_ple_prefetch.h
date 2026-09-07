@@ -40,6 +40,20 @@ typedef struct {
     double elapsed_ms;
     double overlap_ms;
     double wait_ms;
+    double request_build_ms;
+    double history_ngram_ms;
+    double index_lookup_ms;
+    double async_submit_ms;
+    double file_io_ms;
+    double worker_cpu_ms;
+    double result_publish_ms;
+    double decode_dequant_ms;
+    double accumulation_ms;
+    double injection_ms;
+    double wait_at_injection_ms;
+    uint64_t file_read_min_bytes;
+    uint64_t file_read_max_bytes;
+    bool file_reads_sequential;
 } q38_ple_scheduler_stats;
 
 /*
@@ -69,6 +83,12 @@ bool q38_ple_scheduler_wait(q38_ple_scheduler *scheduler,
                             char *error, size_t error_len);
 bool q38_ple_scheduler_get_stats(
     const q38_ple_scheduler *scheduler, q38_ple_scheduler_stats *stats);
+bool q38_ple_scheduler_record_request_timing(
+    q38_ple_scheduler *scheduler, double request_build_ms,
+    double history_ngram_ms, double index_lookup_ms, double async_submit_ms);
+bool q38_ple_scheduler_record_injection_timing(
+    q38_ple_scheduler *scheduler, double decode_dequant_ms,
+    double accumulation_ms, double injection_ms);
 
 #ifdef __cplusplus
 }

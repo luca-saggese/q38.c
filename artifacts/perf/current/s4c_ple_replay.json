@@ -1,0 +1,1 @@
+{"format":"q38_s4c_ple_replay_v1","status":"pass","source":"artifacts/m4/ple_injection_vectors.json","accesses":64,"unique_rows":64,"bytes":10880,"file_read_ops":0,"file_read_min_bytes":0,"file_read_max_bytes":0,"file_io_ms":0.000000,"worker_elapsed_ms":0.137153,"worker_cpu_ms":0.135872,"cache_hits":64,"cache_misses":0,"sequential":true,"mode":"buffered_pread_transient"}

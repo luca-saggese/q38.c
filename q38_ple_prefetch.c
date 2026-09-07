@@ -35,11 +35,25 @@ struct q38_ple_scheduler {
     q38_ple_block *blocks;
     size_t block_count;
     q38_ple_scheduler_stats stats;
+    double request_build_ms;
+    double history_ngram_ms;
+    double index_lookup_ms;
+    double async_submit_ms;
+    double decode_dequant_ms;
+    double accumulation_ms;
+    double injection_ms;
 };
 
 static double scheduler_now_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    return (double)ts.tv_sec * 1000.0 +
+           (double)ts.tv_nsec / 1000000.0;
+}
+
+static double scheduler_thread_cpu_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) return 0.0;
     return (double)ts.tv_sec * 1000.0 +
            (double)ts.tv_nsec / 1000000.0;
 }
@@ -131,6 +145,7 @@ static void warm_block(q38_ple_scheduler *scheduler,
     const size_t chunk_size = 64u * 1024u;
     uint8_t *buffer = (uint8_t *)malloc(chunk_size);
     bool read_complete = false;
+    const double io_started = scheduler_now_ms();
     if (buffer && scheduler->store.model->fd >= 0) {
         uint64_t done = 0;
         while (done < block->bytes) {
@@ -141,11 +156,17 @@ static void warm_block(q38_ple_scheduler *scheduler,
             if (got <= 0) break;
             ++stats->file_read_ops;
             stats->physical_bytes += (uint64_t)got;
+            if (stats->file_read_min_bytes == 0 ||
+                (uint64_t)got < stats->file_read_min_bytes)
+                stats->file_read_min_bytes = (uint64_t)got;
+            if ((uint64_t)got > stats->file_read_max_bytes)
+                stats->file_read_max_bytes = (uint64_t)got;
             done += (uint64_t)got;
             if ((size_t)got != want) break;
         }
         read_complete = done == block->bytes;
     }
+    stats->file_io_ms += scheduler_now_ms() - io_started;
     if (!read_complete) {
         volatile uint8_t touch = 0;
         for (size_t i = 0; i < pages; ++i)
@@ -165,7 +186,15 @@ static void *scheduler_worker(void *arg) {
         if (scheduler->stop) break;
         scheduler->ready = false;
         q38_ple_scheduler_stats stats = scheduler->stats;
+        stats.request_build_ms = scheduler->request_build_ms;
+        stats.history_ngram_ms = scheduler->history_ngram_ms;
+        stats.index_lookup_ms = scheduler->index_lookup_ms;
+        stats.async_submit_ms = scheduler->async_submit_ms;
+        stats.decode_dequant_ms = scheduler->decode_dequant_ms;
+        stats.accumulation_ms = scheduler->accumulation_ms;
+        stats.injection_ms = scheduler->injection_ms;
         stats.start_ms = scheduler_now_ms();
+        const double cpu_start = scheduler_thread_cpu_ms();
         q38_ple_block *blocks = scheduler->blocks;
         const size_t block_count = scheduler->block_count;
         pthread_mutex_unlock(&scheduler->mutex);
@@ -174,12 +203,17 @@ static void *scheduler_worker(void *arg) {
             warm_block(scheduler, &blocks[i], &stats);
         stats.ready_ms = scheduler_now_ms();
         stats.elapsed_ms = stats.ready_ms - stats.start_ms;
+        stats.worker_cpu_ms = scheduler_thread_cpu_ms() - cpu_start;
+        stats.result_publish_ms = 0.0;
 
         pthread_mutex_lock(&scheduler->mutex);
+        const double publish_start = scheduler_now_ms();
         scheduler->stats = stats;
         scheduler->pending = false;
         scheduler->ready = true;
         pthread_cond_broadcast(&scheduler->done);
+        scheduler->stats.result_publish_ms = scheduler_now_ms() -
+                                             publish_start;
     }
     pthread_mutex_unlock(&scheduler->mutex);
     return NULL;
@@ -381,6 +415,7 @@ bool q38_ple_scheduler_submit(q38_ple_scheduler *scheduler,
     }
     scheduler->stats.logical_bytes = (uint64_t)row_count *
                                      scheduler->store.row_bytes;
+    scheduler->stats.file_reads_sequential = true;
     scheduler->pending = true;
     scheduler->ready = false;
     pthread_cond_signal(&scheduler->work);
@@ -404,12 +439,45 @@ bool q38_ple_scheduler_wait(q38_ple_scheduler *scheduler,
     scheduler->stats.wait_ms =
         scheduler->stats.ready_ms > consume_ms
         ? scheduler->stats.ready_ms - consume_ms : 0.0;
+    scheduler->stats.wait_at_injection_ms = scheduler->stats.wait_ms;
     scheduler->stats.overlap_ms =
         scheduler->stats.elapsed_ms > scheduler->stats.wait_ms
         ? scheduler->stats.elapsed_ms - scheduler->stats.wait_ms : 0.0;
     scheduler_free_job(scheduler);
     scheduler->ready = false;
     pthread_cond_broadcast(&scheduler->done);
+    pthread_mutex_unlock(&scheduler->mutex);
+    return true;
+}
+
+bool q38_ple_scheduler_record_request_timing(
+    q38_ple_scheduler *scheduler, double request_build_ms,
+    double history_ngram_ms, double index_lookup_ms, double async_submit_ms) {
+    if (!scheduler) return false;
+    pthread_mutex_lock(&scheduler->mutex);
+    scheduler->request_build_ms = request_build_ms;
+    scheduler->history_ngram_ms = history_ngram_ms;
+    scheduler->index_lookup_ms = index_lookup_ms;
+    scheduler->async_submit_ms = async_submit_ms;
+    scheduler->stats.request_build_ms = request_build_ms;
+    scheduler->stats.history_ngram_ms = history_ngram_ms;
+    scheduler->stats.index_lookup_ms = index_lookup_ms;
+    scheduler->stats.async_submit_ms = async_submit_ms;
+    pthread_mutex_unlock(&scheduler->mutex);
+    return true;
+}
+
+bool q38_ple_scheduler_record_injection_timing(
+    q38_ple_scheduler *scheduler, double decode_dequant_ms,
+    double accumulation_ms, double injection_ms) {
+    if (!scheduler) return false;
+    pthread_mutex_lock(&scheduler->mutex);
+    scheduler->decode_dequant_ms = decode_dequant_ms;
+    scheduler->accumulation_ms = accumulation_ms;
+    scheduler->injection_ms = injection_ms;
+    scheduler->stats.decode_dequant_ms = decode_dequant_ms;
+    scheduler->stats.accumulation_ms = accumulation_ms;
+    scheduler->stats.injection_ms = injection_ms;
     pthread_mutex_unlock(&scheduler->mutex);
     return true;
 }
