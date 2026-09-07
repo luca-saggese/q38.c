@@ -1,0 +1,105 @@
+{
+  "format": "q38_ple_cost_decomposition_v1",
+  "status": "pass",
+  "model_load_policy": {
+    "same_binary": true,
+    "same_process": false,
+    "warmup_runs": 1,
+    "measured_runs": 2,
+    "measured_tokens_per_run": 16,
+    "note": "ON and OFF were run as separate quick invocations because the existing harness has no semantic reset between configurations."
+  },
+  "benchmark": {
+    "prompt": "Explain why the sky appears blue during the day.",
+    "generated_count": 17,
+    "measure_first": 1,
+    "measure_last": 16
+  },
+  "enabled": {
+    "wall_ms": 301.228838,
+    "forward_ms": 300.746808,
+    "full_ple": {
+      "wall_ms": 177.174673,
+      "wait_ms": 0.000418,
+      "id_build_ms": 0.005509,
+      "row_lookup_copy_ms": 0.008276,
+      "row_decode_ms": 0.003135,
+      "projection_ms": 176.868638,
+      "gate_ms": 0.085215,
+      "convolution_ms": 0.171061,
+      "accumulation_ms": 0.00383,
+      "hidden_injection_ms": 0.013538,
+      "misc_ms": 0.015053
+    },
+    "decoder_excluding_full_ple": {
+      "layer_0_ms": 2.207945,
+      "layer_1_ms": 2.21401,
+      "layers_2_47_ms": 113.414199,
+      "gdn_36_layers_ms": 79.00099,
+      "qsa_12_layers_ms": 38.835164,
+      "decoder_total_ms": 117.836154,
+      "moe_total_ms": 19.495651,
+      "gr_total_ms": 14.060778,
+      "gdn_total_ms": 21.87635,
+      "qsa_total_ms": 28.612229
+    },
+    "file_cache": {
+      "logical_bytes": 2720,
+      "pread_bytes": 0,
+      "cache_hits": 16,
+      "cache_misses": 0,
+      "madvise_calls": 0
+    }
+  },
+  "disabled": {
+    "wall_ms": 123.256817,
+    "forward_ms": 122.821933,
+    "full_ple": {
+      "wall_ms": 0.0,
+      "wait_ms": 0.0,
+      "id_build_ms": 0.0,
+      "row_lookup_copy_ms": 0.0,
+      "row_decode_ms": 0.0,
+      "projection_ms": 0.0,
+      "gate_ms": 0.0,
+      "convolution_ms": 0.0,
+      "accumulation_ms": 0.0,
+      "hidden_injection_ms": 0.0,
+      "misc_ms": 0.0
+    },
+    "decoder": {
+      "layer_0_ms": 2.1718,
+      "layer_1_ms": 2.192243,
+      "layers_2_47_ms": 112.773781,
+      "gdn_36_layers_ms": 78.642948,
+      "qsa_12_layers_ms": 38.494876,
+      "decoder_total_ms": 117.137824,
+      "moe_total_ms": 19.311151,
+      "gr_total_ms": 13.94453,
+      "gdn_total_ms": 21.814219,
+      "qsa_total_ms": 28.407878
+    },
+    "file_cache": {
+      "logical_bytes": 0,
+      "pread_bytes": 0,
+      "cache_hits": 0,
+      "cache_misses": 0,
+      "madvise_calls": 0
+    }
+  },
+  "reconciliation": {
+    "total_ple_delta_ms": 177.97202099999998,
+    "direct_ple_cost_ms": 177.174673,
+    "decoder_slowdown_ms": 0.6983299999999986,
+    "unexplained_ms": 0.09901799999997252,
+    "unexplained_fraction_of_delta": 0.000556368351854433,
+    "acceptance_unexplained_lt_5pct": true
+  },
+  "semantics": {
+    "logical_rows_per_token": 16,
+    "logical_bytes_per_token": 2720,
+    "pread_bytes_are_not_physical_nvme_bytes": true,
+    "full_ple_children_non_overlapping": true,
+    "full_ple_child_sum_ms": 177.174673
+  }
+}
