@@ -2962,8 +2962,12 @@ extern "C" bool q38_forward_cuda_gr_read_device(
     const q38_gr_weights *weights, const float *device_residual,
     float *device_input, float *device_normed, char *error, size_t error_len) {
     if (error && error_len) error[0] = '\0';
-    return gr_read_device_impl(context, model, weights, device_residual,
-                                             device_input, device_normed, error, error_len);
+    const bool ok = gr_read_device_impl(
+        context, model, weights, device_residual, device_input, device_normed,
+        error, error_len);
+    if (!ok && error && error_len && error[0] == '\0')
+        snprintf(error, error_len, "GR device read validation failed");
+    return ok;
 }
 
 extern "C" bool q38_forward_cuda_gr_write_device(
@@ -3100,29 +3104,39 @@ extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
             context, model, &layer->attn_gr, context->device_hidden_a,
             context->device_gr_input, context->device_gr_norm, error,
             error_len))
-        return false;
+        return error && error[0] ? false
+                                 : fail(error, error_len,
+                                        "decoder chain GR_READ(attn) failed");
     if (layer->kind == Q38_LAYER_LINEAR_ATTENTION) {
         if (!q38_forward_cuda_gdn_layer_device(
                 context, model, layer, state, context->device_gr_input,
                 layer_number, context->device_gr_block, error, error_len))
-            return false;
+            return error && error[0] ? false
+                                     : fail(error, error_len,
+                                            "decoder chain GDN failed");
     } else {
         if (!q38_forward_cuda_qsa_chain_device(
                 context, model, layer, &state->qsa[layer_number],
                 context->device_gr_input, layer_number,
                 context->device_gr_block, error, error_len))
-            return false;
+            return error && error[0] ? false
+                                     : fail(error, error_len,
+                                            "decoder chain QSA failed");
     }
     if (!q38_forward_cuda_gr_write_device(
             context, model, &layer->attn_gr, context->device_hidden_a,
             context->device_gr_norm, context->device_gr_block,
             context->device_hidden_b, error, error_len))
-        return false;
+        return error && error[0] ? false
+                                 : fail(error, error_len,
+                                        "decoder chain GR_WRITE(attn) failed");
     if (!q38_forward_cuda_gr_read_device(
             context, model, &layer->mlp_gr, context->device_hidden_b,
             context->device_gr_input, context->device_gr_norm, error,
             error_len))
-        return false;
+        return error && error[0] ? false
+                                 : fail(error, error_len,
+                                        "decoder chain GR_READ(mlp) failed");
 
     const q38_tensor *router = layer->router;
     const q38_tensor *gate_up = layer->experts.bank_count
@@ -3233,7 +3247,9 @@ extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
             context, model, &layer->mlp_gr, context->device_hidden_b,
             context->device_gr_norm, context->device_gr_block,
             context->device_hidden_a, error, error_len))
-        return false;
+        return error && error[0] ? false
+                                 : fail(error, error_len,
+                                        "decoder chain GR_WRITE(mlp) failed");
     if (cudaMemcpyAsync(
             host_output, context->device_hidden_a,
             Q38_GR_BRANCHES * Q38_GR_HIDDEN * sizeof(float),
