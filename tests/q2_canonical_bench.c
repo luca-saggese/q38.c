@@ -162,6 +162,13 @@ typedef struct {
     double timing_norms_residual_glue_ms;
     double timing_other_layer_ms;
     double timing_unexplained_ms;
+    double full_ple_ms;
+    double final_gr_ms;
+    double runtime_bookkeeping_ms;
+    double layer_gr_ms[Q38_MODEL_LAYERS];
+    double layer_mixer_ms[Q38_MODEL_LAYERS];
+    double layer_moe_ms[Q38_MODEL_LAYERS];
+    double layer_orchestration_ms[Q38_MODEL_LAYERS];
     q2_owner_stat owners[Q2_OWNER_COUNT];
 } q2_sample;
 
@@ -516,8 +523,33 @@ static void finalize_timing_tree(q2_sample *sample,
         double exclusive = event->elapsed_ms - timing_child_ms(capture, event);
         if (exclusive < 0.0) exclusive = 0.0;
         add_timing_owner(sample, event->name, event->owner, exclusive);
+        if (!strcmp(event->name, "ple_injection"))
+            sample->full_ple_ms += event->elapsed_ms;
+        else if (!strcmp(event->name, "gr_read_final"))
+            sample->final_gr_ms += event->elapsed_ms;
+        else if (!strcmp(event->name, "decoder_layer") &&
+                 event->layer < Q38_MODEL_LAYERS)
+            sample->layer_wall_ms[event->layer] = event->elapsed_ms;
+        else if (event->layer < Q38_MODEL_LAYERS &&
+                 (!strncmp(event->name, "gr_", 3)))
+            sample->layer_gr_ms[event->layer] += event->elapsed_ms;
+        else if (event->layer < Q38_MODEL_LAYERS &&
+                 (!strncmp(event->name, "mixer_", 6)))
+            sample->layer_mixer_ms[event->layer] += event->elapsed_ms;
+        else if (event->layer < Q38_MODEL_LAYERS &&
+                 !strcmp(event->name, "moe"))
+            sample->layer_moe_ms[event->layer] += event->elapsed_ms;
         if (strcmp(event->owner, "PLE") != 0)
             accounted += exclusive;
+    }
+    for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
+        sample->layer_orchestration_ms[layer] =
+            sample->layer_wall_ms[layer] -
+            sample->layer_gr_ms[layer] -
+            sample->layer_mixer_ms[layer] -
+            sample->layer_moe_ms[layer];
+        if (sample->layer_orchestration_ms[layer] < 0.0)
+            sample->layer_orchestration_ms[layer] = 0.0;
     }
     for (size_t i = 0; i < capture->timing_event_count; ++i) {
         const q2_timing_event *event = &capture->timing_events[i];
@@ -527,7 +559,8 @@ static void finalize_timing_tree(q2_sample *sample,
     const double total = sample->forward_ms > 0.0
         ? sample->forward_ms : sample->wall_ms;
     accounted += sample->ple_injection_ms + sample->ple_critical_stall_ms;
-    sample->timing_unexplained_ms = total > accounted ? total - accounted : 0.0;
+    sample->runtime_bookkeeping_ms = total > accounted ? total - accounted : 0.0;
+    sample->timing_unexplained_ms = sample->runtime_bookkeeping_ms;
 }
 
 static double *stage_slot(q2_sample *sample, const char *name) {
@@ -637,6 +670,9 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     ADD(timing_norms_residual_glue_ms);
     ADD(timing_other_layer_ms);
     ADD(timing_unexplained_ms);
+    ADD(full_ple_ms);
+    ADD(final_gr_ms);
+    ADD(runtime_bookkeeping_ms);
     sum->ple_file_read_ops += sample->ple_file_read_ops;
     sum->ple_madvise_calls += sample->ple_madvise_calls;
     sum->ple_logical_bytes += sample->ple_logical_bytes;
@@ -645,6 +681,12 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     sum->ple_cache_misses += sample->ple_cache_misses;
     for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
         sum->layer_wall_ms[i] += sample->layer_wall_ms[i];
+    for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i) {
+        sum->layer_gr_ms[i] += sample->layer_gr_ms[i];
+        sum->layer_mixer_ms[i] += sample->layer_mixer_ms[i];
+        sum->layer_moe_ms[i] += sample->layer_moe_ms[i];
+        sum->layer_orchestration_ms[i] += sample->layer_orchestration_ms[i];
+    }
     if (sample->ple_file_read_min_bytes != 0 &&
         (sum->ple_file_read_min_bytes == 0 ||
          sample->ple_file_read_min_bytes < sum->ple_file_read_min_bytes))
@@ -723,6 +765,9 @@ static void divide_sample(q2_sample *sample, double divisor) {
     DIV(timing_norms_residual_glue_ms);
     DIV(timing_other_layer_ms);
     DIV(timing_unexplained_ms);
+    DIV(full_ple_ms);
+    DIV(final_gr_ms);
+    DIV(runtime_bookkeeping_ms);
 #undef DIV
     sample->telemetry_callbacks = (uint64_t)(
         (double)sample->telemetry_callbacks / divisor);
@@ -765,6 +810,12 @@ static void divide_sample(q2_sample *sample, double divisor) {
         (double)sample->ple_cache_misses / divisor);
     for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
         sample->layer_wall_ms[i] /= divisor;
+    for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i) {
+        sample->layer_gr_ms[i] /= divisor;
+        sample->layer_mixer_ms[i] /= divisor;
+        sample->layer_moe_ms[i] /= divisor;
+        sample->layer_orchestration_ms[i] /= divisor;
+    }
     sample->ple_file_read_min_bytes = (uint64_t)(
         (double)sample->ple_file_read_min_bytes / divisor);
     sample->ple_file_read_max_bytes = (uint64_t)(
@@ -1569,7 +1620,50 @@ static void print_owner_attribution(const q2_sample *sample) {
     printf("]");
 }
 
+static bool is_qsa_layer(size_t layer) {
+    return layer < Q38_MODEL_LAYERS && layer % 4u == 3u;
+}
+
 static void print_sample(const q2_sample *sample) {
+    double decoder_layers_ms = 0.0;
+    double gdn_layers_ms = 0.0;
+    double qsa_layers_ms = 0.0;
+    double gdn_gr_ms = 0.0;
+    double qsa_gr_ms = 0.0;
+    double gdn_mixer_ms = 0.0;
+    double qsa_mixer_ms = 0.0;
+    double gdn_moe_ms = 0.0;
+    double qsa_moe_ms = 0.0;
+    double gdn_orchestration_ms = 0.0;
+    double qsa_orchestration_ms = 0.0;
+    if (sample) {
+        for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i) {
+            decoder_layers_ms += sample->layer_wall_ms[i];
+            if (is_qsa_layer(i)) {
+                qsa_layers_ms += sample->layer_wall_ms[i];
+                qsa_gr_ms += sample->layer_gr_ms[i];
+                qsa_mixer_ms += sample->layer_mixer_ms[i];
+                qsa_moe_ms += sample->layer_moe_ms[i];
+                qsa_orchestration_ms += sample->layer_orchestration_ms[i];
+            } else {
+                gdn_layers_ms += sample->layer_wall_ms[i];
+                gdn_gr_ms += sample->layer_gr_ms[i];
+                gdn_mixer_ms += sample->layer_mixer_ms[i];
+                gdn_moe_ms += sample->layer_moe_ms[i];
+                gdn_orchestration_ms += sample->layer_orchestration_ms[i];
+            }
+        }
+    }
+    const double partition_runtime_ms = sample
+        ? sample->wall_ms - sample->timing_embedding_ms -
+          decoder_layers_ms - sample->full_ple_ms - sample->final_gr_ms -
+          sample->lm_head_ms - sample->argmax_ms
+        : 0.0;
+    const double partition_sum = sample
+        ? sample->timing_embedding_ms + decoder_layers_ms +
+          sample->full_ple_ms + sample->final_gr_ms + sample->lm_head_ms +
+          sample->argmax_ms + partition_runtime_ms
+        : 0.0;
     printf("{\"wall_ms\":%.6f,\"forward_core_ms\":%.6f,"
            "\"argmax_ms\":%.6f,\"bookkeeping_ms\":%.6f,"
            "\"ple_critical_stall_ms\":%.6f,\"ple_elapsed_ms\":%.6f,"
@@ -1670,7 +1764,40 @@ static void print_sample(const q2_sample *sample) {
            sample->ple_projection_weight_upload_bytes);
     for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i)
         printf("%s%.6f", i ? "," : "", sample->layer_wall_ms[i]);
-    printf("]");
+    printf("],\"perf_v2\":{\"partition\":{\"embedding_input_ms\":%.6f,"
+           "\"decoder_layers_ms\":%.6f,\"full_ple_ms\":%.6f,"
+           "\"final_gr_ms\":%.6f,\"lm_head_ms\":%.6f,"
+           "\"argmax_ms\":%.6f,\"runtime_bookkeeping_ms\":%.6f,"
+           "\"sum_ms\":%.6f,\"residual_ms\":%.6f,"
+           "\"residual_fraction\":%.9f},"
+           "\"layer_groups\":{\"gdn\":{\"count\":36,\"total_ms\":%.6f,"
+           "\"gr_ms\":%.6f,\"mixer_ms\":%.6f,\"moe_ms\":%.6f,"
+           "\"orchestration_ms\":%.6f},"
+           "\"qsa\":{\"count\":12,\"total_ms\":%.6f,\"gr_ms\":%.6f,"
+           "\"mixer_ms\":%.6f,\"moe_ms\":%.6f,"
+           "\"orchestration_ms\":%.6f}},\"per_layer\":[",
+           sample->timing_embedding_ms, decoder_layers_ms, sample->full_ple_ms,
+           sample->final_gr_ms, sample->lm_head_ms, sample->argmax_ms,
+           partition_runtime_ms, partition_sum,
+           sample ? sample->wall_ms - partition_sum : 0.0,
+           sample ? (sample->wall_ms != 0.0
+                         ? (sample->wall_ms - partition_sum) / sample->wall_ms
+                         : 0.0)
+                  : 0.0,
+           gdn_layers_ms, gdn_gr_ms, gdn_mixer_ms, gdn_moe_ms,
+           gdn_orchestration_ms, qsa_layers_ms, qsa_gr_ms, qsa_mixer_ms,
+           qsa_moe_ms, qsa_orchestration_ms);
+    for (size_t i = 0; i < Q38_MODEL_LAYERS; ++i) {
+        if (i) putchar(',');
+        printf("{\"layer\":%zu,\"kind\":\"%s\",\"total_ms\":%.6f,"
+               "\"gr_ms\":%.6f,\"mixer_ms\":%.6f,\"moe_ms\":%.6f,"
+               "\"orchestration_ms\":%.6f}",
+               i, is_qsa_layer(i) ? "QSA" : "GDN",
+               sample->layer_wall_ms[i], sample->layer_gr_ms[i],
+               sample->layer_mixer_ms[i], sample->layer_moe_ms[i],
+               sample->layer_orchestration_ms[i]);
+    }
+    printf("]}");
     putchar(',');
     printf("\"exclusive_forward_timing\":{\"embedding_ms\":%.6f,"
     "\"ple_async_window_ms\":%.6f,\"QSA_ms\":%.6f,\"GDN_ms\":%.6f,"

@@ -1,0 +1,186 @@
+{
+  "format": "q2-decode-profile-v2",
+  "capture": {
+    "binary": "tests/q2_forward_exclusive_attribution",
+    "model": "artifacts/m1/qwen38-runtime-only-Q2Experts-BF16Core-BF16PLE.gguf",
+    "tokenizer": "/home/lvx/q38model",
+    "generated_interactions": 10,
+    "measured_decode_tokens": 9,
+    "warmup_runs": 1,
+    "measured_runs": 2,
+    "trace": "artifacts/perf/current/nsys_perf_v2/q2_decode_10.nsys-rep",
+    "correctness": {
+      "generated_ids_identical": true,
+      "final_logits_hash_identical": true,
+      "nan_inf": false,
+      "fallback": false,
+      "ple_critical_stall_ms": 0.0
+    }
+  },
+  "token_partition_mean_ms": {
+    "wall": 129.767198,
+    "embedding_input": 0.012393,
+    "decoder_layers": 122.501988,
+    "full_ple": 0.791471,
+    "final_gr": 0.196950,
+    "lm_head": 5.614605,
+    "argmax": 0.510698,
+    "runtime_bookkeeping": 0.139092,
+    "sum": 129.767198,
+    "residual": 0.0,
+    "residual_fraction": 0.0
+  },
+  "decoder_groups_mean_ms": {
+    "gdn": {
+      "layers": 36,
+      "total": 82.734732,
+      "gr": 17.278629,
+      "mixer": 49.868354,
+      "moe": 15.225563,
+      "orchestration": 0.362185
+    },
+    "qsa": {
+      "layers": 12,
+      "total": 39.767256,
+      "gr": 5.679814,
+      "mixer": 28.860994,
+      "moe": 5.106004,
+      "orchestration": 0.120443
+    }
+  },
+  "per_layer": {
+    "count": 48,
+    "fastest_layer": {
+      "layer": 24,
+      "kind": "GDN",
+      "wall_ms": 2.251676
+    },
+    "median_wall_ms": 2.312048,
+    "slowest_layer": {
+      "layer": 3,
+      "kind": "QSA",
+      "wall_ms": 3.438424
+    },
+    "source": "q2 decode JSON emitted during this capture"
+  },
+  "device_boundary_inventory": {
+    "q2_runtime_observer_per_measured_token": {
+      "telemetry_callbacks": 677,
+      "legacy_host_syncs": 677,
+      "h2d_bytes": 12311808,
+      "d2h_bytes": 8843520,
+      "d2d_bytes": 0,
+      "real_cuda_syncs": 739,
+      "sync_reasons": {
+        "MOE_GROUPED_D2H": 48,
+        "QSA_QKV": 12,
+        "MATRIX_D2H": 665,
+        "MATRIX_BATCH_D2H": 12,
+        "ARGMAX": 2
+      }
+    },
+    "nsys_process_capture_totals": {
+      "cudaMemcpyAsync_calls": 22061,
+      "cudaLaunchKernel_calls": 11889,
+      "cudaStreamSynchronize_calls": 9082,
+      "cudaEventSynchronize_calls": 155,
+      "h2d_memcpy_calls": 11814,
+      "h2d_bytes": 49974240984,
+      "d2h_memcpy_calls": 9081,
+      "d2h_bytes": 269851428,
+      "d2d_memcpy_calls": 1166,
+      "d2d_bytes": 49500850200,
+      "scope": "startup plus warmup and measured decode runs"
+    }
+  },
+  "cuda_timeline": {
+    "scope": "Nsight Systems process capture; no NVTX ranges were present",
+    "gpu_span_ms": 3170.103584,
+    "gpu_kernel_time_ms": 1827.733440,
+    "gpu_busy_fraction": 0.576553,
+    "idle_gap_count": 11888,
+    "longest_idle_gap_ms": 12.984512,
+    "p95_idle_gap_ms": 0.554016,
+    "kernel_histogram": {
+      "lt_5_us": {"count": 2697, "gpu_ms": 6.730656},
+      "5_to_20_us": {"count": 2666, "gpu_ms": 39.043776},
+      "20_to_100_us": {"count": 3582, "gpu_ms": 236.247360},
+      "100_us_to_1_ms": {"count": 2705, "gpu_ms": 590.346720},
+      "gt_1_ms": {"count": 239, "gpu_ms": 955.364928}
+    },
+    "top_kernels": [
+      {
+        "name": "matrix_batch_generic_kernel",
+        "instances": 675,
+        "gpu_ms": 1081.379104
+      },
+      {
+        "name": "bf16_matvec_kernel",
+        "instances": 6939,
+        "gpu_ms": 348.848384
+      },
+      {
+        "name": "q2_grouped_down_private_kernel",
+        "instances": 1296,
+        "gpu_ms": 129.623584
+      },
+      {
+        "name": "project_kernel",
+        "instances": 324,
+        "gpu_ms": 129.000224
+      },
+      {
+        "name": "q2_grouped_gate_up_kernel",
+        "instances": 1296,
+        "gpu_ms": 124.255008
+      }
+    ]
+  },
+  "shortlist": [
+    {
+      "bottleneck": "GDN mixer path",
+      "ms_per_token": 49.868354,
+      "wall_percent": 38.426,
+      "structural_cause": "36 GDN mixer stages dominate the decoder partition.",
+      "expected_removable_wall": "Up to the measured 49.868 ms stage budget; no optimization tested.",
+      "fixture_or_microbench": "Existing GDN stage fixture plus Nsight range-labeled decode."
+    },
+    {
+      "bottleneck": "QSA mixer path",
+      "ms_per_token": 28.860994,
+      "wall_percent": 22.240,
+      "structural_cause": "12 QSA mixer stages, including repeated projection/attention work.",
+      "expected_removable_wall": "Up to the measured 28.861 ms stage budget; no optimization tested.",
+      "fixture_or_microbench": "Existing QSA layer fixture plus CUDA boundary trace."
+    },
+    {
+      "bottleneck": "MoE execution",
+      "ms_per_token": 20.331567,
+      "wall_percent": 15.670,
+      "structural_cause": "Per-layer routed/shared expert execution and grouped reductions.",
+      "expected_removable_wall": "Up to the measured 20.332 ms stage budget; no optimization tested.",
+      "fixture_or_microbench": "Existing MoE routed-expert fixture and kernel histogram."
+    },
+    {
+      "bottleneck": "GR projections",
+      "ms_per_token": 22.958443,
+      "wall_percent": 17.688,
+      "structural_cause": "Four GR projection segments per decoder layer remain on the critical path.",
+      "expected_removable_wall": "Up to the measured 22.958 ms stage budget; no optimization tested.",
+      "fixture_or_microbench": "Existing GR C1/C2/C3 fixtures with transfer/sync attribution."
+    },
+    {
+      "bottleneck": "LM head",
+      "ms_per_token": 5.614605,
+      "wall_percent": 4.326,
+      "structural_cause": "Final vocabulary projection remains a distinct matrix stage.",
+      "expected_removable_wall": "Up to the measured 5.615 ms stage budget; no optimization tested.",
+      "fixture_or_microbench": "Existing LM-head resident projection microbenchmark."
+    }
+  ],
+  "notes": [
+    "The exclusive token partition sums exactly to wall for this capture.",
+    "Nsight process totals include startup and are not substituted for per-token decode counters.",
+    "The trace was collected before NVTX ranges were available, so CUDA-only stage association is based on q2 timing/sync instrumentation."
+  ]
+}

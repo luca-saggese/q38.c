@@ -453,9 +453,10 @@ tests/q2_canonical_bench: tests/q2_canonical_bench.c \
 		$(CUDA_LDLIBS) -lm
 
 tests/q2_forward_exclusive_attribution: tests/q2_canonical_bench.c \
-		$(S4B_DIAG_C_OBJS) $(S4B_DIAG_CUDA_OBJS)
-	$(NVCC) $(DIAG_NVCCFLAGS) -o $@ tests/q2_canonical_bench.c \
 		$(S4B_DIAG_C_OBJS) $(S4B_DIAG_CUDA_OBJS) \
+		q38_residency_plan.o
+	$(NVCC) $(DIAG_NVCCFLAGS) -o $@ tests/q2_canonical_bench.c \
+		$(S4B_DIAG_C_OBJS) $(S4B_DIAG_CUDA_OBJS) q38_residency_plan.o \
 		$(CUDA_LDLIBS) -lm
 
 tests/test_s4c_ple_replay: tests/test_s4c_ple_replay.c \
