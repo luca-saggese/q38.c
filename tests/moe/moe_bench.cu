@@ -13,6 +13,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <inttypes.h>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -67,6 +69,7 @@ struct Device {
     float *expert = nullptr;
     float *accum = nullptr;
     float *grouped_mid = nullptr;
+    float *expert_outputs = nullptr;
     uint16_t *route_ids = nullptr;
     float *route_weights = nullptr;
     float *shared_mid = nullptr;
@@ -83,6 +86,53 @@ struct Scope {
     size_t d2d_bytes = 0;
     size_t bytes_read = 0;
 };
+
+struct Determinism {
+    size_t samples = 0;
+    size_t unique_output_hashes = 0;
+    size_t unique_mid_hashes = 0;
+    uint64_t first_output_hash = 0;
+    uint64_t first_mid_hash = 0;
+    double max_abs_vs_first = 0.0;
+    double max_rel_vs_first = 0.0;
+    double rmse_vs_first = 0.0;
+    bool finite = true;
+};
+
+static uint64_t hash_bytes(const void *data, size_t bytes) {
+    const unsigned char *cursor =
+        static_cast<const unsigned char *>(data);
+    uint64_t hash = 1469598103934665603ULL;
+    for (size_t i = 0; i < bytes; ++i) {
+        hash ^= cursor[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static bool compare_repeat(const std::vector<float> &reference,
+                           const std::vector<float> &current,
+                           double *max_abs, double *max_rel, double *rmse,
+                           bool *finite) {
+    if (reference.size() != current.size() || !max_abs || !max_rel ||
+        !rmse || !finite)
+        return false;
+    double sum = 0.0;
+    *max_abs = 0.0;
+    *max_rel = 0.0;
+    *finite = true;
+    for (size_t i = 0; i < reference.size(); ++i) {
+        if (!std::isfinite(current[i])) *finite = false;
+        const double difference =
+            std::abs((double)current[i] - reference[i]);
+        const double scale = std::max(std::abs((double)reference[i]), 1e-12);
+        *max_abs = std::max(*max_abs, difference);
+        *max_rel = std::max(*max_rel, difference / scale);
+        sum += difference * difference;
+    }
+    *rmse = std::sqrt(sum / reference.size());
+    return true;
+}
 
 static std::string path_join(const std::string &dir, const char *name) {
     return dir + "/" + name;
@@ -197,6 +247,9 @@ static bool alloc_device(Device *device, const Fixture &fixture,
            alloc((void **)&device->grouped_mid,
                  kIntermediateBytes * Q38_MOE_TOP_K,
                  "grouped intermediate allocation") &&
+           alloc((void **)&device->expert_outputs,
+                 kOutputBytes * Q38_MOE_TOP_K,
+                 "grouped expert output allocation") &&
            alloc((void **)&device->route_ids,
                  Q38_MOE_TOP_K * sizeof(uint16_t), "route ID allocation") &&
            alloc((void **)&device->route_weights,
@@ -220,6 +273,7 @@ static void free_device(Device *device) {
     cudaFree(device->expert);
     cudaFree(device->accum);
     cudaFree(device->grouped_mid);
+    cudaFree(device->expert_outputs);
     cudaFree(device->route_ids);
     cudaFree(device->route_weights);
     cudaFree(device->shared_mid);
@@ -317,7 +371,8 @@ static bool run_routed(Device *device, const Fixture &fixture,
 
 static bool run_routed_grouped(Device *device, const Fixture &fixture,
                                std::vector<float> *output,
-                               std::string *error) {
+                               std::string *error,
+                               bool deterministic = false) {
     uint16_t route_ids[Q38_MOE_TOP_K];
     for (size_t k = 0; k < Q38_MOE_TOP_K; ++k)
         route_ids[k] = (uint16_t)k;
@@ -334,12 +389,19 @@ static bool run_routed_grouped(Device *device, const Fixture &fixture,
                      Q38_MOE_TOP_K * sizeof(float), cudaMemcpyHostToDevice,
                      device->stream),
                  "grouped route-weight upload", error) ||
-        !q38_moe_cuda_q2_grouped_indexed(
-            device->gate_up, device->down, device->hidden,
-            device->route_ids, device->route_weights, Q38_MOE_TOP_K,
-            Q38_TEST_MOE_GATE_UP_BLOCKS,
-            Q38_TEST_MOE_DOWN_BLOCKS,
-            device->accum, device->grouped_mid, device->stream, nullptr, 0))
+        !(deterministic
+              ? q38_moe_cuda_q2_grouped_indexed_deterministic(
+                    device->gate_up, device->down, device->hidden,
+                    device->route_ids, device->route_weights, Q38_MOE_TOP_K,
+                    Q38_TEST_MOE_GATE_UP_BLOCKS, Q38_TEST_MOE_DOWN_BLOCKS,
+                    device->accum, device->grouped_mid,
+                    device->expert_outputs, device->stream, nullptr, 0)
+              : q38_moe_cuda_q2_grouped_indexed(
+                    device->gate_up, device->down, device->hidden,
+                    device->route_ids, device->route_weights, Q38_MOE_TOP_K,
+                    Q38_TEST_MOE_GATE_UP_BLOCKS, Q38_TEST_MOE_DOWN_BLOCKS,
+                    device->accum, device->grouped_mid, device->stream,
+                    nullptr, 0)))
         return false;
     output->resize(Q38_MOE_HIDDEN);
     return cuda_ok(cudaMemcpyAsync(output->data(), device->accum, kOutputBytes,
@@ -404,7 +466,7 @@ static bool run_shared(Device *device, const Fixture &fixture,
 
 static bool run_complete(Device *device, const Fixture &fixture,
                          std::vector<float> *output, std::string *error,
-                         bool grouped = false) {
+                         bool grouped = false, bool deterministic = false) {
     std::vector<float> logits(Q38_MOE_EXPERTS);
     std::vector<float> shared_gate(Q38_MOE_INTERMEDIATE);
     std::vector<float> shared_up(Q38_MOE_INTERMEDIATE);
@@ -470,7 +532,8 @@ static bool run_complete(Device *device, const Fixture &fixture,
             shared_gate[i] / (1.0f + expf(-shared_gate[i])) * shared_up[i];
     std::vector<float> routed;
     if (grouped) {
-        if (!run_routed_grouped(device, fixture, &routed, error))
+        if (!run_routed_grouped(device, fixture, &routed, error,
+                                deterministic))
             return false;
     } else if (!run_routed(device, fixture, &routed, error)) {
         return false;
@@ -553,6 +616,61 @@ static void print_scope(const char *name, const Scope &scope,
            name, scope.median_us, scope.p95_us, scope.launches, scope.syncs,
            scope.h2d_bytes, scope.d2h_bytes, scope.d2d_bytes,
            scope.bytes_read, comma ? "," : "");
+}
+
+static bool probe_grouped_determinism(Device *device, const Fixture &fixture,
+                                      Determinism *result,
+                                      std::string *error,
+                                      bool deterministic = false) {
+    constexpr size_t kDeterminismSamples = 1000;
+    std::vector<float> first_output;
+    std::vector<float> current_output;
+    std::vector<float> first_mid(Q38_MOE_TOP_K * Q38_MOE_INTERMEDIATE);
+    std::vector<float> current_mid(first_mid.size());
+    std::set<uint64_t> output_hashes;
+    std::set<uint64_t> mid_hashes;
+    if (!device || !result || !error) return false;
+    *result = Determinism{};
+    for (size_t sample = 0; sample < kDeterminismSamples; ++sample) {
+        if (!run_routed_grouped(device, fixture, &current_output, error,
+                                deterministic) ||
+            !cuda_ok(cudaMemcpyAsync(
+                         current_mid.data(), device->grouped_mid,
+                         current_mid.size() * sizeof(float),
+                         cudaMemcpyDeviceToHost, device->stream),
+                     "determinism mid download", error) ||
+            !cuda_ok(cudaStreamSynchronize(device->stream),
+                     "determinism mid sync", error))
+            return false;
+        const uint64_t output_hash = hash_bytes(
+            current_output.data(), current_output.size() * sizeof(float));
+        const uint64_t mid_hash =
+            hash_bytes(current_mid.data(), current_mid.size() * sizeof(float));
+        output_hashes.insert(output_hash);
+        mid_hashes.insert(mid_hash);
+        if (sample == 0) {
+            first_output = current_output;
+            first_mid = current_mid;
+            result->first_output_hash = output_hash;
+            result->first_mid_hash = mid_hash;
+            continue;
+        }
+        double max_abs = 0.0, max_rel = 0.0, rmse = 0.0;
+        bool finite = true;
+        if (!compare_repeat(first_output, current_output, &max_abs, &max_rel,
+                            &rmse, &finite) ||
+            !finite)
+            result->finite = false;
+        result->max_abs_vs_first =
+            std::max(result->max_abs_vs_first, max_abs);
+        result->max_rel_vs_first =
+            std::max(result->max_rel_vs_first, max_rel);
+        result->rmse_vs_first = std::max(result->rmse_vs_first, rmse);
+    }
+    result->samples = kDeterminismSamples;
+    result->unique_output_hashes = output_hashes.size();
+    result->unique_mid_hashes = mid_hashes.size();
+    return true;
 }
 
 static bool bench_fixture(const char *name, const std::string &dir) {
@@ -646,6 +764,8 @@ static bool bench_fixture(const char *name, const std::string &dir) {
     grouped_routed.d2h_bytes = kOutputBytes;
     grouped_routed.bytes_read =
         Q38_MOE_TOP_K * (kGateUpBytes + kDownBytes);
+    Scope deterministic_grouped_routed = grouped_routed;
+    deterministic_grouped_routed.launches = 3;
     Scope shared = {0};
     shared.launches = 3;
     shared.syncs = 3;
@@ -667,6 +787,8 @@ static bool bench_fixture(const char *name, const std::string &dir) {
     grouped_complete.launches = 1 + 2 + 1 + grouped_routed.launches;
     grouped_complete.h2d_bytes +=
         Q38_MOE_TOP_K * (sizeof(uint16_t) + sizeof(float));
+    Scope deterministic_grouped_complete = grouped_complete;
+    deterministic_grouped_complete.launches += 1;
 
     const bool measured =
         measure([&] { return run_router(&device, fixture, &error); }, &router,
@@ -727,7 +849,21 @@ static bool bench_fixture(const char *name, const std::string &dir) {
                 std::vector<float> output;
                 return run_complete(&device, fixture, &output, &error, true);
             },
-            &grouped_complete, &error);
+            &grouped_complete, &error) &&
+        measure(
+            [&] {
+                std::vector<float> output;
+                return run_routed_grouped(&device, fixture, &output, &error,
+                                          true);
+            },
+            &deterministic_grouped_routed, &error) &&
+        measure(
+            [&] {
+                std::vector<float> output;
+                return run_complete(&device, fixture, &output, &error, true,
+                                    true);
+            },
+            &deterministic_grouped_complete, &error);
 
     if (!measured) {
         fprintf(stderr, "%s: %s\n", name, error.c_str());
@@ -748,6 +884,15 @@ static bool bench_fixture(const char *name, const std::string &dir) {
         free_device(&device);
         return false;
     }
+    std::vector<float> deterministic_grouped_actual;
+    if (!run_complete(&device, fixture, &deterministic_grouped_actual, &error,
+                      true, true)) {
+        fprintf(stderr,
+                "%s: deterministic grouped candidate correctness run failed: %s\n",
+                name, error.c_str());
+        free_device(&device);
+        return false;
+    }
     double oracle_abs = 0.0, oracle_rmse = 0.0;
     double captured_abs = 0.0, captured_rmse = 0.0;
     const bool oracle_ok = compare_output(actual, oracle, &oracle_abs,
@@ -761,9 +906,24 @@ static bool bench_fixture(const char *name, const std::string &dir) {
     const bool grouped_capture_ok = compare_output(
         grouped_actual, fixture.expected, &grouped_capture_abs,
         &grouped_capture_rmse);
+    double deterministic_grouped_abs = 0.0;
+    double deterministic_grouped_rmse = 0.0;
+    const bool deterministic_grouped_oracle_ok = compare_output(
+        deterministic_grouped_actual, oracle, &deterministic_grouped_abs,
+        &deterministic_grouped_rmse);
+    double deterministic_grouped_capture_abs = 0.0;
+    double deterministic_grouped_capture_rmse = 0.0;
+    const bool deterministic_grouped_capture_ok = compare_output(
+        deterministic_grouped_actual, fixture.expected,
+        &deterministic_grouped_capture_abs,
+        &deterministic_grouped_capture_rmse);
     if (!oracle_ok || oracle_abs > 2e-2 || !captured_ok ||
         captured_abs > 2e-2 || !grouped_oracle_ok || grouped_abs > 2e-2 ||
-        !grouped_capture_ok || grouped_capture_abs > 2e-2) {
+        !grouped_capture_ok || grouped_capture_abs > 2e-2 ||
+        !deterministic_grouped_oracle_ok ||
+        deterministic_grouped_abs > 2e-2 ||
+        !deterministic_grouped_capture_ok ||
+        deterministic_grouped_capture_abs > 2e-2) {
         std::vector<float> routed_debug;
         std::vector<float> shared_debug;
         double routed_abs = 0.0, routed_rmse = 0.0;
@@ -798,12 +958,31 @@ static bool bench_fixture(const char *name, const std::string &dir) {
         return false;
     }
 
+    Determinism determinism;
+    if (!probe_grouped_determinism(&device, fixture, &determinism, &error)) {
+        fprintf(stderr, "%s: grouped determinism probe failed: %s\n", name,
+                error.c_str());
+        free_device(&device);
+        return false;
+    }
+    Determinism deterministic_determinism;
+    if (!probe_grouped_determinism(&device, fixture, &deterministic_determinism,
+                                   &error, true)) {
+        fprintf(stderr, "%s: deterministic grouped probe failed: %s\n", name,
+                error.c_str());
+        free_device(&device);
+        return false;
+    }
     const double dispatch_residual = std::max(
         0.0, complete.median_us - router.median_us - routed.median_us -
                   shared.median_us);
     const double grouped_speedup_pct =
         100.0 * (complete.median_us - grouped_complete.median_us) /
         complete.median_us;
+    const double deterministic_speedup_pct =
+        100.0 * (grouped_complete.median_us -
+                  deterministic_grouped_complete.median_us) /
+        grouped_complete.median_us;
     printf("  \"%s\":{\"correctness\":{\"max_abs\":%.9g,\"rmse\":%.9g,"
            "\"oracle_max_abs\":%.9g,\"oracle_rmse\":%.9g,\"nan_inf\":0},\n"
            "   \"candidates\":{\"moe_c2_grouped\":{\"correctness\":"
@@ -813,14 +992,54 @@ static bool bench_fixture(const char *name, const std::string &dir) {
            grouped_capture_abs, grouped_capture_rmse, grouped_speedup_pct);
     print_scope("routed_experts", grouped_routed);
     print_scope("complete_moe_layer", grouped_complete, false);
-    printf("   }}},\n"
-           "   \"accounting\":{\"router_topk_us\":%.3f,"
+    printf("   }\n"
+           "   },\n"
+           "   \"moe_c3_deterministic_reduction\":{\"correctness\":"
+           "{\"max_abs\":%.9g,\"rmse\":%.9g,\"nan_inf\":0},"
+           "\"speedup_pct_vs_grouped\":%.3f,\"scopes\":{\n",
+           deterministic_grouped_capture_abs,
+           deterministic_grouped_capture_rmse, deterministic_speedup_pct);
+    print_scope("routed_experts", deterministic_grouped_routed);
+    print_scope("complete_moe_layer", deterministic_grouped_complete, false);
+    printf("   }\n"
+           "   }\n"
+           "   },\n"
+    "   \"determinism\":{\"atomic\":{\"samples\":%zu,"
+    "\"unique_output_hashes\":%zu,\"unique_mid_hashes\":%zu,"
+    "\"first_output_hash\":\"%016" PRIx64
+    "\",\"first_mid_hash\":\"%016" PRIx64
+    "\",\"max_abs_vs_first\":%.9g,"
+    "\"max_rel_vs_first\":%.9g,\"rmse_vs_first\":%.9g,"
+    "\"nan_inf\":%s},\"deterministic\":{\"samples\":%zu,"
+    "\"unique_output_hashes\":%zu,\"unique_mid_hashes\":%zu,"
+    "\"first_output_hash\":\"%016" PRIx64
+    "\",\"first_mid_hash\":\"%016" PRIx64
+    "\",\"max_abs_vs_first\":%.9g,"
+    "\"max_rel_vs_first\":%.9g,\"rmse_vs_first\":%.9g,"
+    "\"nan_inf\":%s},\"atomic_accumulation_is_nondeterministic\":%s},\n"
+    "   \"accounting\":{\"router_topk_us\":%.3f,"
            "\"routed_experts_us\":%.3f,\"shared_expert_us\":%.3f,"
            "\"dispatch_sync_memcpy_residual_us\":%.3f,"
            "\"accounted_wall_us\":%.3f,\"accounted_fraction\":1.0},\n"
            "   \"scopes\":{\n",
-           router.median_us, routed.median_us, shared.median_us,
-           dispatch_residual, complete.median_us);
+           determinism.samples, determinism.unique_output_hashes,
+           determinism.unique_mid_hashes, determinism.first_output_hash,
+           determinism.first_mid_hash, determinism.max_abs_vs_first,
+           determinism.max_rel_vs_first, determinism.rmse_vs_first,
+           determinism.finite ? "0" : "1",
+           deterministic_determinism.samples,
+           deterministic_determinism.unique_output_hashes,
+           deterministic_determinism.unique_mid_hashes,
+           deterministic_determinism.first_output_hash,
+           deterministic_determinism.first_mid_hash,
+           deterministic_determinism.max_abs_vs_first,
+           deterministic_determinism.max_rel_vs_first,
+           deterministic_determinism.rmse_vs_first,
+           deterministic_determinism.finite ? "0" : "1",
+           determinism.unique_output_hashes > 1 ? "true" : "false",
+           router.median_us,
+           routed.median_us, shared.median_us, dispatch_residual,
+           complete.median_us);
     print_scope("router_topk_projection", router);
     print_scope("one_expert_gate_up", gate_up);
     print_scope("one_expert_down", down);

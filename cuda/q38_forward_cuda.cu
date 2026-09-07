@@ -64,6 +64,8 @@ struct q38_forward_cuda_context {
     size_t device_moe_route_weights_bytes;
     float *device_moe_accum;
     size_t device_moe_accum_bytes;
+    float *device_moe_expert_outputs;
+    size_t device_moe_expert_outputs_bytes;
     float *device_gr_residual;
     size_t device_gr_residual_bytes;
     float *device_gr_norm;
@@ -804,6 +806,12 @@ extern "C" bool q38_forward_cuda_moe_layer_q2_backend(
                        Q38_MOE_HIDDEN * sizeof(float),
                        context->allocation_observer,
                        context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&context->device_moe_expert_outputs,
+                       &context->device_moe_expert_outputs_bytes,
+                       Q38_MOE_TOP_K * Q38_MOE_HIDDEN * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
                        &context->cuda_allocations))
         return fail(error, error_len, "CUDA Q2 MoE layer allocation failed");
 
@@ -824,11 +832,12 @@ extern "C" bool q38_forward_cuda_moe_layer_q2_backend(
         cudaMemcpyAsync(context->device_moe_route_weights, route->weight,
                         Q38_MOE_TOP_K * sizeof(float),
                         cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
-        !q38_moe_cuda_q2_grouped_indexed(
+        !q38_moe_cuda_q2_grouped_indexed_deterministic(
             gate_exec->ptr, down_exec->ptr, context->device_input,
             context->device_moe_route_ids, context->device_moe_route_weights,
             Q38_MOE_TOP_K, 1280u * 10u, 640u * 10u,
             context->device_moe_accum, context->device_moe_grouped_mid,
+            context->device_moe_expert_outputs,
             context->stream, error, error_len) ||
         cudaMemcpyAsync(host_output, context->device_moe_accum,
                         Q38_MOE_HIDDEN * sizeof(float),
@@ -845,7 +854,7 @@ extern "C" bool q38_forward_cuda_moe_layer_q2_backend(
     context->expert_D2H_bytes += Q38_MOE_HIDDEN * sizeof(float);
     context->q2_gate_up_fast_calls += Q38_MOE_TOP_K;
     context->q2_down_calls += Q38_MOE_TOP_K;
-    context->expert_kernel_launches += 2;
+    context->expert_kernel_launches += 3;
     context->persistent_hits += 2;
     if (context->current_layer < Q38_MODEL_LAYERS)
         context->expert_fast_calls_by_layer[context->current_layer] +=
@@ -1103,6 +1112,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_moe_route_ids);
     cudaFree(context->device_moe_route_weights);
     cudaFree(context->device_moe_accum);
+    cudaFree(context->device_moe_expert_outputs);
     cudaFree(context->device_gr_residual);
     cudaFree(context->device_gr_norm);
     cudaFree(context->device_gr_down);
@@ -1282,6 +1292,7 @@ extern "C" void q38_forward_cuda_get_residency_stats(
         (uintptr_t)context->device_moe_route_ids,
         (uintptr_t)context->device_moe_route_weights,
         (uintptr_t)context->device_moe_accum,
+        (uintptr_t)context->device_moe_expert_outputs,
         (uintptr_t)context->device_qsa_input,
         (uintptr_t)context->device_qsa_output,
         (uintptr_t)context->host_qsa_output,

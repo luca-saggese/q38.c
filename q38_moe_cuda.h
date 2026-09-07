@@ -86,6 +86,16 @@ bool q38_moe_cuda_q2_grouped_indexed(
     float *device_output, float *device_mid, cudaStream_t stream,
     char *error, size_t error_len);
 
+/* Deterministic grouped variant.  Each selected expert writes one private
+ * weighted output, followed by a canonical 0..expert_count reduction. */
+bool q38_moe_cuda_q2_grouped_indexed_deterministic(
+    const void *device_gate_up, const void *device_down,
+    const float *device_hidden, const uint16_t *device_expert_ids,
+    const float *device_route_weights, size_t expert_count,
+    size_t gate_expert_blocks, size_t down_expert_blocks,
+    float *device_output, float *device_mid, float *device_expert_outputs,
+    cudaStream_t stream, char *error, size_t error_len);
+
 bool q38_moe_cuda_shared_f32(const float *device_hidden, size_t token_count,
                              const float *device_gate_proj,
                              const float *device_up_proj,

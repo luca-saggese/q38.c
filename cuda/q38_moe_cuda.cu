@@ -225,6 +225,39 @@ __global__ static void q2_grouped_down_weighted_kernel(
     atomicAdd(output + d, route_weights[expert_slot] * value);
 }
 
+__global__ static void q2_grouped_down_private_kernel(
+    const q38_q2_k_block *weights, const float *mid,
+    size_t expert_count, const uint16_t *expert_ids, size_t expert_blocks,
+    float *expert_outputs) {
+    const size_t expert_slot = blockIdx.x;
+    const size_t d = (size_t)blockIdx.y * blockDim.x + threadIdx.x;
+    if (expert_slot >= expert_count) return;
+    if (d >= Q38_MOE_HIDDEN) return;
+    const size_t expert =
+        expert_ids ? expert_ids[expert_slot] : expert_slot;
+    const q38_q2_k_block *expert_weights =
+        weights + expert * expert_blocks;
+    const float *expert_mid = mid + expert_slot * Q38_MOE_INTERMEDIATE;
+    float value = 0.0f;
+    for (size_t i = 0; i < Q38_MOE_INTERMEDIATE; ++i)
+        value += q2_value(expert_weights, i, d, 10) * expert_mid[i];
+    expert_outputs[expert_slot * Q38_MOE_HIDDEN + d] = value;
+}
+
+__global__ static void q2_grouped_deterministic_reduce_kernel(
+    const float *expert_outputs, const float *route_weights,
+    size_t expert_count, float *output) {
+    const size_t d = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (d >= Q38_MOE_HIDDEN) return;
+    float value = 0.0f;
+    for (size_t expert_slot = 0; expert_slot < expert_count; ++expert_slot)
+        value = __fadd_rn(
+            value, __fmul_rn(
+                       route_weights[expert_slot],
+                       expert_outputs[expert_slot * Q38_MOE_HIDDEN + d]));
+    output[d] = value;
+}
+
 extern "C" bool q38_moe_cuda_q2_gate_up_candidate(
     const void *device_gate_up, const float *device_hidden,
     float *device_mid, unsigned threads_per_block, cudaStream_t stream,
@@ -498,6 +531,42 @@ extern "C" bool q38_moe_cuda_q2_grouped_indexed(
                                       256, 0, stream>>>(
         (const q38_q2_k_block *)device_down, device_mid, device_route_weights,
         expert_count, device_expert_ids, down_expert_blocks, device_output);
+    const cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+        return fail(error, error_len, cudaGetErrorString(status));
+    return true;
+}
+
+extern "C" bool q38_moe_cuda_q2_grouped_indexed_deterministic(
+    const void *device_gate_up, const void *device_down,
+    const float *device_hidden, const uint16_t *device_expert_ids,
+    const float *device_route_weights, size_t expert_count,
+    size_t gate_expert_blocks, size_t down_expert_blocks,
+    float *device_output, float *device_mid, float *device_expert_outputs,
+    cudaStream_t stream, char *error, size_t error_len) {
+    if (!device_gate_up || !device_down || !device_hidden ||
+        !device_route_weights || !expert_count ||
+        expert_count > Q38_MOE_TOP_K || !gate_expert_blocks ||
+        !down_expert_blocks || !device_output || !device_mid ||
+        !device_expert_outputs)
+        return fail(error, error_len,
+                    "invalid deterministic indexed grouped Q2 arguments");
+    const unsigned threads = 128u;
+    const size_t total_rows = expert_count * Q38_MOE_INTERMEDIATE;
+    const unsigned gate_blocks = (unsigned)((total_rows +
+                                             (threads / 32u) - 1u) /
+                                            (threads / 32u));
+    q2_grouped_gate_up_kernel<<<gate_blocks, threads, 0, stream>>>(
+        (const q38_q2_k_block *)device_gate_up, device_hidden, expert_count,
+        device_expert_ids, gate_expert_blocks, device_mid);
+    q2_grouped_down_private_kernel<<<dim3((unsigned)expert_count, 10, 1),
+                                    256, 0, stream>>>(
+        (const q38_q2_k_block *)device_down, device_mid, expert_count,
+        device_expert_ids, down_expert_blocks,
+        device_expert_outputs);
+    q2_grouped_deterministic_reduce_kernel<<<10, 256, 0, stream>>>(
+        device_expert_outputs, device_route_weights, expert_count,
+        device_output);
     const cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess)
         return fail(error, error_len, cudaGetErrorString(status));
