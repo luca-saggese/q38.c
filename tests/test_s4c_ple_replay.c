@@ -81,9 +81,11 @@ int main(int argc, char **argv) {
     }
     const double token_wall =
         stats.t11_token_forward_end_ms - stats.t0_token_forward_begin_ms;
-    const double true_overlap =
-        stats.t6_ple_injection_arrival_ms -
-        stats.t1_ple_request_submit_ms;
+    const double submit_to_consume =
+        stats.consume_ms > stats.t1_ple_request_submit_ms
+        ? stats.consume_ms - stats.t1_ple_request_submit_ms : 0.0;
+    const double useful_overlap = stats.elapsed_ms < submit_to_consume
+        ? stats.elapsed_ms : submit_to_consume;
     if (stats.request_id == 0 || stats.token_position != token_position ||
         stats.submit_position != token_position ||
         stats.injection_position != token_position ||
@@ -95,8 +97,8 @@ int main(int argc, char **argv) {
         stats.t8_ple_wait_end_ms < stats.t7_ple_wait_begin_ms ||
         stats.t10_ple_injection_end_ms <
             stats.t9_ple_injection_begin_ms ||
-        true_overlap < 0.0 || token_wall <= 0.0 ||
-        true_overlap >= token_wall) {
+        useful_overlap < 0.0 || token_wall <= 0.0 ||
+        useful_overlap >= token_wall) {
         fprintf(stderr, "invalid PLE timeline boundaries\n");
         q38_ple_scheduler_destroy(scheduler);
         q38_gguf_close(model);
@@ -136,8 +138,9 @@ int main(int argc, char **argv) {
             ",\"T9_ple_injection_begin_ms\":%.6f"
             ",\"T10_ple_injection_end_ms\":%.6f"
             ",\"T11_token_forward_end_ms\":%.6f"
-            ",\"true_ple_overlap_window_ms\":%.6f"
-            ",\"token_wall_ms\":%.6f,\"wait_at_injection_ms\":%.6f"
+            ",\"submit_to_consume_window_ms\":%.6f"
+            ",\"useful_overlap_ms\":%.6f"
+            ",\"token_wall_ms\":%.6f,\"wait_at_consume_ms\":%.6f"
             ",\"synchronous_injection_ms\":%.6f,\"overlap_fraction\":%.6f"
             ",\"overlap_small\":%s,\"boundaries_valid\":true}}\n",
             stats.logical_accesses, stats.unique_rows, stats.logical_bytes,
@@ -153,10 +156,11 @@ int main(int argc, char **argv) {
             stats.t7_ple_wait_begin_ms, stats.t8_ple_wait_end_ms,
             stats.t9_ple_injection_begin_ms,
             stats.t10_ple_injection_end_ms,
-            stats.t11_token_forward_end_ms, true_overlap, token_wall,
+            stats.t11_token_forward_end_ms, submit_to_consume,
+            useful_overlap, token_wall,
             stats.wait_at_injection_ms, stats.injection_ms,
-            token_wall > 0.0 ? true_overlap / token_wall : 0.0,
-            token_wall > 0.0 && true_overlap / token_wall < 0.25
+            token_wall > 0.0 ? useful_overlap / token_wall : 0.0,
+            token_wall > 0.0 && useful_overlap / token_wall < 0.25
                 ? "true" : "false");
     fclose(out);
     q38_ple_scheduler_destroy(scheduler);

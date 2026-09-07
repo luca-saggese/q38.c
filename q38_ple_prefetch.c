@@ -445,17 +445,19 @@ bool q38_ple_scheduler_wait(q38_ple_scheduler *scheduler,
     while (!scheduler->ready)
         pthread_cond_wait(&scheduler->done, &scheduler->mutex);
     scheduler->stats.consume_ms = consume_ms;
-    scheduler->stats.wait_ms =
-        scheduler->stats.ready_ms > consume_ms
-        ? scheduler->stats.ready_ms - consume_ms : 0.0;
     scheduler->stats.t8_ple_wait_end_ms = scheduler_now_ms();
-    scheduler->stats.wait_at_injection_ms =
-        scheduler->stats.t8_ple_wait_end_ms -
-        scheduler->stats.t7_ple_wait_begin_ms;
-    scheduler->stats.wait_ms = scheduler->stats.wait_at_injection_ms;
+    scheduler->stats.wait_ms =
+        scheduler->stats.ready_ms > scheduler->stats.consume_ms
+        ? scheduler->stats.ready_ms - scheduler->stats.consume_ms : 0.0;
+    scheduler->stats.wait_at_injection_ms = scheduler->stats.wait_ms;
+    const double submit_to_consume =
+        scheduler->stats.consume_ms > scheduler->stats.t1_ple_request_submit_ms
+        ? scheduler->stats.consume_ms -
+              scheduler->stats.t1_ple_request_submit_ms
+        : 0.0;
     scheduler->stats.overlap_ms =
-        scheduler->stats.elapsed_ms > scheduler->stats.wait_ms
-        ? scheduler->stats.elapsed_ms - scheduler->stats.wait_ms : 0.0;
+        scheduler->stats.elapsed_ms < submit_to_consume
+        ? scheduler->stats.elapsed_ms : submit_to_consume;
     scheduler_free_job(scheduler);
     scheduler->ready = false;
     pthread_cond_broadcast(&scheduler->done);
