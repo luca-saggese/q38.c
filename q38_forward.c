@@ -573,9 +573,27 @@ static bool full_emit_stage(q38_forward_diagnostics *diagnostics,
     return diagnostics->stage_trace(&usage, diagnostics->trace_user, error,
                                     error_len);
 }
+
+static bool full_emit_timing(q38_forward_diagnostics *diagnostics,
+                             const char *name, const char *parent,
+                             const char *owner, uint32_t layer,
+                             double elapsed_ms, char *error,
+                             size_t error_len) {
+    if (!diagnostics || !diagnostics->timing_trace) return true;
+    const q38_forward_timing_usage usage = {
+        .name = name,
+        .parent = parent,
+        .owner = owner,
+        .layer = layer,
+        .elapsed_ms = elapsed_ms,
+    };
+    return diagnostics->timing_trace(&usage, diagnostics->trace_user, error,
+                                     error_len);
+}
 #else
 #define full_now_ms() 0.0
 #define full_emit_stage(...) true
+#define full_emit_timing(...) true
 #endif
 
 static bool full_mul(size_t a, size_t b, size_t *out) {
@@ -2156,23 +2174,44 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
     if (!full_emit_stage(diagnostics, "embedding_input_prep", 0, 0, 0,
                          full_now_ms() - embedding_started, error, error_len))
         goto fail;
+    if (!full_emit_timing(diagnostics, "embedding", NULL, "EMBEDDING", 0,
+                          full_now_ms() - embedding_started, error, error_len))
+        goto fail;
     for (uint32_t layer_number = 0; layer_number < Q38_MODEL_LAYERS;
          ++layer_number) {
         full_current_layer = layer_number;
         const q38_layer_weights *layer = &weights->layer[layer_number];
         if (layer_number == 1) {
+            const double ple_started = full_now_ms();
             if (!full_ple(model, layer, state, tokens, streams, token_count,
                           updated, scratch, diagnostics, error, error_len))
                 goto fail;
             memcpy(streams, updated, token_count * width * sizeof(float));
+            if (!full_emit_timing(diagnostics, "ple_injection", NULL, "PLE",
+                                  layer_number,
+                                  full_now_ms() - ple_started, error,
+                                  error_len))
+                goto fail;
         }
+        const double layer_started = full_now_ms();
         if (!full_boundary_trace(layer_number, "layer_input", streams,
                                  token_count, width, diagnostics, error,
                                  error_len))
             goto fail;
+        double glue_started = full_now_ms();
         memset(mixed, 0, token_count * Q38_GR_HIDDEN * sizeof(float));
+        if (!full_emit_timing(diagnostics, "residual_glue", "decoder_layer",
+                              "OTHER_LAYER", layer_number,
+                              full_now_ms() - glue_started, error, error_len))
+            goto fail;
+        double segment_started = full_now_ms();
         if (!full_gr_read(model, &layer->attn_gr, streams, token_count,
                           mixed, normed, down, up, scratch, error, error_len))
+            goto fail;
+        if (!full_emit_timing(diagnostics, "gr_read_attn", "decoder_layer",
+                              "GR", layer_number,
+                              full_now_ms() - segment_started, error,
+                              error_len))
             goto fail;
         if (!full_boundary_trace(layer_number, "core_pre_norm", normed,
                                  token_count, width, diagnostics, error,
@@ -2184,6 +2223,7 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  token_count, Q38_GR_HIDDEN, diagnostics,
                                  error, error_len))
             goto fail;
+        segment_started = full_now_ms();
         if (layer->kind == Q38_LAYER_LINEAR_ATTENTION) {
             if (!full_gdn(model, layer, state, mixed, token_count,
                           layer_number, block, scratch, error, error_len))
@@ -2191,6 +2231,15 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         } else if (!full_qsa(model, layer, &state->qsa[layer_number], mixed,
                              token_count, block, selected, counts,
                              layer_number, diagnostics, error, error_len))
+            goto fail;
+        if (!full_emit_timing(
+                diagnostics,
+                layer->kind == Q38_LAYER_LINEAR_ATTENTION ? "mixer_gdn"
+                                                           : "mixer_qsa",
+                "decoder_layer",
+                layer->kind == Q38_LAYER_LINEAR_ATTENTION ? "GDN" : "QSA",
+                layer_number, full_now_ms() - segment_started, error,
+                error_len))
             goto fail;
         if (diagnostics && !diagnostics->directional_steering_attn_device &&
             diagnostics->directional_steering &&
@@ -2204,24 +2253,55 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  token_count, Q38_GR_HIDDEN, diagnostics,
                                  error, error_len))
             goto fail;
+        segment_started = full_now_ms();
         if (!full_gr_write(model, &layer->attn_gr, streams, block, token_count,
                            updated, normed, inject, scratch, error, error_len))
+            goto fail;
+        if (!full_emit_timing(diagnostics, "gr_write_attn", "decoder_layer",
+                              "GR", layer_number,
+                              full_now_ms() - segment_started, error,
+                              error_len))
             goto fail;
         if (!full_boundary_trace(layer_number, "core_residual_gr_write",
                                  updated, token_count, width, diagnostics,
                                  error, error_len))
             goto fail;
+        glue_started = full_now_ms();
         memset(mixed, 0, token_count * Q38_GR_HIDDEN * sizeof(float));
+        if (!full_emit_timing(diagnostics, "residual_glue", "decoder_layer",
+                              "OTHER_LAYER", layer_number,
+                              full_now_ms() - glue_started, error, error_len))
+            goto fail;
+        segment_started = full_now_ms();
         if (!full_gr_read(model, &layer->mlp_gr, updated, token_count, mixed,
-                          normed, down, up, scratch, error, error_len) ||
-            !full_moe(model, layer, weights->quantized, mixed, token_count,
+                          normed, down, up, scratch, error, error_len))
+            goto fail;
+        if (!full_emit_timing(diagnostics, "gr_read_mlp", "decoder_layer",
+                              "GR", layer_number,
+                              full_now_ms() - segment_started, error,
+                              error_len))
+            goto fail;
+        segment_started = full_now_ms();
+        if (!full_moe(model, layer, weights->quantized, mixed, token_count,
                       layer_number, block, scratch, diagnostics, error,
-                      error_len) ||
+                      error_len))
+            goto fail;
+        if (!full_emit_timing(diagnostics, "moe", "decoder_layer", "MoE",
+                              layer_number,
+                              full_now_ms() - segment_started, error,
+                              error_len) ||
             !full_boundary_trace(layer_number, "ffn_output", block,
                                  token_count, Q38_GR_HIDDEN, diagnostics,
-                                 error, error_len) ||
-            !full_gr_write(model, &layer->mlp_gr, updated, block, token_count,
+                                 error, error_len))
+            goto fail;
+        segment_started = full_now_ms();
+        if (!full_gr_write(model, &layer->mlp_gr, updated, block, token_count,
                            streams, normed, inject, scratch, error, error_len))
+            goto fail;
+        if (!full_emit_timing(diagnostics, "gr_write_mlp", "decoder_layer",
+                              "GR", layer_number,
+                              full_now_ms() - segment_started, error,
+                              error_len))
             goto fail;
         if (!full_boundary_trace(layer_number, "mlp_pre_norm", normed,
                                  token_count, width, diagnostics, error,
@@ -2243,6 +2323,10 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         if (Q38_DIAG_ENABLED && diagnostics)
             diagnostics->layer_fingerprint[layer_number] =
                 full_fingerprint(streams, token_count * width);
+        if (!full_emit_timing(diagnostics, "decoder_layer", NULL,
+                              "OTHER_LAYER", layer_number,
+                              full_now_ms() - layer_started, error, error_len))
+            goto fail;
     }
     {
         q38_gr_weights final_gr;
@@ -2252,10 +2336,15 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
         final_gr.input_mix_weight_up =
             full_named_global(weights, "input_mix_weight_up");
         final_gr.block_inject_weight = NULL;
+        const double final_gr_started = full_now_ms();
         if (!final_gr.hc_norm || !final_gr.input_mix_weight_down ||
             !final_gr.input_mix_weight_up ||
             !full_gr_read(model, &final_gr, streams, token_count, mixed,
                           normed, down, up, scratch, error, error_len))
+            goto fail;
+        if (!full_emit_timing(diagnostics, "gr_read_final", NULL, "GR",
+                              UINT32_MAX, full_now_ms() - final_gr_started,
+                              error, error_len))
             goto fail;
         if (Q38_DIAG_ENABLED && diagnostics && diagnostics->trace &&
             !diagnostics->trace(UINT32_MAX, mixed, token_count,
@@ -2284,6 +2373,10 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  token_count * 248320u, 0, 0,
                                  full_now_ms() - started, error, error_len))
                 goto fail;
+            if (!full_emit_timing(diagnostics, "lm_head", NULL, "LM_HEAD",
+                                  UINT32_MAX, full_now_ms() - started, error,
+                                  error_len))
+                goto fail;
         } else if (full_matrix_backend && token_count == 1) {
             full_current_layer = UINT32_MAX;
             full_backend_context(weights->output, 248320, Q38_GR_HIDDEN,
@@ -2302,7 +2395,12 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                  248320, 0, 0, full_now_ms() - started,
                                  error, error_len))
                 goto fail;
+            if (!full_emit_timing(diagnostics, "lm_head", NULL, "LM_HEAD",
+                                  UINT32_MAX, full_now_ms() - started, error,
+                                  error_len))
+                goto fail;
         } else {
+            const double started = full_now_ms();
             for (size_t t = 0; t < token_count; ++t)
                 for (size_t v = 0; v < 248320; ++v)
                     if (!full_row_dot(model, weights->output, v,
@@ -2311,6 +2409,10 @@ bool q38_forward_full(const q38_gguf *model, const q38_weights *weights,
                                       &logits[t * logits_stride + v],
                                       error, error_len))
                         goto fail;
+            if (!full_emit_timing(diagnostics, "lm_head", NULL, "LM_HEAD",
+                                  UINT32_MAX, full_now_ms() - started, error,
+                                  error_len))
+                goto fail;
         }
     }
     if (Q38_DIAG_ENABLED && diagnostics) {

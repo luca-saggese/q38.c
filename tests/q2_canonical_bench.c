@@ -22,6 +22,42 @@ enum {
     REFERENCE_RUNS = 10
 };
 
+enum {
+    Q2_MAX_TIMING_EVENTS = 96,
+    Q2_OWNER_COUNT = 10
+};
+
+typedef enum {
+    Q2_OWNER_QSA = 0,
+    Q2_OWNER_GDN,
+    Q2_OWNER_MOE,
+    Q2_OWNER_GR,
+    Q2_OWNER_PLE,
+    Q2_OWNER_LM_HEAD,
+    Q2_OWNER_NORM,
+    Q2_OWNER_ROUTER,
+    Q2_OWNER_OTHER_LAYER,
+    Q2_OWNER_UNKNOWN
+} q2_owner;
+
+typedef struct {
+    uint64_t calls;
+    double callback_wall_ms;
+    double kernel_ms;
+    double host_wait_ms;
+    double host_overhead_ms;
+    uint64_t bytes_read;
+} q2_owner_stat;
+
+typedef struct {
+    char name[48];
+    char parent[48];
+    char owner[24];
+    uint32_t layer;
+    uint64_t calls;
+    double elapsed_ms;
+} q2_timing_event;
+
 typedef struct {
     double wall_ms;
     double forward_ms;
@@ -61,12 +97,25 @@ typedef struct {
     uint64_t d2d_bytes;
     uint64_t non_ple_upload_bytes;
     uint64_t non_ple_residency_misses;
+    double timing_embedding_ms;
+    double timing_ple_ms;
+    double timing_qsa_ms;
+    double timing_gdn_ms;
+    double timing_moe_ms;
+    double timing_gr_ms;
+    double timing_lm_head_ms;
+    double timing_norms_residual_glue_ms;
+    double timing_other_layer_ms;
+    double timing_unexplained_ms;
+    q2_owner_stat owners[Q2_OWNER_COUNT];
 } q2_sample;
 
 typedef struct {
     q2_sample sample;
     q38_forward_qsa_timing qsa_timing;
     q38_forward_cuda_sync_stats sync_before;
+    q2_timing_event timing_events[Q2_MAX_TIMING_EVENTS];
+    size_t timing_event_count;
 } q2_capture;
 
 typedef struct {
@@ -98,6 +147,9 @@ typedef struct {
     double kernel_ms;
     double backend_overhead_ms;
     double upload_ms;
+    double callback_wall_ms;
+    double host_wait_ms;
+    q2_owner_stat owners[Q2_OWNER_COUNT];
 } q2_telemetry;
 
 typedef struct {
@@ -250,6 +302,31 @@ static void zero_sample(q2_sample *sample) {
     if (sample) memset(sample, 0, sizeof(*sample));
 }
 
+static q2_owner owner_for_record(const q38_forward_cuda_telemetry *record) {
+    const char *stage = record ? record->logical_stage : NULL;
+    const char *subsystem = record ? record->subsystem : NULL;
+    if ((stage && strstr(stage, "router")) ||
+        (record && record->operation && strstr(record->operation, "router")))
+        return Q2_OWNER_ROUTER;
+    if ((subsystem && !strcmp(subsystem, "qsa")) ||
+        (stage && strstr(stage, "qsa")))
+        return Q2_OWNER_QSA;
+    if ((subsystem && !strcmp(subsystem, "gdn")) ||
+        (stage && strstr(stage, "gdn")))
+        return Q2_OWNER_GDN;
+    if ((subsystem && !strcmp(subsystem, "moe")) ||
+        (stage && (strstr(stage, "moe") || strstr(stage, "expert"))))
+        return Q2_OWNER_MOE;
+    if ((subsystem && !strcmp(subsystem, "gr")) ||
+        (stage && strstr(stage, "gr_")))
+        return Q2_OWNER_GR;
+    if (subsystem && !strcmp(subsystem, "ple"))
+        return Q2_OWNER_PLE;
+    if (subsystem && !strcmp(subsystem, "lm_head"))
+        return Q2_OWNER_LM_HEAD;
+    return Q2_OWNER_UNKNOWN;
+}
+
 static void telemetry_observer(const q38_forward_cuda_telemetry *record,
                                void *opaque) {
     q2_telemetry *telemetry = (q2_telemetry *)opaque;
@@ -263,11 +340,111 @@ static void telemetry_observer(const q38_forward_cuda_telemetry *record,
     telemetry->kernel_ms += record->kernel_ms;
     telemetry->backend_overhead_ms += record->backend_overhead_ms;
     telemetry->upload_ms += record->upload_ms;
+    telemetry->callback_wall_ms += record->callback_wall_ms;
+    telemetry->host_wait_ms += record->host_wait_ms;
+    q2_owner_stat *owner = &telemetry->owners[owner_for_record(record)];
+    owner->calls++;
+    owner->callback_wall_ms += record->callback_wall_ms;
+    owner->kernel_ms += record->kernel_ms;
+    owner->host_wait_ms += record->host_wait_ms;
+    owner->host_overhead_ms +=
+        fmax(0.0f, record->backend_overhead_ms - record->host_wait_ms);
+    owner->bytes_read += record->weight_bytes;
     if (!record->ple_file_backed_access) {
         telemetry->non_ple_upload_bytes += record->upload_bytes;
         if (record->non_ple_residency_miss)
             telemetry->non_ple_residency_misses++;
     }
+}
+
+static bool timing_trace(const q38_forward_timing_usage *usage, void *opaque,
+                         char *error, size_t error_len) {
+    q2_capture *capture = (q2_capture *)opaque;
+    if (!capture || !usage || !usage->name || !usage->owner) {
+        if (error && error_len)
+            snprintf(error, error_len, "invalid forward timing span");
+        return false;
+    }
+    for (size_t i = 0; i < capture->timing_event_count; ++i) {
+        q2_timing_event *event = &capture->timing_events[i];
+        if (event->layer == usage->layer &&
+            !strcmp(event->name, usage->name) &&
+            !strcmp(event->parent ? event->parent : "",
+                    usage->parent ? usage->parent : "")) {
+            event->calls++;
+            event->elapsed_ms += usage->elapsed_ms;
+            return true;
+        }
+    }
+    if (capture->timing_event_count >= Q2_MAX_TIMING_EVENTS) {
+        if (error && error_len)
+            snprintf(error, error_len, "forward timing tree capacity exceeded");
+        return false;
+    }
+    q2_timing_event *event =
+        &capture->timing_events[capture->timing_event_count++];
+    memset(event, 0, sizeof(*event));
+    snprintf(event->name, sizeof(event->name), "%s", usage->name);
+    snprintf(event->parent, sizeof(event->parent), "%s",
+             usage->parent ? usage->parent : "");
+    snprintf(event->owner, sizeof(event->owner), "%s", usage->owner);
+    event->layer = usage->layer;
+    event->calls = 1;
+    event->elapsed_ms = usage->elapsed_ms;
+    return true;
+}
+
+static double timing_child_ms(const q2_capture *capture,
+                              const q2_timing_event *parent) {
+    double child_ms = 0.0;
+    if (!capture || !parent) return 0.0;
+    for (size_t i = 0; i < capture->timing_event_count; ++i) {
+        const q2_timing_event *event = &capture->timing_events[i];
+        if (event->layer == parent->layer &&
+            !strcmp(event->parent, parent->name))
+            child_ms += event->elapsed_ms;
+    }
+    return child_ms;
+}
+
+static void add_timing_owner(q2_sample *sample, const char *name,
+                             const char *owner, double elapsed_ms) {
+    if (!sample || !owner || elapsed_ms <= 0.0) return;
+    if (!strcmp(owner, "EMBEDDING")) sample->timing_embedding_ms += elapsed_ms;
+    else if (!strcmp(owner, "PLE")) sample->timing_ple_ms += elapsed_ms;
+    else if (!strcmp(owner, "QSA")) sample->timing_qsa_ms += elapsed_ms;
+    else if (!strcmp(owner, "GDN")) sample->timing_gdn_ms += elapsed_ms;
+    else if (!strcmp(owner, "MoE")) sample->timing_moe_ms += elapsed_ms;
+    else if (!strcmp(owner, "GR")) sample->timing_gr_ms += elapsed_ms;
+    else if (!strcmp(owner, "LM_HEAD"))
+        sample->timing_lm_head_ms += elapsed_ms;
+    else if (!strcmp(owner, "OTHER_LAYER")) {
+        sample->timing_other_layer_ms += elapsed_ms;
+        if (name && strstr(name, "residual"))
+            sample->timing_norms_residual_glue_ms += elapsed_ms;
+    } else if (!strcmp(owner, "NORM"))
+        sample->timing_norms_residual_glue_ms += elapsed_ms;
+}
+
+static void finalize_timing_tree(q2_sample *sample,
+                                const q2_capture *capture) {
+    double accounted = 0.0;
+    if (!sample || !capture) return;
+    for (size_t i = 0; i < capture->timing_event_count; ++i) {
+        const q2_timing_event *event = &capture->timing_events[i];
+        double exclusive = event->elapsed_ms - timing_child_ms(capture, event);
+        if (exclusive < 0.0) exclusive = 0.0;
+        add_timing_owner(sample, event->name, event->owner, exclusive);
+        accounted += exclusive;
+    }
+    for (size_t i = 0; i < capture->timing_event_count; ++i) {
+        const q2_timing_event *event = &capture->timing_events[i];
+        if (strstr(event->name, "residual"))
+            sample->timing_norms_residual_glue_ms += event->elapsed_ms;
+    }
+    const double total = sample->forward_ms > 0.0
+        ? sample->forward_ms : sample->wall_ms;
+    sample->timing_unexplained_ms = total > accounted ? total - accounted : 0.0;
 }
 
 static double *stage_slot(q2_sample *sample, const char *name) {
@@ -340,6 +517,24 @@ static void add_sample(q2_sample *sum, const q2_sample *sample) {
     sum->d2d_bytes += sample->d2d_bytes;
     sum->non_ple_upload_bytes += sample->non_ple_upload_bytes;
     sum->non_ple_residency_misses += sample->non_ple_residency_misses;
+    ADD(timing_embedding_ms);
+    ADD(timing_ple_ms);
+    ADD(timing_qsa_ms);
+    ADD(timing_gdn_ms);
+    ADD(timing_moe_ms);
+    ADD(timing_gr_ms);
+    ADD(timing_lm_head_ms);
+    ADD(timing_norms_residual_glue_ms);
+    ADD(timing_other_layer_ms);
+    ADD(timing_unexplained_ms);
+    for (size_t i = 0; i < Q2_OWNER_COUNT; ++i) {
+        sum->owners[i].calls += sample->owners[i].calls;
+        sum->owners[i].callback_wall_ms += sample->owners[i].callback_wall_ms;
+        sum->owners[i].kernel_ms += sample->owners[i].kernel_ms;
+        sum->owners[i].host_wait_ms += sample->owners[i].host_wait_ms;
+        sum->owners[i].host_overhead_ms += sample->owners[i].host_overhead_ms;
+        sum->owners[i].bytes_read += sample->owners[i].bytes_read;
+    }
 #undef ADD
 }
 
@@ -371,6 +566,16 @@ static void divide_sample(q2_sample *sample, double divisor) {
     DIV(backend_host_work_ms);
     DIV(memcpy_ms);
     DIV(other_ms);
+    DIV(timing_embedding_ms);
+    DIV(timing_ple_ms);
+    DIV(timing_qsa_ms);
+    DIV(timing_gdn_ms);
+    DIV(timing_moe_ms);
+    DIV(timing_gr_ms);
+    DIV(timing_lm_head_ms);
+    DIV(timing_norms_residual_glue_ms);
+    DIV(timing_other_layer_ms);
+    DIV(timing_unexplained_ms);
 #undef DIV
     sample->telemetry_callbacks = (uint64_t)(
         (double)sample->telemetry_callbacks / divisor);
@@ -393,6 +598,16 @@ static void divide_sample(q2_sample *sample, double divisor) {
         (double)sample->non_ple_upload_bytes / divisor);
     sample->non_ple_residency_misses = (uint64_t)(
         (double)sample->non_ple_residency_misses / divisor);
+    for (size_t i = 0; i < Q2_OWNER_COUNT; ++i) {
+        sample->owners[i].calls = (uint64_t)(
+            (double)sample->owners[i].calls / divisor);
+        sample->owners[i].callback_wall_ms /= divisor;
+        sample->owners[i].kernel_ms /= divisor;
+        sample->owners[i].host_wait_ms /= divisor;
+        sample->owners[i].host_overhead_ms /= divisor;
+        sample->owners[i].bytes_read = (uint64_t)(
+            (double)sample->owners[i].bytes_read / divisor);
+    }
 }
 
 static bool parse_size_list(const char *value, q2_options *options) {
@@ -522,6 +737,22 @@ static void add_telemetry_delta(q2_sample *sample,
     sample->cuda_dispatch_ms = after->backend_overhead_ms -
                                before->backend_overhead_ms;
     sample->memcpy_ms = after->upload_ms - before->upload_ms;
+    for (size_t i = 0; i < Q2_OWNER_COUNT; ++i) {
+        sample->owners[i].calls =
+            after->owners[i].calls - before->owners[i].calls;
+        sample->owners[i].callback_wall_ms =
+            after->owners[i].callback_wall_ms -
+            before->owners[i].callback_wall_ms;
+        sample->owners[i].kernel_ms =
+            after->owners[i].kernel_ms - before->owners[i].kernel_ms;
+        sample->owners[i].host_wait_ms =
+            after->owners[i].host_wait_ms - before->owners[i].host_wait_ms;
+        sample->owners[i].host_overhead_ms =
+            after->owners[i].host_overhead_ms -
+            before->owners[i].host_overhead_ms;
+        sample->owners[i].bytes_read =
+            after->owners[i].bytes_read - before->owners[i].bytes_read;
+    }
 }
 
 static void add_sync_delta(
@@ -593,6 +824,7 @@ static bool run_decode(q38_session *session, const q2_options *options,
     }
     memset(&diagnostics, 0, sizeof(diagnostics));
     diagnostics.stage_trace = stage_trace;
+    diagnostics.timing_trace = timing_trace;
     memset(&prefill_capture, 0, sizeof(prefill_capture));
     diagnostics.trace_user = &prefill_capture;
     diagnostics.qsa_timing = &prefill_capture.qsa_timing;
@@ -617,6 +849,7 @@ static bool run_decode(q38_session *session, const q2_options *options,
         q38_ple_scheduler_stats ple = {0};
         const double started = now_ms();
         memset(&capture, 0, sizeof(capture));
+        diagnostics.timing_trace = timing_trace;
         q38_forward_cuda_reset_sync_stats(session->runtime->cuda);
         q38_forward_cuda_get_sync_stats(session->runtime->cuda,
                                         &capture.sync_before);
@@ -639,6 +872,7 @@ static bool run_decode(q38_session *session, const q2_options *options,
         capture.sample.ple_elapsed_ms = ple.elapsed_ms;
         capture.sample.ple_overlap_ms = ple.overlap_ms;
         apply_qsa_timing(&capture.sample, &capture.qsa_timing);
+        finalize_timing_tree(&capture.sample, &capture);
         add_telemetry_delta(&capture.sample, &telemetry_before, telemetry);
         q38_forward_cuda_sync_stats sync_after;
         q38_forward_cuda_get_sync_stats(session->runtime->cuda,
@@ -682,6 +916,7 @@ static bool run_prefill_case(
     memset(&diagnostics, 0, sizeof(diagnostics));
     memset(&capture, 0, sizeof(capture));
     diagnostics.stage_trace = stage_trace;
+    diagnostics.timing_trace = timing_trace;
     diagnostics.trace_user = &capture;
     diagnostics.qsa_timing = &qsa_timing;
     q38_forward_cuda_reset_sync_stats(session->runtime->cuda);
@@ -697,6 +932,18 @@ static bool run_prefill_case(
         return false;
     sample->wall_ms = now_ms() - started;
     apply_qsa_timing(sample, &qsa_timing);
+    finalize_timing_tree(&capture.sample, &capture);
+    sample->timing_embedding_ms = capture.sample.timing_embedding_ms;
+    sample->timing_ple_ms = capture.sample.timing_ple_ms;
+    sample->timing_qsa_ms = capture.sample.timing_qsa_ms;
+    sample->timing_gdn_ms = capture.sample.timing_gdn_ms;
+    sample->timing_moe_ms = capture.sample.timing_moe_ms;
+    sample->timing_gr_ms = capture.sample.timing_gr_ms;
+    sample->timing_lm_head_ms = capture.sample.timing_lm_head_ms;
+    sample->timing_norms_residual_glue_ms =
+        capture.sample.timing_norms_residual_glue_ms;
+    sample->timing_other_layer_ms = capture.sample.timing_other_layer_ms;
+    sample->timing_unexplained_ms = capture.sample.timing_unexplained_ms;
     add_telemetry_delta(sample, &before, telemetry);
     q38_forward_cuda_sync_stats sync_after;
     q38_forward_cuda_get_sync_stats(session->runtime->cuda, &sync_after);
@@ -910,10 +1157,11 @@ static bool run_quick(
     green = generated_ids_identical && final_hash_identical && all_finite &&
             fallback_zero && upload_zero && miss_zero && ple_stall_zero &&
             residency.all_non_ple_resident;
-    printf("{\"format\":\"q2-cuda-wait-attribution-raw-v1\","
-           "\"reference_id\":\"Q2_CUDA_WAIT_ATTRIBUTION_V1\","
-           "\"baseline_reference\":\"Q2_DECODE_REFERENCE_0\","
-           "\"benchmark_kind\":\"quick_integration_attribution\","
+    printf("{\"format\":\"q2-forward-exclusive-attribution-raw-v1\","
+           "\"PERF_SCHEMA\":\"PERF_SCHEMA_V2\","
+           "\"REF_ID\":\"Q2_FORWARD_EXCLUSIVE_ATTRIBUTION_V1\","
+           "\"baseline_reference\":\"S4A_CUDA_WAIT_ATTRIBUTION_V1\","
+           "\"benchmark_kind\":\"quick_forward_exclusive_attribution\","
            "\"prompt\":");
     json_string(options->prompt);
     printf(",\"prompt_ids\":");
@@ -952,6 +1200,13 @@ static bool run_quick(
            "\"fallback\":%s,\"non_ple_upload_bytes\":%" PRIu64
            ",\"non_ple_residency_misses\":%" PRIu64
            ",\"ple_critical_stall_ms\":%.6f},"
+           "\"accounting\":{\"wall_ms\":%.6f,"
+           "\"embedding_ms\":%.6f,\"ple_ms\":%.6f,\"QSA_ms\":%.6f,"
+           "\"GDN_ms\":%.6f,\"MoE_ms\":%.6f,\"GR_ms\":%.6f,"
+           "\"LM_head_ms\":%.6f,\"norms_residual_glue_ms\":%.6f,"
+           "\"other_layer_ms\":%.6f,\"host_blocked_on_cuda_ms\":%.6f,"
+           "\"diagnostic_overhead_ms\":%.6f,\"unexplained_ms\":%.6f,"
+           "\"unexplained_fraction\":%.9f},"
            "\"prefill\":{\"status\":\"not_run\"},"
            "\"residency\":{\"all_non_ple_resident\":%s,"
            "\"persistent_resident_bytes\":%zu,"
@@ -971,6 +1226,22 @@ static bool run_quick(
            telemetry.non_ple_upload_bytes,
            telemetry.non_ple_residency_misses,
            aggregate.ple_critical_stall_ms,
+           aggregate.forward_ms > 0.0 ? aggregate.forward_ms : aggregate.wall_ms,
+           aggregate.timing_embedding_ms, aggregate.timing_ple_ms,
+           aggregate.timing_qsa_ms, aggregate.timing_gdn_ms,
+           aggregate.timing_moe_ms, aggregate.timing_gr_ms,
+           aggregate.timing_lm_head_ms,
+           aggregate.timing_norms_residual_glue_ms,
+           aggregate.timing_other_layer_ms,
+           aggregate.host_blocked_on_cuda_ms,
+           aggregate.telemetry_callback_wall_ms,
+           aggregate.timing_unexplained_ms,
+           (aggregate.forward_ms > 0.0 ? aggregate.forward_ms
+                                        : aggregate.wall_ms) > 0.0
+               ? aggregate.timing_unexplained_ms /
+                     (aggregate.forward_ms > 0.0 ? aggregate.forward_ms
+                                                  : aggregate.wall_ms)
+               : 0.0,
            residency.all_non_ple_resident ? "true" : "false",
            residency.persistent_resident_bytes,
            residency.persistent_resident_tensors,
@@ -1015,6 +1286,32 @@ static void print_sync_attribution(const q2_sample *sample) {
     printf("]}");
 }
 
+static const char *owner_name(q2_owner owner) {
+    static const char *const names[Q2_OWNER_COUNT] = {
+        "QSA", "GDN", "MoE", "GR", "PLE", "LM_HEAD", "NORM",
+        "ROUTER", "OTHER_LAYER", "UNKNOWN"
+    };
+    return owner < Q2_OWNER_COUNT ? names[owner] : "UNKNOWN";
+}
+
+static void print_owner_attribution(const q2_sample *sample) {
+    printf("\"matrix_owner_attribution\":[");
+    for (size_t i = 0; i < Q2_OWNER_COUNT; ++i) {
+        if (i) putchar(',');
+        const q2_owner_stat *owner = &sample->owners[i];
+        printf("{\"owner\":");
+        json_string(owner_name((q2_owner)i));
+        printf(",\"calls\":%" PRIu64
+               ",\"callback_cpu_wall_ms\":%.6f,\"kernel_enqueue_ms\":%.6f,"
+               "\"host_pre_post_ms\":%.6f,\"host_wait_ms\":%.6f,"
+               "\"bytes_read\":%" PRIu64 "}",
+               owner->calls, owner->callback_wall_ms, owner->kernel_ms,
+               owner->host_overhead_ms, owner->host_wait_ms,
+               owner->bytes_read);
+    }
+    printf("]");
+}
+
 static void print_sample(const q2_sample *sample) {
     printf("{\"wall_ms\":%.6f,\"forward_core_ms\":%.6f,"
            "\"argmax_ms\":%.6f,\"bookkeeping_ms\":%.6f,"
@@ -1050,6 +1347,19 @@ static void print_sample(const q2_sample *sample) {
            sample->kernel_launches, sample->host_syncs,
            sample->telemetry_callbacks, sample->h2d_bytes,
            sample->d2h_bytes, sample->d2d_bytes);
+    putchar(',');
+    printf("\"exclusive_forward_timing\":{\"embedding_ms\":%.6f,"
+           "\"ple_ms\":%.6f,\"QSA_ms\":%.6f,\"GDN_ms\":%.6f,"
+           "\"MoE_ms\":%.6f,\"GR_ms\":%.6f,\"LM_head_ms\":%.6f,"
+           "\"norms_residual_glue_ms\":%.6f,\"other_layer_ms\":%.6f,"
+           "\"unexplained_ms\":%.6f},",
+           sample->timing_embedding_ms, sample->timing_ple_ms,
+           sample->timing_qsa_ms, sample->timing_gdn_ms,
+           sample->timing_moe_ms, sample->timing_gr_ms,
+           sample->timing_lm_head_ms,
+           sample->timing_norms_residual_glue_ms,
+           sample->timing_other_layer_ms, sample->timing_unexplained_ms);
+    print_owner_attribution(sample);
     putchar(',');
     print_sync_attribution(sample);
     putchar('}');

@@ -53,6 +53,8 @@ CANONICAL_BENCH_CUDA_OBJS := \
 	q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o q38_gdn.o \
 	q38_moe_cuda.o q38_profile_cuda.o q38_residency.o \
 	q38_topk_cuda.o
+S4B_DIAG_C_OBJS := $(addprefix $(DIAG_OBJDIR)/,$(CANONICAL_BENCH_C_OBJS))
+S4B_DIAG_CUDA_OBJS := $(addprefix $(DIAG_OBJDIR)/,$(CANONICAL_BENCH_CUDA_OBJS))
 
 TEST_BINS := \
 	tests/test_platform tests/test_gguf tests/test_memory \
@@ -61,6 +63,7 @@ TEST_BINS := \
 .PHONY: all q38 q38-diag q38-server q38-server-mock q38-cli q38-dev-worker spark test test-server clean tools \
 	q38-server-real \
 	bench-q2-reference-0 bench-q2-decode bench-q2-prefill \
+	tests/q2_forward_exclusive_attribution \
 	test-prod-diag-equivalence \
 	check-perf-artifacts test-steering test-steering-cuda \
 	gr-fixtures gr-bench gr-c1-bench gr-c2-bench gr-c3-bench \
@@ -418,6 +421,12 @@ tests/q2_canonical_bench: tests/q2_canonical_bench.c \
 		$(CANONICAL_BENCH_C_OBJS) $(CANONICAL_BENCH_CUDA_OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ tests/q2_canonical_bench.c \
 		$(CANONICAL_BENCH_C_OBJS) $(CANONICAL_BENCH_CUDA_OBJS) \
+		$(CUDA_LDLIBS) -lm
+
+tests/q2_forward_exclusive_attribution: tests/q2_canonical_bench.c \
+		$(S4B_DIAG_C_OBJS) $(S4B_DIAG_CUDA_OBJS)
+	$(NVCC) $(DIAG_NVCCFLAGS) -o $@ tests/q2_canonical_bench.c \
+		$(S4B_DIAG_C_OBJS) $(S4B_DIAG_CUDA_OBJS) \
 		$(CUDA_LDLIBS) -lm
 
 bench-q2-reference-0: tests/q2_canonical_bench

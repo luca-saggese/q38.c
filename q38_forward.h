@@ -221,6 +221,23 @@ typedef bool (*q38_forward_stage_trace)(
     const q38_forward_stage_usage *usage, void *user, char *error,
     size_t error_len);
 
+/*
+ * Exclusive forward timing tree.  A parent span may contain child spans; the
+ * consumer must subtract child elapsed time before adding parent exclusive
+ * time to an accounting total.
+ */
+typedef struct {
+    const char *name;
+    const char *parent;
+    const char *owner;
+    uint32_t layer;
+    double elapsed_ms;
+} q38_forward_timing_usage;
+
+typedef bool (*q38_forward_timing_trace)(
+    const q38_forward_timing_usage *usage, void *user, char *error,
+    size_t error_len);
+
 typedef void (*q38_forward_backend_context_trace)(
     uint32_t layer, const char *logical_stage, const q38_tensor *tensor,
     size_t rows, size_t cols, void *user);
@@ -266,6 +283,7 @@ typedef struct {
     q38_forward_backend_context_trace backend_context;
     void *backend_context_user;
     q38_forward_qsa_timing *qsa_timing;
+    q38_forward_timing_trace timing_trace;
     q38_forward_qsa_projection_trace_fn qsa_projection_trace;
     q38_forward_qsa_snapshot_fn qsa_snapshot;
     q38_forward_qsa_qkv_backend qsa_qkv_backend;

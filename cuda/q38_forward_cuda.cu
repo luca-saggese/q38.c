@@ -152,6 +152,7 @@ struct q38_forward_cuda_context {
     uint64_t cuda_synchronizations;
 #if Q38_DIAGNOSTICS
     q38_forward_cuda_sync_stats sync_stats;
+    double telemetry_wait_baseline_ms;
 #endif
     cudaStream_t stream;
     q38_qsa_candidate_fn qsa_candidate;
@@ -432,6 +433,7 @@ static const char *subsystem_for_stage(const char *stage) {
     if (stage && strstr(stage, "ple")) return "ple";
     if (stage && strstr(stage, "lm_head")) return "lm_head";
     if (stage && strstr(stage, "gdn")) return "gdn";
+    if (stage && strstr(stage, "gr_")) return "gr";
     return "unknown";
 }
 
@@ -630,6 +632,10 @@ static void emit_telemetry(q38_forward_cuda_context *context,
     if (!context->telemetry_observer) return;
     char name[128];
     copy_tensor_name(tensor, name, sizeof(name));
+    const double total_wait_ms = context->sync_stats.host_blocked_on_cuda_ms;
+    const double callback_wait_ms =
+        fmax(0.0, total_wait_ms - context->telemetry_wait_baseline_ms);
+    context->telemetry_wait_baseline_ms = total_wait_ms;
     q38_forward_cuda_telemetry record = {
         subsystem_for_stage(context->current_stage), context->current_layer,
         context->current_stage ? context->current_stage : "backend",
@@ -646,6 +652,7 @@ static void emit_telemetry(q38_forward_cuda_context *context,
         (kernel_ms > 0.0f || wall_ms > 0.0) ? rows * sizeof(float) : 0,
         upload_ms, kernel_ms,
         (float)fmax(0.0, wall_ms - (double)upload_ms - (double)kernel_ms),
+        (float)wall_ms, (float)callback_wait_ms,
         allocations, syncs, syncs
     };
 #if Q38_DIAGNOSTICS
@@ -1521,7 +1528,10 @@ extern "C" void q38_forward_cuda_get_sync_stats(
 extern "C" void q38_forward_cuda_reset_sync_stats(
     q38_forward_cuda_context *context) {
 #if Q38_DIAGNOSTICS
-    if (context) memset(&context->sync_stats, 0, sizeof(context->sync_stats));
+    if (context) {
+        memset(&context->sync_stats, 0, sizeof(context->sync_stats));
+        context->telemetry_wait_baseline_ms = 0.0;
+    }
 #else
     (void)context;
 #endif
