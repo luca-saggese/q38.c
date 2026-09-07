@@ -70,11 +70,11 @@ typedef struct q38_forward_cuda_telemetry {
     float upload_ms;
     float kernel_ms;
     float backend_overhead_ms;
-    float callback_wall_ms;
-    float host_wait_ms;
     uint64_t allocation_count;
     uint64_t sync_count;
     uint64_t host_syncs;
+    float callback_wall_ms;
+    float host_wait_ms;
 } q38_forward_cuda_telemetry;
 typedef void (*q38_forward_cuda_telemetry_observer)(
     const q38_forward_cuda_telemetry *telemetry, void *user);

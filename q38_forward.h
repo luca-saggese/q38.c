@@ -283,7 +283,6 @@ typedef struct {
     q38_forward_backend_context_trace backend_context;
     void *backend_context_user;
     q38_forward_qsa_timing *qsa_timing;
-    q38_forward_timing_trace timing_trace;
     q38_forward_qsa_projection_trace_fn qsa_projection_trace;
     q38_forward_qsa_snapshot_fn qsa_snapshot;
     q38_forward_qsa_qkv_backend qsa_qkv_backend;
@@ -292,6 +291,7 @@ typedef struct {
     float directional_steering_ffn_scale;
     float directional_steering_attn_scale;
     bool directional_steering_attn_device;
+    q38_forward_timing_trace timing_trace;
 } q38_forward_diagnostics;
 
 /* Optional diagnostic row-matvec backend.  It is strict when installed via

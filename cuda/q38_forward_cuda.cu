@@ -652,8 +652,8 @@ static void emit_telemetry(q38_forward_cuda_context *context,
         (kernel_ms > 0.0f || wall_ms > 0.0) ? rows * sizeof(float) : 0,
         upload_ms, kernel_ms,
         (float)fmax(0.0, wall_ms - (double)upload_ms - (double)kernel_ms),
-        (float)wall_ms, (float)callback_wait_ms,
-        allocations, syncs, syncs
+        allocations, syncs, syncs,
+        (float)wall_ms, (float)callback_wait_ms
     };
 #if Q38_DIAGNOSTICS
     const double callback_started = cuda_sync_now_ms();
