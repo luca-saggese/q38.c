@@ -2803,51 +2803,82 @@ static bool ensure_qsa_chain_workspace(q38_forward_cuda_context *context,
     if (!ensure_buffer((void **)&workspace->qfull, &workspace_bytes,
                        12288u * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->q, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->q, &workspace_bytes,
                        6144u * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->k, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->k, &workspace_bytes,
                        512u * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->v, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->v, &workspace_bytes,
                        512u * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->index, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->index, &workspace_bytes,
                        640u * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->index_q, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->index_q, &workspace_bytes,
                        512u * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->raw_index, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->raw_index, &workspace_bytes,
                        128u * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->attention, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->attention, &workspace_bytes,
                        6144u * sizeof(float), context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->selected_k, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->selected_k, &workspace_bytes,
                        selected_kv_elements * sizeof(float),
                        context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->selected_v, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->selected_v, &workspace_bytes,
                        selected_kv_elements * sizeof(float),
                        context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations) ||
-        !ensure_buffer((void **)&workspace->selected, &workspace_bytes,
+                       &context->cuda_allocations)) {
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
+    workspace_bytes = 0;
+    if (!ensure_buffer((void **)&workspace->selected, &workspace_bytes,
                        selected_capacity * sizeof(uint32_t),
                        context->allocation_observer,
                        context->allocation_observer_user,
-                       &context->cuda_allocations))
+                       &context->cuda_allocations)) {
         return fail(error, error_len, "QSA chain workspace allocation failed");
+    }
     workspace->selected_capacity = selected_capacity;
     context->qsa_chain_workspace_ready = true;
     return true;
