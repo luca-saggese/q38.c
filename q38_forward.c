@@ -213,7 +213,9 @@ static bool q38_forward_qsa_ref_impl(
     const float *hidden, size_t token_count, float *output,
     uint32_t *selected, size_t selected_stride, size_t *selected_counts,
     const q38_qsa_precomputed_qkv *precomputed,
-    q38_forward_qsa_timing *timing, char *error, size_t error_len) {
+    q38_forward_qsa_timing *timing, uint32_t layer_number,
+    q38_forward_qsa_snapshot_fn snapshot, void *snapshot_user, char *error,
+    size_t error_len) {
     if (error && error_len) error[0] = '\0';
     if (timing) memset(timing, 0, sizeof(*timing));
     const double total_started = qsa_now_ms();
@@ -248,6 +250,8 @@ static bool q38_forward_qsa_ref_impl(
     float *indexq = calloc(token_count * w->index_heads * w->index_dim, sizeof(float));
     float *attention = calloc(token_count * attention_width, sizeof(float));
     const size_t base_position = state->position;
+    const uint64_t state_before_position = state->position;
+    const size_t state_before_count = state->main_k.count;
     if (!qfull || !keys || !values || !index || !raw_index || !queries ||
         !indexq || !attention) {
         if (!precomputed) {
@@ -419,8 +423,8 @@ static bool q38_forward_qsa_ref_impl(
     const double output_started = qsa_now_ms();
     if (timing)
         timing->output_projection_backend_used =
-            w->matrix_batch_backend != NULL && token_count > 1;
-    if (w->matrix_batch_backend && token_count > 1) {
+            w->matrix_batch_backend != NULL;
+    if (w->matrix_batch_backend) {
         if (!w->matrix_batch_backend(
                 &w->o_proj, attention, token_count, output,
                 w->matrix_batch_user, error, error_len))
@@ -438,6 +442,30 @@ static bool q38_forward_qsa_ref_impl(
     }
     if (timing)
         timing->output_projection_ms += qsa_now_ms() - output_started;
+    if (snapshot) {
+        const q38_forward_qsa_snapshot capture = {
+            .q_projection = qfull,
+            .q_projection_count = token_count * q_rows,
+            .keys = keys,
+            .keys_count = token_count * k_rows,
+            .values = values,
+            .values_count = token_count * k_rows,
+            .index_projection = index,
+            .index_projection_count = token_count * index_rows,
+            .attention = attention,
+            .attention_count = token_count * attention_width,
+            .output = output,
+            .output_count = token_count * w->hidden,
+            .selected = selected,
+            .selected_count = selected_counts[0],
+            .state = state,
+            .state_before_position = state_before_position,
+            .state_before_count = state_before_count,
+        };
+        if (!snapshot(layer_number, &capture, snapshot_user, error,
+                      error_len))
+            return false;
+    }
     const double cleanup_started = qsa_now_ms();
     if (!precomputed) {
         free(qfull); free(keys); free(values);
@@ -461,7 +489,8 @@ bool q38_forward_qsa_ref(const q38_forward_qsa_weights *weights,
                          size_t error_len) {
     return q38_forward_qsa_ref_impl(
         weights, state, hidden, token_count, output, selected,
-        selected_stride, selected_counts, NULL, NULL, error, error_len);
+        selected_stride, selected_counts, NULL, NULL, UINT32_MAX, NULL, NULL,
+        error, error_len);
 }
 
 bool q38_forward_qsa_ref_timed(
@@ -473,7 +502,8 @@ bool q38_forward_qsa_ref_timed(
         return fail(error, error_len, "QSA timing output is null");
     return q38_forward_qsa_ref_impl(
         weights, state, hidden, token_count, output, selected,
-        selected_stride, selected_counts, NULL, timing, error, error_len);
+        selected_stride, selected_counts, NULL, timing, UINT32_MAX, NULL, NULL,
+        error, error_len);
 }
 
 /* The complete graph below intentionally keeps tensor payloads in the GGUF
@@ -1868,7 +1898,7 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
     full_qsa_batch_user batch_user = {
         model, full_matrix_batch_backend, full_backend_user
     };
-    if (full_matrix_batch_backend && tokens > 1) {
+    if (full_matrix_batch_backend) {
         w.matrix_batch_backend = full_qsa_matrix_batch;
         w.matrix_batch_user = &batch_user;
     }
@@ -1932,7 +1962,8 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
     bool ok = q38_forward_qsa_ref_impl(
         &w, qsa_state, input, tokens, output, selected,
         Q38_FULL_QSA_SELECTED_STRIDE, counts, precomputed_ptr, &timing,
-        error, error_len);
+        layer_number, diagnostics ? diagnostics->qsa_snapshot : NULL,
+        diagnostics ? diagnostics->trace_user : NULL, error, error_len);
     if (precomputed_ptr) {
         timing.qkv_projection_ms = qkv_timing.qkv_projection_ms;
         timing.qkv_backend_used = qkv_timing.qkv_backend_used;

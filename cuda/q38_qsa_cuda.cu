@@ -108,6 +108,28 @@ extern "C" bool q38_qsa_cuda_project_main(
         v_rows > SIZE_MAX / token_count) {
         return fail(error, error_len, "CUDA QSA projection size overflows");
     }
+    if (!q38_qsa_cuda_project_device(
+            q_proj, q_rows, k_proj, k_rows, v_proj, v_rows, cols,
+            device_input, token_count, device_q, device_k, device_v, stream,
+            error, error_len))
+        return false;
+    return true;
+}
+
+extern "C" bool q38_qsa_cuda_project_device(
+    const uint16_t *q_proj, size_t q_rows, const uint16_t *k_proj,
+    size_t k_rows, const uint16_t *v_proj, size_t v_rows, size_t cols,
+    const float *device_input, size_t token_count, float *device_q,
+    float *device_k, float *device_v, cudaStream_t stream, char *error,
+    size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (!q_proj || !k_proj || !v_proj || !cols || !device_input ||
+        !token_count || !device_q || !device_k || !device_v) {
+        return fail(error, error_len, "invalid CUDA QSA device projection arguments");
+    }
+    if (q_rows > SIZE_MAX / token_count || k_rows > SIZE_MAX / token_count ||
+        v_rows > SIZE_MAX / token_count)
+        return fail(error, error_len, "CUDA QSA device projection size overflows");
     const size_t q_elements = q_rows * token_count;
     const size_t k_elements = k_rows * token_count;
     const size_t v_elements = v_rows * token_count;

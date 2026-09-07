@@ -1760,6 +1760,10 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
     const bool gdn_bf16_candidate =
         token_count == 1 && tensor->type == 30 &&
         is_gdn_projection_stage(context->current_stage);
+    const bool qsa_bf16_candidate =
+        token_count == 1 && tensor->type == 30 &&
+        context->current_stage &&
+        !strcmp(context->current_stage, "qsa_output_projection");
     const bool launched = gr_bf16_candidate
         ? q38_cuda_bf16_matvec_configured(
               (const uint16_t *)exec->ptr, rows, cols,
@@ -1769,6 +1773,11 @@ extern "C" bool q38_forward_cuda_matrix_batch_backend(
         ? q38_cuda_gdn_project(
               Q38_GDN_WEIGHT_BF16, exec->ptr, rows, cols,
               context->device_input, token_count, context->device_output,
+              context->stream, error, error_len)
+        : qsa_bf16_candidate
+        ? q38_cuda_bf16_matvec_configured(
+              (const uint16_t *)exec->ptr, rows, cols,
+              context->device_input, context->device_output, 256u,
               context->stream, error, error_len)
         : q38_cuda_matrix_batch_generic(
               tensor->type, exec->ptr, context->device_input, token_count,

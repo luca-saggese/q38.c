@@ -84,6 +84,78 @@ typedef struct {
     moe_capture_case cases[MOE_CAPTURE_COUNT];
 } moe_capture_context;
 
+enum {
+    GDN_CAPTURE_COUNT = 3,
+    GDN_EARLY_LAYER = 0,
+    GDN_MIDDLE_LAYER = 24,
+    GDN_LATE_LAYER = 46,
+    GDN_QKV_CHANNELS = 10240,
+    GDN_Z_CHANNELS = 6144,
+    GDN_HEADS = 48,
+    GDN_HEAD_DIM = 128,
+    GDN_CONV_HISTORY_TOKENS = 3,
+    GDN_CONV_KERNEL = 4,
+};
+
+enum {
+    QSA_CAPTURE_COUNT = 3,
+    QSA_EARLY_LAYER = 3,
+    QSA_MIDDLE_LAYER = 23,
+    QSA_LATE_LAYER = 47,
+    QSA_INDEX_PROJECTION_ROWS = 640,
+    QSA_INDEX_STATE_ROWS = 128,
+    QSA_ATTENTION_WIDTH = 6144,
+    QSA_SELECTED_STRIDE = 2048,
+};
+
+typedef struct {
+    uint32_t layer;
+    bool input_captured;
+    bool output_captured;
+    float hidden[HIDDEN];
+    float expected[HIDDEN];
+    float conv_history[ GDN_CONV_HISTORY_TOKENS * GDN_QKV_CHANNELS ];
+    float next_conv_history[ GDN_CONV_HISTORY_TOKENS * GDN_QKV_CHANNELS ];
+    float recurrent_state[ GDN_HEADS * GDN_HEAD_DIM * GDN_HEAD_DIM ];
+    float next_recurrent_state[ GDN_HEADS * GDN_HEAD_DIM * GDN_HEAD_DIM ];
+} gdn_capture_case;
+
+typedef struct {
+    worker *worker;
+    gdn_capture_case cases[GDN_CAPTURE_COUNT];
+} gdn_capture_context;
+
+typedef struct {
+    uint32_t layer;
+    bool input_captured;
+    bool snapshot_captured;
+    float hidden[HIDDEN];
+    float q_projection[Q_ROWS];
+    float keys[K_ROWS];
+    float values[V_ROWS];
+    float index_projection[QSA_INDEX_PROJECTION_ROWS];
+    float attention[QSA_ATTENTION_WIDTH];
+    float output[HIDDEN];
+    uint32_t selected[QSA_SELECTED_STRIDE];
+    size_t selected_count;
+    float state_main_k[K_ROWS];
+    float state_main_v[V_ROWS];
+    float state_index_k[QSA_INDEX_STATE_ROWS];
+    size_t state_main_k_count;
+    size_t state_main_v_count;
+    size_t state_index_k_count;
+    uint64_t state_before_position;
+    size_t state_before_count;
+    uint64_t state_position;
+    uint32_t state_pending_count;
+    uint64_t state_pending_position;
+} qsa_capture_case;
+
+typedef struct {
+    worker *worker;
+    qsa_capture_case cases[QSA_CAPTURE_COUNT];
+} qsa_capture_context;
+
 static void residency_telemetry(
     const q38_forward_cuda_telemetry *telemetry, void *user) {
     (void)user;
@@ -500,6 +572,266 @@ static bool make_directory(const char *path, char *error, size_t error_len) {
     return false;
 }
 
+static qsa_capture_case *find_qsa_capture_case(
+    qsa_capture_context *capture, uint32_t layer) {
+    for (size_t i = 0; i < QSA_CAPTURE_COUNT; ++i)
+        if (capture->cases[i].layer == layer)
+            return &capture->cases[i];
+    return NULL;
+}
+
+static bool capture_qsa_boundary(uint32_t layer, const char *boundary,
+                                 const float *values, size_t token_count,
+                                 size_t width, void *user, char *error,
+                                 size_t error_len) {
+    qsa_capture_context *capture = (qsa_capture_context *)user;
+    qsa_capture_case *case_data = find_qsa_capture_case(capture, layer);
+    if (!case_data || strcmp(boundary, "gdn_qsa_input") != 0)
+        return true;
+    if (!values || token_count != 1 || width != HIDDEN) {
+        snprintf(error, error_len, "invalid QSA input capture at layer %u",
+                 layer);
+        return false;
+    }
+    memcpy(case_data->hidden, values, sizeof(case_data->hidden));
+    case_data->input_captured = true;
+    return true;
+}
+
+static bool capture_qsa_snapshot(
+    uint32_t layer, const q38_forward_qsa_snapshot *snapshot, void *user,
+    char *error, size_t error_len) {
+    qsa_capture_context *capture = (qsa_capture_context *)user;
+    qsa_capture_case *case_data = find_qsa_capture_case(capture, layer);
+    if (!case_data || !snapshot)
+        return case_data == NULL;
+    if (snapshot->q_projection_count != Q_ROWS ||
+        snapshot->keys_count != K_ROWS ||
+        snapshot->values_count != V_ROWS ||
+        snapshot->index_projection_count != QSA_INDEX_PROJECTION_ROWS ||
+        snapshot->attention_count != QSA_ATTENTION_WIDTH ||
+        snapshot->output_count != HIDDEN ||
+        snapshot->selected_count > QSA_SELECTED_STRIDE ||
+        !snapshot->q_projection || !snapshot->keys || !snapshot->values ||
+        !snapshot->index_projection || !snapshot->attention ||
+        !snapshot->output || !snapshot->selected || !snapshot->state) {
+        snprintf(error, error_len, "invalid QSA snapshot at layer %u", layer);
+        return false;
+    }
+    const q38_qsa_state *state = snapshot->state;
+    if (state->main_k.count > 1 || state->main_v.count > 1 ||
+        state->index_k.count > 1 ||
+        state->main_k.row_bytes != K_ROWS * sizeof(float) ||
+        state->main_v.row_bytes != V_ROWS * sizeof(float) ||
+        state->index_k.row_bytes != QSA_INDEX_STATE_ROWS * sizeof(float)) {
+        snprintf(error, error_len, "unsupported QSA state shape at layer %u",
+                 layer);
+        return false;
+    }
+    memcpy(case_data->q_projection, snapshot->q_projection,
+           sizeof(case_data->q_projection));
+    memcpy(case_data->keys, snapshot->keys, sizeof(case_data->keys));
+    memcpy(case_data->values, snapshot->values, sizeof(case_data->values));
+    memcpy(case_data->index_projection, snapshot->index_projection,
+           sizeof(case_data->index_projection));
+    memcpy(case_data->attention, snapshot->attention,
+           sizeof(case_data->attention));
+    memcpy(case_data->output, snapshot->output, sizeof(case_data->output));
+    memcpy(case_data->selected, snapshot->selected,
+           snapshot->selected_count * sizeof(case_data->selected[0]));
+    case_data->selected_count = snapshot->selected_count;
+    case_data->state_main_k_count = state->main_k.count;
+    case_data->state_main_v_count = state->main_v.count;
+    case_data->state_index_k_count = state->index_k.count;
+    if (state->main_k.count)
+        memcpy(case_data->state_main_k, state->main_k.data,
+               state->main_k.count * state->main_k.row_bytes);
+    if (state->main_v.count)
+        memcpy(case_data->state_main_v, state->main_v.data,
+               state->main_v.count * state->main_v.row_bytes);
+    if (state->index_k.count)
+        memcpy(case_data->state_index_k, state->index_k.data,
+               state->index_k.count * state->index_k.row_bytes);
+    case_data->state_before_position = snapshot->state_before_position;
+    case_data->state_before_count = snapshot->state_before_count;
+    case_data->state_position = state->position;
+    case_data->state_pending_count = state->pending_count;
+    case_data->state_pending_position = state->pending_position;
+    case_data->snapshot_captured = true;
+    return true;
+}
+
+static bool write_qsa_tensor(const char *directory, const char *name,
+                             const q38_gguf *model, const q38_tensor *tensor,
+                             char *error, size_t error_len) {
+    const void *data = tensor ? q38_gguf_tensor_data(model, tensor) : NULL;
+    if (!data) {
+        snprintf(error, error_len, "missing QSA tensor payload %s", name);
+        return false;
+    }
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/%s", directory, name);
+    return write_binary_atomic(path, data, (size_t)tensor->bytes, error,
+                               error_len);
+}
+
+static bool write_qsa_fixture(worker *w, const qsa_capture_case *case_data,
+                              const char *directory, uint32_t token,
+                              char *error, size_t error_len) {
+    const q38_qsa_weights *qsa = &w->weights.layer[case_data->layer].qsa;
+    const q38_tensor *tensors[] = {
+        qsa->q_proj, qsa->k_proj, qsa->v_proj, qsa->o_proj,
+        qsa->index_qk_proj, qsa->q_norm, qsa->k_norm,
+        qsa->index_q_norm, qsa->index_k_norm,
+    };
+    const char *tensor_names[] = {
+        "q_proj.bin", "k_proj.bin", "v_proj.bin", "o_proj.bin",
+        "index_qk_proj.bin", "q_norm.bin", "k_norm.bin",
+        "index_q_norm.bin", "index_k_norm.bin",
+    };
+    if (!case_data->input_captured || !case_data->snapshot_captured) {
+        snprintf(error, error_len, "layer %u QSA trace incomplete",
+                 case_data->layer);
+        return false;
+    }
+    if (!make_directory("tests/fixtures/qsa", error, error_len) ||
+        !make_directory(directory, error, error_len))
+        return false;
+    struct {
+        const char *name;
+        const void *data;
+        size_t bytes;
+    } files[] = {
+        {"hidden.f32", case_data->hidden, sizeof(case_data->hidden)},
+        {"q_projection.f32", case_data->q_projection,
+         sizeof(case_data->q_projection)},
+        {"keys.f32", case_data->keys, sizeof(case_data->keys)},
+        {"values.f32", case_data->values, sizeof(case_data->values)},
+        {"index_projection.f32", case_data->index_projection,
+         sizeof(case_data->index_projection)},
+        {"attention.f32", case_data->attention,
+         sizeof(case_data->attention)},
+        {"expected_output.f32", case_data->output,
+         sizeof(case_data->output)},
+        {"selected_ids.u32", case_data->selected,
+         case_data->selected_count * sizeof(case_data->selected[0])},
+        {"state_main_k.f32", case_data->state_main_k,
+         case_data->state_main_k_count * K_ROWS * sizeof(float)},
+        {"state_main_v.f32", case_data->state_main_v,
+         case_data->state_main_v_count * V_ROWS * sizeof(float)},
+        {"state_index_k.f32", case_data->state_index_k,
+         case_data->state_index_k_count * QSA_INDEX_STATE_ROWS *
+             sizeof(float)},
+    };
+    for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
+        char path[1200];
+        snprintf(path, sizeof(path), "%s/%s", directory, files[i].name);
+        if (!write_binary_atomic(path, files[i].data, files[i].bytes, error,
+                                 error_len))
+            return false;
+    }
+    for (size_t i = 0; i < sizeof(tensors) / sizeof(tensors[0]); ++i)
+        if (!write_qsa_tensor(directory, tensor_names[i], w->model,
+                              tensors[i], error, error_len))
+            return false;
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/metadata.json", directory);
+    FILE *metadata = fopen(path, "w");
+    if (!metadata) {
+        snprintf(error, error_len, "failed to write QSA metadata");
+        return false;
+    }
+    fprintf(metadata,
+            "{\"real_capture\":true,\"token\":%u,\"layer\":%u,"
+            "\"hidden_elements\":%u,\"selected_count\":%zu,"
+            "\"selected_ids\":[",
+            token, case_data->layer, HIDDEN, case_data->selected_count);
+    for (size_t i = 0; i < case_data->selected_count; ++i)
+        fprintf(metadata, "%s%u", i ? "," : "", case_data->selected[i]);
+    fprintf(metadata,
+            "],\"state\":{\"before_position\":%" PRIu64
+            ",\"before_count\":%zu,\"position\":%" PRIu64
+            ",\"main_k_count\":%zu,\"main_v_count\":%zu,"
+            "\"index_k_count\":%zu,\"pending_count\":%u,"
+            "\"pending_position\":%" PRIu64
+            ",\"main_k_row_bytes\":%zu,\"main_v_row_bytes\":%zu,"
+            "\"index_k_row_bytes\":%zu},\"tensors\":{",
+            case_data->state_before_position, case_data->state_before_count,
+            case_data->state_position, case_data->state_main_k_count,
+            case_data->state_main_v_count, case_data->state_index_k_count,
+            case_data->state_pending_count, case_data->state_pending_position,
+            K_ROWS * sizeof(float), V_ROWS * sizeof(float),
+            QSA_INDEX_STATE_ROWS * sizeof(float));
+    for (size_t i = 0; i < sizeof(tensors) / sizeof(tensors[0]); ++i) {
+        const q38_tensor *tensor = tensors[i];
+        fprintf(metadata, "%s\"%s\":{\"qtype\":%u,\"bytes\":%" PRIu64
+                ",\"rel_offset\":%" PRIu64 ",\"abs_offset\":%" PRIu64 "}",
+                i ? "," : "", tensor_names[i], tensor->type, tensor->bytes,
+                tensor->rel_offset, tensor->abs_offset);
+    }
+    fprintf(metadata,
+            "},\"shapes\":{\"q_projection\":[%u],\"keys\":[%u],"
+            "\"values\":[%u],\"index_projection\":[%u],"
+            "\"attention\":[%u],\"output\":[%u]}}\n",
+            Q_ROWS, K_ROWS, V_ROWS, QSA_INDEX_PROJECTION_ROWS,
+            QSA_ATTENTION_WIDTH, HIDDEN);
+    const bool ok = fclose(metadata) == 0;
+    if (!ok) snprintf(error, error_len, "failed to close QSA metadata");
+    return ok;
+}
+
+static bool capture_qsa_fixtures(worker *w, uint32_t token) {
+    static const uint32_t layers[QSA_CAPTURE_COUNT] = {
+        QSA_EARLY_LAYER, QSA_MIDDLE_LAYER, QSA_LATE_LAYER
+    };
+    static const char *directories[QSA_CAPTURE_COUNT] = {
+        "tests/fixtures/qsa/early",
+        "tests/fixtures/qsa/middle",
+        "tests/fixtures/qsa/late",
+    };
+    qsa_capture_context capture = {.worker = w};
+    for (size_t i = 0; i < QSA_CAPTURE_COUNT; ++i)
+        capture.cases[i].layer = layers[i];
+    float *logits = (float *)calloc(VOCAB, sizeof(float));
+    char error[256] = {0};
+    if (!logits) {
+        fprintf(stderr, "CAPTURE_QSA error=logit allocation failed\n");
+        return false;
+    }
+    q38_forward_state_reset(&w->state);
+    q38_forward_diagnostics diagnostics = {0};
+    diagnostics.boundary_trace = capture_qsa_boundary;
+    diagnostics.qsa_snapshot = capture_qsa_snapshot;
+    diagnostics.trace_user = &capture;
+    diagnostics.backend_context = backend_context_trace;
+    diagnostics.backend_context_user = w->cuda;
+    diagnostics.qsa_qkv_backend = q38_forward_cuda_qsa_qkv_backend;
+    diagnostics.qsa_qkv_backend_user = w->cuda;
+    const q38_forward_backend_config backend = cuda_backend_config(w);
+    setenv("Q38_TRACE_ALL_QSA", "1", 1);
+    const bool ok = q38_forward_full_with_backend_config(
+        w->model, &w->weights, &w->state, &token, 1, logits, VOCAB,
+        &diagnostics, &backend, error, sizeof(error));
+    unsetenv("Q38_TRACE_ALL_QSA");
+    free(logits);
+    if (!ok) {
+        fprintf(stderr, "CAPTURE_QSA error=%s\n",
+                error[0] ? error : "forward failed");
+        return false;
+    }
+    for (size_t i = 0; i < QSA_CAPTURE_COUNT; ++i) {
+        if (!write_qsa_fixture(w, &capture.cases[i], directories[i], token,
+                               error, sizeof(error))) {
+            fprintf(stderr, "CAPTURE_QSA error=%s\n", error);
+            return false;
+        }
+        printf("{\"capture_qsa\":{\"layer\":%u,\"fixture\":\"%s\"}}\n",
+               capture.cases[i].layer, directories[i]);
+    }
+    fflush(stdout);
+    return true;
+}
+
 static bool write_moe_tensor(const char *directory, const char *name,
                              const q38_gguf *model, const q38_tensor *tensor,
                              char *error, size_t error_len) {
@@ -719,6 +1051,247 @@ static bool capture_moe_fixtures(worker *w, uint32_t token) {
         printf("{\"capture_moe\":{\"layer\":%u,\"fixture\":\"%s\"}}\n",
                capture.cases[i].layer, directories[i]);
     }
+    fflush(stdout);
+    return true;
+}
+
+static gdn_capture_case *find_gdn_capture_case(gdn_capture_context *capture,
+                                               uint32_t layer) {
+    for (size_t i = 0; i < GDN_CAPTURE_COUNT; ++i)
+        if (capture->cases[i].layer == layer)
+            return &capture->cases[i];
+    return NULL;
+}
+
+static bool capture_gdn_boundary(uint32_t layer, const char *boundary,
+                                 const float *values, size_t token_count,
+                                 size_t width, void *user, char *error,
+                                 size_t error_len) {
+    gdn_capture_context *capture = (gdn_capture_context *)user;
+    gdn_capture_case *case_data = find_gdn_capture_case(capture, layer);
+    if (!case_data ||
+        (strcmp(boundary, "gdn_qsa_input") != 0 &&
+         strcmp(boundary, "gdn_qsa_output") != 0))
+        return true;
+    if (!values || token_count != 1 || width != HIDDEN) {
+        snprintf(error, error_len, "invalid GDN capture boundary at layer %u",
+                 layer);
+        return false;
+    }
+    if (!strcmp(boundary, "gdn_qsa_input")) {
+        memcpy(case_data->hidden, values, sizeof(case_data->hidden));
+        case_data->input_captured = true;
+    } else {
+        memcpy(case_data->expected, values, sizeof(case_data->expected));
+        case_data->output_captured = true;
+    }
+    return true;
+}
+
+static bool write_gdn_tensor(const char *directory, const char *name,
+                             const q38_gguf *model, const q38_tensor *tensor,
+                             char *error, size_t error_len) {
+    const void *data = tensor ? q38_gguf_tensor_data(model, tensor) : NULL;
+    if (!data) {
+        snprintf(error, error_len, "missing GDN tensor payload %s", name);
+        return false;
+    }
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/%s", directory, name);
+    return write_binary_atomic(path, data, (size_t)tensor->bytes, error,
+                               error_len);
+}
+
+static bool write_gdn_fixture(worker *w, const gdn_capture_case *case_data,
+                              const char *directory, uint32_t token,
+                              const uint32_t *prefix, size_t prefix_count,
+                              char *error, size_t error_len) {
+    const q38_gdn_weights *gdn = &w->weights.layer[case_data->layer].gdn;
+    const q38_tensor *tensors[] = {
+        gdn->in_proj_qkv, gdn->in_proj_z, gdn->in_proj_a, gdn->in_proj_b,
+        gdn->conv1d, gdn->A_log, gdn->dt_bias, gdn->norm, gdn->out_proj,
+    };
+    if (!case_data->input_captured || !case_data->output_captured)
+        return snprintf(error, error_len,
+                        "layer %u GDN trace incomplete", case_data->layer),
+               false;
+    for (size_t i = 0; i < sizeof(tensors) / sizeof(tensors[0]); ++i)
+        if (!tensors[i]) {
+            snprintf(error, error_len, "layer %u GDN tensor set incomplete",
+                     case_data->layer);
+            return false;
+        }
+    if (!make_directory("tests/fixtures/gdn", error, error_len) ||
+        !make_directory(directory, error, error_len))
+        return false;
+
+    char path[1200];
+    struct {
+        const char *name;
+        const void *data;
+        size_t bytes;
+    } files[] = {
+        {"hidden.f32", case_data->hidden, sizeof(case_data->hidden)},
+        {"conv_history.f32", case_data->conv_history,
+         sizeof(case_data->conv_history)},
+        {"recurrent_state.f32", case_data->recurrent_state,
+         sizeof(case_data->recurrent_state)},
+        {"expected.f32", case_data->expected, sizeof(case_data->expected)},
+        {"next_conv_history.f32", case_data->next_conv_history,
+         sizeof(case_data->next_conv_history)},
+        {"next_recurrent_state.f32", case_data->next_recurrent_state,
+         sizeof(case_data->next_recurrent_state)},
+    };
+    for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
+        snprintf(path, sizeof(path), "%s/%s", directory, files[i].name);
+        if (!write_binary_atomic(path, files[i].data, files[i].bytes, error,
+                                 error_len))
+            return false;
+    }
+    const char *tensor_names[] = {
+        "in_proj_qkv.bin", "in_proj_z.bin", "in_proj_a.bin", "in_proj_b.bin",
+        "conv1d.bin", "A_log.bin", "dt_bias.bin", "norm.bin", "out_proj.bin",
+    };
+    for (size_t i = 0; i < sizeof(tensors) / sizeof(tensors[0]); ++i)
+        if (!write_gdn_tensor(directory, tensor_names[i], w->model, tensors[i],
+                              error, error_len))
+            return false;
+
+    snprintf(path, sizeof(path), "%s/metadata.json", directory);
+    FILE *metadata = fopen(path, "w");
+    if (!metadata) {
+        snprintf(error, error_len, "failed to write GDN metadata");
+        return false;
+    }
+    fprintf(metadata,
+            "{\"real_capture\":true,\"layer\":%u,\"token\":%u,"
+            "\"prefix_tokens\":[",
+            case_data->layer, token);
+    for (size_t i = 0; i < prefix_count; ++i)
+        fprintf(metadata, "%s%u", i ? "," : "", prefix[i]);
+    fprintf(metadata, "],\"hidden_elements\":%u,\"conv_history_shape\":[%u,%u],"
+            "\"recurrent_state_shape\":[%u,%u,%u],\"tensors\":{",
+            HIDDEN, GDN_CONV_HISTORY_TOKENS, GDN_QKV_CHANNELS, GDN_HEADS,
+            GDN_HEAD_DIM, GDN_HEAD_DIM);
+    for (size_t i = 0; i < sizeof(tensors) / sizeof(tensors[0]); ++i) {
+        const q38_tensor *tensor = tensors[i];
+        fprintf(metadata,
+                "%s\"%s\":{\"type\":%u,\"bytes\":%" PRIu64
+                ",\"rel_offset\":%" PRIu64 "}",
+                i ? "," : "", tensor_names[i], tensor->type, tensor->bytes,
+                tensor->rel_offset);
+    }
+    fprintf(metadata, "}}\n");
+    const bool ok = fclose(metadata) == 0;
+    if (!ok) snprintf(error, error_len, "failed to close GDN metadata");
+    return ok;
+}
+
+static bool capture_gdn_fixtures(worker *w, uint32_t token) {
+    static const uint32_t layers[GDN_CAPTURE_COUNT] = {
+        GDN_EARLY_LAYER, GDN_MIDDLE_LAYER, GDN_LATE_LAYER
+    };
+    static const char *directories[GDN_CAPTURE_COUNT] = {
+        "tests/fixtures/gdn/early",
+        "tests/fixtures/gdn/middle",
+        "tests/fixtures/gdn/late",
+    };
+    const uint32_t prefix[] = {9419, 17, 478};
+    gdn_capture_context *capture =
+        (gdn_capture_context *)calloc(1, sizeof(*capture));
+    if (!capture) {
+        fprintf(stderr, "CAPTURE_GDN error=capture allocation failed\n");
+        return false;
+    }
+    capture->worker = w;
+    for (size_t i = 0; i < GDN_CAPTURE_COUNT; ++i)
+        capture->cases[i].layer = layers[i];
+
+    char error[256] = {0};
+    float *prefix_logits =
+        (float *)calloc(3u * VOCAB, sizeof(float));
+    float *token_logits = (float *)calloc(VOCAB, sizeof(float));
+    if (!prefix_logits || !token_logits) {
+        free(prefix_logits);
+        free(token_logits);
+        free(capture);
+        fprintf(stderr, "CAPTURE_GDN error=logit allocation failed\n");
+        return false;
+    }
+    q38_forward_state_reset(&w->state);
+    const q38_forward_backend_config backend = cuda_backend_config(w);
+    q38_forward_diagnostics prefix_diagnostics = {0};
+    prefix_diagnostics.backend_context = backend_context_trace;
+    prefix_diagnostics.backend_context_user = w->cuda;
+    if (!q38_forward_full_with_backend_config(
+            w->model, &w->weights, &w->state, prefix, 3, prefix_logits,
+            VOCAB, &prefix_diagnostics, &backend, error, sizeof(error))) {
+        fprintf(stderr, "CAPTURE_GDN error=prefix forward: %s\n", error);
+        free(prefix_logits);
+        free(token_logits);
+        free(capture);
+        return false;
+    }
+    for (size_t i = 0; i < GDN_CAPTURE_COUNT; ++i) {
+        const int slot = q38_gdn_slot_for_layer(
+            &w->state.storage.layout, capture->cases[i].layer);
+        if (slot < 0) {
+            fprintf(stderr, "CAPTURE_GDN error=invalid GDN layer %u\n",
+                    capture->cases[i].layer);
+            free(prefix_logits);
+            free(token_logits);
+            free(capture);
+            return false;
+        }
+        memcpy(capture->cases[i].conv_history,
+               q38_state_conv_history_slot(&w->state.storage, (uint32_t)slot),
+               sizeof(capture->cases[i].conv_history));
+        memcpy(capture->cases[i].recurrent_state,
+               q38_state_recurrent_slot(&w->state.storage, (uint32_t)slot),
+               sizeof(capture->cases[i].recurrent_state));
+    }
+    q38_forward_diagnostics diagnostics = {0};
+    diagnostics.boundary_trace = capture_gdn_boundary;
+    diagnostics.trace_user = capture;
+    diagnostics.backend_context = backend_context_trace;
+    diagnostics.backend_context_user = w->cuda;
+    setenv("Q38_TRACE_ALL_QSA", "1", 1);
+    const bool ok = q38_forward_full_with_backend_config(
+        w->model, &w->weights, &w->state, &token, 1, token_logits, VOCAB,
+        &diagnostics, &backend, error, sizeof(error));
+    unsetenv("Q38_TRACE_ALL_QSA");
+    if (!ok) {
+        fprintf(stderr, "CAPTURE_GDN error=token forward: %s\n",
+                error[0] ? error : "forward failed");
+        free(prefix_logits);
+        free(token_logits);
+        free(capture);
+        return false;
+    }
+    for (size_t i = 0; i < GDN_CAPTURE_COUNT; ++i) {
+        const int slot = q38_gdn_slot_for_layer(
+            &w->state.storage.layout, capture->cases[i].layer);
+        memcpy(capture->cases[i].next_conv_history,
+               q38_state_conv_history_slot(&w->state.storage, (uint32_t)slot),
+               sizeof(capture->cases[i].next_conv_history));
+        memcpy(capture->cases[i].next_recurrent_state,
+               q38_state_recurrent_slot(&w->state.storage, (uint32_t)slot),
+               sizeof(capture->cases[i].next_recurrent_state));
+        if (!write_gdn_fixture(w, &capture->cases[i], directories[i], token,
+                               prefix, sizeof(prefix) / sizeof(prefix[0]),
+                               error, sizeof(error))) {
+            fprintf(stderr, "CAPTURE_GDN error=%s\n", error);
+            free(prefix_logits);
+            free(token_logits);
+            free(capture);
+            return false;
+        }
+        printf("{\"capture_gdn\":{\"layer\":%u,\"fixture\":\"%s\"}}\n",
+               capture->cases[i].layer, directories[i]);
+    }
+    free(prefix_logits);
+    free(token_logits);
+    free(capture);
     fflush(stdout);
     return true;
 }
@@ -1023,7 +1596,7 @@ int main(int argc, char **argv) {
     printf("{\"ready\":true,\"commands\":[\"RESET\",\"LOAD_QSA_PLUGIN\","
            "\"UNLOAD_QSA_PLUGIN\",\"RUN_QKV_FIXTURE\",\"RUN_QKV\","
            "\"RUN_FORWARD\",\"BENCH_QSA\",\"CAPTURE\",\"CAPTURE_QSA\","
-           "\"CAPTURE_MOE\","
+           "\"CAPTURE_MOE\",\"CAPTURE_GDN\","
            "\"STATUS\",\"QUIT\"]}\n");
     status(&w);
     char line[1024];
@@ -1052,8 +1625,15 @@ int main(int argc, char **argv) {
             uint32_t token = 9419;
             parse_u32(line, "token=", &token);
             capture_moe_fixtures(&w, token);
-        } else if (!strncmp(line, "CAPTURE_QSA", 11) ||
-                   !strncmp(line, "CAPTURE", 7)) {
+        } else if (!strncmp(line, "CAPTURE_GDN", 11)) {
+            uint32_t token = 220;
+            parse_u32(line, "token=", &token);
+            capture_gdn_fixtures(&w, token);
+        } else if (!strncmp(line, "CAPTURE_QSA", 11)) {
+            uint32_t token = 9419;
+            parse_u32(line, "token=", &token);
+            capture_qsa_fixtures(&w, token);
+        } else if (!strncmp(line, "CAPTURE", 7)) {
             uint32_t token = 9419;
             uint32_t layer = QSA_LAYER;
             parse_u32(line, "token=", &token);

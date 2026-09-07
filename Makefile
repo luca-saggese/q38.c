@@ -55,7 +55,8 @@ TEST_BINS := \
 	check-perf-artifacts test-steering test-steering-cuda \
 	gr-fixtures gr-bench gr-c1-bench gr-c2-bench gr-c3-bench \
 	gr-c3-bundle gr-c4-bench test-gr test-moe bench-moe \
-	gdn-fixtures test-gdn bench-gdn bench-gdn-c1 bench-gdn-c2 bench-gdn-c3
+	gdn-fixtures test-gdn bench-gdn bench-gdn-c1 bench-gdn-c2 bench-gdn-c3 \
+	bench-qsa
 
 all: q38
 
@@ -377,6 +378,28 @@ bench-gdn-c3: tests/gdn/gdn_bench
 	./tests/gdn/gdn_bench "$(GDN_FIXTURE_DIR)" "$$tmp" gdn_c3 && \
 	mv "$$tmp" artifacts/perf/subsystems/gdn_c3.json || \
 		{ status=$$?; rm -f "$$tmp"; exit $$status; }
+
+tests/qsa/qsa_reference.o: tests/qsa/qsa_reference.c tests/qsa/qsa_reference.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+tests/qsa/qsa_bench.o: tests/qsa/qsa_bench.cu tests/qsa/qsa_reference.h \
+	q38_qsa_cuda.h q38_cuda_primitives.h
+	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+
+tests/qsa/qsa_bench: tests/qsa/qsa_bench.o tests/qsa/qsa_reference.o \
+	q38_qsa_cuda.o q38_cuda_primitives.o
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS)
+
+bench-qsa: tests/qsa/qsa_bench
+	@test -d tests/fixtures/qsa/early && \
+	test -d tests/fixtures/qsa/middle && \
+	test -d tests/fixtures/qsa/late || \
+	{ echo "QSA fixtures missing; run one authorized CAPTURE_QSA load"; exit 1; }
+	@mkdir -p artifacts/perf/subsystems
+	@tmp="artifacts/perf/subsystems/qsa_reference.json.tmp"; rm -f "$$tmp"; \
+	./tests/qsa/qsa_bench tests/fixtures/qsa "$$tmp" && \
+	mv "$$tmp" artifacts/perf/subsystems/qsa_reference.json || \
+	{ status=$$?; rm -f "$$tmp"; exit $$status; }
 
 tests/q2_canonical_bench: tests/q2_canonical_bench.c \
 		$(CANONICAL_BENCH_C_OBJS) $(CANONICAL_BENCH_CUDA_OBJS)

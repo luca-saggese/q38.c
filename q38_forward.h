@@ -93,6 +93,30 @@ typedef struct {
 } q38_forward_qsa_timing;
 
 typedef struct {
+    const float *q_projection;
+    size_t q_projection_count;
+    const float *keys;
+    size_t keys_count;
+    const float *values;
+    size_t values_count;
+    const float *index_projection;
+    size_t index_projection_count;
+    const float *attention;
+    size_t attention_count;
+    const float *output;
+    size_t output_count;
+    const uint32_t *selected;
+    size_t selected_count;
+    const q38_qsa_state *state;
+    uint64_t state_before_position;
+    size_t state_before_count;
+} q38_forward_qsa_snapshot;
+
+typedef bool (*q38_forward_qsa_snapshot_fn)(
+    uint32_t layer, const q38_forward_qsa_snapshot *snapshot, void *user,
+    char *error, size_t error_len);
+
+typedef struct {
     uint32_t layer;
     bool qkv_backend_used;
     bool output_projection_backend_used;
@@ -243,6 +267,7 @@ typedef struct {
     void *backend_context_user;
     q38_forward_qsa_timing *qsa_timing;
     q38_forward_qsa_projection_trace_fn qsa_projection_trace;
+    q38_forward_qsa_snapshot_fn qsa_snapshot;
     q38_forward_qsa_qkv_backend qsa_qkv_backend;
     void *qsa_qkv_backend_user;
     const q38_directional_steering *directional_steering;
