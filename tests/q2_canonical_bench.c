@@ -324,7 +324,12 @@ static q2_owner owner_for_record(const q38_forward_cuda_telemetry *record) {
         return Q2_OWNER_PLE;
     if (subsystem && !strcmp(subsystem, "lm_head"))
         return Q2_OWNER_LM_HEAD;
-    return Q2_OWNER_UNKNOWN;
+    /*
+     * The remaining backend callbacks are scalar/runtime glue (for example
+     * row_matvec) that has no finer logical stage.  Keep them attributed to
+     * the forward runtime rather than leaving a matrix call owner-less.
+     */
+    return Q2_OWNER_OTHER_LAYER;
 }
 
 static void telemetry_observer(const q38_forward_cuda_telemetry *record,
