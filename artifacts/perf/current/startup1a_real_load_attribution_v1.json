@@ -1,5 +1,6 @@
 {
   "phase": "STARTUP-1A",
+  "retry": true,
   "model_loaded": true,
   "decode_benchmark": false,
   "timer_clock": "CLOCK_MONOTONIC_RAW",
@@ -8,16 +9,16 @@
     "cuda_prepare_ms": "INVALID as decomposition parent",
     "runtime_init_ms": "VALID total initialization"
   },
-  "runtime_init_ms": 50854.734,
-  "gguf_tokenizer_actual_work_ms": 43824.274000000005,
+  "runtime_init_ms": 33813.716,
+  "gguf_tokenizer_actual_work_ms": 27290.339,
   "residency": {
-    "plan_ms": 26.136,
-    "device_alloc_ms": 2178.978,
-    "source_mmap_to_staging_ms": 3660.852,
-    "h2d_enqueue_ms": 2.202,
-    "d2d_enqueue_ms": 6.040,
-    "final_cuda_completion_wait_ms": 12.790,
-    "other_ms": 1143.454
+    "plan_ms": 26.162,
+    "device_alloc_ms": 1956.967,
+    "source_mmap_to_staging_ms": 3382.299,
+    "h2d_enqueue_ms": 2.273,
+    "d2d_enqueue_ms": 7.341,
+    "final_cuda_completion_wait_ms": 12.718,
+    "other_ms": 1135.609
   },
   "bytes": {
     "planned_resident": 49500850200,
@@ -28,8 +29,8 @@
   },
   "throughput": {
     "resident_gib": 46.101259253919125,
-    "source_copy_gb_s": 13.521674790458615,
-    "h2d_host_completion_wait_gb_s": 3870.277576231431,
+    "source_copy_gb_s": 14.635267372872711,
+    "h2d_host_completion_wait_gb_s": 3892.188252869948,
     "h2d_host_completion_wait_definition": "bytes divided by final cudaStreamSynchronize blocked time; not a physical DMA throughput measurement"
   },
   "allocations": {
@@ -40,8 +41,8 @@
   "faults": {
     "mincore_pages_before": 15371315,
     "mincore_pages_after": 15371315,
-    "minor_before": 278147,
-    "minor_after": 1350067,
+    "minor_before": 278195,
+    "minor_after": 1350115,
     "major_before": 0,
     "major_after": 0
   },
@@ -53,906 +54,906 @@
       {
         "source_offset": 135104,
         "bytes": 1271398400,
-        "source_copy_ms": 74.662,
-        "h2d_enqueue_ms": 0.034
+        "source_copy_ms": 68.754,
+        "h2d_enqueue_ms": 0.037
       },
       {
         "source_offset": 1271533504,
         "bytes": 1271398400,
-        "source_copy_ms": 88.212,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 82.364,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 2542931904,
         "bytes": 142254528,
-        "source_copy_ms": 9.490,
+        "source_copy_ms": 8.794,
         "h2d_enqueue_ms": 0.017
       },
       {
         "source_offset": 2685186432,
         "bytes": 275251200,
-        "source_copy_ms": 29.077,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 28.163,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 2960437632,
         "bytes": 550502400,
-        "source_copy_ms": 35.668,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.118,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 3510940032,
         "bytes": 154793408,
-        "source_copy_ms": 14.770,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 14.062,
+        "h2d_enqueue_ms": 0.055
       },
       {
         "source_offset": 3665733440,
         "bytes": 275251200,
-        "source_copy_ms": 18.264,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.970,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 3940984640,
         "bytes": 550502400,
-        "source_copy_ms": 37.274,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.936,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 4491487040,
         "bytes": 53662744,
-        "source_copy_ms": 3.981,
-        "h2d_enqueue_ms": 0.018
+        "source_copy_ms": 3.633,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 58945411936,
         "bytes": 136090304,
-        "source_copy_ms": 15.111,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 13.773,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 59081502240,
         "bytes": 275251200,
-        "source_copy_ms": 18.185,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.104,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 59356753440,
         "bytes": 550502400,
-        "source_copy_ms": 38.354,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 34.292,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 59907255840,
         "bytes": 38876160,
-        "source_copy_ms": 2.755,
+        "source_copy_ms": 2.728,
         "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 59946132000,
         "bytes": 275251200,
-        "source_copy_ms": 23.503,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 22.843,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 60221383200,
         "bytes": 550502400,
-        "source_copy_ms": 36.329,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.497,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 60771885600,
         "bytes": 257686464,
-        "source_copy_ms": 22.265,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 21.347,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 61029572064,
         "bytes": 275251200,
-        "source_copy_ms": 19.802,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.242,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 61304823264,
         "bytes": 550502400,
-        "source_copy_ms": 34.584,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 31.889,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 61855325664,
         "bytes": 154793408,
-        "source_copy_ms": 14.482,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 10.330,
+        "h2d_enqueue_ms": 0.061
       },
       {
         "source_offset": 62010119072,
         "bytes": 275251200,
-        "source_copy_ms": 17.740,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.253,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 62285370272,
         "bytes": 550502400,
-        "source_copy_ms": 36.670,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 32.899,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 62835872672,
         "bytes": 154793408,
-        "source_copy_ms": 15.908,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 15.830,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 62990666080,
         "bytes": 275251200,
-        "source_copy_ms": 17.667,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.853,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 63265917280,
         "bytes": 550502400,
-        "source_copy_ms": 40.004,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 38.556,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 63816419680,
         "bytes": 38876160,
-        "source_copy_ms": 2.961,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 2.910,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 63855295840,
         "bytes": 275251200,
-        "source_copy_ms": 24.830,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 23.701,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 64130547040,
         "bytes": 550502400,
-        "source_copy_ms": 40.525,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 39.694,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 64681049440,
         "bytes": 257686464,
-        "source_copy_ms": 22.080,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 21.230,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 64938735904,
         "bytes": 275251200,
-        "source_copy_ms": 18.328,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 17.079,
+        "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 65213987104,
         "bytes": 550502400,
-        "source_copy_ms": 34.835,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 31.867,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 65764489504,
         "bytes": 154793408,
-        "source_copy_ms": 14.737,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 11.695,
+        "h2d_enqueue_ms": 0.058
       },
       {
         "source_offset": 65919282912,
         "bytes": 275251200,
-        "source_copy_ms": 18.687,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.328,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 66194534112,
         "bytes": 550502400,
-        "source_copy_ms": 36.408,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.670,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 66745036512,
         "bytes": 154793408,
-        "source_copy_ms": 13.962,
-        "h2d_enqueue_ms": 0.060
+        "source_copy_ms": 13.714,
+        "h2d_enqueue_ms": 0.068
       },
       {
         "source_offset": 66899829920,
         "bytes": 275251200,
-        "source_copy_ms": 18.094,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 17.173,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 67175081120,
         "bytes": 550502400,
-        "source_copy_ms": 34.540,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 31.837,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 67725583520,
         "bytes": 38876160,
-        "source_copy_ms": 2.914,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 2.724,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 67764459680,
         "bytes": 275251200,
-        "source_copy_ms": 21.522,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 20.330,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 68039710880,
         "bytes": 550502400,
-        "source_copy_ms": 34.648,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 32.247,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 68590213280,
         "bytes": 257686464,
-        "source_copy_ms": 20.173,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 19.537,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 68847899744,
         "bytes": 275251200,
-        "source_copy_ms": 19.064,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 18.022,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 69123150944,
         "bytes": 550502400,
-        "source_copy_ms": 35.942,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 33.402,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 69673653344,
         "bytes": 154793408,
-        "source_copy_ms": 15.385,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 9.292,
+        "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 69828446752,
         "bytes": 275251200,
-        "source_copy_ms": 17.265,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 20.346,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 70103697952,
         "bytes": 550502400,
-        "source_copy_ms": 35.490,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.010,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 70654200352,
         "bytes": 154793408,
-        "source_copy_ms": 14.794,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 14.623,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 70808993760,
         "bytes": 275251200,
-        "source_copy_ms": 17.809,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 16.882,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 71084244960,
         "bytes": 550502400,
-        "source_copy_ms": 35.938,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 32.741,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 71634747360,
         "bytes": 154793408,
-        "source_copy_ms": 14.462,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 9.946,
+        "h2d_enqueue_ms": 0.046
       },
       {
         "source_offset": 71789540768,
         "bytes": 275251200,
-        "source_copy_ms": 17.447,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 19.402,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 72064791968,
         "bytes": 550502400,
-        "source_copy_ms": 37.248,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.771,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 72615294368,
         "bytes": 38876160,
-        "source_copy_ms": 2.949,
-        "h2d_enqueue_ms": 0.020
+        "source_copy_ms": 2.621,
+        "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 72654170528,
         "bytes": 275251200,
-        "source_copy_ms": 25.060,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 22.928,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 72929421728,
         "bytes": 550502400,
-        "source_copy_ms": 42.590,
+        "source_copy_ms": 40.478,
         "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 73479924128,
         "bytes": 257686464,
-        "source_copy_ms": 24.234,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 22.366,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 73737610592,
         "bytes": 275251200,
-        "source_copy_ms": 22.540,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 20.216,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 74012861792,
         "bytes": 550502400,
-        "source_copy_ms": 43.047,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 39.581,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 74563364192,
         "bytes": 154793408,
-        "source_copy_ms": 16.625,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 14.838,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 74718157600,
         "bytes": 275251200,
-        "source_copy_ms": 21.687,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 19.328,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 74993408800,
         "bytes": 550502400,
-        "source_copy_ms": 44.066,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 41.267,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 75543911200,
         "bytes": 154793408,
-        "source_copy_ms": 16.986,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.326,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 75698704608,
         "bytes": 275251200,
-        "source_copy_ms": 23.581,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 21.415,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 75973955808,
         "bytes": 550502400,
-        "source_copy_ms": 44.782,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 38.775,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 76524458208,
         "bytes": 38876160,
-        "source_copy_ms": 3.504,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 3.082,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 76563334368,
         "bytes": 275251200,
-        "source_copy_ms": 25.250,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 22.687,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 76838585568,
         "bytes": 550502400,
-        "source_copy_ms": 43.977,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 38.371,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 77389087968,
         "bytes": 257686464,
-        "source_copy_ms": 23.244,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 21.672,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 77646774432,
         "bytes": 275251200,
-        "source_copy_ms": 22.792,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.858,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 77922025632,
         "bytes": 550502400,
-        "source_copy_ms": 41.723,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 37.319,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 78472528032,
         "bytes": 154793408,
-        "source_copy_ms": 10.265,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 10.401,
+        "h2d_enqueue_ms": 0.056
       },
       {
         "source_offset": 78627321440,
         "bytes": 275251200,
-        "source_copy_ms": 23.097,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 19.257,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 78902572640,
         "bytes": 550502400,
-        "source_copy_ms": 38.097,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 36.477,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 79453075040,
         "bytes": 38876160,
-        "source_copy_ms": 2.521,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 2.378,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 79491951200,
         "bytes": 275251200,
-        "source_copy_ms": 21.995,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 21.073,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 79767202400,
         "bytes": 550502400,
-        "source_copy_ms": 35.371,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.040,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 80317704800,
         "bytes": 257686464,
-        "source_copy_ms": 20.667,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 20.651,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 80575391264,
         "bytes": 275251200,
-        "source_copy_ms": 18.941,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 18.033,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 80850642464,
         "bytes": 550502400,
-        "source_copy_ms": 38.004,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 35.686,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 81401144864,
         "bytes": 38876160,
-        "source_copy_ms": 3.451,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 3.140,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 81440021024,
         "bytes": 275251200,
-        "source_copy_ms": 21.988,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 20.148,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 81715272224,
         "bytes": 550502400,
-        "source_copy_ms": 36.809,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 32.626,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 82265774624,
         "bytes": 257686464,
-        "source_copy_ms": 20.751,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 19.720,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 82523461088,
         "bytes": 275251200,
-        "source_copy_ms": 19.876,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 18.641,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 82798712288,
         "bytes": 550502400,
-        "source_copy_ms": 35.472,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 32.678,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 83349214688,
         "bytes": 154793408,
-        "source_copy_ms": 15.276,
-        "h2d_enqueue_ms": 0.012
+        "source_copy_ms": 14.306,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 83504008096,
         "bytes": 275251200,
-        "source_copy_ms": 17.679,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.491,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 83779259296,
         "bytes": 550502400,
-        "source_copy_ms": 36.280,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.147,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 84329761696,
         "bytes": 154793408,
-        "source_copy_ms": 15.296,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 14.300,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 84484555104,
         "bytes": 275251200,
-        "source_copy_ms": 19.219,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 17.119,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 84759806304,
         "bytes": 550502400,
-        "source_copy_ms": 37.684,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 34.287,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 85310308704,
         "bytes": 38876160,
-        "source_copy_ms": 2.626,
+        "source_copy_ms": 2.365,
         "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 85349184864,
         "bytes": 275251200,
-        "source_copy_ms": 21.746,
+        "source_copy_ms": 20.406,
         "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 85624436064,
         "bytes": 550502400,
-        "source_copy_ms": 36.115,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.300,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 86174938464,
         "bytes": 257686464,
-        "source_copy_ms": 21.024,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 19.745,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 86432624928,
         "bytes": 275251200,
-        "source_copy_ms": 19.568,
+        "source_copy_ms": 17.872,
         "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 86707876128,
         "bytes": 550502400,
-        "source_copy_ms": 36.188,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.153,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 87258378528,
         "bytes": 154793408,
-        "source_copy_ms": 14.585,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 12.785,
+        "h2d_enqueue_ms": 0.062
       },
       {
         "source_offset": 87413171936,
         "bytes": 275251200,
-        "source_copy_ms": 18.934,
-        "h2d_enqueue_ms": 0.011
+        "source_copy_ms": 18.187,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 87688423136,
         "bytes": 550502400,
-        "source_copy_ms": 43.562,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 39.463,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 88238925536,
         "bytes": 154793408,
-        "source_copy_ms": 15.871,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 14.884,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 88393718944,
         "bytes": 275251200,
-        "source_copy_ms": 21.474,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 18.622,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 88668970144,
         "bytes": 550502400,
-        "source_copy_ms": 39.387,
+        "source_copy_ms": 36.941,
         "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 89219472544,
         "bytes": 38876160,
-        "source_copy_ms": 3.184,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 2.685,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 89258348704,
         "bytes": 275251200,
-        "source_copy_ms": 23.884,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 22.092,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 89533599904,
         "bytes": 550502400,
-        "source_copy_ms": 39.670,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 36.216,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 90084102304,
         "bytes": 257686464,
-        "source_copy_ms": 21.383,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.985,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 90341788768,
         "bytes": 275251200,
-        "source_copy_ms": 21.277,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.739,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 90617039968,
         "bytes": 550502400,
-        "source_copy_ms": 40.756,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 36.729,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 91167542368,
         "bytes": 154793408,
-        "source_copy_ms": 16.216,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 16.236,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 91322335776,
         "bytes": 275251200,
-        "source_copy_ms": 20.869,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 18.934,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 91597586976,
         "bytes": 550502400,
-        "source_copy_ms": 41.434,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 36.501,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 92148089376,
         "bytes": 154793408,
-        "source_copy_ms": 15.966,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 11.028,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 92302882784,
         "bytes": 275251200,
-        "source_copy_ms": 19.930,
-        "h2d_enqueue_ms": 0.011
+        "source_copy_ms": 23.153,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 92578133984,
         "bytes": 550502400,
-        "source_copy_ms": 41.632,
+        "source_copy_ms": 39.429,
         "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 93128636384,
         "bytes": 154793408,
-        "source_copy_ms": 16.574,
-        "h2d_enqueue_ms": 0.012
+        "source_copy_ms": 15.879,
+        "h2d_enqueue_ms": 0.010
       },
       {
         "source_offset": 93283429792,
         "bytes": 275251200,
-        "source_copy_ms": 18.178,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 16.739,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 93558680992,
         "bytes": 550502400,
-        "source_copy_ms": 36.684,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.491,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 94109183392,
         "bytes": 38876160,
-        "source_copy_ms": 2.705,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 2.478,
+        "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 94148059552,
         "bytes": 275251200,
-        "source_copy_ms": 21.614,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 20.193,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 94423310752,
         "bytes": 550502400,
-        "source_copy_ms": 36.782,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.556,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 94973813152,
         "bytes": 257686464,
-        "source_copy_ms": 21.898,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 20.579,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 95231499616,
         "bytes": 275251200,
-        "source_copy_ms": 19.361,
-        "h2d_enqueue_ms": 0.012
+        "source_copy_ms": 17.847,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 95506750816,
         "bytes": 550502400,
-        "source_copy_ms": 36.655,
-        "h2d_enqueue_ms": 0.020
+        "source_copy_ms": 33.410,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 96057253216,
         "bytes": 154793408,
-        "source_copy_ms": 14.567,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 11.275,
+        "h2d_enqueue_ms": 0.065
       },
       {
         "source_offset": 96212046624,
         "bytes": 275251200,
-        "source_copy_ms": 18.033,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 18.996,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 96487297824,
         "bytes": 550502400,
-        "source_copy_ms": 37.284,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 34.770,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 97037800224,
         "bytes": 154793408,
-        "source_copy_ms": 15.398,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 14.797,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 97192593632,
         "bytes": 275251200,
-        "source_copy_ms": 19.088,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 17.827,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 97467844832,
         "bytes": 550502400,
-        "source_copy_ms": 39.539,
+        "source_copy_ms": 34.958,
         "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 98018347232,
         "bytes": 38876160,
-        "source_copy_ms": 2.927,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 2.670,
+        "h2d_enqueue_ms": 0.017
       },
       {
         "source_offset": 98057223392,
         "bytes": 275251200,
-        "source_copy_ms": 24.324,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 21.939,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 98332474592,
         "bytes": 550502400,
-        "source_copy_ms": 39.107,
+        "source_copy_ms": 35.890,
         "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 98882976992,
         "bytes": 257686464,
-        "source_copy_ms": 22.524,
+        "source_copy_ms": 21.328,
         "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 99140663456,
         "bytes": 275251200,
-        "source_copy_ms": 20.599,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 19.547,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 99415914656,
         "bytes": 550502400,
-        "source_copy_ms": 38.165,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 34.553,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 99966417056,
         "bytes": 154793408,
-        "source_copy_ms": 15.616,
+        "source_copy_ms": 14.254,
         "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 100121210464,
         "bytes": 275251200,
-        "source_copy_ms": 19.220,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 17.595,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 100396461664,
         "bytes": 550502400,
-        "source_copy_ms": 38.441,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 34.580,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 100946964064,
         "bytes": 38876160,
-        "source_copy_ms": 3.124,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 2.655,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 100985840224,
         "bytes": 275251200,
-        "source_copy_ms": 24.436,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 21.636,
+        "h2d_enqueue_ms": 0.010
       },
       {
         "source_offset": 101261091424,
         "bytes": 550502400,
-        "source_copy_ms": 40.849,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 36.017,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 101811593824,
         "bytes": 257686464,
-        "source_copy_ms": 23.156,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 22.649,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 102069280288,
         "bytes": 275251200,
-        "source_copy_ms": 20.591,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.790,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 102344531488,
         "bytes": 550502400,
-        "source_copy_ms": 39.112,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 36.265,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 102895033888,
         "bytes": 154793408,
-        "source_copy_ms": 15.794,
+        "source_copy_ms": 14.748,
         "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 103049827296,
         "bytes": 275251200,
-        "source_copy_ms": 17.973,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.375,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 103325078496,
         "bytes": 550502400,
-        "source_copy_ms": 39.057,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 34.694,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 103875580896,
         "bytes": 25666560,
-        "source_copy_ms": 1.975,
+        "source_copy_ms": 1.742,
         "h2d_enqueue_ms": 0.014
       }
     ]
   },
   "raw": {
-    "gguf_open_ms": 0.103,
-    "tokenizer_ms": 43822.657,
-    "binding_ms": 1.514,
-    "cuda_prepare_ms": 7030.452,
-    "runtime_init_ms": 50854.734,
-    "residency_plan_ms": 26.136,
-    "residency_device_alloc_ms": 2178.978,
-    "residency_source_copy_ms": 3660.852,
-    "residency_h2d_enqueue_ms": 2.202,
-    "residency_d2d_enqueue_ms": 6.040,
-    "residency_final_wait_ms": 12.790,
-    "residency_other_ms": 1143.454,
+    "gguf_open_ms": 0.124,
+    "tokenizer_ms": 27288.717,
+    "binding_ms": 1.498,
+    "cuda_prepare_ms": 6523.370,
+    "runtime_init_ms": 33813.716,
+    "residency_plan_ms": 26.162,
+    "residency_device_alloc_ms": 1956.967,
+    "residency_source_copy_ms": 3382.299,
+    "residency_h2d_enqueue_ms": 2.273,
+    "residency_d2d_enqueue_ms": 7.341,
+    "residency_final_wait_ms": 12.718,
+    "residency_other_ms": 1135.609,
     "residency_planned_bytes": 49500850200,
     "residency_staged_bytes": 49500850200,
     "residency_h2d_bytes": 49500850200,
@@ -964,897 +965,897 @@
     "residency_allocated_bytes": 52043647000,
     "mincore_pages_before": 15371315,
     "mincore_pages_after": 15371315,
-    "minor_faults_before": 278147,
-    "minor_faults_after": 1350067,
+    "minor_faults_before": 278195,
+    "minor_faults_after": 1350115,
     "major_faults_before": 0,
     "major_faults_after": 0,
     "span_timings": [
       {
         "source_offset": 135104,
         "bytes": 1271398400,
-        "source_copy_ms": 74.662,
-        "h2d_enqueue_ms": 0.034
+        "source_copy_ms": 68.754,
+        "h2d_enqueue_ms": 0.037
       },
       {
         "source_offset": 1271533504,
         "bytes": 1271398400,
-        "source_copy_ms": 88.212,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 82.364,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 2542931904,
         "bytes": 142254528,
-        "source_copy_ms": 9.490,
+        "source_copy_ms": 8.794,
         "h2d_enqueue_ms": 0.017
       },
       {
         "source_offset": 2685186432,
         "bytes": 275251200,
-        "source_copy_ms": 29.077,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 28.163,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 2960437632,
         "bytes": 550502400,
-        "source_copy_ms": 35.668,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.118,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 3510940032,
         "bytes": 154793408,
-        "source_copy_ms": 14.770,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 14.062,
+        "h2d_enqueue_ms": 0.055
       },
       {
         "source_offset": 3665733440,
         "bytes": 275251200,
-        "source_copy_ms": 18.264,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.970,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 3940984640,
         "bytes": 550502400,
-        "source_copy_ms": 37.274,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.936,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 4491487040,
         "bytes": 53662744,
-        "source_copy_ms": 3.981,
-        "h2d_enqueue_ms": 0.018
+        "source_copy_ms": 3.633,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 58945411936,
         "bytes": 136090304,
-        "source_copy_ms": 15.111,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 13.773,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 59081502240,
         "bytes": 275251200,
-        "source_copy_ms": 18.185,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.104,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 59356753440,
         "bytes": 550502400,
-        "source_copy_ms": 38.354,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 34.292,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 59907255840,
         "bytes": 38876160,
-        "source_copy_ms": 2.755,
+        "source_copy_ms": 2.728,
         "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 59946132000,
         "bytes": 275251200,
-        "source_copy_ms": 23.503,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 22.843,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 60221383200,
         "bytes": 550502400,
-        "source_copy_ms": 36.329,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.497,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 60771885600,
         "bytes": 257686464,
-        "source_copy_ms": 22.265,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 21.347,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 61029572064,
         "bytes": 275251200,
-        "source_copy_ms": 19.802,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.242,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 61304823264,
         "bytes": 550502400,
-        "source_copy_ms": 34.584,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 31.889,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 61855325664,
         "bytes": 154793408,
-        "source_copy_ms": 14.482,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 10.330,
+        "h2d_enqueue_ms": 0.061
       },
       {
         "source_offset": 62010119072,
         "bytes": 275251200,
-        "source_copy_ms": 17.740,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.253,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 62285370272,
         "bytes": 550502400,
-        "source_copy_ms": 36.670,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 32.899,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 62835872672,
         "bytes": 154793408,
-        "source_copy_ms": 15.908,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 15.830,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 62990666080,
         "bytes": 275251200,
-        "source_copy_ms": 17.667,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.853,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 63265917280,
         "bytes": 550502400,
-        "source_copy_ms": 40.004,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 38.556,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 63816419680,
         "bytes": 38876160,
-        "source_copy_ms": 2.961,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 2.910,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 63855295840,
         "bytes": 275251200,
-        "source_copy_ms": 24.830,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 23.701,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 64130547040,
         "bytes": 550502400,
-        "source_copy_ms": 40.525,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 39.694,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 64681049440,
         "bytes": 257686464,
-        "source_copy_ms": 22.080,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 21.230,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 64938735904,
         "bytes": 275251200,
-        "source_copy_ms": 18.328,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 17.079,
+        "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 65213987104,
         "bytes": 550502400,
-        "source_copy_ms": 34.835,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 31.867,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 65764489504,
         "bytes": 154793408,
-        "source_copy_ms": 14.737,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 11.695,
+        "h2d_enqueue_ms": 0.058
       },
       {
         "source_offset": 65919282912,
         "bytes": 275251200,
-        "source_copy_ms": 18.687,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.328,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 66194534112,
         "bytes": 550502400,
-        "source_copy_ms": 36.408,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.670,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 66745036512,
         "bytes": 154793408,
-        "source_copy_ms": 13.962,
-        "h2d_enqueue_ms": 0.060
+        "source_copy_ms": 13.714,
+        "h2d_enqueue_ms": 0.068
       },
       {
         "source_offset": 66899829920,
         "bytes": 275251200,
-        "source_copy_ms": 18.094,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 17.173,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 67175081120,
         "bytes": 550502400,
-        "source_copy_ms": 34.540,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 31.837,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 67725583520,
         "bytes": 38876160,
-        "source_copy_ms": 2.914,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 2.724,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 67764459680,
         "bytes": 275251200,
-        "source_copy_ms": 21.522,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 20.330,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 68039710880,
         "bytes": 550502400,
-        "source_copy_ms": 34.648,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 32.247,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 68590213280,
         "bytes": 257686464,
-        "source_copy_ms": 20.173,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 19.537,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 68847899744,
         "bytes": 275251200,
-        "source_copy_ms": 19.064,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 18.022,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 69123150944,
         "bytes": 550502400,
-        "source_copy_ms": 35.942,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 33.402,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 69673653344,
         "bytes": 154793408,
-        "source_copy_ms": 15.385,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 9.292,
+        "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 69828446752,
         "bytes": 275251200,
-        "source_copy_ms": 17.265,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 20.346,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 70103697952,
         "bytes": 550502400,
-        "source_copy_ms": 35.490,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.010,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 70654200352,
         "bytes": 154793408,
-        "source_copy_ms": 14.794,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 14.623,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 70808993760,
         "bytes": 275251200,
-        "source_copy_ms": 17.809,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 16.882,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 71084244960,
         "bytes": 550502400,
-        "source_copy_ms": 35.938,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 32.741,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 71634747360,
         "bytes": 154793408,
-        "source_copy_ms": 14.462,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 9.946,
+        "h2d_enqueue_ms": 0.046
       },
       {
         "source_offset": 71789540768,
         "bytes": 275251200,
-        "source_copy_ms": 17.447,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 19.402,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 72064791968,
         "bytes": 550502400,
-        "source_copy_ms": 37.248,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.771,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 72615294368,
         "bytes": 38876160,
-        "source_copy_ms": 2.949,
-        "h2d_enqueue_ms": 0.020
+        "source_copy_ms": 2.621,
+        "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 72654170528,
         "bytes": 275251200,
-        "source_copy_ms": 25.060,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 22.928,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 72929421728,
         "bytes": 550502400,
-        "source_copy_ms": 42.590,
+        "source_copy_ms": 40.478,
         "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 73479924128,
         "bytes": 257686464,
-        "source_copy_ms": 24.234,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 22.366,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 73737610592,
         "bytes": 275251200,
-        "source_copy_ms": 22.540,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 20.216,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 74012861792,
         "bytes": 550502400,
-        "source_copy_ms": 43.047,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 39.581,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 74563364192,
         "bytes": 154793408,
-        "source_copy_ms": 16.625,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 14.838,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 74718157600,
         "bytes": 275251200,
-        "source_copy_ms": 21.687,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 19.328,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 74993408800,
         "bytes": 550502400,
-        "source_copy_ms": 44.066,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 41.267,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 75543911200,
         "bytes": 154793408,
-        "source_copy_ms": 16.986,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.326,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 75698704608,
         "bytes": 275251200,
-        "source_copy_ms": 23.581,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 21.415,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 75973955808,
         "bytes": 550502400,
-        "source_copy_ms": 44.782,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 38.775,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 76524458208,
         "bytes": 38876160,
-        "source_copy_ms": 3.504,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 3.082,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 76563334368,
         "bytes": 275251200,
-        "source_copy_ms": 25.250,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 22.687,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 76838585568,
         "bytes": 550502400,
-        "source_copy_ms": 43.977,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 38.371,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 77389087968,
         "bytes": 257686464,
-        "source_copy_ms": 23.244,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 21.672,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 77646774432,
         "bytes": 275251200,
-        "source_copy_ms": 22.792,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.858,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 77922025632,
         "bytes": 550502400,
-        "source_copy_ms": 41.723,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 37.319,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 78472528032,
         "bytes": 154793408,
-        "source_copy_ms": 10.265,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 10.401,
+        "h2d_enqueue_ms": 0.056
       },
       {
         "source_offset": 78627321440,
         "bytes": 275251200,
-        "source_copy_ms": 23.097,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 19.257,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 78902572640,
         "bytes": 550502400,
-        "source_copy_ms": 38.097,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 36.477,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 79453075040,
         "bytes": 38876160,
-        "source_copy_ms": 2.521,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 2.378,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 79491951200,
         "bytes": 275251200,
-        "source_copy_ms": 21.995,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 21.073,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 79767202400,
         "bytes": 550502400,
-        "source_copy_ms": 35.371,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.040,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 80317704800,
         "bytes": 257686464,
-        "source_copy_ms": 20.667,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 20.651,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 80575391264,
         "bytes": 275251200,
-        "source_copy_ms": 18.941,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 18.033,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 80850642464,
         "bytes": 550502400,
-        "source_copy_ms": 38.004,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 35.686,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 81401144864,
         "bytes": 38876160,
-        "source_copy_ms": 3.451,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 3.140,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 81440021024,
         "bytes": 275251200,
-        "source_copy_ms": 21.988,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 20.148,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 81715272224,
         "bytes": 550502400,
-        "source_copy_ms": 36.809,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 32.626,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 82265774624,
         "bytes": 257686464,
-        "source_copy_ms": 20.751,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 19.720,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 82523461088,
         "bytes": 275251200,
-        "source_copy_ms": 19.876,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 18.641,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 82798712288,
         "bytes": 550502400,
-        "source_copy_ms": 35.472,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 32.678,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 83349214688,
         "bytes": 154793408,
-        "source_copy_ms": 15.276,
-        "h2d_enqueue_ms": 0.012
+        "source_copy_ms": 14.306,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 83504008096,
         "bytes": 275251200,
-        "source_copy_ms": 17.679,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.491,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 83779259296,
         "bytes": 550502400,
-        "source_copy_ms": 36.280,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.147,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 84329761696,
         "bytes": 154793408,
-        "source_copy_ms": 15.296,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 14.300,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 84484555104,
         "bytes": 275251200,
-        "source_copy_ms": 19.219,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 17.119,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 84759806304,
         "bytes": 550502400,
-        "source_copy_ms": 37.684,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 34.287,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 85310308704,
         "bytes": 38876160,
-        "source_copy_ms": 2.626,
+        "source_copy_ms": 2.365,
         "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 85349184864,
         "bytes": 275251200,
-        "source_copy_ms": 21.746,
+        "source_copy_ms": 20.406,
         "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 85624436064,
         "bytes": 550502400,
-        "source_copy_ms": 36.115,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.300,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 86174938464,
         "bytes": 257686464,
-        "source_copy_ms": 21.024,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 19.745,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 86432624928,
         "bytes": 275251200,
-        "source_copy_ms": 19.568,
+        "source_copy_ms": 17.872,
         "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 86707876128,
         "bytes": 550502400,
-        "source_copy_ms": 36.188,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 33.153,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 87258378528,
         "bytes": 154793408,
-        "source_copy_ms": 14.585,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 12.785,
+        "h2d_enqueue_ms": 0.062
       },
       {
         "source_offset": 87413171936,
         "bytes": 275251200,
-        "source_copy_ms": 18.934,
-        "h2d_enqueue_ms": 0.011
+        "source_copy_ms": 18.187,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 87688423136,
         "bytes": 550502400,
-        "source_copy_ms": 43.562,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 39.463,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 88238925536,
         "bytes": 154793408,
-        "source_copy_ms": 15.871,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 14.884,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 88393718944,
         "bytes": 275251200,
-        "source_copy_ms": 21.474,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 18.622,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 88668970144,
         "bytes": 550502400,
-        "source_copy_ms": 39.387,
+        "source_copy_ms": 36.941,
         "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 89219472544,
         "bytes": 38876160,
-        "source_copy_ms": 3.184,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 2.685,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 89258348704,
         "bytes": 275251200,
-        "source_copy_ms": 23.884,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 22.092,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 89533599904,
         "bytes": 550502400,
-        "source_copy_ms": 39.670,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 36.216,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 90084102304,
         "bytes": 257686464,
-        "source_copy_ms": 21.383,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.985,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 90341788768,
         "bytes": 275251200,
-        "source_copy_ms": 21.277,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.739,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 90617039968,
         "bytes": 550502400,
-        "source_copy_ms": 40.756,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 36.729,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 91167542368,
         "bytes": 154793408,
-        "source_copy_ms": 16.216,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 16.236,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 91322335776,
         "bytes": 275251200,
-        "source_copy_ms": 20.869,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 18.934,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 91597586976,
         "bytes": 550502400,
-        "source_copy_ms": 41.434,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 36.501,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 92148089376,
         "bytes": 154793408,
-        "source_copy_ms": 15.966,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 11.028,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 92302882784,
         "bytes": 275251200,
-        "source_copy_ms": 19.930,
-        "h2d_enqueue_ms": 0.011
+        "source_copy_ms": 23.153,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 92578133984,
         "bytes": 550502400,
-        "source_copy_ms": 41.632,
+        "source_copy_ms": 39.429,
         "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 93128636384,
         "bytes": 154793408,
-        "source_copy_ms": 16.574,
-        "h2d_enqueue_ms": 0.012
+        "source_copy_ms": 15.879,
+        "h2d_enqueue_ms": 0.010
       },
       {
         "source_offset": 93283429792,
         "bytes": 275251200,
-        "source_copy_ms": 18.178,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 16.739,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 93558680992,
         "bytes": 550502400,
-        "source_copy_ms": 36.684,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.491,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 94109183392,
         "bytes": 38876160,
-        "source_copy_ms": 2.705,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 2.478,
+        "h2d_enqueue_ms": 0.016
       },
       {
         "source_offset": 94148059552,
         "bytes": 275251200,
-        "source_copy_ms": 21.614,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 20.193,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 94423310752,
         "bytes": 550502400,
-        "source_copy_ms": 36.782,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 33.556,
+        "h2d_enqueue_ms": 0.014
       },
       {
         "source_offset": 94973813152,
         "bytes": 257686464,
-        "source_copy_ms": 21.898,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 20.579,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 95231499616,
         "bytes": 275251200,
-        "source_copy_ms": 19.361,
-        "h2d_enqueue_ms": 0.012
+        "source_copy_ms": 17.847,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 95506750816,
         "bytes": 550502400,
-        "source_copy_ms": 36.655,
-        "h2d_enqueue_ms": 0.020
+        "source_copy_ms": 33.410,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 96057253216,
         "bytes": 154793408,
-        "source_copy_ms": 14.567,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 11.275,
+        "h2d_enqueue_ms": 0.065
       },
       {
         "source_offset": 96212046624,
         "bytes": 275251200,
-        "source_copy_ms": 18.033,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 18.996,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 96487297824,
         "bytes": 550502400,
-        "source_copy_ms": 37.284,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 34.770,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 97037800224,
         "bytes": 154793408,
-        "source_copy_ms": 15.398,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 14.797,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 97192593632,
         "bytes": 275251200,
-        "source_copy_ms": 19.088,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 17.827,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 97467844832,
         "bytes": 550502400,
-        "source_copy_ms": 39.539,
+        "source_copy_ms": 34.958,
         "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 98018347232,
         "bytes": 38876160,
-        "source_copy_ms": 2.927,
-        "h2d_enqueue_ms": 0.016
+        "source_copy_ms": 2.670,
+        "h2d_enqueue_ms": 0.017
       },
       {
         "source_offset": 98057223392,
         "bytes": 275251200,
-        "source_copy_ms": 24.324,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 21.939,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 98332474592,
         "bytes": 550502400,
-        "source_copy_ms": 39.107,
+        "source_copy_ms": 35.890,
         "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 98882976992,
         "bytes": 257686464,
-        "source_copy_ms": 22.524,
+        "source_copy_ms": 21.328,
         "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 99140663456,
         "bytes": 275251200,
-        "source_copy_ms": 20.599,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 19.547,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 99415914656,
         "bytes": 550502400,
-        "source_copy_ms": 38.165,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 34.553,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 99966417056,
         "bytes": 154793408,
-        "source_copy_ms": 15.616,
+        "source_copy_ms": 14.254,
         "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 100121210464,
         "bytes": 275251200,
-        "source_copy_ms": 19.220,
-        "h2d_enqueue_ms": 0.013
+        "source_copy_ms": 17.595,
+        "h2d_enqueue_ms": 0.011
       },
       {
         "source_offset": 100396461664,
         "bytes": 550502400,
-        "source_copy_ms": 38.441,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 34.580,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 100946964064,
         "bytes": 38876160,
-        "source_copy_ms": 3.124,
-        "h2d_enqueue_ms": 0.017
+        "source_copy_ms": 2.655,
+        "h2d_enqueue_ms": 0.015
       },
       {
         "source_offset": 100985840224,
         "bytes": 275251200,
-        "source_copy_ms": 24.436,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 21.636,
+        "h2d_enqueue_ms": 0.010
       },
       {
         "source_offset": 101261091424,
         "bytes": 550502400,
-        "source_copy_ms": 40.849,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 36.017,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 101811593824,
         "bytes": 257686464,
-        "source_copy_ms": 23.156,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 22.649,
+        "h2d_enqueue_ms": 0.013
       },
       {
         "source_offset": 102069280288,
         "bytes": 275251200,
-        "source_copy_ms": 20.591,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 19.790,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 102344531488,
         "bytes": 550502400,
-        "source_copy_ms": 39.112,
-        "h2d_enqueue_ms": 0.015
+        "source_copy_ms": 36.265,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 102895033888,
         "bytes": 154793408,
-        "source_copy_ms": 15.794,
+        "source_copy_ms": 14.748,
         "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 103049827296,
         "bytes": 275251200,
-        "source_copy_ms": 17.973,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 16.375,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 103325078496,
         "bytes": 550502400,
-        "source_copy_ms": 39.057,
-        "h2d_enqueue_ms": 0.014
+        "source_copy_ms": 34.694,
+        "h2d_enqueue_ms": 0.012
       },
       {
         "source_offset": 103875580896,
         "bytes": 25666560,
-        "source_copy_ms": 1.975,
+        "source_copy_ms": 1.742,
         "h2d_enqueue_ms": 0.014
       }
     ]

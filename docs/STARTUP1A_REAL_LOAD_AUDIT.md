@@ -142,15 +142,15 @@ The single permitted runtime sample produced:
 
 | Component | Time |
 |---|---:|
-| Total `runtime_init_ms` | 50,854.734 ms |
-| GGUF open + tokenizer + binding | 43,824.274 ms |
-| Residency planning | 26.136 ms |
-| Device allocations | 2,178.978 ms |
-| mmap -> pinned staging | 3,660.852 ms |
-| H2D enqueue | 2.202 ms |
-| D2D enqueue | 6.040 ms |
-| Final CUDA completion wait | 12.790 ms |
-| Other CUDA preparation | 1,143.454 ms |
+| Total `runtime_init_ms` | 33,813.716 ms |
+| GGUF open + tokenizer + binding | 27,291.339 ms |
+| Residency planning | 26.162 ms |
+| Device allocations | 1,956.967 ms |
+| mmap -> pinned staging | 3,382.299 ms |
+| H2D enqueue | 2.273 ms |
+| D2D enqueue | 7.341 ms |
+| Final CUDA completion wait | 12.718 ms |
+| Other CUDA preparation | 1,135.609 ms |
 
 The runtime sample planned and staged `49,500,850,200` bytes (46.101 GiB)
 across 148 spans and submitted the same number of bytes to H2D. PLE submitted
@@ -158,12 +158,12 @@ bytes were zero. There were 1,168 CUDA/pinned allocations totalling
 `52,043,647,000` bytes; the largest staging/transfer allocation was
 `1,271,398,400` bytes.
 
-The source copy rate was 13.522 GB/s for mmap-to-staging CPU copies. The
+The source copy rate was 14.635 GB/s for mmap-to-staging CPU copies. The
 reported H2D number in the artifact is explicitly only
 `bytes / final cudaStreamSynchronize blocked time`; it is not a physical DMA
 throughput measurement because C1 does not record CUDA event elapsed time.
 The sample had zero major faults and the process minor-fault count increased
-from 278,147 to 1,350,067. `mincore` reported the same resident-page count
+from 278,195 to 1,350,115. `mincore` reported the same resident-page count
 before and after the residency phase.
 
 The old `cuda_prepare_ms` value (7,030.452 ms) is therefore invalid as a
