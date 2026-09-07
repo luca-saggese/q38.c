@@ -139,6 +139,9 @@ struct q38_forward_cuda_context {
     size_t device_qsa_output_bytes;
     float *host_qsa_output;
     size_t host_qsa_output_bytes;
+    q38_qsa_cuda_chain_state qsa_chain_state[Q38_MODEL_LAYERS];
+    q38_qsa_cuda_chain_workspace qsa_chain_workspace;
+    bool qsa_chain_workspace_ready;
     float *device_gdn_input;
     size_t device_gdn_input_bytes;
     float *device_gdn_qkv;
@@ -275,6 +278,13 @@ struct q38_forward_cuda_context {
     uint64_t expert_kernel_launches;
     uint64_t expert_H2D_bytes;
     uint64_t expert_D2H_bytes;
+    uint64_t qsa_chain_calls;
+    uint64_t qsa_chain_kernel_launches;
+    uint64_t qsa_chain_syncs;
+    uint64_t qsa_chain_h2d_bytes;
+    uint64_t qsa_chain_d2h_bytes;
+    uint64_t qsa_chain_internal_h2d_bytes;
+    uint64_t qsa_chain_internal_d2h_bytes;
     uint64_t expert_fast_calls_by_layer[Q38_MODEL_LAYERS];
     uint64_t expert_legacy_calls_by_layer[Q38_MODEL_LAYERS];
 };
@@ -1552,6 +1562,19 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_gr_updated);
     cudaFree(context->device_qsa_input);
     cudaFree(context->device_qsa_output);
+    for (size_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer)
+        q38_qsa_cuda_chain_release(&context->qsa_chain_state[layer]);
+    cudaFree(context->qsa_chain_workspace.qfull);
+    cudaFree(context->qsa_chain_workspace.q);
+    cudaFree(context->qsa_chain_workspace.k);
+    cudaFree(context->qsa_chain_workspace.v);
+    cudaFree(context->qsa_chain_workspace.index);
+    cudaFree(context->qsa_chain_workspace.index_q);
+    cudaFree(context->qsa_chain_workspace.raw_index);
+    cudaFree(context->qsa_chain_workspace.attention);
+    cudaFree(context->qsa_chain_workspace.selected_k);
+    cudaFree(context->qsa_chain_workspace.selected_v);
+    cudaFree(context->qsa_chain_workspace.selected);
     cudaFree(context->device_gdn_input);
     cudaFree(context->device_gdn_qkv);
     cudaFree(context->device_gdn_z);
@@ -1816,6 +1839,15 @@ extern "C" void q38_forward_cuda_get_residency_stats(
     stats->expert_kernel_launches = context->expert_kernel_launches;
     stats->expert_H2D_bytes = context->expert_H2D_bytes;
     stats->expert_D2H_bytes = context->expert_D2H_bytes;
+    stats->qsa_chain_calls = context->qsa_chain_calls;
+    stats->qsa_chain_kernel_launches = context->qsa_chain_kernel_launches;
+    stats->qsa_chain_syncs = context->qsa_chain_syncs;
+    stats->qsa_chain_h2d_bytes = context->qsa_chain_h2d_bytes;
+    stats->qsa_chain_d2h_bytes = context->qsa_chain_d2h_bytes;
+    stats->qsa_chain_internal_h2d_bytes =
+        context->qsa_chain_internal_h2d_bytes;
+    stats->qsa_chain_internal_d2h_bytes =
+        context->qsa_chain_internal_d2h_bytes;
     memcpy(stats->expert_fast_calls_by_layer,
            context->expert_fast_calls_by_layer,
            sizeof(stats->expert_fast_calls_by_layer));
@@ -2758,6 +2790,205 @@ extern "C" bool q38_forward_cuda_gr_write_backend(
             cudaSuccess)
         return fail(error, error_len, "GR-C4 write completion failed");
     Q38_CUDA_DIAG_ONLY(++context->cuda_synchronizations);
+    return true;
+}
+
+static bool ensure_qsa_chain_workspace(q38_forward_cuda_context *context,
+                                       char *error, size_t error_len) {
+    if (context->qsa_chain_workspace_ready) return true;
+    q38_qsa_cuda_chain_workspace *workspace = &context->qsa_chain_workspace;
+    size_t workspace_bytes = 0;
+    const size_t selected_capacity = 2051u;
+    const size_t selected_kv_elements = selected_capacity * 2u * 256u;
+    if (!ensure_buffer((void **)&workspace->qfull, &workspace_bytes,
+                       12288u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->q, &workspace_bytes,
+                       6144u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->k, &workspace_bytes,
+                       512u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->v, &workspace_bytes,
+                       512u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->index, &workspace_bytes,
+                       640u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->index_q, &workspace_bytes,
+                       512u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->raw_index, &workspace_bytes,
+                       128u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->attention, &workspace_bytes,
+                       6144u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->selected_k, &workspace_bytes,
+                       selected_kv_elements * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->selected_v, &workspace_bytes,
+                       selected_kv_elements * sizeof(float),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&workspace->selected, &workspace_bytes,
+                       selected_capacity * sizeof(uint32_t),
+                       context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
+        return fail(error, error_len, "QSA chain workspace allocation failed");
+    workspace->selected_capacity = selected_capacity;
+    context->qsa_chain_workspace_ready = true;
+    return true;
+}
+
+static bool qsa_chain_tensor(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_tensor *tensor, size_t rows, size_t cols,
+    const uint16_t **pointer, char *error, size_t error_len) {
+    size_t actual_rows = 0, actual_cols = 0;
+    q38_exec_tensor *exec = exec_tensor_for(context, model, tensor);
+    if (!tensor || tensor->type != 30 || !tensor_shape(tensor, &actual_rows,
+                                                         &actual_cols) ||
+        actual_rows != rows || actual_cols != cols ||
+        !exec_tensor_is_resident(exec, tensor))
+        return fail(error, error_len, "QSA chain requires resident BF16 tensors");
+    *pointer = (const uint16_t *)exec->ptr;
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_qsa_chain_backend(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_qsa_state *host_state, const float *host_input, size_t token_count,
+    uint32_t layer_number, float *host_output, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    if (!context || !model || !layer || !host_state || !host_input ||
+        token_count != 1 || !host_output || !timing ||
+        layer_number >= Q38_MODEL_LAYERS)
+        return false;
+    q38_qsa_cuda_chain_state *chain =
+        &context->qsa_chain_state[layer_number];
+    if (host_state->position != chain->position &&
+        chain->position != 0 && host_state->position != 0)
+        return false;
+    const q38_qsa_weights *weights = &layer->qsa;
+    const uint16_t *q_proj, *k_proj, *v_proj, *index_proj, *o_proj;
+    const uint16_t *q_norm, *k_norm, *index_q_norm, *index_k_norm;
+    if (!qsa_chain_tensor(context, model, weights->q_proj, 12288, 2560,
+                          &q_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->k_proj, 512, 2560,
+                          &k_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->v_proj, 512, 2560,
+                          &v_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->index_qk_proj, 640, 2560,
+                          &index_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->o_proj, 2560, 6144,
+                          &o_proj, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->q_norm, 1, 256,
+                          &q_norm, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->k_norm, 1, 256,
+                          &k_norm, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->index_q_norm, 1, 128,
+                          &index_q_norm, error, error_len) ||
+        !qsa_chain_tensor(context, model, weights->index_k_norm, 1, 128,
+                          &index_k_norm, error, error_len))
+        return false;
+    if (!ensure_qsa_chain_workspace(context, error, error_len))
+        return false;
+    if (host_state->position == 0 && chain->position != 0)
+        q38_qsa_cuda_chain_reset(chain);
+    if (chain->position == 0 && host_state->position != 0) {
+        if (host_state->main_k.count != host_state->position ||
+            host_state->main_v.count != host_state->position ||
+            host_state->index_k.count != host_state->position)
+            return false;
+        if (!q38_qsa_cuda_chain_reserve(
+                chain, host_state->main_k.count, context->stream, error,
+                error_len) ||
+            cudaMemcpyAsync(
+                chain->main_k, host_state->main_k.data,
+                host_state->main_k.count * host_state->main_k.row_bytes,
+                cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+            cudaMemcpyAsync(
+                chain->main_v, host_state->main_v.data,
+                host_state->main_v.count * host_state->main_v.row_bytes,
+                cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+            cudaMemcpyAsync(
+                chain->index_k, host_state->index_k.data,
+                host_state->index_k.count * host_state->index_k.row_bytes,
+                cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+            return fail(error, error_len, "QSA chain state seed failed");
+        chain->count = host_state->position;
+        chain->position = host_state->position;
+    }
+    const size_t required = chain->count + 1;
+    size_t reserve_capacity = chain->capacity ? chain->capacity * 2u : 16u;
+    if (reserve_capacity < required) reserve_capacity = required;
+    if (!q38_qsa_cuda_chain_reserve(chain, reserve_capacity, context->stream,
+                                    error,
+                                    error_len))
+        return false;
+    if (!context->device_input ||
+        !ensure_buffer((void **)&context->device_input,
+                       &context->device_input_elements,
+                       2560u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations) ||
+        !ensure_buffer((void **)&context->device_output,
+                       &context->device_output_bytes,
+                       2560u * sizeof(float), context->allocation_observer,
+                       context->allocation_observer_user,
+                       &context->cuda_allocations))
+        return fail(error, error_len, "QSA chain boundary workspace allocation failed");
+    if (cudaMemcpyAsync(context->device_input, host_input,
+                        2560u * sizeof(float), cudaMemcpyHostToDevice,
+                        context->stream) != cudaSuccess)
+        return fail(error, error_len, "QSA chain input upload failed");
+    const double started = host_now_ms();
+    if (!q38_qsa_cuda_chain_decode(
+            q_proj, k_proj, v_proj, index_proj, o_proj, q_norm, k_norm,
+            index_q_norm, index_k_norm, context->device_input,
+            context->device_output, host_state->position, chain,
+            &context->qsa_chain_workspace, context->stream, error, error_len))
+        return false;
+    if (cudaMemcpyAsync(host_output, context->device_output,
+                        2560u * sizeof(float), cudaMemcpyDeviceToHost,
+                        context->stream) != cudaSuccess ||
+        cudaStreamSynchronize(context->stream) != cudaSuccess)
+        return fail(error, error_len, "QSA chain output download failed");
+    if (!q38_qsa_state_advance_device(host_state, 1, error, error_len))
+        return false;
+    timing->qkv_backend_used = true;
+    timing->output_projection_backend_used = true;
+    timing->qkv_projection_ms = host_now_ms() - started;
+    timing->q_projection_ms = timing->qkv_projection_ms;
+    timing->k_projection_ms = 0.0;
+    timing->v_projection_ms = 0.0;
+    timing->qkv_projection_ms = timing->qkv_projection_ms;
+    timing->kernel_launches = 9;
+    timing->host_syncs = 1;
+    timing->h2d_bytes = 2560u * sizeof(float);
+    timing->d2h_bytes = 2560u * sizeof(float);
+    timing->total_ms = timing->qkv_projection_ms;
+    ++context->qsa_chain_calls;
+    context->qsa_chain_kernel_launches += timing->kernel_launches;
+    ++context->qsa_chain_syncs;
+    context->qsa_chain_h2d_bytes += timing->h2d_bytes;
+    context->qsa_chain_d2h_bytes += timing->d2h_bytes;
     return true;
 }
 

@@ -159,6 +159,13 @@ typedef struct {
     uint64_t expert_kernel_launches;
     uint64_t expert_H2D_bytes;
     uint64_t expert_D2H_bytes;
+    uint64_t qsa_chain_calls;
+    uint64_t qsa_chain_kernel_launches;
+    uint64_t qsa_chain_syncs;
+    uint64_t qsa_chain_h2d_bytes;
+    uint64_t qsa_chain_d2h_bytes;
+    uint64_t qsa_chain_internal_h2d_bytes;
+    uint64_t qsa_chain_internal_d2h_bytes;
     uint64_t expert_fast_calls_by_layer[Q38_MODEL_LAYERS];
     uint64_t expert_legacy_calls_by_layer[Q38_MODEL_LAYERS];
 } q38_forward_cuda_residency_stats;
@@ -246,6 +253,12 @@ bool q38_forward_cuda_qsa_qkv_backend(
     const q38_tensor *k_proj, const q38_tensor *v_proj,
     const float *host_input, size_t token_count, float *host_q,
     float *host_k, float *host_v, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len);
+
+bool q38_forward_cuda_qsa_chain_backend(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_qsa_state *state, const float *host_input, size_t token_count,
+    uint32_t layer_number, float *host_output, q38_forward_qsa_timing *timing,
     void *user, char *error, size_t error_len);
 
 /* Reduce the most recent device-side matrix result without downloading it. */

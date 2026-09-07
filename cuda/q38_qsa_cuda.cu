@@ -1,5 +1,7 @@
 #include "q38_qsa_cuda.h"
 
+#include "q38_gdn.h"
+
 #include <cuda_runtime.h>
 
 #include <math.h>
@@ -10,8 +12,299 @@ static bool fail(char *error, size_t error_len, const char *message) {
     return false;
 }
 
+static bool fail_cuda(char *error, size_t error_len) {
+    return fail(error, error_len, cudaGetErrorString(cudaGetLastError()));
+}
+
 __device__ static float bf16_to_float(uint16_t value) {
     return __int_as_float((int)((uint32_t)value << 16));
+}
+
+__device__ static float chain_rope_angle(size_t component, size_t rotary,
+                                         uint64_t position) {
+    float frequency = 1.0f;
+    const float base = powf(10000000.0f, -2.0f / (float)rotary);
+    for (size_t i = 0; i < component; ++i) frequency *= base;
+    return (float)position * frequency;
+}
+
+__global__ static void chain_prepare_kernel(
+    const float *qfull, const float *raw_k, const float *raw_v,
+    const float *index, const uint16_t *q_norm, const uint16_t *k_norm,
+    const uint16_t *index_q_norm, size_t position, float *q, float *k,
+    float *v, float *index_q, float *raw_index) {
+    const size_t head = blockIdx.x;
+    const size_t lane = threadIdx.x;
+    if (lane != 0) return;
+    if (head < 24) {
+        float sum = 0.0f;
+        for (size_t d = 0; d < 256; ++d) {
+            const float value = qfull[head * 512 + d];
+            sum += value * value;
+        }
+        const float scale = rsqrtf(sum / 256.0f + 1e-6f);
+        for (size_t p = 0; p < 32; ++p) {
+            const float angle = chain_rope_angle(p, 64, position);
+            const float c = cosf(angle), s = sinf(angle);
+            const size_t a = p, b = 32 + p;
+            const float x = qfull[head * 512 + a] * scale *
+                            (1.0f + bf16_to_float(q_norm[a]));
+            const float y = qfull[head * 512 + b] * scale *
+                            (1.0f + bf16_to_float(q_norm[b]));
+            q[head * 256 + a] = x * c - y * s;
+            q[head * 256 + b] = x * s + y * c;
+        }
+        for (size_t d = 64; d < 256; ++d)
+            q[head * 256 + d] =
+                qfull[head * 512 + d] * scale *
+                (1.0f + bf16_to_float(q_norm[d]));
+        return;
+    }
+    if (head < 26) {
+        const size_t kv_head = head - 24;
+        float sum = 0.0f;
+        for (size_t d = 0; d < 256; ++d) {
+            const float value = raw_k[kv_head * 256 + d];
+            sum += value * value;
+        }
+        const float scale = rsqrtf(sum / 256.0f + 1e-6f);
+        for (size_t p = 0; p < 32; ++p) {
+            const float angle = chain_rope_angle(p, 64, position);
+            const float c = cosf(angle), s = sinf(angle);
+            const float x = raw_k[kv_head * 256 + p] * scale *
+                            (1.0f + bf16_to_float(k_norm[p]));
+            const float y = raw_k[kv_head * 256 + 32 + p] * scale *
+                            (1.0f + bf16_to_float(k_norm[32 + p]));
+            k[kv_head * 256 + p] = x * c - y * s;
+            k[kv_head * 256 + 32 + p] = x * s + y * c;
+        }
+        for (size_t d = 64; d < 256; ++d)
+            k[kv_head * 256 + d] =
+                raw_k[kv_head * 256 + d] * scale *
+                (1.0f + bf16_to_float(k_norm[d]));
+        for (size_t d = 0; d < 256; ++d)
+            v[kv_head * 256 + d] = raw_v[kv_head * 256 + d];
+        return;
+    }
+    const size_t index_head = head - 26;
+    if (index_head < 4) {
+        float sum = 0.0f;
+        for (size_t d = 0; d < 128; ++d) {
+            const float value = index[index_head * 128 + d];
+            sum += value * value;
+        }
+        const float scale = rsqrtf(sum / 128.0f + 1e-6f);
+        for (size_t p = 0; p < 32; ++p) {
+            const float angle = chain_rope_angle(p, 64, position);
+            const float c = cosf(angle), s = sinf(angle);
+            const float x = index[index_head * 128 + p] * scale *
+                            (1.0f + bf16_to_float(index_q_norm[p]));
+            const float y = index[index_head * 128 + 32 + p] * scale *
+                            (1.0f + bf16_to_float(index_q_norm[32 + p]));
+            index_q[index_head * 128 + p] = x * c - y * s;
+            index_q[index_head * 128 + 32 + p] = x * s + y * c;
+        }
+        for (size_t d = 64; d < 128; ++d)
+            index_q[index_head * 128 + d] =
+                index[index_head * 128 + d] * scale *
+                (1.0f + bf16_to_float(index_q_norm[d]));
+        return;
+    }
+    if (index_head == 4)
+        for (size_t d = 0; d < 128; ++d)
+            raw_index[d] = index[4 * 128 + d];
+}
+
+__global__ static void chain_append_kernel(
+    const float *k, const float *v, const float *raw_index, float *state_k,
+    float *state_v, float *state_index, size_t row) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < 512) {
+        state_k[row * 512 + index] = k[index];
+        state_v[row * 512 + index] = v[index];
+    } else if (index < 640)
+        state_index[row * 128 + index - 512] = raw_index[index - 512];
+}
+
+__global__ static void chain_select_kernel(
+    const float *state_index, const float *index_q, const uint16_t *index_k_norm,
+    size_t visible, uint32_t *selected, size_t selected_capacity) {
+    if (blockIdx.x != 0 || threadIdx.x != 0) return;
+    const size_t ratio = 4, dim = 128, budget = 2048;
+    const size_t complete = visible / ratio;
+    const size_t groups = complete < budget / ratio ? complete : budget / ratio;
+    float scores[512];
+    uint32_t ids[512];
+    size_t used = 0;
+    for (size_t candidate = 0; candidate < complete; ++candidate) {
+        const size_t begin = candidate * ratio;
+        float total = 0.0f;
+        float key[128];
+        for (size_t d = 0; d < dim; ++d) {
+            float value = 0.0f;
+            for (size_t j = 0; j < ratio; ++j)
+                value += state_index[(begin + j) * dim + d];
+            key[d] = value * 0.25f;
+        }
+        float norm = 0.0f;
+        for (size_t d = 0; d < dim; ++d) {
+            key[d] *= 1.0f + bf16_to_float(index_k_norm[d]);
+            norm += key[d] * key[d];
+        }
+        const float scale = rsqrtf(norm / dim + 1e-6f);
+        for (size_t d = 0; d < dim; ++d) key[d] *= scale;
+        for (size_t h = 0; h < 4; ++h) {
+            float dot = 0.0f;
+            for (size_t d = 0; d < dim; ++d)
+                dot += index_q[h * dim + d] * key[d];
+            total += dot > 0.0f ? dot : 0.0f;
+        }
+        const float score = total / sqrtf((float)dim);
+        size_t at = used;
+        while (at > 0) {
+            const size_t previous = ids[at - 1];
+            if (scores[at - 1] > score ||
+                (scores[at - 1] == score && previous < candidate))
+                break;
+            --at;
+        }
+        if (at < groups) {
+            if (used < groups) ++used;
+            for (size_t j = used; j > at + 1; --j) {
+                scores[j - 1] = scores[j - 2];
+                ids[j - 1] = ids[j - 2];
+            }
+            scores[at] = score;
+            ids[at] = (uint32_t)candidate;
+        }
+    }
+    size_t out = 0;
+    for (size_t rank = 0; rank < groups; ++rank)
+        for (size_t j = 0; j < ratio; ++j)
+            if (out < selected_capacity)
+                selected[out++] = ids[rank] * ratio + (uint32_t)j;
+    for (size_t i = complete * ratio; i < visible; ++i)
+        if (out < selected_capacity) selected[out++] = (uint32_t)i;
+}
+
+__global__ static void chain_gate_kernel(const float *qfull, float *attention) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= 6144) return;
+    const size_t head = index / 256, d = index % 256;
+    const float gate = 1.0f /
+        (1.0f + expf(-qfull[head * 512 + 256 + d]));
+    attention[index] *= gate;
+}
+
+extern "C" bool q38_qsa_cuda_chain_reserve(
+    q38_qsa_cuda_chain_state *state, size_t capacity, cudaStream_t stream,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!state || !capacity || capacity <= state->capacity) return true;
+    if (capacity > SIZE_MAX / (512u * sizeof(float)) ||
+        capacity > SIZE_MAX / (128u * sizeof(float)))
+        return fail(error, error_len, "QSA chain state size overflows");
+    float *main_k = nullptr, *main_v = nullptr, *index_k = nullptr;
+    if (cudaMalloc((void **)&main_k, capacity * 512 * sizeof(float)) !=
+            cudaSuccess ||
+        cudaMalloc((void **)&main_v, capacity * 512 * sizeof(float)) !=
+            cudaSuccess ||
+        cudaMalloc((void **)&index_k, capacity * 128 * sizeof(float)) !=
+            cudaSuccess) {
+        cudaFree(main_k); cudaFree(main_v); cudaFree(index_k);
+        return fail(error, error_len, "QSA chain state allocation failed");
+    }
+    if (state->count) {
+        if (cudaMemcpyAsync(main_k, state->main_k,
+                            state->count * 512 * sizeof(float),
+                            cudaMemcpyDeviceToDevice, stream) != cudaSuccess ||
+            cudaMemcpyAsync(main_v, state->main_v,
+                            state->count * 512 * sizeof(float),
+                            cudaMemcpyDeviceToDevice, stream) != cudaSuccess ||
+            cudaMemcpyAsync(index_k, state->index_k,
+                            state->count * 128 * sizeof(float),
+                            cudaMemcpyDeviceToDevice, stream) != cudaSuccess) {
+            cudaFree(main_k); cudaFree(main_v); cudaFree(index_k);
+            return fail(error, error_len, "QSA chain state growth copy failed");
+        }
+    }
+    cudaFree(state->main_k); cudaFree(state->main_v); cudaFree(state->index_k);
+    state->main_k = main_k;
+    state->main_v = main_v;
+    state->index_k = index_k;
+    state->capacity = capacity;
+    return true;
+}
+
+extern "C" void q38_qsa_cuda_chain_release(q38_qsa_cuda_chain_state *state) {
+    if (!state) return;
+    cudaFree(state->main_k); cudaFree(state->main_v); cudaFree(state->index_k);
+    *state = {};
+}
+
+extern "C" void q38_qsa_cuda_chain_reset(q38_qsa_cuda_chain_state *state) {
+    if (!state) return;
+    state->count = 0;
+    state->position = 0;
+}
+
+extern "C" bool q38_qsa_cuda_chain_decode(
+    const uint16_t *q_proj, const uint16_t *k_proj, const uint16_t *v_proj,
+    const uint16_t *index_qk_proj, const uint16_t *o_proj,
+    const uint16_t *q_norm, const uint16_t *k_norm,
+    const uint16_t *index_q_norm, const uint16_t *index_k_norm,
+    const float *device_input, float *device_output, uint64_t position,
+    q38_qsa_cuda_chain_state *state, q38_qsa_cuda_chain_workspace *workspace,
+    cudaStream_t stream, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!q_proj || !k_proj || !v_proj || !index_qk_proj || !o_proj ||
+        !q_norm || !k_norm || !index_q_norm || !index_k_norm ||
+        !device_input || !device_output || !state || !workspace ||
+        !state->main_k || !state->main_v || !state->index_k ||
+        !workspace->qfull || !workspace->q || !workspace->k ||
+        !workspace->v || !workspace->index || !workspace->index_q ||
+        !workspace->raw_index || !workspace->attention ||
+        !workspace->selected_k || !workspace->selected_v ||
+        !workspace->selected || !workspace->selected_capacity ||
+        state->count >= state->capacity || state->position != position)
+        return fail(error, error_len, "invalid QSA chain decode state");
+    if (!q38_qsa_cuda_project_device(
+            q_proj, 12288, k_proj, 512, v_proj, 512, 2560, device_input, 1,
+            workspace->qfull, workspace->k, workspace->v, stream, error,
+            error_len) ||
+        !q38_cuda_bf16_matvec_device(
+            index_qk_proj, 640, 2560, device_input, workspace->index, stream,
+            error, error_len))
+        return false;
+    chain_prepare_kernel<<<30, 1, 0, stream>>>(
+        workspace->qfull, workspace->k, workspace->v, workspace->index,
+        q_norm, k_norm, index_q_norm, (size_t)position, workspace->q,
+        workspace->k, workspace->v, workspace->index_q, workspace->raw_index);
+    chain_append_kernel<<<(640 + 255) / 256, 256, 0, stream>>>(
+        workspace->k, workspace->v, workspace->raw_index, state->main_k,
+        state->main_v, state->index_k, state->count);
+    const size_t visible = state->count + 1;
+    chain_select_kernel<<<1, 1, 0, stream>>>(
+        state->index_k, workspace->index_q, index_k_norm, visible,
+        workspace->selected, workspace->selected_capacity);
+    const size_t selected_count =
+        (visible / 4 < 512 ? visible / 4 : 512) * 4 + visible % 4;
+    if (!q38_qsa_cuda_gather_attention(
+            state->main_k, state->main_v, visible, 2, 256, workspace->selected,
+            selected_count, workspace->selected_k, workspace->selected_v,
+            workspace->q, 1, 24, workspace->attention, stream, error,
+            error_len))
+        return false;
+    chain_gate_kernel<<<(6144 + 255) / 256, 256, 0, stream>>>(
+        workspace->qfull, workspace->attention);
+    if (!q38_cuda_bf16_matvec_device(
+            o_proj, 2560, 6144, workspace->attention, device_output, stream,
+            error, error_len))
+        return false;
+    if (cudaGetLastError() != cudaSuccess) return fail_cuda(error, error_len);
+    state->count = visible;
+    state->position = position + 1;
+    return true;
 }
 
 __global__ static void project_kernel(const uint16_t *weights, size_t rows,

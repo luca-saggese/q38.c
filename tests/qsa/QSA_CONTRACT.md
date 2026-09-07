@@ -23,10 +23,12 @@ The production baseline is the current single-token split path:
 2. Host index projection, state update, selection, and attention.
 3. Host scalar output projection.
 
-QSA-C1 replaces only step 3 with a resident BF16 device matvec. It adds one
-output upload, one output download, one kernel launch, and one synchronization.
-It is promotable only when all three fixtures remain correct and the complete
-QSA-layer median improves by at least 10%.
+The explicit `qsa_c1` fixture mode replaces only step 3 with a resident BF16
+device matvec.  `qsa_chain_c1` is the normal-decode chain mode: it keeps Q/K/V,
+index compression, cache state, selection, attention, and output projection on
+the device, with one input upload and one output download at the layer
+boundary.  Both modes are promotable only when all three fixtures remain
+correct and the complete QSA-layer median improves by at least 10%.
 
 The benchmark must not load a GGUF model. Fixture capture is a separate,
 one-shot operation performed only when real captures are unavailable.

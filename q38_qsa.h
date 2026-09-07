@@ -49,6 +49,13 @@ bool q38_qsa_state_init(q38_qsa_state *state, size_t main_k_row_bytes,
 bool q38_qsa_state_append(q38_qsa_state *state, const void *main_k,
                           const void *main_v, const void *index_k,
                           size_t row_count, char *error, size_t error_len);
+/*
+ * Advance the host-visible timeline for a device-resident QSA cache.  The
+ * cache rows remain owned by the CUDA backend; this updates only metadata
+ * used by decode bookkeeping and diagnostics.
+ */
+bool q38_qsa_state_advance_device(q38_qsa_state *state, size_t row_count,
+                                  char *error, size_t error_len);
 void q38_qsa_state_reset(q38_qsa_state *state);
 void q38_qsa_state_destroy(q38_qsa_state *state);
 bool q38_qsa_state_clone(const q38_qsa_state *source, q38_qsa_state *copy,

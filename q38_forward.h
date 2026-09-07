@@ -140,6 +140,12 @@ typedef bool (*q38_forward_qsa_qkv_backend)(
     float *host_k, float *host_v, q38_forward_qsa_timing *timing,
     void *user, char *error, size_t error_len);
 
+typedef bool (*q38_forward_qsa_chain_backend)(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_qsa_state *state, const float *host_input, size_t token_count,
+    uint32_t layer_number, float *host_output, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len);
+
 /*
  * Run a text-only QSA layer.  Matrices are output-by-input and may point
  * directly into a read-only GGUF mmap.  The graph appends all projections
@@ -301,6 +307,8 @@ typedef struct {
     q38_forward_qsa_snapshot_fn qsa_snapshot;
     q38_forward_qsa_qkv_backend qsa_qkv_backend;
     void *qsa_qkv_backend_user;
+    q38_forward_qsa_chain_backend qsa_chain_backend;
+    void *qsa_chain_backend_user;
     q38_ple_cost_timing *ple_cost;
     const q38_directional_steering *directional_steering;
     float directional_steering_ffn_scale;
@@ -398,6 +406,7 @@ typedef struct {
     /* Optional host-state refresh used before device-backed trace snapshots. */
     q38_forward_state_sync_backend sync_state;
     q38_forward_qsa_qkv_backend qsa_qkv;
+    q38_forward_qsa_chain_backend qsa_chain;
     void *user;
 } q38_forward_backend_config;
 

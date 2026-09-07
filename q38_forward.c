@@ -612,6 +612,10 @@ static bool full_emit_timing(q38_forward_diagnostics *diagnostics,
 #define full_now_ms() 0.0
 #define full_emit_stage(...) true
 #define full_emit_timing(...) true
+static void full_nvtx_push_indexed(const char *prefix, uint32_t index) {
+    (void)prefix;
+    (void)index;
+}
 #endif
 
 static bool full_mul(size_t a, size_t b, size_t *out) {
@@ -1988,6 +1992,22 @@ static bool full_qsa(const q38_gguf *model, const q38_layer_weights *layer,
                      size_t *counts, uint32_t layer_number,
                      q38_forward_diagnostics *diagnostics, char *error,
                      size_t error_len) {
+    if (diagnostics && diagnostics->qsa_chain_backend && tokens == 1) {
+        q38_forward_qsa_timing chain_timing = {0};
+        if (!diagnostics->qsa_chain_backend(
+                model, layer, qsa_state, input, tokens, layer_number, output,
+                &chain_timing, diagnostics->qsa_chain_backend_user, error,
+                error_len)) {
+            if (error && error_len && error[0] != '\0')
+                return false;
+            else
+                goto legacy_qsa;
+        }
+        if (diagnostics->qsa_timing)
+            *diagnostics->qsa_timing = chain_timing;
+        return true;
+    }
+legacy_qsa:
     q38_forward_qsa_weights w;
     memset(&w, 0, sizeof(w));
     const q38_tensor *matrices[] = {
@@ -2681,6 +2701,12 @@ bool q38_forward_full_with_backend_config(
     const q38_forward_backend_config *config, char *error, size_t error_len) {
     if (!config)
         return full_fail(error, error_len, "backend configuration is null");
+    if (diagnostics) {
+        diagnostics->qsa_qkv_backend = config->qsa_qkv;
+        diagnostics->qsa_qkv_backend_user = config->user;
+        diagnostics->qsa_chain_backend = config->qsa_chain;
+        diagnostics->qsa_chain_backend_user = config->user;
+    }
     return full_with_matrix_batch_moe_layer_backend_ex(
         model, weights, state, tokens, token_count, logits, logits_stride,
         diagnostics, config->matvec, config->matrix, config->matrix_batch,

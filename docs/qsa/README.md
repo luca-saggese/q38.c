@@ -14,6 +14,9 @@ benchmark is performed by this target.
 The first candidate is QSA-C1, a single-token output-projection matvec. The
 candidate is measured against the complete layer, not only the projection
 kernel, and is promoted only if the correctness and 10% complete-layer gates
-pass on early, middle, and late fixtures. QSA-C1 is wired into the production
-forward path for `token_count == 1`; QKV, index/compress, attention, and QSA
-state handling are unchanged.
+pass on early, middle, and late fixtures. The explicit `qsa_chain_c1` mode
+extends this to the normal-decode device chain: Q/K/V, index/compress, cache
+state, selection, attention, and output projection stay device-resident with
+one input H2D and one output D2H at the layer boundary. The production
+callback is used for single-token evaluation; chunked prefill keeps the
+reference path.

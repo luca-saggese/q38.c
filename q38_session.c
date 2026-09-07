@@ -218,6 +218,7 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     runtime->backend.gdn_layer = q38_forward_cuda_gdn_layer_backend;
     runtime->backend.sync_state = q38_forward_cuda_sync_gdn_state;
     runtime->backend.qsa_qkv = q38_forward_cuda_qsa_qkv_backend;
+    runtime->backend.qsa_chain = q38_forward_cuda_qsa_chain_backend;
     runtime->backend.user = runtime->cuda;
     return true;
 
@@ -418,6 +419,8 @@ bool q38_session_eval_timed(
     }
     diagnostics->qsa_qkv_backend = session->runtime->backend.qsa_qkv;
     diagnostics->qsa_qkv_backend_user = session->runtime->backend.user;
+    diagnostics->qsa_chain_backend = session->runtime->backend.qsa_chain;
+    diagnostics->qsa_chain_backend_user = session->runtime->backend.user;
     diagnostics->directional_steering = &session->runtime->steering;
     diagnostics->directional_steering_ffn_scale =
         session->steering_ffn_scale;
@@ -536,6 +539,8 @@ bool q38_session_prefill_chunked(
          */
         diagnostics->qsa_qkv_backend = NULL;
         diagnostics->qsa_qkv_backend_user = NULL;
+        diagnostics->qsa_chain_backend = NULL;
+        diagnostics->qsa_chain_backend_user = NULL;
     }
     size_t offset = 0;
     while (offset < token_count) {

@@ -1937,6 +1937,11 @@ static bool run_reference0(q38_session *session, const q2_options *options,
            ",\"persistent_ple_entries\":%" PRIu64
            ",\"non_ple_upload_bytes\":%" PRIu64
            ",\"non_ple_residency_misses\":%" PRIu64
+           "},\"qsa_chain_c1\":{\"calls\":%" PRIu64
+           ",\"kernel_launches\":%" PRIu64 ",\"syncs\":%" PRIu64
+           ",\"h2d_bytes\":%" PRIu64 ",\"d2h_bytes\":%" PRIu64
+           ",\"internal_h2d_bytes\":%" PRIu64
+           ",\"internal_d2h_bytes\":%" PRIu64
            "},\"telemetry\":{\"callbacks\":%" PRIu64
            ",\"kernel_ms\":%.6f,\"backend_overhead_ms\":%.6f,"
            "\"upload_ms\":%.6f,\"h2d_bytes\":%" PRIu64
@@ -1948,7 +1953,15 @@ static bool run_reference0(q38_session *session, const q2_options *options,
            residency->persistent_resident_tensors,
            residency->persistent_ple_entries,
            telemetry.non_ple_upload_bytes,
-           telemetry.non_ple_residency_misses, telemetry.callbacks,
+           telemetry.non_ple_residency_misses,
+           residency->qsa_chain_calls,
+           residency->qsa_chain_kernel_launches,
+           residency->qsa_chain_syncs,
+           residency->qsa_chain_h2d_bytes,
+           residency->qsa_chain_d2h_bytes,
+           residency->qsa_chain_internal_h2d_bytes,
+           residency->qsa_chain_internal_d2h_bytes,
+           telemetry.callbacks,
            telemetry.kernel_ms, telemetry.backend_overhead_ms,
            telemetry.upload_ms, telemetry.h2d_bytes, telemetry.d2h_bytes,
            telemetry.host_syncs);
@@ -2054,6 +2067,11 @@ static int run(const q2_options *options) {
                ",\"persistent_ple_entries\":%" PRIu64
                ",\"non_ple_upload_bytes\":%" PRIu64
                ",\"non_ple_residency_misses\":%" PRIu64
+               "},\"qsa_chain_c1\":{\"calls\":%" PRIu64
+               ",\"kernel_launches\":%" PRIu64 ",\"syncs\":%" PRIu64
+               ",\"h2d_bytes\":%" PRIu64 ",\"d2h_bytes\":%" PRIu64
+               ",\"internal_h2d_bytes\":%" PRIu64
+               ",\"internal_d2h_bytes\":%" PRIu64
                "},\"telemetry\":{\"callbacks\":%" PRIu64
                ",\"kernel_ms\":%.6f,\"backend_overhead_ms\":%.6f,"
                "\"upload_ms\":%.6f,\"h2d_bytes\":%" PRIu64
@@ -2066,6 +2084,13 @@ static int run(const q2_options *options) {
                residency.persistent_ple_entries,
                summary.non_ple_upload_bytes,
                summary.non_ple_residency_misses,
+               residency.qsa_chain_calls,
+               residency.qsa_chain_kernel_launches,
+               residency.qsa_chain_syncs,
+               residency.qsa_chain_h2d_bytes,
+               residency.qsa_chain_d2h_bytes,
+               residency.qsa_chain_internal_h2d_bytes,
+               residency.qsa_chain_internal_d2h_bytes,
                telemetry.callbacks, telemetry.kernel_ms,
                telemetry.backend_overhead_ms, telemetry.upload_ms,
                telemetry.h2d_bytes, telemetry.d2h_bytes,

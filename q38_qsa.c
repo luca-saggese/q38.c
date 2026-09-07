@@ -103,6 +103,19 @@ bool q38_qsa_state_append(q38_qsa_state *state, const void *main_k,
     return true;
 }
 
+bool q38_qsa_state_advance_device(q38_qsa_state *state, size_t row_count,
+                                  char *error, size_t error_len) {
+    if (error && error_len > 0) error[0] = '\0';
+    if (!state || !row_count || row_count > UINT64_MAX - state->position ||
+        row_count > UINT64_MAX - state->committed_tokens)
+        return fail(error, error_len, "invalid device QSA state advance");
+    state->position += row_count;
+    state->committed_tokens += row_count;
+    state->pending_count = (uint32_t)(state->position % 4u);
+    state->pending_position = state->position - state->pending_count;
+    return true;
+}
+
 void q38_qsa_state_reset(q38_qsa_state *state) {
     if (!state) return;
     state->main_k.count = 0;

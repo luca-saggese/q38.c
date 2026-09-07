@@ -60,12 +60,19 @@ struct Device {
     uint16_t *k_proj = nullptr;
     uint16_t *v_proj = nullptr;
     uint16_t *o_proj = nullptr;
+    uint16_t *index_qk_proj = nullptr;
+    uint16_t *q_norm = nullptr;
+    uint16_t *k_norm = nullptr;
+    uint16_t *index_q_norm = nullptr;
+    uint16_t *index_k_norm = nullptr;
     float *input = nullptr;
     float *q = nullptr;
     float *k = nullptr;
     float *v = nullptr;
     float *output_input = nullptr;
     float *output = nullptr;
+    q38_qsa_cuda_chain_state chain_state{};
+    q38_qsa_cuda_chain_workspace chain_workspace{};
 };
 
 struct Stats {
@@ -118,6 +125,7 @@ struct Run {
 enum class Mode {
     Baseline,
     C1,
+    ChainC1,
 };
 
 static double now_us() {
@@ -352,6 +360,17 @@ static bool alloc_device(const Fixture &fixture, Device *device,
                  "v projection allocation") &&
            alloc((void **)&device->o_proj, fixture.o_proj.raw.size(),
                  "output projection allocation") &&
+           alloc((void **)&device->index_qk_proj,
+                 fixture.index_qk_proj.raw.size(),
+                 "index projection allocation") &&
+           alloc((void **)&device->q_norm, fixture.q_norm.raw.size(),
+                 "q norm allocation") &&
+           alloc((void **)&device->k_norm, fixture.k_norm.raw.size(),
+                 "k norm allocation") &&
+           alloc((void **)&device->index_q_norm, fixture.index_q_norm.raw.size(),
+                 "index q norm allocation") &&
+           alloc((void **)&device->index_k_norm, fixture.index_k_norm.raw.size(),
+                 "index k norm allocation") &&
            alloc((void **)&device->input, kHidden * sizeof(float),
                  "input allocation") &&
            alloc((void **)&device->q, kQRows * sizeof(float),
@@ -363,7 +382,26 @@ static bool alloc_device(const Fixture &fixture, Device *device,
            alloc((void **)&device->output_input, kAttention * sizeof(float),
                  "output input allocation") &&
            alloc((void **)&device->output, kOutput * sizeof(float),
-                 "output allocation");
+                 "output allocation") &&
+           alloc((void **)&device->chain_workspace.index, kIndexRows * sizeof(float),
+                 "chain index workspace allocation") &&
+           alloc((void **)&device->chain_workspace.index_q,
+                 kIndexStateRows * sizeof(float),
+                 "chain index query workspace allocation") &&
+           alloc((void **)&device->chain_workspace.raw_index,
+                 kIndexStateRows * sizeof(float),
+                 "chain raw index workspace allocation") &&
+           alloc((void **)&device->chain_workspace.attention,
+                 kAttention * sizeof(float), "chain attention workspace allocation") &&
+           alloc((void **)&device->chain_workspace.selected_k,
+                 kSelectedStride * 2 * 256 * sizeof(float),
+                 "chain selected key workspace allocation") &&
+           alloc((void **)&device->chain_workspace.selected_v,
+                 kSelectedStride * 2 * 256 * sizeof(float),
+                 "chain selected value workspace allocation") &&
+           alloc((void **)&device->chain_workspace.selected,
+                 kSelectedStride * sizeof(uint32_t),
+                 "chain selected ID workspace allocation");
 }
 
 static void free_device(Device *device) {
@@ -371,12 +409,25 @@ static void free_device(Device *device) {
     cudaFree(device->k_proj);
     cudaFree(device->v_proj);
     cudaFree(device->o_proj);
+    cudaFree(device->index_qk_proj);
+    cudaFree(device->q_norm);
+    cudaFree(device->k_norm);
+    cudaFree(device->index_q_norm);
+    cudaFree(device->index_k_norm);
     cudaFree(device->input);
     cudaFree(device->q);
     cudaFree(device->k);
     cudaFree(device->v);
     cudaFree(device->output_input);
     cudaFree(device->output);
+    q38_qsa_cuda_chain_release(&device->chain_state);
+    cudaFree(device->chain_workspace.index);
+    cudaFree(device->chain_workspace.index_q);
+    cudaFree(device->chain_workspace.raw_index);
+    cudaFree(device->chain_workspace.attention);
+    cudaFree(device->chain_workspace.selected_k);
+    cudaFree(device->chain_workspace.selected_v);
+    cudaFree(device->chain_workspace.selected);
     if (device->stream) cudaStreamDestroy(device->stream);
     *device = {};
 }
@@ -399,6 +450,29 @@ static bool upload_weights(const Fixture &fixture, Device *device,
                                    fixture.o_proj.raw.size(),
                                    cudaMemcpyHostToDevice, device->stream),
                    "output projection upload", error) &&
+           cuda_ok(cudaMemcpyAsync(device->index_qk_proj,
+                                   fixture.index_qk_proj.raw.data(),
+                                   fixture.index_qk_proj.raw.size(),
+                                   cudaMemcpyHostToDevice, device->stream),
+                   "index projection upload", error) &&
+           cuda_ok(cudaMemcpyAsync(device->q_norm, fixture.q_norm.raw.data(),
+                                   fixture.q_norm.raw.size(),
+                                   cudaMemcpyHostToDevice, device->stream),
+                   "q norm upload", error) &&
+           cuda_ok(cudaMemcpyAsync(device->k_norm, fixture.k_norm.raw.data(),
+                                   fixture.k_norm.raw.size(),
+                                   cudaMemcpyHostToDevice, device->stream),
+                   "k norm upload", error) &&
+           cuda_ok(cudaMemcpyAsync(device->index_q_norm,
+                                   fixture.index_q_norm.raw.data(),
+                                   fixture.index_q_norm.raw.size(),
+                                   cudaMemcpyHostToDevice, device->stream),
+                   "index q norm upload", error) &&
+           cuda_ok(cudaMemcpyAsync(device->index_k_norm,
+                                   fixture.index_k_norm.raw.data(),
+                                   fixture.index_k_norm.raw.size(),
+                                   cudaMemcpyHostToDevice, device->stream),
+                   "index k norm upload", error) &&
            cuda_ok(cudaStreamSynchronize(device->stream), "weight sync",
                    error);
 }
@@ -451,6 +525,54 @@ static bool run_once(const Fixture &fixture, Device *device, Mode mode,
     run->state_index_k.assign(kIndexStateRows, 0.0f);
     run->attention.assign(kAttention, 0.0f);
     run->selected.assign(kSelectedStride, 0);
+    if (mode == Mode::ChainC1) {
+        q38_qsa_cuda_chain_reset(&device->chain_state);
+        if (!q38_qsa_cuda_chain_reserve(
+                &device->chain_state, 1, device->stream, error->data(),
+                error->size()))
+            return false;
+        const double started = now_us();
+        if (!cuda_ok(cudaMemcpyAsync(
+                         device->input, fixture.hidden.data(),
+                         kHidden * sizeof(float), cudaMemcpyHostToDevice,
+                         device->stream),
+                     "QSA chain input upload", error))
+            return false;
+        char cuda_error[256] = {};
+        if (!q38_qsa_cuda_chain_decode(
+                device->q_proj, device->k_proj, device->v_proj,
+                device->index_qk_proj, device->o_proj, device->q_norm,
+                device->k_norm, device->index_q_norm, device->index_k_norm,
+                device->input, device->output, 0, &device->chain_state,
+                &device->chain_workspace, device->stream, cuda_error,
+                sizeof(cuda_error))) {
+            *error = cuda_error[0] ? cuda_error : "QSA chain launch failed";
+            return false;
+        }
+        if (!cuda_ok(cudaMemcpyAsync(
+                         run->output.data(), device->output,
+                         kOutput * sizeof(float), cudaMemcpyDeviceToHost,
+                         device->stream),
+                     "QSA chain output download", error) ||
+            !cuda_ok(cudaStreamSynchronize(device->stream),
+                     "QSA chain synchronize", error))
+            return false;
+        run->sample.total_us = now_us() - started;
+        run->selected.resize(fixture.selected.size());
+        if (!run->selected.empty() &&
+            !cuda_ok(cudaMemcpy(
+                         run->selected.data(), device->chain_workspace.selected,
+                         run->selected.size() * sizeof(uint32_t),
+                         cudaMemcpyDeviceToHost),
+                     "QSA chain selected-ID validation", error))
+            return false;
+        run->sample.qkv_us = run->sample.total_us;
+        run->sample.launches = 12;
+        run->sample.syncs = 1;
+        run->sample.h2d_bytes = kHidden * sizeof(float);
+        run->sample.d2h_bytes = kOutput * sizeof(float);
+        return true;
+    }
     std::vector<float> q(kQRows), k(kKvRows), v(kKvRows), index(kIndexRows);
     const double total_started = now_us();
     const double qkv_started = now_us();
@@ -641,7 +763,7 @@ static void emit_metric(FILE *artifact, const char *name, const Stats &stats) {
 }
 
 static bool run_case(const std::string &root, const char *name, FILE *artifact,
-                     bool *all_correct) {
+                     bool *all_correct, Mode candidate_mode) {
     Fixture fixture;
     std::string error;
     const std::string dir = root + "/" + name;
@@ -656,6 +778,11 @@ static bool run_case(const std::string &root, const char *name, FILE *artifact,
         free_device(&device);
         return false;
     }
+    device.chain_workspace.qfull = device.q;
+    device.chain_workspace.q = device.output_input;
+    device.chain_workspace.k = device.k;
+    device.chain_workspace.v = device.v;
+    device.chain_workspace.selected_capacity = kSelectedStride;
     std::vector<Sample> baseline_samples, c1_samples;
     baseline_samples.reserve(kSamples);
     c1_samples.reserve(kSamples);
@@ -672,8 +799,9 @@ static bool run_case(const std::string &root, const char *name, FILE *artifact,
             free_device(&device);
             return false;
         }
-        if (!run_once(fixture, &device, Mode::C1, &warmup, &error)) {
-            std::fprintf(stderr, "%s C1 warmup: %s\n", name, error.c_str());
+        if (!run_once(fixture, &device, candidate_mode, &warmup, &error)) {
+            std::fprintf(stderr, "%s candidate warmup: %s\n", name,
+                         error.c_str());
             free_device(&device);
             return false;
         }
@@ -698,16 +826,27 @@ static bool run_case(const std::string &root, const char *name, FILE *artifact,
                          error.c_str());
         baseline_correct &= baseline_valid;
         baseline_selected |= selected_match;
-        if (!run_once(fixture, &device, Mode::C1, &run, &error)) {
-            std::fprintf(stderr, "%s C1: %s\n", name, error.c_str());
+        if (!run_once(fixture, &device, candidate_mode, &run, &error)) {
+            std::fprintf(stderr, "%s candidate: %s\n", name, error.c_str());
             free_device(&device);
             return false;
         }
         c1_samples.push_back(run.sample);
-        const bool c1_valid = validate_run(
-            fixture, run, &error, &q, &k, &v, &index, &state_k, &state_v,
-            &state_index,
-            &attention, &output, &selected_match);
+        bool c1_valid;
+        if (candidate_mode == Mode::ChainC1) {
+            output = compare(run.output.data(), fixture.expected_output.data(),
+                             run.output.size());
+            c1_valid = compare_passes(output);
+            selected_match = run.selected == fixture.selected;
+            c1_valid = c1_valid && selected_match;
+            if (!c1_valid)
+                error = "QSA chain output validation failed: max_abs=" +
+                        std::to_string(output.max_abs);
+        } else {
+            c1_valid = validate_run(
+                fixture, run, &error, &q, &k, &v, &index, &state_k, &state_v,
+                &state_index, &attention, &output, &selected_match);
+        }
         if (!c1_valid)
             std::fprintf(stderr, "%s C1 correctness: %s\n", name,
                          error.c_str());
@@ -754,11 +893,12 @@ static bool run_case(const std::string &root, const char *name, FILE *artifact,
                      ",\"syncs\":%" PRIu64
                      ",\"h2d_bytes\":%" PRIu64
                      ",\"d2h_bytes\":%" PRIu64
-                     "},\"c1\":{",
-                 baseline_samples.front().launches,
-                 baseline_samples.front().syncs,
-                 baseline_samples.front().h2d_bytes,
-                 baseline_samples.front().d2h_bytes);
+                     "},\"%s\":{",
+                     baseline_samples.front().launches,
+                     baseline_samples.front().syncs,
+                     baseline_samples.front().h2d_bytes,
+                     baseline_samples.front().d2h_bytes,
+                     candidate_mode == Mode::ChainC1 ? "chain_c1" : "c1");
     emit_metric(artifact, "total", c1_total);
     std::fprintf(artifact, ",");
     emit_metric(artifact, "qkv", sample_stats(c1_samples, &Sample::qkv_us));
@@ -790,22 +930,26 @@ static bool run_case(const std::string &root, const char *name, FILE *artifact,
                      "},\"promotion\":{\"median_saved_us\":%.6f,"
                      "\"relative_reduction_percent\":%.6f,"
                      "\"promoted\":%s},\"correctness\":{\"baseline\":%s,"
-                     "\"c1\":%s,\"selected_ids_exact\":%s,"
+                     "\"%s\":%s,\"selected_ids_exact\":%s,"
                      "\"max_abs\":%.9g,\"max_rel\":%.9g,\"rmse\":%.9g,"
                      "\"nonfinite\":0}}\n",
                  c1_samples.front().launches, c1_samples.front().syncs,
                  c1_samples.front().h2d_bytes, c1_samples.front().d2h_bytes,
                  saved, reduction, c1_correct && reduction >= 10.0 ? "true" :
                  "false", baseline_correct ? "true" : "false",
+                 candidate_mode == Mode::ChainC1 ? "chain_c1" : "c1",
                  c1_correct ? "true" : "false",
                  baseline_selected && c1_selected ? "true" : "false",
                  c1_output.max_abs, c1_output.max_rel, c1_output.rmse);
     std::printf(
-        "{\"fixture\":\"%s\",\"layer\":%u,\"baseline_median_us\":%.3f,"
+        "{\"fixture\":\"%s\",\"layer\":%u,\"mode\":\"%s\","
+        "\"baseline_median_us\":%.3f,"
         "\"c1_median_us\":%.3f,\"saved_us\":%.3f,"
         "\"reduction_percent\":%.3f,\"baseline_correct\":%s,"
         "\"c1_correct\":%s,\"selected_ids_exact\":%s}\n",
-        name, fixture.layer, baseline_total.median, c1_total.median, saved,
+        name, fixture.layer,
+        candidate_mode == Mode::ChainC1 ? "qsa_chain_c1" : "qsa_c1",
+        baseline_total.median, c1_total.median, saved,
         reduction, baseline_correct ? "true" : "false",
         c1_correct ? "true" : "false",
         baseline_selected && c1_selected ? "true" : "false");
@@ -818,6 +962,17 @@ int main(int argc, char **argv) {
     const std::string root = argc > 1 ? argv[1] : "tests/fixtures/qsa";
     const std::string artifact =
         argc > 2 ? argv[2] : "artifacts/perf/subsystems/qsa_reference.json";
+    Mode candidate_mode = Mode::C1;
+    if (argc > 3) {
+        if (std::strcmp(argv[3], "qsa_chain_c1") == 0)
+            candidate_mode = Mode::ChainC1;
+        else if (std::strcmp(argv[3], "qsa_c1") != 0) {
+            std::fprintf(stderr,
+                         "usage: qsa_bench FIXTURE_ROOT ARTIFACT "
+                         "[qsa_c1|qsa_chain_c1]\n");
+            return 2;
+        }
+    }
     FILE *out = std::fopen(artifact.c_str(), "w");
     if (!out) {
         std::fprintf(stderr, "failed to open %s\n", artifact.c_str());
@@ -825,15 +980,18 @@ int main(int argc, char **argv) {
     }
     std::fprintf(out,
                  "{\"schema\":\"QSA_SUBSYSTEM_V1\","
+                 "\"mode\":\"%s\","
                  "\"fixture_root\":\"%s\",\"warmups\":%zu,"
                  "\"samples\":%zu,\"fixtures\":[\n",
+                 candidate_mode == Mode::ChainC1 ? "qsa_chain_c1" : "qsa_c1",
                  root.c_str(), kWarmups, kSamples);
     bool all_correct = true;
     const char *names[] = {"early", "middle", "late"};
     bool ok = true;
     for (size_t i = 0; i < 3; ++i) {
         if (i) std::fprintf(out, ",");
-        if (!run_case(root, names[i], out, &all_correct)) ok = false;
+        if (!run_case(root, names[i], out, &all_correct, candidate_mode))
+            ok = false;
     }
     std::fprintf(out, "]}\n");
     std::fclose(out);

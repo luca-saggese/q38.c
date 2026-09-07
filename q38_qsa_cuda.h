@@ -11,6 +11,50 @@
 extern "C" {
 #endif
 
+typedef struct {
+    float *main_k;
+    float *main_v;
+    float *index_k;
+    size_t capacity;
+    size_t count;
+    uint64_t position;
+} q38_qsa_cuda_chain_state;
+
+typedef struct {
+    float *qfull;
+    float *q;
+    float *k;
+    float *v;
+    float *index;
+    float *index_q;
+    float *raw_index;
+    float *attention;
+    float *selected_k;
+    float *selected_v;
+    uint32_t *selected;
+    size_t selected_capacity;
+} q38_qsa_cuda_chain_workspace;
+
+bool q38_qsa_cuda_chain_reserve(q38_qsa_cuda_chain_state *state,
+                                size_t capacity, cudaStream_t stream,
+                                char *error, size_t error_len);
+void q38_qsa_cuda_chain_release(q38_qsa_cuda_chain_state *state);
+void q38_qsa_cuda_chain_reset(q38_qsa_cuda_chain_state *state);
+
+/*
+ * Single-token QSA chain.  All weights, activations, cache rows, and
+ * workspaces are device-resident.  The function only enqueues work; the
+ * caller owns the boundary input upload/output download and synchronization.
+ */
+bool q38_qsa_cuda_chain_decode(
+    const uint16_t *q_proj, const uint16_t *k_proj, const uint16_t *v_proj,
+    const uint16_t *index_qk_proj, const uint16_t *o_proj,
+    const uint16_t *q_norm, const uint16_t *k_norm,
+    const uint16_t *index_q_norm, const uint16_t *index_k_norm,
+    const float *device_input, float *device_output, uint64_t position,
+    q38_qsa_cuda_chain_state *state, q38_qsa_cuda_chain_workspace *workspace,
+    cudaStream_t stream, char *error, size_t error_len);
+
 bool q38_qsa_cuda_project_main(const uint16_t *q_proj, size_t q_rows,
                                const uint16_t *k_proj, size_t k_rows,
                                const uint16_t *v_proj, size_t v_rows,
