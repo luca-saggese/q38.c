@@ -216,7 +216,8 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     runtime->backend.expert = q38_forward_cuda_expert_backend;
     runtime->backend.moe_layer = q38_forward_cuda_moe_layer_q2_backend;
     runtime->backend.gdn_layer = q38_forward_cuda_gdn_layer_backend;
-    runtime->backend.decoder_layer_chain = NULL;
+    runtime->backend.decoder_layer_chain =
+        q38_forward_cuda_decoder_layer_chain_backend;
     runtime->backend.sync_state = q38_forward_cuda_sync_gdn_state;
     runtime->backend.qsa_qkv = q38_forward_cuda_qsa_qkv_backend;
     runtime->backend.qsa_chain = q38_forward_cuda_qsa_chain_backend;

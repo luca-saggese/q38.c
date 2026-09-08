@@ -45,6 +45,78 @@ __global__ static void route_weights_kernel(
     }
 }
 
+__device__ static bool route_ascending_before(
+    float left_score, uint16_t left_id, float right_score,
+    uint16_t right_id) {
+    return left_score < right_score ||
+           (left_score == right_score && left_id > right_id);
+}
+
+__global__ static void q38_moe_route_top10_decode_kernel(
+    const float *logits, uint32_t *indices, uint16_t *expert_ids,
+    float *weights) {
+    __shared__ float scores[Q38_MOE_EXPERTS];
+    __shared__ uint16_t ids[Q38_MOE_EXPERTS];
+    __shared__ float selected_exp[Q38_MOE_TOP_K];
+    __shared__ float normalizer;
+    const unsigned thread = threadIdx.x;
+
+    for (unsigned offset = 0; offset < 2; ++offset) {
+        const unsigned expert = thread + offset * 256u;
+        const float effective =
+            __bfloat162float(__float2bfloat16_rn(logits[expert]));
+        scores[expert] = effective;
+        ids[expert] = (uint16_t)expert;
+    }
+    __syncthreads();
+
+    for (unsigned length = 2; length <= Q38_MOE_EXPERTS; length <<= 1) {
+        for (unsigned stride = length >> 1; stride; stride >>= 1) {
+            for (unsigned offset = 0; offset < 2; ++offset) {
+                const unsigned index = thread + offset * 256u;
+                const unsigned partner = index ^ stride;
+                if (partner > index) {
+                    const bool ascending = (index & length) == 0;
+                    const bool before = route_ascending_before(
+                        scores[index], ids[index], scores[partner],
+                        ids[partner]);
+                    const bool swap = ascending ? !before : before;
+                    if (swap) {
+                        const float score = scores[index];
+                        const uint16_t id = ids[index];
+                        scores[index] = scores[partner];
+                        ids[index] = ids[partner];
+                        scores[partner] = score;
+                        ids[partner] = id;
+                    }
+                }
+            }
+            __syncthreads();
+        }
+    }
+
+    if (thread < Q38_MOE_TOP_K)
+        selected_exp[thread] =
+            expf(scores[Q38_MOE_EXPERTS - 1u - thread] -
+                 scores[Q38_MOE_EXPERTS - 1u]);
+    __syncthreads();
+    if (thread == 0) {
+        float sum = 0.0f;
+        for (unsigned k = 0; k < Q38_MOE_TOP_K; ++k)
+            sum += selected_exp[k];
+        normalizer = sum;
+    }
+    __syncthreads();
+    if (thread < Q38_MOE_TOP_K) {
+        const uint16_t id = ids[Q38_MOE_EXPERTS - 1u - thread];
+        const float normalized = selected_exp[thread] / normalizer;
+        indices[thread] = id;
+        expert_ids[thread] = id;
+        weights[thread] =
+            __bfloat162float(__float2bfloat16_rn(normalized));
+    }
+}
+
 __global__ static void router_kernel(const float *hidden, size_t tokens,
                                      const float *router, float *logits) {
     const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -85,6 +157,13 @@ extern "C" bool q38_moe_cuda_route_weights(
     if (!device_logits || !token_count || !device_indices ||
         !device_expert_ids || !device_weights)
         return fail(error, error_len, "invalid CUDA route weight arguments");
+    if (token_count == 1) {
+        q38_moe_route_top10_decode_kernel<<<1, 256, 0, stream>>>(
+            device_logits, device_indices, device_expert_ids, device_weights);
+        const cudaError_t status = cudaGetLastError();
+        return status == cudaSuccess ||
+               fail(error, error_len, cudaGetErrorString(status));
+    }
     if (!q38_topk_cuda(device_logits, token_count, Q38_MOE_EXPERTS,
                        Q38_MOE_TOP_K, device_indices, stream, error,
                        error_len))
