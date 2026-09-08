@@ -56,17 +56,34 @@ fixtures. Activation payload and scale bytes remain exact; all projection and
 single-expert comparisons remain within the frozen `1e-5` tolerance with zero
 NaN and zero Inf.
 
-One production full-model smoke was started with MTP and vision disabled,
-greedy decoding, the native materialized pack, and a 16-token limit. Native
-runtime initialization completed after approximately `426.031 s`, including
-approximately `425.949 s` in CUDA preparation. The run reached the execution
-window but exceeded the command time budget before emitting generated token
-IDs. Therefore first-token equality, short-sequence equality, and
-NVIDIA/vLLM comparison are **not established**.
+The M9N-06 hotfix then added the missing shared-MoE `device_moe_mid`
+workspace and replaced the five synchronous whole-region copies with two
+128 MiB pinned staging buffers, asynchronous H2D transfers, reuse events, and
+final cleanup before inference. The host-only preflight and the normal
+non-model test gates remained green.
 
-Because production correctness is not established, `NVIDIA_NVFP4_REFERENCE_0`
-was not run. No performance promotion or full-decoder correctness claim is
-made in this checkpoint.
+The single authorized post-hotfix smoke used MTP and vision disabled,
+file-backed PLE, greedy decoding, `--prefill-reference`, and
+`--max-tokens 4`. It completed without a crash or numerical exception:
+
+```text
+prompt tokens: 11
+cuda_prepare_ms: 83317.870
+runtime_init_ms: 83399.558
+first token: 271
+generated IDs: [271, 248068, 271, 248069]
+prefill_ms: 1296.283
+decode_median_ms: 113.657
+peak CUDA allocated bytes: 76540162048
+peak RSS bytes: 36908294144
+NaN: 0
+Inf: 0
+fallback used: false
+```
+
+The generated-token sequence is now available, but no NVIDIA/vLLM reference
+run was performed in this hotfix. Therefore token equality against the
+external reference and `NVIDIA_NVFP4_REFERENCE_0` remain **not established**.
 
 ## Acceptance disposition
 
@@ -79,7 +96,7 @@ made in this checkpoint.
 | File-backed NVIDIA PLE binding | PASS |
 | MTP and vision excluded | PASS |
 | Frozen NVFP4 CUDA fixtures | PASS |
-| Full-model generated tokens | BLOCKED: smoke timed out before token output |
+| Full-model generated tokens | PASS: 4 IDs emitted, no NaN/Inf, no fallback |
 | NVIDIA/vLLM token equality | NOT RUN |
 | `NVIDIA_NVFP4_REFERENCE_0` | NOT RUN |
 
