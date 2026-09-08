@@ -2995,6 +2995,11 @@ static bool qsa_chain_tensor(
     q38_forward_cuda_context *context, const q38_gguf *model,
     const q38_tensor *tensor, size_t rows, size_t cols,
     const uint16_t **pointer, char *error, size_t error_len);
+static bool qsa_chain_device_impl(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_layer_weights *layer, q38_qsa_state *host_state,
+    const float *device_input, uint32_t layer_number, float *device_output,
+    bool allow_host_seed, char *error, size_t error_len);
 extern "C" bool q38_forward_cuda_gr_read_device(
     q38_forward_cuda_context *context, const q38_gguf *model,
     const q38_gr_weights *weights, const float *device_residual,
@@ -3028,50 +3033,9 @@ extern "C" bool q38_forward_cuda_qsa_chain_device(
     if (!context || !model || !layer || !host_state || !device_input ||
         !device_output || layer_number >= Q38_MODEL_LAYERS)
         return false;
-    q38_qsa_cuda_chain_state *chain =
-        &context->qsa_chain_state[layer_number];
-    if (host_state->position == 0 && chain->position != 0)
-        q38_qsa_cuda_chain_reset(chain);
-    if (chain->position != host_state->position)
-        return fail(error, error_len,
-                    "QSA device chain state is not seeded for this position");
-    const q38_qsa_weights *weights = &layer->qsa;
-    const uint16_t *q_proj, *k_proj, *v_proj, *index_proj, *o_proj;
-    const uint16_t *q_norm, *k_norm, *index_q_norm, *index_k_norm;
-    if (!qsa_chain_tensor(context, model, weights->q_proj, 12288, 2560,
-                          &q_proj, error, error_len) ||
-        !qsa_chain_tensor(context, model, weights->k_proj, 512, 2560,
-                          &k_proj, error, error_len) ||
-        !qsa_chain_tensor(context, model, weights->v_proj, 512, 2560,
-                          &v_proj, error, error_len) ||
-        !qsa_chain_tensor(context, model, weights->index_qk_proj, 640, 2560,
-                          &index_proj, error, error_len) ||
-        !qsa_chain_tensor(context, model, weights->o_proj, 2560, 6144,
-                          &o_proj, error, error_len) ||
-        !qsa_chain_tensor(context, model, weights->q_norm, 1, 256,
-                          &q_norm, error, error_len) ||
-        !qsa_chain_tensor(context, model, weights->k_norm, 1, 256,
-                          &k_norm, error, error_len) ||
-        !qsa_chain_tensor(context, model, weights->index_q_norm, 1, 128,
-                          &index_q_norm, error, error_len) ||
-        !qsa_chain_tensor(context, model, weights->index_k_norm, 1, 128,
-                          &index_k_norm, error, error_len) ||
-        !ensure_qsa_chain_workspace(context, error, error_len))
-        return false;
-    if (!ensure_qsa_chain_capacity(
-            chain, chain->count + 1u, context->stream, error, error_len))
-        return false;
-    if (!q38_qsa_cuda_chain_decode(
-            q_proj, k_proj, v_proj, index_proj, o_proj, q_norm, k_norm,
-            index_q_norm, index_k_norm, device_input, device_output,
-            host_state->position, chain, &context->qsa_chain_workspace,
-            context->stream, error, error_len))
-        return false;
-    if (!q38_qsa_state_advance_device(host_state, 1, error, error_len))
-        return false;
-    ++context->qsa_chain_calls;
-    context->qsa_chain_kernel_launches += 9;
-    return true;
+    return qsa_chain_device_impl(
+        context, model, layer, host_state, device_input, layer_number,
+        device_output, false, error, error_len);
 }
 
 extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
@@ -3571,23 +3535,48 @@ static bool qsa_chain_tensor(
     return true;
 }
 
-extern "C" bool q38_forward_cuda_qsa_chain_backend(
-    const q38_gguf *model, const q38_layer_weights *layer,
-    q38_qsa_state *host_state, const float *host_input, size_t token_count,
-    uint32_t layer_number, float *host_output, q38_forward_qsa_timing *timing,
-    void *user, char *error, size_t error_len) {
-    if (error && error_len) error[0] = '\0';
-    q38_forward_cuda_context *context =
-        (q38_forward_cuda_context *)user;
-    if (!context || !model || !layer || !host_state || !host_input ||
-        token_count != 1 || !host_output || !timing ||
-        layer_number >= Q38_MODEL_LAYERS)
-        return false;
+static bool prepare_qsa_chain_state(
+    q38_forward_cuda_context *context, q38_qsa_cuda_chain_state *chain,
+    q38_qsa_state *host_state, bool allow_host_seed, char *error,
+    size_t error_len) {
+    if (host_state->position == 0 && chain->position != 0)
+        q38_qsa_cuda_chain_reset(chain);
+    if (chain->position == host_state->position)
+        return true;
+    if (!allow_host_seed || chain->position != 0 ||
+        host_state->main_k.count != host_state->position ||
+        host_state->main_v.count != host_state->position ||
+        host_state->index_k.count != host_state->position)
+        return fail(error, error_len,
+                    "QSA device chain state is not seeded for this position");
+    if (!ensure_qsa_chain_capacity(
+            chain, host_state->main_k.count, context->stream, error,
+            error_len) ||
+        cudaMemcpyAsync(
+            chain->main_k, host_state->main_k.data,
+            host_state->main_k.count * host_state->main_k.row_bytes,
+            cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(
+            chain->main_v, host_state->main_v.data,
+            host_state->main_v.count * host_state->main_v.row_bytes,
+            cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
+        cudaMemcpyAsync(
+            chain->index_k, host_state->index_k.data,
+            host_state->index_k.count * host_state->index_k.row_bytes,
+            cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
+        return fail(error, error_len, "QSA chain state seed failed");
+    chain->count = host_state->position;
+    chain->position = host_state->position;
+    return true;
+}
+
+static bool qsa_chain_device_impl(
+    q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_layer_weights *layer, q38_qsa_state *host_state,
+    const float *device_input, uint32_t layer_number, float *device_output,
+    bool allow_host_seed, char *error, size_t error_len) {
     q38_qsa_cuda_chain_state *chain =
         &context->qsa_chain_state[layer_number];
-    if (host_state->position != chain->position &&
-        chain->position != 0 && host_state->position != 0)
-        return false;
     const q38_qsa_weights *weights = &layer->qsa;
     const uint16_t *q_proj, *k_proj, *v_proj, *index_proj, *o_proj;
     const uint16_t *q_norm, *k_norm, *index_q_norm, *index_k_norm;
@@ -3608,38 +3597,36 @@ extern "C" bool q38_forward_cuda_qsa_chain_backend(
         !qsa_chain_tensor(context, model, weights->index_q_norm, 1, 128,
                           &index_q_norm, error, error_len) ||
         !qsa_chain_tensor(context, model, weights->index_k_norm, 1, 128,
-                          &index_k_norm, error, error_len))
-        return false;
-    if (!ensure_qsa_chain_workspace(context, error, error_len))
-        return false;
-    if (host_state->position == 0 && chain->position != 0)
-        q38_qsa_cuda_chain_reset(chain);
-    if (chain->position == 0 && host_state->position != 0) {
-        if (host_state->main_k.count != host_state->position ||
-            host_state->main_v.count != host_state->position ||
-            host_state->index_k.count != host_state->position)
-            return false;
-        if (!ensure_qsa_chain_capacity(
-                chain, host_state->main_k.count, context->stream, error,
-                error_len) ||
-            cudaMemcpyAsync(
-                chain->main_k, host_state->main_k.data,
-                host_state->main_k.count * host_state->main_k.row_bytes,
-                cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
-            cudaMemcpyAsync(
-                chain->main_v, host_state->main_v.data,
-                host_state->main_v.count * host_state->main_v.row_bytes,
-                cudaMemcpyHostToDevice, context->stream) != cudaSuccess ||
-            cudaMemcpyAsync(
-                chain->index_k, host_state->index_k.data,
-                host_state->index_k.count * host_state->index_k.row_bytes,
-                cudaMemcpyHostToDevice, context->stream) != cudaSuccess)
-            return fail(error, error_len, "QSA chain state seed failed");
-        chain->count = host_state->position;
-        chain->position = host_state->position;
-    }
-    if (!ensure_qsa_chain_capacity(
+                          &index_k_norm, error, error_len) ||
+        !ensure_qsa_chain_workspace(context, error, error_len) ||
+        !prepare_qsa_chain_state(
+            context, chain, host_state, allow_host_seed, error, error_len) ||
+        !ensure_qsa_chain_capacity(
             chain, chain->count + 1u, context->stream, error, error_len))
+        return false;
+    if (!q38_qsa_cuda_chain_decode(
+            q_proj, k_proj, v_proj, index_proj, o_proj, q_norm, k_norm,
+            index_q_norm, index_k_norm, device_input, device_output,
+            host_state->position, chain, &context->qsa_chain_workspace,
+            context->stream, error, error_len) ||
+        !q38_qsa_state_advance_device(host_state, 1, error, error_len))
+        return false;
+    ++context->qsa_chain_calls;
+    context->qsa_chain_kernel_launches += 9;
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_qsa_chain_backend(
+    const q38_gguf *model, const q38_layer_weights *layer,
+    q38_qsa_state *host_state, const float *host_input, size_t token_count,
+    uint32_t layer_number, float *host_output, q38_forward_qsa_timing *timing,
+    void *user, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    q38_forward_cuda_context *context =
+        (q38_forward_cuda_context *)user;
+    if (!context || !model || !layer || !host_state || !host_input ||
+        token_count != 1 || !host_output || !timing ||
+        layer_number >= Q38_MODEL_LAYERS)
         return false;
     if (!context->device_input ||
         !ensure_buffer((void **)&context->device_input,
@@ -3658,19 +3645,15 @@ extern "C" bool q38_forward_cuda_qsa_chain_backend(
                         context->stream) != cudaSuccess)
         return fail(error, error_len, "QSA chain input upload failed");
     const double started = host_now_ms();
-    if (!q38_qsa_cuda_chain_decode(
-            q_proj, k_proj, v_proj, index_proj, o_proj, q_norm, k_norm,
-            index_q_norm, index_k_norm, context->device_input,
-            context->device_output, host_state->position, chain,
-            &context->qsa_chain_workspace, context->stream, error, error_len))
+    if (!qsa_chain_device_impl(
+            context, model, layer, host_state, context->device_input,
+            layer_number, context->device_output, true, error, error_len))
         return false;
     if (cudaMemcpyAsync(host_output, context->device_output,
                         2560u * sizeof(float), cudaMemcpyDeviceToHost,
                         context->stream) != cudaSuccess ||
         cudaStreamSynchronize(context->stream) != cudaSuccess)
         return fail(error, error_len, "QSA chain output download failed");
-    if (!q38_qsa_state_advance_device(host_state, 1, error, error_len))
-        return false;
     timing->qkv_backend_used = true;
     timing->output_projection_backend_used = true;
     timing->qkv_projection_ms = host_now_ms() - started;
@@ -3683,7 +3666,6 @@ extern "C" bool q38_forward_cuda_qsa_chain_backend(
     timing->h2d_bytes = 2560u * sizeof(float);
     timing->d2h_bytes = 2560u * sizeof(float);
     timing->total_ms = timing->qkv_projection_ms;
-    ++context->qsa_chain_calls;
     context->qsa_chain_kernel_launches += timing->kernel_launches;
     ++context->qsa_chain_syncs;
     context->qsa_chain_h2d_bytes += timing->h2d_bytes;
