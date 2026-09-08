@@ -52,3 +52,6 @@ artifacts/m8/*.log
 artifacts/m8/*.stderr
 artifacts/m8/*.exit
 artifacts/m9-nvidia/raw/nvfp4_tensor_inventory.json
+# The full M9-NVIDIA snapshot is a local-only model cache. The metadata files
+# already tracked in Git remain tracked despite this ignore rule.
+models/Qwen3.8-Flash-Next-NVFP4/*
