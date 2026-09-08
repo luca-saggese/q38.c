@@ -73,6 +73,31 @@ tests/test_m9_nvfp4_pack: tests/test_m9_nvfp4_pack.c q38_nvfp4_pack.o \
 m9n-pack-test: tests/test_m9_nvfp4_pack
 	./tests/test_m9_nvfp4_pack
 
+tests/nvfp4/nvfp4_cuda_fixture: tests/nvfp4/nvfp4_cuda_fixture.cu
+	$(NVCC) $(NVCCFLAGS) -o $@ $< $(CUDA_LDLIBS)
+
+.PHONY: m9n-nvfp4-cuda-test
+m9n-nvfp4-cuda-test: tests/nvfp4/nvfp4_cuda_fixture
+	python3 tools/q38_nvfp4_cuda_fixture.py \
+		--output /tmp/q38_nvfp4_cuda_fixture.bin
+	./tests/nvfp4/nvfp4_cuda_fixture /tmp/q38_nvfp4_cuda_fixture.bin
+	rm -f /tmp/q38_nvfp4_cuda_fixture.bin
+
+.PHONY: m9n-nvfp4-cuda-full-test
+m9n-nvfp4-cuda-full-test: tests/nvfp4/nvfp4_cuda_fixture
+	python3 tools/q38_nvfp4_cuda_fixture.py \
+		--output /tmp/q38_nvfp4_cuda_fixture.bin
+	./tests/nvfp4/nvfp4_cuda_fixture \
+		/tmp/q38_nvfp4_cuda_fixture.bin \
+		tests/nvfp4/fixtures/full_expert_early/payload.bin
+	./tests/nvfp4/nvfp4_cuda_fixture \
+		/tmp/q38_nvfp4_cuda_fixture.bin \
+		tests/nvfp4/fixtures/full_expert_middle/payload.bin
+	./tests/nvfp4/nvfp4_cuda_fixture \
+		/tmp/q38_nvfp4_cuda_fixture.bin \
+		tests/nvfp4/fixtures/full_expert_late/payload.bin
+	rm -f /tmp/q38_nvfp4_cuda_fixture.bin
+
 tests/bench_ple_projection_cuda: tests/bench_ple_projection.cu \
 		build/release/q38_gdn.o build/release/q38_cuda_primitives.o
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LDLIBS) -lm

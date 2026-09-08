@@ -1,0 +1,132 @@
+{
+  "format": "q38-m9n-04-cuda-correctness-v1",
+  "checkpoint_revision": "fc694b54fb0174e0913e6adf86691ef85a4ead47",
+  "model": "nvidia/Qwen3.8-Flash-Next-NVFP4",
+  "contract": "docs/m9-nvidia/NVFP4_CHECKPOINT_CONTRACT.md",
+  "test_binary": "tests/nvfp4/nvfp4_cuda_fixture.cu",
+  "tolerance": {
+    "max_abs": 1.0e-5,
+    "nan": 0,
+    "inf": 0
+  },
+  "scope": {
+    "full_model_load": false,
+    "inference": false,
+    "importer_changed": false,
+    "residency_changed": false,
+    "ple_changed": false,
+    "dense_expert_expansion": false,
+    "production_cuda_kernel": false,
+    "tensor_core_or_cublaslt": false
+  },
+  "cuda_allocations": {
+    "during_projection_call": 0,
+    "setup_allocations": 10,
+    "setup_bytes": 3730240,
+    "setup_bytes_mib": 3.55743408
+  },
+  "activation_quantization": {
+    "gate": "exact packed bytes and exact E4M3 block-scale bytes",
+    "up": "exact packed bytes and exact E4M3 block-scale bytes",
+    "down": "exact packed bytes and exact E4M3 block-scale bytes"
+  },
+  "full_expert": {
+    "expert_id": 0,
+    "fixtures": {
+      "early": {
+        "layer": 0,
+        "fixture": "tests/nvfp4/fixtures/full_expert_early",
+        "gate": {
+          "max_abs": 1.31130219e-06,
+          "rmse": 2.69203235e-07,
+          "nan": 0,
+          "inf": 0
+        },
+        "up": {
+          "max_abs": 1.13248825e-06,
+          "rmse": 2.20650582e-07,
+          "nan": 0,
+          "inf": 0
+        },
+        "silu_mul": {
+          "max_abs": 9.53674316e-07,
+          "rmse": 6.31518873e-08,
+          "nan": 0,
+          "inf": 0
+        },
+        "down": {
+          "max_abs": 5.96046448e-08,
+          "rmse": 6.821277e-09,
+          "nan": 0,
+          "inf": 0
+        },
+        "pass": true
+      },
+      "middle": {
+        "layer": 24,
+        "fixture": "tests/nvfp4/fixtures/full_expert_middle",
+        "gate": {
+          "max_abs": 2.02655792e-06,
+          "rmse": 3.70096929e-07,
+          "nan": 0,
+          "inf": 0
+        },
+        "up": {
+          "max_abs": 2.14576721e-06,
+          "rmse": 3.63647575e-07,
+          "nan": 0,
+          "inf": 0
+        },
+        "silu_mul": {
+          "max_abs": 6.85453415e-07,
+          "rmse": 9.18684795e-08,
+          "nan": 0,
+          "inf": 0
+        },
+        "down": {
+          "max_abs": 6.70552254e-08,
+          "rmse": 1.05629903e-08,
+          "nan": 0,
+          "inf": 0
+        },
+        "pass": true
+      },
+      "late": {
+        "layer": 47,
+        "fixture": "tests/nvfp4/fixtures/full_expert_late",
+        "gate": {
+          "max_abs": 5.48362732e-06,
+          "rmse": 8.3187841e-07,
+          "nan": 0,
+          "inf": 0
+        },
+        "up": {
+          "max_abs": 4.29153442e-06,
+          "rmse": 6.90055332e-07,
+          "nan": 0,
+          "inf": 0
+        },
+        "silu_mul": {
+          "max_abs": 2.02655792e-06,
+          "rmse": 2.53529557e-07,
+          "nan": 0,
+          "inf": 0
+        },
+        "down": {
+          "max_abs": 1.34110451e-07,
+          "rmse": 2.89109996e-08,
+          "nan": 0,
+          "inf": 0
+        },
+        "pass": true
+      }
+    }
+  },
+  "slice_regression": {
+    "cases": 9,
+    "c0_pass": 9,
+    "c1_packed_pass": 9,
+    "c1_scale_pass": 9,
+    "c2_pass": 9
+  }
+}

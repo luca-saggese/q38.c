@@ -1,0 +1,187 @@
+{
+  "format": "q38-m9n-04-full-expert-fixture-v1",
+  "stage": "late",
+  "layer": 47,
+  "expert_id": 0,
+  "checkpoint_revision": "fc694b54fb0174e0913e6adf86691ef85a4ead47",
+  "source_model": "nvidia/Qwen3.8-Flash-Next-NVFP4",
+  "source_activation": {
+    "path": "tests/fixtures/moe/late/hidden.f32",
+    "dtype": "F32",
+    "shape": [
+      2560
+    ],
+    "sha256": "7eea91704211e6801be0e27c5ef6cb0ac468cb37c0373f0dc8beaf51c9dc96ba"
+  },
+  "tensors": {
+    "gate": {
+      "weight": {
+        "name": "model.language_model.layers.47.mlp.experts.0.gate_proj.weight",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 4421641808,
+        "bytes": 819200,
+        "dtype": "U8",
+        "shape": [
+          640,
+          1280
+        ],
+        "payload_sha256": "1eeedc4436943043a6ea5c45ade1c382fa991e9d71dc26d526ae95c46643b656"
+      },
+      "weight_scale": {
+        "name": "model.language_model.layers.47.mlp.experts.0.gate_proj.weight_scale",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 3750000208,
+        "bytes": 102400,
+        "dtype": "F8_E4M3",
+        "shape": [
+          640,
+          160
+        ],
+        "payload_sha256": "52453134f2e22166ba51e2459f48595bba756fa64235694a6e9551911d37a21d"
+      },
+      "weight_scale_2": {
+        "name": "model.language_model.layers.47.mlp.experts.0.gate_proj.weight_scale_2",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 1216124,
+        "bytes": 4,
+        "dtype": "F32",
+        "shape": [],
+        "payload_sha256": "6b12f6f5b9234b3206c99bf2c25dc463da1fa11327f17215df2a708e10a557ca"
+      },
+      "input_scale": {
+        "name": "model.language_model.layers.47.mlp.experts.0.gate_proj.input_scale",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 1216120,
+        "bytes": 4,
+        "dtype": "F32",
+        "shape": [],
+        "payload_sha256": "e6d9aaced159fe3924a4f9e1b8b1d4cea58189f2208cc4a00e2e6848570bd3b6"
+      }
+    },
+    "up": {
+      "weight": {
+        "name": "model.language_model.layers.47.mlp.experts.0.up_proj.weight",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 4422461008,
+        "bytes": 819200,
+        "dtype": "U8",
+        "shape": [
+          640,
+          1280
+        ],
+        "payload_sha256": "5e37e19dde88ef82b10847b60a27a557a0b6418a135fe1ebdb24079b0073d336"
+      },
+      "weight_scale": {
+        "name": "model.language_model.layers.47.mlp.experts.0.up_proj.weight_scale",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 3750102608,
+        "bytes": 102400,
+        "dtype": "F8_E4M3",
+        "shape": [
+          640,
+          160
+        ],
+        "payload_sha256": "8c84e980e0e2d16bdefbcf362beadea284735e2320be47baf503abc66bef7648"
+      },
+      "weight_scale_2": {
+        "name": "model.language_model.layers.47.mlp.experts.0.up_proj.weight_scale_2",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 1216132,
+        "bytes": 4,
+        "dtype": "F32",
+        "shape": [],
+        "payload_sha256": "6b12f6f5b9234b3206c99bf2c25dc463da1fa11327f17215df2a708e10a557ca"
+      },
+      "input_scale": {
+        "name": "model.language_model.layers.47.mlp.experts.0.up_proj.input_scale",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 1216128,
+        "bytes": 4,
+        "dtype": "F32",
+        "shape": [],
+        "payload_sha256": "e6d9aaced159fe3924a4f9e1b8b1d4cea58189f2208cc4a00e2e6848570bd3b6"
+      }
+    },
+    "down": {
+      "weight": {
+        "name": "model.language_model.layers.47.mlp.experts.0.down_proj.weight",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 4420822608,
+        "bytes": 819200,
+        "dtype": "U8",
+        "shape": [
+          2560,
+          320
+        ],
+        "payload_sha256": "d4daaa183ec3d0f7577a9e1af7f4801eee90efd80c23809bf43b84c6cfb09b2e"
+      },
+      "weight_scale": {
+        "name": "model.language_model.layers.47.mlp.experts.0.down_proj.weight_scale",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 3749897808,
+        "bytes": 102400,
+        "dtype": "F8_E4M3",
+        "shape": [
+          2560,
+          40
+        ],
+        "payload_sha256": "1187bb032cc72fec6e41138687c4813dd90909eedee077808a524a99fab78ed4"
+      },
+      "weight_scale_2": {
+        "name": "model.language_model.layers.47.mlp.experts.0.down_proj.weight_scale_2",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 1216116,
+        "bytes": 4,
+        "dtype": "F32",
+        "shape": [],
+        "payload_sha256": "b245af79d6e17e536ec7917716a7685bc7ee4a67bb7d04ba224a96384cf9e5fa"
+      },
+      "input_scale": {
+        "name": "model.language_model.layers.47.mlp.experts.0.down_proj.input_scale",
+        "source_shard": "model-00009-of-00010.safetensors",
+        "source_offset": 1216112,
+        "bytes": 4,
+        "dtype": "F32",
+        "shape": [],
+        "payload_sha256": "af1d95c39bc7dd00786d82e4494e3cb09fa7dbdfb74b2f996f36ec58d3a19239"
+      }
+    }
+  },
+  "payload": {
+    "path": "payload.bin",
+    "bytes": 2809148,
+    "sha256": "e373f6d578d2bc32f26a2cdc3e7b35a5cc5afa4c74336989e138f5a11c259389"
+  },
+  "oracle": {
+    "weight_formula": "decode_e2m1 * decode_e4m3fn(weight_scale) * weight_scale_2",
+    "activation_block_size": 16,
+    "accumulation": "FP32 rounded after each product and sum",
+    "intermediate": "FP32 SiLU(gate) * up"
+  },
+  "expected": {
+    "gate": {
+      "output_shape": [
+        640
+      ],
+      "output_sha256": "1d438c140ec1d91e5aa2b5557d8f9452deab46e41f24f1454dd1e84b3fe354e9"
+    },
+    "up": {
+      "output_shape": [
+        640
+      ],
+      "output_sha256": "66f0bdacd1fe9b9d440e14155a70004140e3b33c2726fddacf841b3517b0642f"
+    },
+    "intermediate": {
+      "output_shape": [
+        640
+      ],
+      "output_sha256": "d6dfd959731b40750fa6bd999f89b7527dc2ca0f9d525a7dfe2988337bd12b00"
+    },
+    "down": {
+      "output_shape": [
+        2560
+      ],
+      "output_sha256": "db20dda7781cb4ce11637580101c4d266b6c13caa7ad30d98c706319d4ec40ad"
+    }
+  }
+}
