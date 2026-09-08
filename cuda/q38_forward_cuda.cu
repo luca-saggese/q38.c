@@ -3217,6 +3217,9 @@ extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
         !ensure((void **)&context->device_moe_shared_up,
                 &context->device_moe_shared_up_bytes,
                 Q38_MOE_INTERMEDIATE * sizeof(float)) ||
+        !ensure((void **)&context->device_moe_mid,
+                &context->device_moe_mid_bytes,
+                Q38_MOE_INTERMEDIATE * sizeof(float)) ||
         !ensure((void **)&context->device_moe_shared_output,
                 &context->device_moe_shared_output_bytes,
                 Q38_MOE_HIDDEN * sizeof(float)) ||
