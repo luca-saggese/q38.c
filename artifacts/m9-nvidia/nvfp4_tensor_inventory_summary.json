@@ -1,0 +1,857 @@
+{
+  "format": "q38-m9-nvidia-nvfp4-tensor-inventory-summary-v1",
+  "checkpoint": {
+    "repo_id": "nvidia/Qwen3.8-Flash-Next-NVFP4",
+    "revision": "main",
+    "local_metadata_dir": "models/Qwen3.8-Flash-Next-NVFP4",
+    "metadata_only": true,
+    "tensor_payload_downloaded": false,
+    "safetensors_headers_read_via_http_range": true
+  },
+  "audit_date": "2026-09-08",
+  "q2_reference_freeze": {
+    "reference_id": "Q2_DEVICE_CHAIN_V1",
+    "ms_per_token": 76.282,
+    "tok_per_s": 13.109,
+    "policy": "frozen; do not modify Q2 during M9-NVIDIA",
+    "repository_branch": "qwen38-spark-proto",
+    "repository_commit_at_audit_start": "e5ba107b7"
+  },
+  "tensor_count": 299545,
+  "unknown_count": 0,
+  "counts_by_class": {
+    "MTP FP8": 3101,
+    "NVFP4 input_scale": 73728,
+    "NVFP4 weight_scale": 73728,
+    "NVFP4 weight_scale_2": 73728,
+    "PLE FP8": 129,
+    "main BF16": 1067,
+    "main NVFP4 weight": 73728,
+    "other": 3,
+    "vision": 333
+  },
+  "bytes_by_class": {
+    "MTP FP8": 2698026496,
+    "NVFP4 input_scale": 294912,
+    "NVFP4 weight_scale": 7549747200,
+    "NVFP4 weight_scale_2": 294912,
+    "PLE FP8": 51200245762,
+    "main BF16": 9895397120,
+    "main NVFP4 weight": 60397977600,
+    "other": 280,
+    "vision": 897862112
+  },
+  "counts_by_dtype": {
+    "BF16": 2966,
+    "F32": 147456,
+    "F8_E4M3": 75392,
+    "I64": 3,
+    "U8": 73728
+  },
+  "counts_by_projection": {
+    "down_proj": 99377,
+    "gate_proj": 99377,
+    "unattributed": 1414,
+    "up_proj": 99377
+  },
+  "representative_early_middle_late": {
+    "early": {
+      "stage": "early",
+      "layer": 0,
+      "expert_id": 0,
+      "source_shard": "model-00001-of-00010.safetensors",
+      "projections": {
+        "gate_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.0.mlp.experts.0.gate_proj.weight",
+            "source_shard": "model-00001-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              640,
+              1280
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              598584472,
+              599403672
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.0.mlp.experts.0.gate_proj.weight_scale",
+              "model.language_model.layers.0.mlp.experts.0.gate_proj.weight_scale_2",
+              "model.language_model.layers.0.mlp.experts.0.gate_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.gate_proj.weight_scale",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                640,
+                160
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                283294872,
+                283397272
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.gate_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.gate_proj.weight_scale_2",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                292,
+                296
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.gate_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.gate_proj.input_scale",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                288,
+                292
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.gate_proj.weight"
+              ]
+            }
+          }
+        },
+        "up_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.0.mlp.experts.0.up_proj.weight",
+            "source_shard": "model-00001-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              640,
+              1280
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              599403672,
+              600222872
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.0.mlp.experts.0.up_proj.weight_scale",
+              "model.language_model.layers.0.mlp.experts.0.up_proj.weight_scale_2",
+              "model.language_model.layers.0.mlp.experts.0.up_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.up_proj.weight_scale",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                640,
+                160
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                283397272,
+                283499672
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.up_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.up_proj.weight_scale_2",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                300,
+                304
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.up_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.up_proj.input_scale",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                296,
+                300
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.up_proj.weight"
+              ]
+            }
+          }
+        },
+        "down_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.0.mlp.experts.0.down_proj.weight",
+            "source_shard": "model-00001-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              2560,
+              320
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              597765272,
+              598584472
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.0.mlp.experts.0.down_proj.weight_scale",
+              "model.language_model.layers.0.mlp.experts.0.down_proj.weight_scale_2",
+              "model.language_model.layers.0.mlp.experts.0.down_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.down_proj.weight_scale",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                2560,
+                40
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                283192472,
+                283294872
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.down_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.down_proj.weight_scale_2",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                284,
+                288
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.down_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.0.mlp.experts.0.down_proj.input_scale",
+              "source_shard": "model-00001-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                280,
+                284
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.0.mlp.experts.0.down_proj.weight"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "middle": {
+      "stage": "middle",
+      "layer": 24,
+      "expert_id": 0,
+      "source_shard": "model-00005-of-00010.safetensors",
+      "projections": {
+        "gate_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.24.mlp.experts.0.gate_proj.weight",
+            "source_shard": "model-00005-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              640,
+              1280
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              5672992632,
+              5673811832
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.24.mlp.experts.0.gate_proj.weight_scale",
+              "model.language_model.layers.24.mlp.experts.0.gate_proj.weight_scale_2",
+              "model.language_model.layers.24.mlp.experts.0.gate_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.gate_proj.weight_scale",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                640,
+                160
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                1372807032,
+                1372909432
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.gate_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.gate_proj.weight_scale_2",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                36724,
+                36728
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.gate_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.gate_proj.input_scale",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                36720,
+                36724
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.gate_proj.weight"
+              ]
+            }
+          }
+        },
+        "up_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.24.mlp.experts.0.up_proj.weight",
+            "source_shard": "model-00005-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              640,
+              1280
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              5673811832,
+              5674631032
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.24.mlp.experts.0.up_proj.weight_scale",
+              "model.language_model.layers.24.mlp.experts.0.up_proj.weight_scale_2",
+              "model.language_model.layers.24.mlp.experts.0.up_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.up_proj.weight_scale",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                640,
+                160
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                1372909432,
+                1373011832
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.up_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.up_proj.weight_scale_2",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                36732,
+                36736
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.up_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.up_proj.input_scale",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                36728,
+                36732
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.up_proj.weight"
+              ]
+            }
+          }
+        },
+        "down_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.24.mlp.experts.0.down_proj.weight",
+            "source_shard": "model-00005-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              2560,
+              320
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              5672173432,
+              5672992632
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.24.mlp.experts.0.down_proj.weight_scale",
+              "model.language_model.layers.24.mlp.experts.0.down_proj.weight_scale_2",
+              "model.language_model.layers.24.mlp.experts.0.down_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.down_proj.weight_scale",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                2560,
+                40
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                1372704632,
+                1372807032
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.down_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.down_proj.weight_scale_2",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                36716,
+                36720
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.down_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.24.mlp.experts.0.down_proj.input_scale",
+              "source_shard": "model-00005-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                36712,
+                36716
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.24.mlp.experts.0.down_proj.weight"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "late": {
+      "stage": "late",
+      "layer": 47,
+      "expert_id": 0,
+      "source_shard": "model-00009-of-00010.safetensors",
+      "projections": {
+        "gate_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.47.mlp.experts.0.gate_proj.weight",
+            "source_shard": "model-00009-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              640,
+              1280
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              4420430720,
+              4421249920
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.47.mlp.experts.0.gate_proj.weight_scale",
+              "model.language_model.layers.47.mlp.experts.0.gate_proj.weight_scale_2",
+              "model.language_model.layers.47.mlp.experts.0.gate_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.gate_proj.weight_scale",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                640,
+                160
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                3748789120,
+                3748891520
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.gate_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.gate_proj.weight_scale_2",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                5036,
+                5040
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.gate_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.gate_proj.input_scale",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                5032,
+                5036
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.gate_proj.weight"
+              ]
+            }
+          }
+        },
+        "up_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.47.mlp.experts.0.up_proj.weight",
+            "source_shard": "model-00009-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              640,
+              1280
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              4421249920,
+              4422069120
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.47.mlp.experts.0.up_proj.weight_scale",
+              "model.language_model.layers.47.mlp.experts.0.up_proj.weight_scale_2",
+              "model.language_model.layers.47.mlp.experts.0.up_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.up_proj.weight_scale",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                640,
+                160
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                3748891520,
+                3748993920
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.up_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.up_proj.weight_scale_2",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                5044,
+                5048
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.up_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.up_proj.input_scale",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                5040,
+                5044
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.up_proj.weight"
+              ]
+            }
+          }
+        },
+        "down_proj": {
+          "weight": {
+            "tensor_name": "model.language_model.layers.47.mlp.experts.0.down_proj.weight",
+            "source_shard": "model-00009-of-00010.safetensors",
+            "dtype": "U8",
+            "stored_shape": [
+              2560,
+              320
+            ],
+            "bytes": 819200,
+            "data_offsets": [
+              4419611520,
+              4420430720
+            ],
+            "component_class": "main NVFP4 weight",
+            "associated_scale_tensors": [
+              "model.language_model.layers.47.mlp.experts.0.down_proj.weight_scale",
+              "model.language_model.layers.47.mlp.experts.0.down_proj.weight_scale_2",
+              "model.language_model.layers.47.mlp.experts.0.down_proj.input_scale"
+            ]
+          },
+          "scales": {
+            "weight_scale": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.down_proj.weight_scale",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F8_E4M3",
+              "stored_shape": [
+                2560,
+                40
+              ],
+              "bytes": 102400,
+              "data_offsets": [
+                3748686720,
+                3748789120
+              ],
+              "component_class": "NVFP4 weight_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.down_proj.weight"
+              ]
+            },
+            "weight_scale_2": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.down_proj.weight_scale_2",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                5028,
+                5032
+              ],
+              "component_class": "NVFP4 weight_scale_2",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.down_proj.weight"
+              ]
+            },
+            "input_scale": {
+              "tensor_name": "model.language_model.layers.47.mlp.experts.0.down_proj.input_scale",
+              "source_shard": "model-00009-of-00010.safetensors",
+              "dtype": "F32",
+              "stored_shape": [],
+              "bytes": 4,
+              "data_offsets": [
+                5024,
+                5028
+              ],
+              "component_class": "NVFP4 input_scale",
+              "associated_scale_tensors": [
+                "model.language_model.layers.47.mlp.experts.0.down_proj.weight"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "source_shard_totals": [
+    {
+      "source_shard": "model-00001-of-00010.safetensors",
+      "tensor_count": 12327,
+      "tensor_bytes": 3114347672,
+      "remote_file_bytes": 3115991696,
+      "header_bytes": 1644016
+    },
+    {
+      "source_shard": "model-00002-of-00010.safetensors",
+      "tensor_count": 38725,
+      "tensor_bytes": 10000312848,
+      "remote_file_bytes": 10005510304,
+      "header_bytes": 5197448
+    },
+    {
+      "source_shard": "model-00003-of-00010.safetensors",
+      "tensor_count": 39560,
+      "tensor_bytes": 10000026312,
+      "remote_file_bytes": 10005364728,
+      "header_bytes": 5338408
+    },
+    {
+      "source_shard": "model-00004-of-00010.safetensors",
+      "tensor_count": 38970,
+      "tensor_bytes": 10000789504,
+      "remote_file_bytes": 10006060112,
+      "header_bytes": 5270600
+    },
+    {
+      "source_shard": "model-00005-of-00010.safetensors",
+      "tensor_count": 39617,
+      "tensor_bytes": 10000007032,
+      "remote_file_bytes": 10005362392,
+      "header_bytes": 5355352
+    },
+    {
+      "source_shard": "model-00006-of-00010.safetensors",
+      "tensor_count": 39560,
+      "tensor_bytes": 10000026312,
+      "remote_file_bytes": 10005375328,
+      "header_bytes": 5349008
+    },
+    {
+      "source_shard": "model-00007-of-00010.safetensors",
+      "tensor_count": 38969,
+      "tensor_bytes": 10000687104,
+      "remote_file_bytes": 10005956544,
+      "header_bytes": 5269432
+    },
+    {
+      "source_shard": "model-00008-of-00010.safetensors",
+      "tensor_count": 39560,
+      "tensor_bytes": 10000026312,
+      "remote_file_bytes": 10005375200,
+      "header_bytes": 5348880
+    },
+    {
+      "source_shard": "model-00009-of-00010.safetensors",
+      "tensor_count": 9036,
+      "tensor_bytes": 5677902720,
+      "remote_file_bytes": 5679113808,
+      "header_bytes": 1211080
+    },
+    {
+      "source_shard": "model-00010-of-00010.safetensors",
+      "tensor_count": 20,
+      "tensor_bytes": 128585216,
+      "remote_file_bytes": 128587536,
+      "header_bytes": 2312
+    },
+    {
+      "source_shard": "model-fp8-mtp-ple.safetensors",
+      "tensor_count": 3201,
+      "tensor_bytes": 53717135362,
+      "remote_file_bytes": 53717551730,
+      "header_bytes": 416360
+    }
+  ],
+  "file_totals": {
+    "main_shard_file_bytes": 78962697648,
+    "main_shard_tensor_payload_bytes": 78922711032,
+    "sidecar_file_bytes": 53717551730,
+    "sidecar_tensor_payload_bytes": 53717135362,
+    "index_metadata_total_size": 132639846394
+  },
+  "requested_totals": {
+    "nvfp4_weight_bytes": 60397977600,
+    "nvfp4_scale_bytes": 7550337024,
+    "bf16_main_model_tensor_bytes": 9895397120,
+    "ple_tensor_bytes": 51200245762,
+    "mtp_tensor_bytes": 2698026496,
+    "vision_tensor_bytes": 897862112,
+    "other_tensor_bytes": 280
+  },
+  "aggregate_hashes": {
+    "algorithm": "SHA-256",
+    "raw_inventory_sha256": "83b0aace4491132149a9db33e4a2b5e432f68c180d0b431d15ca09318067f79f",
+    "tensor_names_sha256": "efedc3dc8f763e0cedea2f9084d540a3a4aeceb76e992d4e8ffae8f51f3f897e",
+    "tensor_records_sha256": "1eeb45992b6ae41c669dd47ee0efcf27c75edf0c7476d465a3f8909c4f634828",
+    "tensor_payload_aggregate_sha256": "a56b525189aadecfe50a01d69d87e47571bd98bc08f45fb7ab0c82455c372e64",
+    "source_metadata_sha256": "749cc91212c49621c6bf7373935a316d5eb0a094ab9a20e7496e191377db3a84",
+    "category_totals_sha256": "80e7d4ce41e116a483ca09d647758eab7ccff83aca700ba133d8a789295e1a66"
+  },
+  "source_metadata_files": [
+    {
+      "file": "README.md",
+      "local_bytes": 12109,
+      "sha256": "e3ed0cb89950ef0f41e8df344ba1cc15c67e1baf91e1cb5305a7344e58a8d975"
+    },
+    {
+      "file": "config.json",
+      "local_bytes": 30820,
+      "sha256": "deef67a61f3311faf051b23dc4192f442c7fee4f9cd2f38cbcbe4da55c763a80"
+    },
+    {
+      "file": "hf_quant_config.json",
+      "local_bytes": 23001,
+      "sha256": "331ad11d57c8bc374554579977198084e0d4d0933d5b3558f125f6f670aba0e8"
+    },
+    {
+      "file": "model.safetensors.index.json",
+      "local_bytes": 31275518,
+      "sha256": "660414e8300728ba80062e6a3c81cb76a65e2ab136ac9e9ceb450ba0c51c3c0d"
+    }
+  ]
+}

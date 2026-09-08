@@ -51,3 +51,4 @@ artifacts/m7/candidates_fp32/
 artifacts/m8/*.log
 artifacts/m8/*.stderr
 artifacts/m8/*.exit
+artifacts/m9-nvidia/raw/nvfp4_tensor_inventory.json
