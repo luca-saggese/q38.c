@@ -41,7 +41,7 @@ PRODUCTION_C_OBJS := \
 PRODUCTION_CUDA_OBJS := \
 	q38_cuda.o q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o \
-	q38_topk_cuda.o
+	q38_topk_cuda.o q38_nvfp4_residency.o
 PRODUCTION_OBJS := $(PRODUCTION_C_OBJS) $(PRODUCTION_CUDA_OBJS)
 RELEASE_OBJS := $(addprefix $(RELEASE_OBJDIR)/,$(PRODUCTION_OBJS))
 DIAG_OBJS := $(addprefix $(DIAG_OBJDIR)/,$(PRODUCTION_OBJS))

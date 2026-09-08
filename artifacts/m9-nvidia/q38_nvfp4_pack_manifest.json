@@ -480,39 +480,50 @@
   },
   "pack": {
     "format": "Q38_NVFP4_PACK_V1",
-    "path": "artifacts/m9-nvidia/q38_nvfp4_source_backed.pack",
+    "path": "artifacts/m9-nvidia/q38_nvfp4_materialized.pack",
     "manifest_path": "artifacts/m9-nvidia/q38_nvfp4_pack_manifest.json",
-    "storage_mode": "source-backed",
-    "pack_file_bytes": 10079359,
+    "storage_mode": "materialized",
+    "pack_file_bytes": 78751653215,
     "metadata_bytes": 10079359,
-    "data_bytes": 0,
+    "data_bytes": 78741573856,
     "main_resident_bytes": 77843711744,
     "ple_external": true,
     "ple_backing_bytes": 53717551730,
-    "payload_hashes_complete": false,
+    "payload_hashes_complete": true,
     "regions": {
       "bf16_main": {
-        "pack_offset": null,
+        "pack_offset": 10079359,
         "bytes": 9895397120
       },
+      "vision": {
+        "pack_offset": 9905476479,
+        "bytes": 897862112
+      },
       "nvfp4_weight": {
-        "pack_offset": null,
+        "pack_offset": 10803338591,
         "bytes": 60397977600
       },
       "nvfp4_weight_scale": {
-        "pack_offset": null,
+        "pack_offset": 71201316191,
         "bytes": 7549747200
       },
       "nvfp4_weight_scale_2": {
-        "pack_offset": null,
+        "pack_offset": 78751063391,
         "bytes": 294912
       },
       "nvfp4_input_scale": {
-        "pack_offset": null,
+        "pack_offset": 78751358303,
         "bytes": 294912
       }
     },
-    "region_hashes": {},
+    "region_hashes": {
+      "bf16_main": "de522ab8fe855045e9a783c37255cc95f6d2b3d1da742d24e8bdb9a8803f59de",
+      "vision": "665127beaa6d168ab9ff4e22c6c3df3ea012bf0097550e6fb52d0a84103d4eb0",
+      "nvfp4_weight": "c555fa2963b233deed4615b8fc9e851b6fbbd8f91cf8398d0bc4811c9358737e",
+      "nvfp4_weight_scale": "b80bf7a4de6c7d43a9a77ce4770877e9257c7d7eb1e00370ae94dfc16c6be818",
+      "nvfp4_weight_scale_2": "a647b3595b1a7b245bb3ce245fcbadb9951b1e2b011ef8a26cb7a78de1ae6681",
+      "nvfp4_input_scale": "d084575b6ae40ab44c1e20698a52b0c218405b0ed471c1f065555fb95d4084f5"
+    },
     "source_hashes": {},
     "mtp_execution": "disabled",
     "vision_execution": "disabled"

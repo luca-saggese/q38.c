@@ -42,8 +42,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     int failed = 0;
-    if (!q38_nvfp4_pack_is_source_backed(pack) ||
-        q38_nvfp4_pack_main_resident_bytes(pack) != UINT64_C(77843711744) ||
+    if (q38_nvfp4_pack_main_resident_bytes(pack) != UINT64_C(77843711744) ||
         q38_nvfp4_pack_ple_bytes(pack) != UINT64_C(51200245762)) {
         fprintf(stderr, "pack accounting mismatch\n");
         failed = 1;
@@ -99,6 +98,6 @@ int main(int argc, char **argv) {
     }
     q38_nvfp4_pack_close(pack);
     if (failed) return 1;
-    puts("test_m9_nvfp4_pack: source-backed binding passed");
+    puts("test_m9_nvfp4_pack: native binding passed");
     return 0;
 }

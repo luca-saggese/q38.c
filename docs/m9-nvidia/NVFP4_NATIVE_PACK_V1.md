@@ -49,25 +49,29 @@ Shard IDs must be resolved through the descriptor table: the safetensors
 header places `shard_100` and `shard_101` before `shard_98` and `shard_99`
 physically even though all shard payloads are contiguous.
 
-## Current local mode
+## Materialized load-only result
 
-The local filesystem has approximately 28.8 GB available while a fully
-materialized main pack requires approximately 78.8 GB in addition to the
-downloaded checkpoint. The importer therefore fails closed before creating a
-partial file in materialized mode and currently produces a source-backed
-descriptor pack:
+The complete materialized pack is:
 
 ```text
-artifacts/m9-nvidia/q38_nvfp4_source_backed.pack
-artifacts/m9-nvidia/q38_nvfp4_pack_manifest.json
+artifacts/m9-nvidia/q38_nvfp4_materialized.pack
 ```
 
-The source-backed pack is a valid load/bind artifact, but it is not a
-materialized CUDA residency image. Its planned main payload is
-`77,843,711,744` bytes and its actual CUDA payload allocation in the
-load-only check is zero. A materialized load-only gate must be run on a
-filesystem with enough free space; no inference or NVFP4 kernel is part of
-this milestone.
+Its file size is `78,751,653,215` bytes. The main CUDA residency image
+excludes the optional indexed vision region and contains
+`77,843,711,744` bytes:
+
+```text
+NVFP4 weights: 60,397,977,600 bytes
+NVFP4 scales:   7,549,747,200 bytes
+BF16 main:      9,895,397,120 bytes
+```
+
+The load-only path allocates five CUDA regions and copies the materialized
+payload without dequantization or swizzling. The completed gate reported
+`77,843,711,744` allocated and copied bytes, `0` PLE resident bytes, and no
+inference. The host RSS after the load-only process was
+`17,879,400,448` bytes; this is separate from the CUDA allocation accounting.
 
 ## Integrity and round-trip
 
@@ -78,7 +82,8 @@ artifacts/m9-nvidia/nvfp4_tensor_inventory_summary.json
 ```
 
 It records the pinned checkpoint revision, exhaustive category totals,
-source-shard totals, region offsets/bytes, and `unknown_count = 0`. The
-early, middle, and late M9N-02 fixtures retain exact packed weight,
-weight-scale, and scalar bytes after native binding; the independent
-dequantization result remains `max_abs = 0`, `mismatch = 0`.
+source-shard totals, materialized region offsets/bytes, complete region
+hashes, and `unknown_count = 0`. The early, middle, and late M9N-02 fixtures
+retain exact packed weight, weight-scale, and scalar bytes when read from both
+source-backed and materialized packs; the independent dequantization result
+remains `max_abs = 0`, `mismatch = 0`.

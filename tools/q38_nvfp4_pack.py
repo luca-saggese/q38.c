@@ -855,73 +855,144 @@ def pack(
     return summary
 
 
+def _fixture_expected(item: dict, component: str) -> bytes:
+    if component == "weight":
+        return b"".join(bytes.fromhex(row) for row in item["packed_rows_hex"])
+    if component == "weight_scale":
+        return b"".join(bytes.fromhex(row) for row in item["scale_rows_hex"])
+    return bytes.fromhex(item["raw_hex"])
+
+
+def _fixture_relative_ranges(
+    fixture: dict, item: dict, component: str
+) -> list[tuple[int, int]]:
+    rows = fixture["slice"]["rows"]
+    logical_start, logical_end = fixture["slice"]["logical_k_range"]
+    shape = item["stored_shape"]
+    if component == "weight":
+        row_bytes = shape[1]
+        column = logical_start // 2
+        length = (logical_end - logical_start) // 2
+    elif component == "weight_scale":
+        row_bytes = shape[1]
+        column = logical_start // fixture["slice"]["logical_values_per_block"]
+        length = (
+            logical_end - logical_start
+        ) // fixture["slice"]["logical_values_per_block"]
+    else:
+        row_bytes = 0
+        column = 0
+        length = 4 if item["dtype"] == "F32" else 1
+    if component in ("weight", "weight_scale"):
+        return [
+            (row * row_bytes + column, length)
+            for row in rows
+        ]
+    return [(0, length)]
+
+
+def _read_at(fp: BinaryIO, offset: int, length: int) -> bytes:
+    fp.seek(offset)
+    payload = fp.read(length)
+    if len(payload) != length:
+        fail(f"short read at offset {offset} (wanted {length} bytes)")
+    return payload
+
+
 def verify_fixtures(pack_path: Path, fixtures: Path) -> None:
-    """Verify source-backed or materialized expert bytes against M9N-02."""
-    with pack_path.open("rb") as fp:
-        header = fp.read(HEADER_SIZE)
-    if len(header) != HEADER_SIZE:
-        fail(f"truncated pack: {pack_path}")
-    fields = struct.unpack(HEADER_FORMAT, header[:struct.calcsize(HEADER_FORMAT)])
-    magic, version, mode = fields[:3]
-    if magic != MAGIC or version != VERSION:
-        fail("fixture verification found an invalid pack header")
-    source_root = pack_path.parent
-    # The verification uses the original checkpoint files named by fixture
-    # metadata; this intentionally remains independent of any dequantization.
-    for fixture_name in ("early.json", "middle.json", "late.json"):
-        fixture = json.loads((fixtures / fixture_name).read_text())
-        for projection, values in fixture["projections"].items():
-            for component in COMPONENTS:
-                item = values[component]
-                source = Path(item["source_shard"])
-                if not source.is_absolute():
-                    source = Path(
-                        "models/Qwen3.8-Flash-Next-NVFP4"
-                    ) / source
-                if not source.exists():
-                    fail(f"fixture source shard is missing: {source}")
-                payload = bytearray()
-                ranges = item["fetched_absolute_ranges"]
-                if ranges and isinstance(ranges[0], int):
-                    ranges = [ranges]
-                with source.open("rb", buffering=0) as fp:
-                    for start, end in ranges:
-                        fp.seek(int(start))
-                        block = fp.read(int(end) - int(start) + 1)
-                        if len(block) != int(end) - int(start) + 1:
-                            fail(f"short fixture read: {source}")
-                        payload.extend(block)
-                if component == "weight":
-                    expected = b"".join(
-                        bytes.fromhex(row)
-                        for row in item["packed_rows_hex"]
-                    )
-                    if bytes(payload) != expected:
-                        fail(
-                            f"{fixture_name} {projection} {component} bytes mismatch"
+    """Verify fixture slices against the packed expert references."""
+    with pack_path.open("rb") as pack_fp:
+        header = pack_fp.read(HEADER_SIZE)
+        if len(header) != HEADER_SIZE:
+            fail(f"truncated pack: {pack_path}")
+        fields = struct.unpack(
+            HEADER_FORMAT, header[:struct.calcsize(HEADER_FORMAT)]
+        )
+        magic, version, mode = fields[:3]
+        if magic != MAGIC or version != VERSION:
+            fail("fixture verification found an invalid pack header")
+        expert_table_offset = fields[12]
+        source_root = Path("models/Qwen3.8-Flash-Next-NVFP4")
+        source_fps: dict[Path, BinaryIO] = {}
+        try:
+            for fixture_name in ("early.json", "middle.json", "late.json"):
+                fixture = json.loads((fixtures / fixture_name).read_text())
+                layer = fixture["layer"]
+                expert = fixture["expert_id"]
+                for projection_name, values in fixture["projections"].items():
+                    projection = PROJECTION_ID[
+                        projection_name.removesuffix("_proj")
+                    ]
+                    for component in COMPONENTS:
+                        item = values[component]
+                        expected = _fixture_expected(item, component)
+                        rel_ranges = _fixture_relative_ranges(
+                            fixture, item, component
                         )
-                elif component == "weight_scale":
-                    expected = b"".join(
-                        bytes.fromhex(row)
-                        for row in item["scale_rows_hex"]
-                    )
-                    if bytes(payload) != expected:
-                        fail(
-                            f"{fixture_name} {projection} {component} bytes mismatch"
+                        index = (
+                            (
+                                (layer * len(PROJECTIONS) + projection)
+                                * 512
+                                + expert
+                            )
+                            * len(COMPONENTS)
+                            + COMPONENT_ID[component]
                         )
-                else:
-                    expected = bytes.fromhex(item["raw_hex"])
-                    if bytes(payload) != expected:
-                        fail(
-                            f"{fixture_name} {projection} {component} bytes mismatch"
+                        ref_offset = expert_table_offset + index * REF_SIZE
+                        raw_ref = _read_at(pack_fp, ref_offset, REF_SIZE)
+                        source_id, _, source_offset, pack_offset, tensor_bytes = (
+                            struct.unpack(REF_FORMAT, raw_ref)
                         )
+                        element_bytes = 4 if item["dtype"] == "F32" else 1
+                        expected_tensor_bytes = element_bytes
+                        for dimension in item["stored_shape"]:
+                            expected_tensor_bytes *= dimension
+                        if tensor_bytes != expected_tensor_bytes:
+                            fail(
+                                f"{fixture_name} {projection_name} "
+                                f"{component} tensor size mismatch"
+                            )
+                        if mode == MODE_MATERIALIZED:
+                            if pack_offset == (1 << 64) - 1:
+                                fail(
+                                    f"{fixture_name} {projection_name} "
+                                    f"{component} has no materialized offset"
+                                )
+                            fp = pack_fp
+                            base_offset = pack_offset
+                        else:
+                            if pack_offset != (1 << 64) - 1:
+                                fail(
+                                    f"{fixture_name} {projection_name} "
+                                    f"{component} unexpectedly has pack data"
+                                )
+                            source = Path(item["source_shard"])
+                            if not source.is_absolute():
+                                source = source_root / source
+                            if source not in source_fps:
+                                if not source.exists():
+                                    fail(f"fixture source shard is missing: {source}")
+                                source_fps[source] = source.open("rb", buffering=0)
+                            fp = source_fps[source]
+                            base_offset = source_offset
+                        actual = b"".join(
+                            _read_at(fp, base_offset + relative, length)
+                            for relative, length in rel_ranges
+                        )
+                        if actual != expected:
+                            fail(
+                                f"{fixture_name} {projection_name} "
+                                f"{component} packed bytes mismatch"
+                            )
+        finally:
+            for fp in source_fps.values():
+                fp.close()
     print(
         json.dumps(
             {
                 "format": "Q38_NVFP4_PACK_V1",
                 "mode": "source-backed"
-                if mode == MODE_SOURCE_BACKED
-                else "materialized",
+                if mode == MODE_SOURCE_BACKED else "materialized",
                 "fixtures": ["early", "middle", "late"],
                 "packed_weight_bytes": "exact",
                 "weight_scale_bytes": "exact",

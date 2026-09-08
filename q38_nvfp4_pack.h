@@ -32,6 +32,15 @@ typedef enum {
     Q38_NVFP4_COMPONENT_INPUT_SCALE = 3,
 } q38_nvfp4_component;
 
+typedef enum {
+    Q38_NVFP4_REGION_BF16 = 0,
+    Q38_NVFP4_REGION_WEIGHT = 1,
+    Q38_NVFP4_REGION_WEIGHT_SCALE = 2,
+    Q38_NVFP4_REGION_WEIGHT_SCALE_2 = 3,
+    Q38_NVFP4_REGION_INPUT_SCALE = 4,
+    Q38_NVFP4_REGION_COUNT = 5,
+} q38_nvfp4_region;
+
 typedef struct {
     const void *data;
     uint64_t bytes;
@@ -43,6 +52,12 @@ typedef struct {
     uint64_t pack_offset;
     uint32_t source_id;
 } q38_nvfp4_view;
+
+typedef struct {
+    const void *data;
+    uint64_t bytes;
+    uint64_t pack_offset;
+} q38_nvfp4_region_view;
 
 typedef struct q38_nvfp4_pack q38_nvfp4_pack;
 
@@ -66,6 +81,9 @@ bool q38_nvfp4_pack_get_bf16_view(const q38_nvfp4_pack *pack, uint32_t index,
 
 bool q38_nvfp4_pack_get_bf16_count(const q38_nvfp4_pack *pack,
                                    uint32_t *count);
+bool q38_nvfp4_pack_get_region_view(
+    const q38_nvfp4_pack *pack, uint32_t region,
+    q38_nvfp4_region_view *out, char *error, size_t error_len);
 uint64_t q38_nvfp4_pack_main_resident_bytes(const q38_nvfp4_pack *pack);
 uint64_t q38_nvfp4_pack_ple_bytes(const q38_nvfp4_pack *pack);
 uint64_t q38_nvfp4_pack_file_bytes(const q38_nvfp4_pack *pack);

@@ -85,6 +85,20 @@ typedef struct {
 } q38_nvfp4_disk_bf16;
 
 typedef struct {
+    uint64_t name_offset;
+    uint32_t name_len;
+    uint32_t class_id;
+    uint32_t source_id;
+    uint32_t dtype;
+    uint32_t ndim;
+    uint32_t reserved;
+    uint64_t source_offset;
+    uint64_t pack_offset;
+    uint64_t bytes;
+    uint64_t shape[4];
+} q38_nvfp4_disk_aux;
+
+typedef struct {
     uint32_t shard_id;
     uint32_t source_id;
     uint32_t dtype;
@@ -460,6 +474,63 @@ uint64_t q38_nvfp4_pack_file_bytes(const q38_nvfp4_pack *pack) {
 
 uint32_t q38_nvfp4_pack_storage_mode(const q38_nvfp4_pack *pack) {
     return pack ? pack->header.storage_mode : 0;
+}
+
+bool q38_nvfp4_pack_get_region_view(
+    const q38_nvfp4_pack *pack, uint32_t region,
+    q38_nvfp4_region_view *out, char *error, size_t error_len) {
+    if (!pack || !out || region >= Q38_NVFP4_REGION_COUNT)
+        return set_error(error, error_len, "invalid NVFP4 region");
+    if (pack->header.storage_mode != 2)
+        return set_error(error, error_len,
+                         "NVFP4 region is not materialized");
+
+    uint64_t start = Q38_NVFP4_INVALID_OFFSET;
+    uint64_t cursor = Q38_NVFP4_INVALID_OFFSET;
+    uint64_t total = 0;
+    if (region == Q38_NVFP4_REGION_BF16) {
+        const q38_nvfp4_disk_bf16 *records =
+            (const q38_nvfp4_disk_bf16 *)((const uint8_t *)pack->map +
+                                          pack->header.bf16_table_offset);
+        cursor = records[0].pack_offset;
+        start = cursor;
+        for (uint32_t i = 0; i < pack->header.bf16_count; ++i) {
+            if (records[i].pack_offset != cursor)
+                return set_error(error, error_len,
+                                 "BF16 materialized region is not contiguous");
+            cursor += records[i].bytes;
+            total += records[i].bytes;
+        }
+    } else {
+        uint32_t component = region - 1;
+        const q38_nvfp4_disk_ref *records =
+            (const q38_nvfp4_disk_ref *)((const uint8_t *)pack->map +
+                                         pack->header.expert_table_offset);
+        for (uint64_t slot = 0;
+             slot < (uint64_t)Q38_NVFP4_LAYER_COUNT *
+                        Q38_NVFP4_PROJECTION_COUNT *
+                        Q38_NVFP4_EXPERT_COUNT;
+             ++slot) {
+            const q38_nvfp4_disk_ref *ref =
+                &records[slot * Q38_NVFP4_COMPONENT_COUNT + component];
+            if (start == Q38_NVFP4_INVALID_OFFSET) {
+                start = ref->pack_offset;
+                cursor = start;
+            }
+            if (ref->pack_offset != cursor)
+                return set_error(error, error_len,
+                                 "NVFP4 materialized region is not contiguous");
+            cursor += ref->bytes;
+            total += ref->bytes;
+        }
+    }
+    if (start == Q38_NVFP4_INVALID_OFFSET ||
+        !range_ok(pack->bytes, start, total))
+        return set_error(error, error_len, "NVFP4 region is out of range");
+    out->data = (const uint8_t *)pack->map + start;
+    out->bytes = total;
+    out->pack_offset = start;
+    return true;
 }
 
 bool q38_nvfp4_pack_is_source_backed(const q38_nvfp4_pack *pack) {

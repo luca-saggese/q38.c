@@ -18,6 +18,7 @@
 #include "q38_tokenizer.h"
 #include "q38_weights.h"
 #include "q38_nvfp4_pack.h"
+#include "q38_nvfp4_residency.h"
 
 #include <inttypes.h>
 #include <math.h>
@@ -296,9 +297,20 @@ static int cmd_load_only(const q38_options *opt) {
         q38_nvfp4_pack_close(pack);
         return 1;
     }
+    q38_nvfp4_cuda_residency residency;
+    q38_nvfp4_cuda_residency_init(&residency);
+    if (!q38_nvfp4_pack_is_source_backed(pack) &&
+        !q38_nvfp4_cuda_residency_load(
+            pack, &residency, error, sizeof(error))) {
+        fprintf(stderr, "q38: NVFP4 residency load: %s\n", error);
+        q38_forward_cuda_context_destroy(context);
+        q38_nvfp4_pack_close(pack);
+        return 1;
+    }
     (void)q38_platform_rss_bytes(&rss_after);
     if (q38_platform_probe(&after, reason, sizeof(reason)) != 0) {
         fprintf(stderr, "q38: NVFP4 CUDA post-init probe: %s\n", reason);
+        q38_nvfp4_cuda_residency_destroy(&residency);
         q38_forward_cuda_context_destroy(context);
         q38_nvfp4_pack_close(pack);
         return 1;
@@ -311,8 +323,18 @@ static int cmd_load_only(const q38_options *opt) {
         q38_nvfp4_pack_main_resident_bytes(pack) -
         nvfp4_weight_bytes - nvfp4_scale_bytes - nvfp4_scalar_bytes;
     const uint64_t context_bytes =
-        before.cuda_free_bytes > after.cuda_free_bytes
-            ? before.cuda_free_bytes - after.cuda_free_bytes : 0;
+        before.cuda_free_bytes > after.cuda_free_bytes &&
+                before.cuda_free_bytes - after.cuda_free_bytes >
+                    residency.allocated_bytes
+            ? before.cuda_free_bytes - after.cuda_free_bytes -
+                  residency.allocated_bytes
+            : 0;
+    const uint64_t resident_weight_bytes =
+        residency.allocated_bytes ? nvfp4_weight_bytes : 0;
+    const uint64_t resident_scale_bytes =
+        residency.allocated_bytes ? nvfp4_scale_bytes : 0;
+    const uint64_t resident_bf16_bytes =
+        residency.allocated_bytes ? bf16_bytes : 0;
     if (opt->json) {
         printf("{\"format\":\"Q38_NVFP4_PACK_V1\","
                "\"storage_mode\":\"%s\","
@@ -325,6 +347,8 @@ static int cmd_load_only(const q38_options *opt) {
                "\"resident_nvfp4_weight_bytes\":%" PRIu64 ","
                "\"resident_nvfp4_scale_bytes\":%" PRIu64 ","
                "\"resident_bf16_bytes\":%" PRIu64 ","
+               "\"residency_allocations\":%u,"
+               "\"residency_copied_bytes\":%" PRIu64 ","
                "\"persistent_workspace_bytes\":%" PRIu64 ","
                "\"cuda_context_overhead_bytes\":%" PRIu64 ","
                "\"ple_backing_file_bytes\":%" PRIu64 ","
@@ -345,13 +369,11 @@ static int cmd_load_only(const q38_options *opt) {
                q38_nvfp4_pack_is_source_backed(pack) ? 0 :
                    q38_nvfp4_pack_file_bytes(pack),
                q38_nvfp4_pack_main_resident_bytes(pack),
-               q38_nvfp4_pack_is_source_backed(pack) ? 0 :
-                   q38_nvfp4_pack_main_resident_bytes(pack),
-               nvfp4_weight_bytes, nvfp4_scale_bytes, bf16_bytes,
-               (uint64_t)0, context_bytes, q38_nvfp4_pack_ple_bytes(pack),
-               q38_nvfp4_pack_is_source_backed(pack)
-                   ? context_bytes : q38_nvfp4_pack_main_resident_bytes(pack) +
-                     context_bytes,
+               residency.allocated_bytes,
+               resident_weight_bytes, resident_scale_bytes, resident_bf16_bytes,
+               residency.allocation_count, residency.copied_bytes,
+               (uint64_t)0, context_bytes,                q38_nvfp4_pack_ple_bytes(pack),
+               residency.allocated_bytes + context_bytes,
                rss_before, rss_after,
                rss_after > rss_before ? rss_after : rss_before);
     } else {
@@ -364,6 +386,7 @@ static int cmd_load_only(const q38_options *opt) {
                "  NVFP4 weights:               %" PRIu64 "\n"
                "  NVFP4 scales:                %" PRIu64 "\n"
                "  BF16 main:                   %" PRIu64 "\n"
+               "residency allocations/copy:    %u / %" PRIu64 "\n"
                "PLE backing bytes:             %" PRIu64 "\n"
                "PLE resident/accounted bytes:  0\n"
                "CUDA context overhead:         %" PRIu64 "\n"
@@ -374,12 +397,13 @@ static int cmd_load_only(const q38_options *opt) {
                q38_nvfp4_pack_source_revision(pack),
                q38_nvfp4_pack_file_bytes(pack),
                q38_nvfp4_pack_main_resident_bytes(pack),
-               q38_nvfp4_pack_is_source_backed(pack) ? 0 :
-                   q38_nvfp4_pack_main_resident_bytes(pack),
-               nvfp4_weight_bytes, nvfp4_scale_bytes, bf16_bytes,
+               residency.allocated_bytes,
+               resident_weight_bytes, resident_scale_bytes, resident_bf16_bytes,
+               residency.allocation_count, residency.copied_bytes,
                q38_nvfp4_pack_ple_bytes(pack), context_bytes,
                rss_before, rss_after);
     }
+    q38_nvfp4_cuda_residency_destroy(&residency);
     q38_forward_cuda_context_destroy(context);
     q38_nvfp4_pack_close(pack);
     return 0;
