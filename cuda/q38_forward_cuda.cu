@@ -513,6 +513,27 @@ static bool fail(char *error, size_t error_len, const char *message) {
     return false;
 }
 
+static bool ensure_qsa_chain_capacity(
+    q38_qsa_cuda_chain_state *chain, size_t required, cudaStream_t stream,
+    char *error, size_t error_len) {
+    const q38_model_config *config = q38_model_config_default();
+    if (!chain || !config || required > config->max_position_embeddings)
+        return fail(error, error_len,
+                    "QSA chain context exceeds max position embeddings");
+    if (required <= chain->capacity) return true;
+
+    size_t reserve_capacity = chain->capacity ? chain->capacity : 16u;
+    while (reserve_capacity < required) {
+        if (reserve_capacity > SIZE_MAX / 2u) {
+            reserve_capacity = required;
+            break;
+        }
+        reserve_capacity *= 2u;
+    }
+    return q38_qsa_cuda_chain_reserve(
+        chain, reserve_capacity, stream, error, error_len);
+}
+
 static bool is_lm_head_tensor(const q38_tensor *tensor) {
     return tensor && tensor->name.len == 14 &&
            memcmp(tensor->name.ptr, "lm_head.weight", 14) == 0;
@@ -1260,7 +1281,7 @@ extern "C" bool q38_forward_cuda_load_qsa_state(
         if (host->main_k.count != host->position ||
             host->main_v.count != host->position ||
             host->index_k.count != host->position ||
-            !q38_qsa_cuda_chain_reserve(
+            !ensure_qsa_chain_capacity(
                 device, host->position, context->stream, error, error_len) ||
             cudaMemcpyAsync(
                 device->main_k, host->main_k.data,
@@ -2974,7 +2995,6 @@ static bool qsa_chain_tensor(
     q38_forward_cuda_context *context, const q38_gguf *model,
     const q38_tensor *tensor, size_t rows, size_t cols,
     const uint16_t **pointer, char *error, size_t error_len);
-
 extern "C" bool q38_forward_cuda_gr_read_device(
     q38_forward_cuda_context *context, const q38_gguf *model,
     const q38_gr_weights *weights, const float *device_residual,
@@ -3038,11 +3058,8 @@ extern "C" bool q38_forward_cuda_qsa_chain_device(
                           &index_k_norm, error, error_len) ||
         !ensure_qsa_chain_workspace(context, error, error_len))
         return false;
-    const size_t required = chain->count + 1u;
-    size_t capacity = chain->capacity ? chain->capacity * 2u : 16u;
-    if (capacity < required) capacity = required;
-    if (!q38_qsa_cuda_chain_reserve(chain, capacity, context->stream,
-                                                  error, error_len))
+    if (!ensure_qsa_chain_capacity(
+            chain, chain->count + 1u, context->stream, error, error_len))
         return false;
     if (!q38_qsa_cuda_chain_decode(
             q_proj, k_proj, v_proj, index_proj, o_proj, q_norm, k_norm,
@@ -3602,7 +3619,7 @@ extern "C" bool q38_forward_cuda_qsa_chain_backend(
             host_state->main_v.count != host_state->position ||
             host_state->index_k.count != host_state->position)
             return false;
-        if (!q38_qsa_cuda_chain_reserve(
+        if (!ensure_qsa_chain_capacity(
                 chain, host_state->main_k.count, context->stream, error,
                 error_len) ||
             cudaMemcpyAsync(
@@ -3621,24 +3638,9 @@ extern "C" bool q38_forward_cuda_qsa_chain_backend(
         chain->count = host_state->position;
         chain->position = host_state->position;
     }
-    const size_t required = chain->count + 1u;
-    const q38_model_config *config = q38_model_config_default();
-    if (!config || required > config->max_position_embeddings)
-        return fail(error, error_len,
-                    "QSA chain context exceeds max position embeddings");
-    if (required > chain->capacity) {
-        size_t reserve_capacity = chain->capacity ? chain->capacity : 16u;
-        while (reserve_capacity < required) {
-            if (reserve_capacity > SIZE_MAX / 2u) {
-                reserve_capacity = required;
-                break;
-            }
-            reserve_capacity *= 2u;
-        }
-        if (!q38_qsa_cuda_chain_reserve(
-                chain, reserve_capacity, context->stream, error, error_len))
-            return false;
-    }
+    if (!ensure_qsa_chain_capacity(
+            chain, chain->count + 1u, context->stream, error, error_len))
+        return false;
     if (!context->device_input ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements,
