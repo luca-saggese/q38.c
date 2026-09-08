@@ -1,0 +1,116 @@
+{
+  "format": "q38-m9n-05-fast-nvfp4-execution-v1",
+  "hardware": {
+    "device": "NVIDIA GB10",
+    "sm": "121",
+    "observed_read_ceiling_GBps": 237.234382
+  },
+  "oracle": "NVFP4_CUDA_ORACLE_V1",
+  "fixed_tolerance": 1.0e-5,
+  "iterations": {
+    "warmup": 100,
+    "measured": 100
+  },
+  "scope": {
+    "full_model_load": false,
+    "inference": false,
+    "q38_generation": false,
+    "ple": false,
+    "mtp": false,
+    "server": false,
+    "router_optimized": false,
+    "canonical_pack_modified": false
+  },
+  "effective_weight_bytes": {
+    "one_projection": 921600,
+    "single_expert": 2764800,
+    "top10": 27648000
+  },
+  "stages": {
+    "early": {
+      "layer": 0,
+      "oracle_c0": {
+        "gate": {"median_us": 26.944000, "p95_us": 27.168000, "launches": 2, "GBps": 34.204275},
+        "up": {"median_us": 26.976001, "p95_us": 27.200000, "launches": 2, "GBps": 34.163700},
+        "down": {"median_us": 24.992000, "p95_us": 25.119999, "launches": 2, "GBps": 36.875800},
+        "full_expert": {"median_us": 78.368001, "p95_us": 80.416001, "launches": 7, "GBps": 35.279706},
+        "top10": {"median_us": 891.327977, "p95_us": 897.535980, "launches": 80, "GBps": 31.018885}
+      },
+      "nv_c1": {
+        "gate": {"median_us": 31.008000, "p95_us": 31.199999, "launches": 2, "GBps": 29.721363},
+        "up": {"median_us": 31.744000, "p95_us": 32.832000, "launches": 2, "GBps": 29.032258},
+        "down": {"median_us": 24.992000, "p95_us": 35.103999, "launches": 2, "GBps": 36.875800},
+        "full_expert": {"median_us": 85.631996, "p95_us": 119.071998, "launches": 7, "GBps": 32.286997}
+      },
+      "nv_c2": {
+        "fused_gate_up": {"median_us": 45.504000, "p95_us": 46.303999, "launches": 2, "GBps": 40.506329},
+        "full_expert": {"median_us": 70.079997, "p95_us": 70.912004, "launches": 4, "GBps": 39.452056, "speedup_vs_c0": 1.118265}
+      },
+      "nv_c4": {"top10": {"median_us": 481.631994, "p95_us": 484.800011, "launches": 4, "GBps": 57.404824, "speedup_vs_c0": 1.850641}},
+      "correctness": {"single_max_abs": 9.31322575e-09, "single_rmse": 2.14790317e-09, "top10_max_abs": 2.23517418e-08, "top10_rmse": 3.16000218e-09, "selected_ids_exact": true, "nan": 0, "inf": 0}
+    },
+    "middle": {
+      "layer": 24,
+      "activation_capture_layer": 23,
+      "oracle_c0": {
+        "gate": {"median_us": 27.071999, "p95_us": 28.096000, "launches": 2, "GBps": 34.042554},
+        "up": {"median_us": 26.976001, "p95_us": 27.936000, "launches": 2, "GBps": 34.163700},
+        "down": {"median_us": 25.952000, "p95_us": 38.688000, "launches": 2, "GBps": 35.511714},
+        "full_expert": {"median_us": 78.304000, "p95_us": 80.352001, "launches": 7, "GBps": 35.308541},
+        "top10": {"median_us": 911.808014, "p95_us": 920.032024, "launches": 80, "GBps": 30.322173}
+      },
+      "nv_c1": {
+        "gate": {"median_us": 31.136001, "p95_us": 34.240000, "launches": 2, "GBps": 29.599177},
+        "up": {"median_us": 30.751999, "p95_us": 31.936001, "launches": 2, "GBps": 29.968783},
+        "down": {"median_us": 25.696000, "p95_us": 26.944000, "launches": 2, "GBps": 35.865504},
+        "full_expert": {"median_us": 87.967999, "p95_us": 116.736002, "launches": 7, "GBps": 31.429611}
+      },
+      "nv_c2": {
+        "fused_gate_up": {"median_us": 45.440000, "p95_us": 45.536000, "launches": 2, "GBps": 40.563381},
+        "full_expert": {"median_us": 70.175998, "p95_us": 71.039997, "launches": 4, "GBps": 39.398086, "speedup_vs_c0": 1.116680}
+      },
+      "nv_c4": {"top10": {"median_us": 471.520007, "p95_us": 613.888025, "launches": 4, "GBps": 58.635900, "speedup_vs_c0": 1.933763}},
+      "correctness": {"single_max_abs": 1.49011612e-08, "single_rmse": 3.3735572e-09, "top10_max_abs": 1.11758709e-08, "top10_rmse": 2.19258599e-09, "selected_ids_exact": true, "nan": 0, "inf": 0}
+    },
+    "late": {
+      "layer": 47,
+      "oracle_c0": {
+        "gate": {"median_us": 27.008001, "p95_us": 28.000001, "launches": 2, "GBps": 34.123222},
+        "up": {"median_us": 27.744001, "p95_us": 28.991999, "launches": 2, "GBps": 33.217992},
+        "down": {"median_us": 25.024001, "p95_us": 37.184000, "launches": 2, "GBps": 36.828644},
+        "full_expert": {"median_us": 80.192000, "p95_us": 80.416001, "launches": 7, "GBps": 34.477255},
+        "top10": {"median_us": 905.632019, "p95_us": 911.808014, "launches": 80, "GBps": 30.528956}
+      },
+      "nv_c1": {
+        "gate": {"median_us": 31.008000, "p95_us": 31.199999, "launches": 2, "GBps": 29.721363},
+        "up": {"median_us": 31.808000, "p95_us": 32.543998, "launches": 2, "GBps": 28.973843},
+        "down": {"median_us": 25.024001, "p95_us": 37.632000, "launches": 2, "GBps": 36.828644},
+        "full_expert": {"median_us": 86.464003, "p95_us": 87.264001, "launches": 7, "GBps": 31.976313}
+      },
+      "nv_c2": {
+        "fused_gate_up": {"median_us": 45.504000, "p95_us": 46.271998, "launches": 2, "GBps": 40.506329},
+        "full_expert": {"median_us": 70.720002, "p95_us": 89.184001, "launches": 4, "GBps": 39.095021, "speedup_vs_c0": 1.133937}
+      },
+      "nv_c4": {"top10": {"median_us": 473.536015, "p95_us": 480.544001, "launches": 4, "GBps": 58.386267, "speedup_vs_c0": 1.912488}},
+      "correctness": {"single_max_abs": 4.47034836e-08, "single_rmse": 1.05205134e-08, "top10_max_abs": 2.23517418e-08, "top10_rmse": 4.58665625e-09, "selected_ids_exact": true, "nan": 0, "inf": 0}
+    }
+  },
+  "promotion": {
+    "best_single_expert_candidate": "NV-C2",
+    "best_top10_candidate": "NV-C4",
+    "top10_improvement_threshold_percent": 10.0,
+    "top10_improvement_percent": {
+      "early": 45.964672,
+      "middle": 48.287359,
+      "late": 47.712094
+    },
+    "custom_candidate_promoted_for_next_comparison": "NV-C4"
+  },
+  "cublaslt": {
+    "status": "not_promotable",
+    "median_us": null,
+    "reason": "CUDA 13 cublasLt exposes scalar A/B scale pointers but no canonical NVFP4 per-16-value E4M3 block-scale binding",
+    "conversion": "not_performed",
+    "canonical_pack_unchanged": true
+  }
+}

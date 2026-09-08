@@ -76,6 +76,29 @@ m9n-pack-test: tests/test_m9_nvfp4_pack
 tests/nvfp4/nvfp4_cuda_fixture: tests/nvfp4/nvfp4_cuda_fixture.cu
 	$(NVCC) $(NVCCFLAGS) -o $@ $< $(CUDA_LDLIBS)
 
+.PHONY: m9n05-nvfp4-bundles
+m9n05-nvfp4-bundles:
+	python3 tools/q38_nvfp4_bundle_fixture.py \
+		--source-root models/Qwen3.8-Flash-Next-NVFP4 \
+		--stage early \
+		--output-dir artifacts/m9-nvidia/m9n05-bundles/early
+	python3 tools/q38_nvfp4_bundle_fixture.py \
+		--source-root models/Qwen3.8-Flash-Next-NVFP4 \
+		--stage middle \
+		--output-dir artifacts/m9-nvidia/m9n05-bundles/middle
+	python3 tools/q38_nvfp4_bundle_fixture.py \
+		--source-root models/Qwen3.8-Flash-Next-NVFP4 \
+		--stage late \
+		--output-dir artifacts/m9-nvidia/m9n05-bundles/late
+
+tests/nvfp4/nvfp4_fast_bench: tests/nvfp4/nvfp4_fast_bench.cu \
+		tests/nvfp4/nvfp4_cuda_fixture.cu
+	$(NVCC) $(NVCCFLAGS) -o $@ $< $(CUDA_LDLIBS) -lcublasLt
+
+.PHONY: m9n-nvfp4-fast-bench
+m9n-nvfp4-fast-bench: m9n05-nvfp4-bundles tests/nvfp4/nvfp4_fast_bench
+	./tests/nvfp4/nvfp4_fast_bench
+
 .PHONY: m9n-nvfp4-cuda-test
 m9n-nvfp4-cuda-test: tests/nvfp4/nvfp4_cuda_fixture
 	python3 tools/q38_nvfp4_cuda_fixture.py \

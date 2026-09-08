@@ -55,6 +55,8 @@ artifacts/m9-nvidia/raw/nvfp4_tensor_inventory.json
 # Native pack payloads are generated from the local NVIDIA snapshot and are
 # intentionally not versioned; the compact manifest remains tracked.
 artifacts/m9-nvidia/*.pack
+# M9N-05 fixture-only routed bundles are generated from the local checkpoint.
+artifacts/m9-nvidia/m9n05-bundles/
 # The full M9-NVIDIA snapshot is a local-only model cache. The metadata files
 # already tracked in Git remain tracked despite this ignore rule.
 models/Qwen3.8-Flash-Next-NVFP4/*
