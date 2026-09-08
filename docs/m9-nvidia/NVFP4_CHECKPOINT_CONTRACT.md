@@ -199,21 +199,219 @@ weight_scale_2:      scalar F32       = 4 bytes
 input_scale:         scalar F32       = 4 bytes
 ```
 
-The U8 storage is packed NVFP4 payload, not an assertion that the runtime
-should interpret the values as ordinary uint8 weights. The scale cardinality
-is consistent with:
+The U8 storage is packed NVFP4 payload, not an ordinary uint8 weight. The
+ModelOpt 0.46 dequantizer treats the last stored dimension as packed logical
+K and expands it in place:
 
 ```text
-gate/up inferred logical element shape: [640, 2560]
-down   inferred logical element shape: [2560, 640]
+stored row layout:
+    U8[out, logical_k / 2]
+logical matrix:
+    W[out, logical_k]
+weight_scale:
+    FP8[out, logical_k / 16]
 ```
 
-Those logical shapes are inventory inferences from the packed byte count,
-group size, and architecture. They are **not** yet a physical-orientation
-contract. In particular, the importer must not assume that the stored
-`[out, packed_in]` orientation, scale layout, or any cuBLASLt swizzle is
-already established. The stored header shape and dtype remain authoritative
-until semantic dequantization tests define the physical ABI.
+Therefore the exact logical/physical orientation for these two-dimensional
+expert projections is:
+
+```text
+gate/up:
+    logical W[640, 2560]
+    stored packed W[640, 1280]
+    scale S[640, 160]
+
+down:
+    logical W[2560, 640]
+    stored packed W[2560, 320]
+    scale S[2560, 40]
+```
+
+No transpose or cuBLASLt scale swizzle is part of this checkpoint contract.
+The q38 importer must preserve this row-major orientation and perform any
+backend-specific transform only after a separate backend ABI gate.
+
+## 6.1 ModelOpt 0.46 numerical contract
+
+The numerical contract was verified against the pinned ModelOpt sources at
+tag `0.46.0`, commit
+`43fd41a58d52c4e6e5dec1d1ff5989ecc737ae1a`. The independent implementation
+and compact real-checkpoint fixtures are:
+
+```text
+tests/reference/nvfp4_modelopt_reference.py
+tests/nvfp4/fixtures/early.json
+tests/nvfp4/fixtures/middle.json
+tests/nvfp4/fixtures/late.json
+```
+
+### E2M1 nibble table
+
+The high nibble bit 3 is the sign bit and the low three bits select the
+magnitude. Both zero encodings decode to numeric zero.
+
+| Nibble | Sign | Magnitude code | Decoded E2M1 value |
+|---:|---:|---:|---:|
+| `0x0` | `+` | 0 | `0.0` |
+| `0x1` | `+` | 1 | `0.5` |
+| `0x2` | `+` | 2 | `1.0` |
+| `0x3` | `+` | 3 | `1.5` |
+| `0x4` | `+` | 4 | `2.0` |
+| `0x5` | `+` | 5 | `3.0` |
+| `0x6` | `+` | 6 | `4.0` |
+| `0x7` | `+` | 7 | `6.0` |
+| `0x8` | `-` | 0 | `0.0` |
+| `0x9` | `-` | 1 | `-0.5` |
+| `0xA` | `-` | 2 | `-1.0` |
+| `0xB` | `-` | 3 | `-1.5` |
+| `0xC` | `-` | 4 | `-2.0` |
+| `0xD` | `-` | 5 | `-3.0` |
+| `0xE` | `-` | 6 | `-4.0` |
+| `0xF` | `-` | 7 | `-6.0` |
+
+For one packed byte:
+
+```text
+logical value 0 = byte & 0x0F
+logical value 1 = byte >> 4
+```
+
+The packing is therefore **low nibble first**. ModelOpt writes
+`(q[..., 1::2] << 4) | q[..., 0::2]` and unpacks the low nibble before the
+high nibble. The exact source is
+`modelopt/torch/quantization/qtensor/nvfp4_tensor.py:27, 330-359`.
+
+The FP4 decision boundaries are also frozen:
+
+```text
+|x| <= 0.25  -> 0.0
+|x| <  0.75  -> 0.5
+|x| <= 1.25  -> 1.0
+|x| <  1.75  -> 1.5
+|x| <= 2.5   -> 2.0
+|x| <  3.5   -> 3.0
+|x| <= 5.0   -> 4.0
+otherwise    -> 6.0
+```
+
+The sign is applied after magnitude selection. Thus normalized values beyond
+the representable range saturate to `+/-6.0`; there is no ordinary integer
+zero-point.
+
+### E4M3 block scales
+
+`weight_scale` is a finite-only FP8 E4M3 value. ModelOpt uses the decoded FP8
+value as a normalized block scale and multiplies it by the scalar
+`weight_scale_2`. For the standard NVFP4 mode used by this checkpoint:
+
+```text
+E2M1_MAX = 6
+E4M3_MAX = 448
+weight_scale_2 = global_weight_amax / (6 * 448)
+```
+
+For row `r` and logical column `k`:
+
+```text
+block = floor(k / 16)
+S_weight[r, k] =
+    decode_e4m3fn(weight_scale[r, block]) * weight_scale_2
+
+W[r, k] =
+    decode_e2m1(packed_weight[r, k // 2]) * S_weight[r, k]
+```
+
+The low/high nibble choice in `packed_weight[r, k // 2]` is determined by
+`k % 2`. The complete reconstruction formula is therefore:
+
+```text
+W[r,k] =
+    decode_e2m1(
+        (packed_weight[r, floor(k / 2)] & 0x0F)
+        if k is even
+        else (packed_weight[r, floor(k / 2)] >> 4)
+    )
+    * decode_e4m3fn(weight_scale[r, floor(k / 16)])
+    * weight_scale_2
+```
+
+`weight_scale_2` is a positive multiplicative scale, not its reciprocal. This
+is explicit in ModelOpt's `get_weights_scaling_factor_2_from_quantizer()` and
+`NVFP4QTensor.dequantize()`:
+
+```text
+modelopt/torch/quantization/qtensor/nvfp4_tensor.py:96-108
+modelopt/torch/quantization/qtensor/nvfp4_tensor.py:190-207
+modelopt/torch/quantization/qtensor/nvfp4_tensor.py:361-408
+```
+
+ModelOpt's export test independently states that
+`weight_scale * weight_scale_2` is the dequantization scale:
+`tests/gpu_trtllm/torch/export/test_export_compressed_nvfp4.py:70-80`.
+
+### Activation W4A4 contract
+
+The exported `input_scale` is the activation normalization scale:
+
+```text
+input_scale = activation_amax / (6 * 448)
+```
+
+It is not the runtime multiplier applied directly to the activation. The
+ModelOpt runtime backend passes its reciprocal as the TensorRT-LLM global
+quantization multiplier:
+
+```text
+runtime_global_scale = 1 / input_scale = (6 * 448) / activation_amax
+```
+
+For each consecutive activation block of 16 logical values:
+
+```text
+block_amax = max(abs(x[block]))
+block_scale_fp8 =
+    encode_e4m3fn(block_amax / (6 * input_scale))
+block_scale =
+    decode_e4m3fn(block_scale_fp8) * input_scale
+q[block] = encode_e2m1(x[block] / block_scale)
+x_quantized[block] = decode_e2m1(q[block]) * block_scale
+```
+
+Activation facts:
+
+```text
+block size:        16 logical values
+activation scale:  dynamically generated FP8 E4M3 per block
+global scale:      exported F32 input_scale
+packing:           two FP4 values per U8, low nibble first
+rounding:          the E2M1 decision boundaries listed above
+clipping:          FP4 normalized magnitude saturates at 6.0;
+                   FP8 block scale saturates at E4M3 finite max 448
+```
+
+The exported scalar formula is documented in
+`modelopt/torch/quantization/config.py:691-704`; the block computation is in
+`modelopt/torch/kernels/quantization/common/nvfp4_quant.py:81-120` and
+`modelopt/torch/kernels/quantization/gemm/fp4_kernel_hopper.py:102-161`.
+The export path registers `input_scale` and `weight_scale_2` in
+`modelopt/torch/export/unified_export_hf.py:686-706`.
+
+### Real-slice fixture results
+
+Each fixture contains four output rows and 64 logical K values for
+`gate_proj`, `up_proj`, and `down_proj`, fetched by HTTP ranges from the
+pinned checkpoint revision. No full tensor payload was materialized.
+
+| Fixture | Projections | Compared elements | Max absolute difference | Mismatches |
+|---|---|---:|---:|---:|
+| Early, layer 0/expert 0 | gate/up/down | 768 | `0.0` | 0 |
+| Middle, layer 24/expert 0 | gate/up/down | 768 | `0.0` | 0 |
+| Late, layer 47/expert 0 | gate/up/down | 768 | `0.0` | 0 |
+
+The comparison is between the independent q38 reference and a direct
+translation of ModelOpt's unpack/dequant sequence. The FP8 E4M3 decoder was
+also cross-checked against PyTorch `float8_e4m3fn` for every fetched scale
+byte.
 
 ## 7. PLE contract
 
@@ -303,16 +501,13 @@ associated scale tensor names
 
 The following are intentionally not frozen by this document:
 
-- NVFP4 nibble ordering inside each U8 payload;
-- physical matrix orientation after packing;
-- scale byte encoding conversion details;
 - cuBLASLt scale/swizzle layout;
-- activation quantization staging;
 - CUDA kernel selection;
 - main-model loader ownership and residency implementation;
 - MTP execution;
 - full-model inference behavior.
 
-Those require byte-level payload fixtures and semantic reference checks in a
-later milestone. This milestone stops at the checkpoint contract and
-complete header inventory.
+Those remain separate backend/runtime questions. The ModelOpt numerical
+contract, packed orientation, scale multiplication direction, activation
+block size, and E2M1 nibble ABI are now frozen. This milestone still stops
+before CUDA production kernels and full-model inference.
