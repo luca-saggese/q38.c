@@ -12,6 +12,7 @@ extern "C" {
 enum {
     Q38_QUANT_Q2_K = 10,
     Q38_QUANT_Q4_K = 12,
+    Q38_QUANT_NVIDIA_NVFP4 = 100,
 };
 
 #define Q38_QUANT_QK_K 256

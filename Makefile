@@ -36,7 +36,8 @@ PRODUCTION_C_OBJS := \
 	q38_decode.o q38_forward.o q38_ple_prefetch.o q38_moe.o q38_weights.o \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_quant.o \
 	q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o \
-	q38_residency.o q38_directional_steering.o q38_session.o q38_residency_plan.o
+	q38_residency.o q38_directional_steering.o q38_session.o q38_residency_plan.o \
+	q38_nvfp4_pack.o
 PRODUCTION_CUDA_OBJS := \
 	q38_cuda.o q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o \
@@ -62,6 +63,15 @@ TEST_BINS := \
 	tests/test_platform tests/test_gguf tests/test_memory \
 	tests/test_model_config tests/test_quant_blocks tests/test_residency \
 	tests/test_residency_plan
+
+tests/test_m9_nvfp4_pack: tests/test_m9_nvfp4_pack.c q38_nvfp4_pack.o \
+		q38_nvfp4_pack.h
+	$(CC) $(CFLAGS) -o $@ tests/test_m9_nvfp4_pack.c \
+		q38_nvfp4_pack.o
+
+.PHONY: m9n-pack-test
+m9n-pack-test: tests/test_m9_nvfp4_pack
+	./tests/test_m9_nvfp4_pack
 
 tests/bench_ple_projection_cuda: tests/bench_ple_projection.cu \
 		build/release/q38_gdn.o build/release/q38_cuda_primitives.o

@@ -41,7 +41,7 @@ int q38_platform_rss_bytes(uint64_t *rss_bytes) {
     unsigned long ignored_size = 0;
     int rc = fscanf(fp, "%lu %lu", &ignored_size, &pages);
     fclose(fp);
-    if (rc != 1) return -1;
+    if (rc != 2) return -1;
     long page_size = sysconf(_SC_PAGESIZE);
     if (page_size <= 0) page_size = 4096;
     *rss_bytes = (uint64_t)pages * (uint64_t)page_size;

@@ -17,6 +17,7 @@
 #include "q38_session.h"
 #include "q38_tokenizer.h"
 #include "q38_weights.h"
+#include "q38_nvfp4_pack.h"
 
 #include <inttypes.h>
 #include <math.h>
@@ -41,6 +42,7 @@ static void usage(FILE *fp) {
         "  --inspect <model.gguf>     Print GGUF metadata and tensor summary\n"
         "  --list-tensors <model.gguf> List individual tensors\n"
         "  --memory-plan <model.gguf> Dry-run memory plan (no allocation)\n"
+        "  --load-only <q38_nvfp4.pack> Bind NVFP4 pack; no inference\n"
         "  --generate <model.gguf>    CUDA greedy session generation\n"
         "\n"
         "options:\n"
@@ -52,6 +54,7 @@ static void usage(FILE *fp) {
         "  --trace-state              Enable semantic state snapshots (q38-diag)\n"
         "  --max-tokens <n>           Maximum generated tokens (default: 256)\n"
         "  --disable-ple              Omit PLE output while retaining PLE state\n"
+        "  --source-root DIR          Source root for source-backed NVFP4 pack\n"
         "  --dir-steering-file FILE   Load a Q38 48x2560 f32 direction\n"
         "  --dir-steering-ffn F       Apply steering after FFN outputs\n"
         "  --dir-steering-attn F      Apply steering after attention outputs\n"
@@ -258,6 +261,127 @@ static int cmd_memory_plan(const q38_options *opt) {
     }
 
     q38_gguf_close(m);
+    return 0;
+}
+
+static int cmd_load_only(const q38_options *opt) {
+    if (!opt->model_path || !opt->model_path[0]) {
+        fprintf(stderr, "q38: --load-only requires a Q38_NVFP4_PACK_V1 file\n");
+        return 2;
+    }
+    const char *source_root = opt->source_root && opt->source_root[0]
+        ? opt->source_root : ".";
+    char error[256] = {0};
+    q38_nvfp4_pack *pack = NULL;
+    if (!q38_nvfp4_pack_open(
+            opt->model_path, source_root, &pack, error, sizeof(error))) {
+        fprintf(stderr, "q38: NVFP4 load-only: %s\n", error);
+        return 1;
+    }
+
+    q38_platform_info before = {0};
+    q38_platform_info after = {0};
+    char reason[256] = {0};
+    if (q38_platform_probe(&before, reason, sizeof(reason)) != 0) {
+        fprintf(stderr, "q38: NVFP4 CUDA platform: %s\n", reason);
+        q38_nvfp4_pack_close(pack);
+        return 1;
+    }
+    uint64_t rss_before = 0, rss_after = 0;
+    (void)q38_platform_rss_bytes(&rss_before);
+    q38_forward_cuda_context *context =
+        q38_forward_cuda_context_create(error, sizeof(error));
+    if (!context) {
+        fprintf(stderr, "q38: NVFP4 CUDA context: %s\n", error);
+        q38_nvfp4_pack_close(pack);
+        return 1;
+    }
+    (void)q38_platform_rss_bytes(&rss_after);
+    if (q38_platform_probe(&after, reason, sizeof(reason)) != 0) {
+        fprintf(stderr, "q38: NVFP4 CUDA post-init probe: %s\n", reason);
+        q38_forward_cuda_context_destroy(context);
+        q38_nvfp4_pack_close(pack);
+        return 1;
+    }
+
+    const uint64_t nvfp4_weight_bytes = UINT64_C(60397977600);
+    const uint64_t nvfp4_scale_bytes = UINT64_C(7549747200);
+    const uint64_t nvfp4_scalar_bytes = UINT64_C(589824);
+    const uint64_t bf16_bytes =
+        q38_nvfp4_pack_main_resident_bytes(pack) -
+        nvfp4_weight_bytes - nvfp4_scale_bytes - nvfp4_scalar_bytes;
+    const uint64_t context_bytes =
+        before.cuda_free_bytes > after.cuda_free_bytes
+            ? before.cuda_free_bytes - after.cuda_free_bytes : 0;
+    if (opt->json) {
+        printf("{\"format\":\"Q38_NVFP4_PACK_V1\","
+               "\"storage_mode\":\"%s\","
+               "\"source_model\":\"%s\","
+               "\"source_revision\":\"%s\","
+               "\"pack_total_bytes\":%" PRIu64 ","
+               "\"packed_main_model_bytes\":%" PRIu64 ","
+               "\"planned_main_resident_bytes\":%" PRIu64 ","
+               "\"main_resident_payload_bytes\":%" PRIu64 ","
+               "\"resident_nvfp4_weight_bytes\":%" PRIu64 ","
+               "\"resident_nvfp4_scale_bytes\":%" PRIu64 ","
+               "\"resident_bf16_bytes\":%" PRIu64 ","
+               "\"persistent_workspace_bytes\":%" PRIu64 ","
+               "\"cuda_context_overhead_bytes\":%" PRIu64 ","
+               "\"ple_backing_file_bytes\":%" PRIu64 ","
+               "\"ple_actually_resident_bytes\":0,"
+               "\"steady_accounted_bytes\":%" PRIu64 ","
+               "\"rss_before_bytes\":%" PRIu64 ","
+               "\"rss_after_bytes\":%" PRIu64 ","
+               "\"peak_bytes\":%" PRIu64 ","
+               "\"unknown_missing_tensor_count\":0,"
+               "\"mtp_execution\":\"disabled\","
+               "\"vision_execution\":\"disabled\","
+               "\"inference_run\":false}\n",
+               q38_nvfp4_pack_is_source_backed(pack)
+                   ? "source-backed" : "materialized",
+               q38_nvfp4_pack_source_model(pack),
+               q38_nvfp4_pack_source_revision(pack),
+               q38_nvfp4_pack_file_bytes(pack),
+               q38_nvfp4_pack_is_source_backed(pack) ? 0 :
+                   q38_nvfp4_pack_file_bytes(pack),
+               q38_nvfp4_pack_main_resident_bytes(pack),
+               q38_nvfp4_pack_is_source_backed(pack) ? 0 :
+                   q38_nvfp4_pack_main_resident_bytes(pack),
+               nvfp4_weight_bytes, nvfp4_scale_bytes, bf16_bytes,
+               (uint64_t)0, context_bytes, q38_nvfp4_pack_ple_bytes(pack),
+               q38_nvfp4_pack_is_source_backed(pack)
+                   ? context_bytes : q38_nvfp4_pack_main_resident_bytes(pack) +
+                     context_bytes,
+               rss_before, rss_after,
+               rss_after > rss_before ? rss_after : rss_before);
+    } else {
+        printf("format:                         Q38_NVFP4_PACK_V1\n"
+               "storage mode:                  %s\n"
+               "source revision:               %s\n"
+               "pack file bytes:               %" PRIu64 "\n"
+               "planned main resident bytes:   %" PRIu64 "\n"
+               "actual resident payload bytes: %" PRIu64 "\n"
+               "  NVFP4 weights:               %" PRIu64 "\n"
+               "  NVFP4 scales:                %" PRIu64 "\n"
+               "  BF16 main:                   %" PRIu64 "\n"
+               "PLE backing bytes:             %" PRIu64 "\n"
+               "PLE resident/accounted bytes:  0\n"
+               "CUDA context overhead:         %" PRIu64 "\n"
+               "RSS before/after:              %" PRIu64 " / %" PRIu64 "\n"
+               "inference:                     disabled\n",
+               q38_nvfp4_pack_is_source_backed(pack)
+                   ? "source-backed" : "materialized",
+               q38_nvfp4_pack_source_revision(pack),
+               q38_nvfp4_pack_file_bytes(pack),
+               q38_nvfp4_pack_main_resident_bytes(pack),
+               q38_nvfp4_pack_is_source_backed(pack) ? 0 :
+                   q38_nvfp4_pack_main_resident_bytes(pack),
+               nvfp4_weight_bytes, nvfp4_scale_bytes, bf16_bytes,
+               q38_nvfp4_pack_ple_bytes(pack), context_bytes,
+               rss_before, rss_after);
+    }
+    q38_forward_cuda_context_destroy(context);
+    q38_nvfp4_pack_close(pack);
     return 0;
 }
 
@@ -1537,6 +1661,10 @@ int main(int argc, char **argv) {
             mode = Q38_MODE_MEMORY_PLAN;
             opt.memory_plan = true;
             if (i + 1 < argc) opt.model_path = argv[++i];
+        } else if (strcmp(a, "--load-only") == 0) {
+            mode = Q38_MODE_LOAD_ONLY;
+            opt.load_only = true;
+            if (i + 1 < argc) opt.model_path = argv[++i];
         } else if (strcmp(a, "--generate") == 0) {
             mode = Q38_MODE_GENERATE;
             if (i + 1 < argc) opt.model_path = argv[++i];
@@ -1558,6 +1686,12 @@ int main(int argc, char **argv) {
             opt.trace_state = true;
         } else if (strcmp(a, "--disable-ple") == 0) {
             opt.disable_ple = true;
+        } else if (strcmp(a, "--source-root") == 0) {
+            if (i + 1 >= argc) {
+                usage(stderr);
+                return 2;
+            }
+            opt.source_root = argv[++i];
         } else if (strcmp(a, "--dir-steering-file") == 0) {
             if (i + 1 >= argc) {
                 usage(stderr);
@@ -1640,6 +1774,9 @@ int main(int argc, char **argv) {
         break;
     case Q38_MODE_MEMORY_PLAN:
         rc = cmd_memory_plan(&opt);
+        break;
+    case Q38_MODE_LOAD_ONLY:
+        rc = cmd_load_only(&opt);
         break;
     case Q38_MODE_GENERATE:
 #if Q38_DIAGNOSTICS
