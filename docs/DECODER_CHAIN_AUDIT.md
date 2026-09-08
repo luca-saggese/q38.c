@@ -1,5 +1,22 @@
 # Decoder Layer Chain Audit
 
+## DECODER_LAYER_CHAIN: PROMOTED
+
+Final end-to-end A/B result with separate model loads, identical model,
+prompt, greedy decoding, PLE, residency, CUDA configuration, and generation
+length:
+
+| Path | Decode latency | Throughput |
+|---|---:|---:|
+| OLD | 110.393 ms/token | 9.059 tok/s |
+| DEVICE | 76.282 ms/token | 13.109 tok/s |
+
+Improvement: **-30.90% latency / +44.71% throughput**. The generated token
+sequence was identical. The previous regression was caused by single-token
+MoE routing, not by the decoder-layer device chain itself.
+
+The generic multi-token routing path remains unchanged.
+
 ## Scope
 
 This is a static comparison of the two single-token decoder paths:
@@ -7,9 +24,9 @@ This is a static comparison of the two single-token decoder paths:
 - **Old path:** `runtime->backend.decoder_layer_chain = NULL`
 - **Chain path:** `q38_forward_cuda_decoder_layer_chain_backend`
 
-No full-model load or runtime benchmark was used for this audit. The chain is
-disabled in production until an isolated fixture benchmark proves that it is
-at least as fast as the old path.
+The static comparison below records the pre-promotion differences between the
+two paths. The production default now uses
+`q38_forward_cuda_decoder_layer_chain_backend`.
 
 ## Call-graph comparison
 
@@ -122,6 +139,18 @@ optimization or promotion decision.
    layer-level ping-pong setup add host orchestration even when no allocation
    occurs.
 
-The decoder layer chain remains a candidate path only. It is not promoted to
-production until an isolated complete-layer benchmark shows wall time no
-worse than the old path, with correctness and state parity.
+## Confirmed routing root cause
+
+Before promotion, the device chain routed a single decode token through the
+generic `q38_topk_cuda()` path. That kernel mapped one CUDA thread per token;
+with `token_count == 1`, only one thread performed the serial top-10 search
+over all 512 experts, including repeated selected-expert checks. The separate
+route-weight kernel also scanned the 512 logits serially for that token.
+
+The specialized cooperative single-token routing kernel now performs the
+BF16-effective-logit conversion, deterministic top-10 selection, selected
+softmax normalization, and output ID/weight writes in one launch. The generic
+multi-token path remains in use for `token_count > 1`.
+
+This removed the pathological per-layer routing bottleneck and restored the
+device chain's end-to-end advantage shown above.
