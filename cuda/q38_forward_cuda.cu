@@ -7,6 +7,7 @@
 #include "q38_topk_cuda.h"
 #include "q38_gr_ref.h"
 #include "q38_diagnostics.h"
+#include "q38_model_config.h"
 #include "q38_residency_plan.h"
 
 #include <cooperative_groups.h>
@@ -3620,13 +3621,24 @@ extern "C" bool q38_forward_cuda_qsa_chain_backend(
         chain->count = host_state->position;
         chain->position = host_state->position;
     }
-    const size_t required = chain->count + 1;
-    size_t reserve_capacity = chain->capacity ? chain->capacity * 2u : 16u;
-    if (reserve_capacity < required) reserve_capacity = required;
-    if (!q38_qsa_cuda_chain_reserve(chain, reserve_capacity, context->stream,
-                                    error,
-                                    error_len))
-        return false;
+    const size_t required = chain->count + 1u;
+    const q38_model_config *config = q38_model_config_default();
+    if (!config || required > config->max_position_embeddings)
+        return fail(error, error_len,
+                    "QSA chain context exceeds max position embeddings");
+    if (required > chain->capacity) {
+        size_t reserve_capacity = chain->capacity ? chain->capacity : 16u;
+        while (reserve_capacity < required) {
+            if (reserve_capacity > SIZE_MAX / 2u) {
+                reserve_capacity = required;
+                break;
+            }
+            reserve_capacity *= 2u;
+        }
+        if (!q38_qsa_cuda_chain_reserve(
+                chain, reserve_capacity, context->stream, error, error_len))
+            return false;
+    }
     if (!context->device_input ||
         !ensure_buffer((void **)&context->device_input,
                        &context->device_input_elements,
