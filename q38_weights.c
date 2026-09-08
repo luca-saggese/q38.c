@@ -1,5 +1,7 @@
 #include "q38_weights.h"
+#include "q38_quant.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -327,6 +329,10 @@ static bool validate_metadata(const q38_gguf *model, uint32_t max_layer,
     q38_str arch;
     uint32_t metadata_layer;
     bool runtime_only, excluded_vision, excluded_mtp;
+    if (model->native_nvfp4) {
+        *quantized = true;
+        return true;
+    }
     if (!q38_gguf_get_string(model, "general.architecture", &arch) ||
         arch.len != strlen("qwen4_exp") ||
         memcmp(arch.ptr, "qwen4_exp", arch.len) != 0 ||
@@ -420,13 +426,15 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
         }
         if (tensor->type != 30 && tensor->type != 27 &&
             tensor->type != 8 && tensor->type != 10 && tensor->type != 12 &&
-            tensor->type != 16) {
+            tensor->type != 16 && tensor->type != Q38_QUANT_NVIDIA_NVFP4 &&
+            tensor->type != Q38_DTYPE_NVIDIA_FP8_E4M3) {
             set_error(error, error_len, "unsupported tensor type in runtime artifact");
             return false;
         }
         if (name_has(tensor, ".mlp.experts.gate_up_proj")) {
             if (!shape_is(tensor, routed_gate_up_shape, 3) ||
-                (out->quantized ? (tensor->type != 10 && tensor->type != 12)
+                (out->quantized ? (tensor->type != 10 && tensor->type != 12 &&
+                                   tensor->type != Q38_QUANT_NVIDIA_NVFP4)
                                 : tensor->type != 30))
                 set_error(error, error_len, "routed gate/up shape/type mismatch");
             else {
@@ -443,7 +451,8 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
             const uint64_t *shape = out->quantized
                 ? routed_down_transposed : routed_down_source;
             if (!shape_is(tensor, shape, 3) ||
-                (out->quantized ? (tensor->type != 10 && tensor->type != 12)
+                (out->quantized ? (tensor->type != 10 && tensor->type != 12 &&
+                                   tensor->type != Q38_QUANT_NVIDIA_NVFP4)
                                 : tensor->type != 30))
                 set_error(error, error_len, "routed down shape/type mismatch");
             else {
@@ -496,12 +505,29 @@ bool q38_weights_bind_subset(const q38_gguf *model, uint32_t max_layer,
                     name_has(tensor, "ngram_heads_vocab_sizes");
                 bool row_quantized = out->quantized && tensor->ndim >= 2 &&
                     tensor->dim[tensor->ndim - 1] % 32 == 0;
-                uint32_t expected_type = source_integer ? 27 :
-                    (row_quantized ? 8 : 30);
-                if (tensor->type != expected_type)
-                    set_error(error, error_len, "PLE shape/type mismatch");
-                else
+                uint32_t expected_type;
+                if (source_integer) {
+                    expected_type = 27;
+                } else if (model->native_nvfp4) {
+                    expected_type = row_quantized &&
+                        tensor->type == Q38_DTYPE_NVIDIA_FP8_E4M3
+                        ? Q38_DTYPE_NVIDIA_FP8_E4M3 : 30;
+                } else {
+                    expected_type = row_quantized
+                        ? (tensor->type == Q38_DTYPE_NVIDIA_FP8_E4M3
+                            ? Q38_DTYPE_NVIDIA_FP8_E4M3 : 8)
+                        : 30;
+                }
+                if (tensor->type != expected_type) {
+                    if (error && error_len)
+                        snprintf(error, error_len,
+                                 "PLE shape/type mismatch: %.*s type=%u expected=%u ndim=%u last=%" PRIu64,
+                                 (int)tensor->name.len, tensor->name.ptr,
+                                 tensor->type, expected_type, tensor->ndim,
+                                 tensor->ndim ? tensor->dim[tensor->ndim - 1] : 0);
+                } else {
                     dst->ple_tensor[dst->ple_tensor_count++] = tensor;
+                }
             }
         } else if (name_has(tensor, ".linear_attn.") ||
                    name_has(tensor, ".self_attn.") ||

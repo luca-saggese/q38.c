@@ -13,6 +13,7 @@ enum {
     Q38_QUANT_Q2_K = 10,
     Q38_QUANT_Q4_K = 12,
     Q38_QUANT_NVIDIA_NVFP4 = 100,
+    Q38_DTYPE_NVIDIA_FP8_E4M3 = 101,
 };
 
 #define Q38_QUANT_QK_K 256

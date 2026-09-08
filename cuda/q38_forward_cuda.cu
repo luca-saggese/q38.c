@@ -1,5 +1,5 @@
 #include "q38_forward_cuda.h"
-
+#include "q38_nvfp4_residency.h"
 #include "q38_cuda_primitives.h"
 #include "q38_gdn.h"
 #include "q38_moe_cuda.h"
@@ -81,6 +81,7 @@ typedef enum {
 } q38_storage_class;
 
 typedef struct {
+    const void *host;
     const void *ptr;
     uint64_t bytes;
     uint32_t rows;
@@ -132,6 +133,14 @@ struct q38_forward_cuda_context {
     size_t device_moe_shared_output_bytes;
     float *device_moe_shared_weight;
     size_t device_moe_shared_weight_bytes;
+    uint8_t *device_nvfp4_activation;
+    size_t device_nvfp4_activation_bytes;
+    uint8_t *device_nvfp4_activation_scale;
+    size_t device_nvfp4_activation_scale_bytes;
+    uint8_t *device_nvfp4_down_activation;
+    size_t device_nvfp4_down_activation_bytes;
+    uint8_t *device_nvfp4_down_activation_scale;
+    size_t device_nvfp4_down_activation_scale_bytes;
     float *device_gr_residual;
     size_t device_gr_residual_bytes;
     float *device_gr_norm;
@@ -204,6 +213,9 @@ struct q38_forward_cuda_context {
     const void *lm_head_host_data;
     bool lm_head_resident;
     bool lm_head_uses_persistent;
+    q38_nvfp4_cuda_residency nvfp4_residency;
+    const q38_gguf *nvfp4_model;
+    bool nvfp4_enabled;
     size_t matrix_upload_bytes;
     uint64_t resident_hits;
     uint64_t resident_misses;
@@ -1630,6 +1642,88 @@ extern "C" bool q38_forward_cuda_enable_all_non_ple_residency(
     return true;
 }
 
+extern "C" bool q38_forward_cuda_enable_nvfp4_residency(
+    q38_forward_cuda_context *context, const q38_nvfp4_pack *pack,
+    const q38_gguf *model, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!context || !pack || !model || !model->native_nvfp4 ||
+        !model->tensors || !model->n_tensors)
+        return fail(error, error_len, "invalid native NVFP4 residency arguments");
+    if (!q38_nvfp4_cuda_residency_load(
+            pack, &context->nvfp4_residency, error, error_len))
+        return false;
+    q38_nvfp4_region_view bf16_region;
+    if (!q38_nvfp4_pack_get_region_view(
+            pack, Q38_NVFP4_REGION_BF16, &bf16_region, error, error_len))
+        return false;
+    free(context->exec_tensors);
+    context->exec_tensors = (q38_exec_tensor *)calloc(
+        (size_t)model->n_tensors, sizeof(*context->exec_tensors));
+    if (!context->exec_tensors)
+        return fail(error, error_len, "native NVFP4 descriptor allocation failed");
+    context->exec_model = model;
+    context->persistent_count = 0;
+    context->persistent_bytes = bf16_region.bytes;
+    context->persistent_expected_bytes = bf16_region.bytes;
+    context->persistent_expected_tensors = 0;
+    context->persistent_loaded_bytes = bf16_region.bytes;
+    context->persistent_loaded_tensors = 0;
+    for (uint64_t i = 0; i < model->n_tensors; ++i) {
+        const q38_tensor *tensor = &model->tensors[i];
+        q38_exec_tensor *exec = &context->exec_tensors[i];
+        exec->host = q38_gguf_tensor_data(model, tensor);
+        exec->bytes = tensor->bytes;
+        exec->rows = tensor->ndim > 0 ? (uint32_t)tensor->dim[0] : 0;
+        exec->cols = tensor->ndim > 1 ? (uint32_t)tensor->dim[1] : 0;
+        exec->qtype = tensor->type;
+        exec->tensor_id = (uint32_t)i;
+        exec->name = tensor->name.ptr;
+        if (tensor->type == Q38_DTYPE_NVIDIA_FP8_E4M3) {
+            exec->storage = Q38_STORAGE_FILE_BACKED_PLE;
+            continue;
+        }
+        if (tensor->type == Q38_QUANT_NVIDIA_NVFP4) {
+            /* Routed experts are addressed through the five native regions. */
+            exec->storage = Q38_STORAGE_RESIDENT;
+            continue;
+        }
+        if (!exec->host || (const uint8_t *)exec->host <
+                                (const uint8_t *)bf16_region.data ||
+            (const uint8_t *)exec->host >
+                (const uint8_t *)bf16_region.data + bf16_region.bytes ||
+            tensor->bytes > bf16_region.bytes -
+                ((const uint8_t *)exec->host -
+                 (const uint8_t *)bf16_region.data))
+            continue;
+        const size_t offset = (size_t)((const uint8_t *)exec->host -
+                                       (const uint8_t *)bf16_region.data);
+        exec->ptr = (uint8_t *)context->nvfp4_residency.device_regions[
+            Q38_NVFP4_REGION_BF16] + offset;
+        exec->storage = Q38_STORAGE_RESIDENT;
+        context->persistent_expected_tensors++;
+        context->persistent_loaded_tensors++;
+    }
+    if (cudaMalloc((void **)&context->device_nvfp4_activation, 1280u) !=
+            cudaSuccess ||
+        cudaMalloc((void **)&context->device_nvfp4_activation_scale, 160u) !=
+            cudaSuccess ||
+        cudaMalloc((void **)&context->device_nvfp4_down_activation,
+                   Q38_MOE_TOP_K * 320u) != cudaSuccess ||
+        cudaMalloc((void **)&context->device_nvfp4_down_activation_scale,
+                   Q38_MOE_TOP_K * 40u) != cudaSuccess)
+        return fail(error, error_len, "native NVFP4 scratch allocation failed");
+    context->device_nvfp4_activation_bytes = 1280u;
+    context->device_nvfp4_activation_scale_bytes = 160u;
+    context->device_nvfp4_down_activation_bytes = Q38_MOE_TOP_K * 320u;
+    context->device_nvfp4_down_activation_scale_bytes = Q38_MOE_TOP_K * 40u;
+    context->cuda_allocations += 4;
+    context->nvfp4_model = model;
+    context->nvfp4_enabled = true;
+    context->all_non_ple_resident = true;
+    context->persistent_coverage_ok = true;
+    return true;
+}
+
 extern "C" void
 q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     if (!context) return;
@@ -1652,6 +1746,10 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
     cudaFree(context->device_moe_shared_up);
     cudaFree(context->device_moe_shared_output);
     cudaFree(context->device_moe_shared_weight);
+    cudaFree(context->device_nvfp4_activation);
+    cudaFree(context->device_nvfp4_activation_scale);
+    cudaFree(context->device_nvfp4_down_activation);
+    cudaFree(context->device_nvfp4_down_activation_scale);
     cudaFree(context->device_gr_residual);
     cudaFree(context->device_gr_norm);
     cudaFree(context->device_gr_down);
@@ -1706,6 +1804,7 @@ q38_forward_cuda_context_destroy(q38_forward_cuda_context *context) {
         cudaFree(context->persistent[i].device);
     free(context->persistent);
     free(context->exec_tensors);
+    q38_nvfp4_cuda_residency_destroy(&context->nvfp4_residency);
     if (context->stream) cudaStreamDestroy(context->stream);
     free(context);
 }
@@ -1794,6 +1893,7 @@ extern "C" bool q38_forward_cuda_prepare_lm_head(
         context->lm_head_uses_persistent = true;
         return true;
     }
+
     if (context->lm_head_device_weights &&
         !context->lm_head_uses_persistent &&
         context->lm_head_device_weights_bytes < tensor->bytes) {
@@ -1817,6 +1917,36 @@ extern "C" bool q38_forward_cuda_prepare_lm_head(
     context->lm_head_host_data = data;
     context->lm_head_resident = true;
     context->lm_head_uses_persistent = false;
+    return true;
+}
+
+extern "C" bool q38_forward_cuda_prepare_nvfp4_lm_head(
+    q38_forward_cuda_context *context, const q38_nvfp4_pack *pack,
+    const q38_tensor *tensor, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!context || !pack || !tensor || !tensor->bytes)
+        return fail(error, error_len, "invalid native NVFP4 LM-head arguments");
+    q38_nvfp4_region_view region;
+    if (!q38_nvfp4_pack_get_region_view(
+            pack, Q38_NVFP4_REGION_BF16, &region, error, error_len))
+        return false;
+    const void *host = q38_gguf_tensor_data(context->nvfp4_model, tensor);
+    if (!host ||
+        (const uint8_t *)host < (const uint8_t *)region.data ||
+        (const uint8_t *)host >
+            (const uint8_t *)region.data + region.bytes ||
+        tensor->bytes > region.bytes -
+            ((const uint8_t *)host - (const uint8_t *)region.data))
+        return fail(error, error_len, "native NVFP4 LM-head is outside BF16 region");
+    const size_t offset = (size_t)((const uint8_t *)host -
+                                   (const uint8_t *)region.data);
+    context->lm_head_device_weights =
+        (uint8_t *)context->nvfp4_residency.device_regions[
+            Q38_NVFP4_REGION_BF16] + offset;
+    context->lm_head_device_weights_bytes = tensor->bytes;
+    context->lm_head_host_data = host;
+    context->lm_head_resident = true;
+    context->lm_head_uses_persistent = true;
     return true;
 }
 
@@ -3167,15 +3297,22 @@ extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
         exec_tensor_for(context, model, shared_down_proj);
     q38_exec_tensor *shared_weight_exec =
         exec_tensor_for(context, model, shared_gate);
+    const bool native_nvfp4 = gate_up->type == Q38_QUANT_NVIDIA_NVFP4;
     if (router->type != Q38_GDN_WEIGHT_BF16 ||
-        gate_up->type != Q38_QUANT_Q2_K || down->type != Q38_QUANT_Q2_K ||
+        (!native_nvfp4 &&
+         (gate_up->type != Q38_QUANT_Q2_K ||
+          down->type != Q38_QUANT_Q2_K)) ||
+        (native_nvfp4 &&
+         (down->type != Q38_QUANT_NVIDIA_NVFP4 ||
+          !context->nvfp4_enabled)) ||
         shared_gate_proj->type != Q38_GDN_WEIGHT_BF16 ||
         shared_up_proj->type != Q38_GDN_WEIGHT_BF16 ||
         shared_down_proj->type != Q38_GDN_WEIGHT_BF16 ||
         shared_gate->type != Q38_GDN_WEIGHT_BF16 ||
         !exec_tensor_is_resident(router_exec, router) ||
-        !exec_tensor_is_resident(gate_exec, gate_up) ||
-        !exec_tensor_is_resident(down_exec, down) ||
+        (!native_nvfp4 &&
+         (!exec_tensor_is_resident(gate_exec, gate_up) ||
+          !exec_tensor_is_resident(down_exec, down))) ||
         !exec_tensor_is_resident(shared_gate_exec, shared_gate_proj) ||
         !exec_tensor_is_resident(shared_up_exec, shared_up_proj) ||
         !exec_tensor_is_resident(shared_down_exec, shared_down_proj) ||
@@ -3193,13 +3330,6 @@ extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
             context->device_moe_route_indices, context->device_moe_route_ids,
             context->device_moe_route_weights, context->stream, cuda_error,
             sizeof(cuda_error)) ||
-        !q38_moe_cuda_q2_grouped_indexed_deterministic(
-            gate_exec->ptr, down_exec->ptr, context->device_gr_input,
-            context->device_moe_route_ids, context->device_moe_route_weights,
-            Q38_MOE_TOP_K, 1280u * 10u, 640u * 10u,
-            context->device_moe_accum, context->device_moe_grouped_mid,
-            context->device_moe_expert_outputs, context->stream, cuda_error,
-            sizeof(cuda_error)) ||
         !q38_cuda_bf16_matvec_device(
             (const uint16_t *)shared_gate_exec->ptr, Q38_MOE_INTERMEDIATE,
             Q38_MOE_HIDDEN, context->device_gr_input,
@@ -3212,6 +3342,58 @@ extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
             sizeof(cuda_error)))
         return fail(error, error_len,
                     cuda_error[0] ? cuda_error : "decoder MoE launch failed");
+    bool routed_ok = false;
+    if (native_nvfp4) {
+        constexpr size_t gate_weight_expert = 640u * 1280u;
+        constexpr size_t gate_scale_expert = 640u * 160u;
+        const size_t gate_projection_stride =
+            Q38_MOE_EXPERTS * gate_weight_expert;
+        const size_t gate_scale_stride =
+            Q38_MOE_EXPERTS * gate_scale_expert;
+        const size_t layer_weight_stride = 3u * gate_projection_stride;
+        const size_t layer_scale_stride = 3u * gate_scale_stride;
+        uint8_t *weights = (uint8_t *)context->nvfp4_residency
+            .device_regions[Q38_NVFP4_REGION_WEIGHT] +
+            layer_number * layer_weight_stride;
+        uint8_t *scales = (uint8_t *)context->nvfp4_residency
+            .device_regions[Q38_NVFP4_REGION_WEIGHT_SCALE] +
+            layer_number * layer_scale_stride;
+        float *scale_2 = (float *)context->nvfp4_residency
+            .device_regions[Q38_NVFP4_REGION_WEIGHT_SCALE_2] +
+            layer_number * 3u * Q38_MOE_EXPERTS;
+        float *input_scale = (float *)context->nvfp4_residency
+            .device_regions[Q38_NVFP4_REGION_INPUT_SCALE] +
+            layer_number * 3u * Q38_MOE_EXPERTS;
+        routed_ok = q38_moe_cuda_nvfp4_grouped_indexed(
+            weights, scales, scale_2, input_scale,
+            weights + gate_projection_stride,
+            scales + gate_scale_stride,
+            scale_2 + Q38_MOE_EXPERTS,
+            input_scale + Q38_MOE_EXPERTS,
+            weights + 2u * gate_projection_stride,
+            scales + 2u * gate_scale_stride,
+            scale_2 + 2u * Q38_MOE_EXPERTS,
+            input_scale + 2u * Q38_MOE_EXPERTS,
+            context->device_gr_input, context->device_moe_route_ids,
+            context->device_moe_route_weights, Q38_MOE_TOP_K,
+            context->device_moe_accum, context->device_moe_grouped_mid,
+            context->device_nvfp4_activation,
+            context->device_nvfp4_activation_scale,
+            context->device_nvfp4_down_activation,
+            context->device_nvfp4_down_activation_scale,
+            context->stream, cuda_error, sizeof(cuda_error));
+    } else {
+        routed_ok = q38_moe_cuda_q2_grouped_indexed_deterministic(
+            gate_exec->ptr, down_exec->ptr, context->device_gr_input,
+            context->device_moe_route_ids, context->device_moe_route_weights,
+            Q38_MOE_TOP_K, 1280u * 10u, 640u * 10u,
+            context->device_moe_accum, context->device_moe_grouped_mid,
+            context->device_moe_expert_outputs, context->stream, cuda_error,
+            sizeof(cuda_error));
+    }
+    if (!routed_ok)
+        return fail(error, error_len,
+                    cuda_error[0] ? cuda_error : "decoder routed MoE launch failed");
     moe_shared_silu_mul_kernel<<<
         (Q38_MOE_INTERMEDIATE + 255u) / 256u, 256, 0, context->stream>>>(
         context->device_moe_shared_gate, context->device_moe_shared_up,
@@ -3237,9 +3419,13 @@ extern "C" bool q38_forward_cuda_decoder_layer_chain_backend(
         return fail(error, error_len, "decoder MoE reduction launch failed");
     Q38_CUDA_DIAG_ONLY(++context->routed_layers_executed);
     Q38_CUDA_DIAG_ONLY(context->selected_experts_total += Q38_MOE_TOP_K);
-    Q38_CUDA_DIAG_ONLY(context->q2_gate_up_fast_calls += Q38_MOE_TOP_K);
-    Q38_CUDA_DIAG_ONLY(context->q2_down_calls += Q38_MOE_TOP_K);
-    Q38_CUDA_DIAG_ONLY(context->expert_kernel_launches += 5);
+    if (!native_nvfp4) {
+        Q38_CUDA_DIAG_ONLY(context->q2_gate_up_fast_calls += Q38_MOE_TOP_K);
+        Q38_CUDA_DIAG_ONLY(context->q2_down_calls += Q38_MOE_TOP_K);
+        Q38_CUDA_DIAG_ONLY(context->expert_kernel_launches += 5);
+    } else {
+        Q38_CUDA_DIAG_ONLY(context->expert_kernel_launches += 4);
+    }
     if (!apply_directional_steering_device(
             context, context->device_gr_block, layer_number,
             Q38_GR_HIDDEN, 1, context->directional_steering_ffn_scale, error,

@@ -47,6 +47,21 @@ static float bf16(uint16_t x) {
     return value;
 }
 
+static float e4m3fn(uint8_t value) {
+    const int sign = (value & 0x80u) ? -1 : 1;
+    const int exponent = (value >> 3) & 0xFu;
+    const int mantissa = value & 0x7u;
+    float decoded;
+    if (exponent == 0)
+        decoded = ((float)mantissa / 8.0f) * exp2f(-6.0f);
+    else if (exponent == 0xFu)
+        decoded = (1.0f + (float)mantissa / 8.0f) * 256.0f;
+    else
+        decoded = (1.0f + (float)mantissa / 8.0f) *
+                  exp2f((float)(exponent - 7));
+    return (float)sign * decoded;
+}
+
 static float matrix_at(const q38_forward_matrix *matrix, size_t row,
                        size_t col) {
     if (matrix->dtype == Q38_FORWARD_BF16)
@@ -1734,6 +1749,17 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
     if (cost) cost->misc_ms += full_now_ms() - misc_started;
     uint32_t ids[16];
     float row[160];
+    float ple_global_scale = 1.0f;
+    if (layer->ple_store.global_scale) {
+        const void *scale_data = q38_gguf_tensor_data(
+            model, layer->ple_store.global_scale);
+        if (!scale_data || layer->ple_store.global_scale->type != 30 ||
+            layer->ple_store.global_scale->bytes < sizeof(uint16_t))
+            goto fail;
+        uint16_t scale_bits;
+        memcpy(&scale_bits, scale_data, sizeof(scale_bits));
+        ple_global_scale = bf16(scale_bits);
+    }
     for (size_t t = 0; t < token_count; ++t) {
         const double ids_started = full_now_ms();
         if (!q38_ple_ngram_ids_ref(&hash, &state->token_history, tokens[t],
@@ -1756,6 +1782,14 @@ static bool full_ple(const q38_gguf *model, const q38_layer_weights *layer,
                     embedding[t * emb_width + h * 160 + d] =
                         full_bf16_to_float(bits);
                 }
+            } else if (layer->ple_store.qtype == Q38_DTYPE_NVIDIA_FP8_E4M3) {
+                if (layer->ple_store.row_bytes != 160) {
+                    full_fail(error, error_len, "unexpected NVIDIA PLE row size");
+                    goto fail;
+                }
+                for (size_t d = 0; d < 160; ++d)
+                    embedding[t * emb_width + h * 160 + d] =
+                        e4m3fn(((const uint8_t *)row)[d]) * ple_global_scale;
             } else if (layer->ple_store.qtype == 8) {
                 if (layer->ple_store.row_bytes != 170) {
                     full_fail(error, error_len, "unexpected PLE Q8_0 row size");

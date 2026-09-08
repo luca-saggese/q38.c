@@ -4,6 +4,7 @@
 #include "q38_decode.h"
 #include "q38_directional_steering.h"
 #include "q38_gguf.h"
+#include "q38_nvfp4_runtime.h"
 #include "q38_tokenizer.h"
 #include "q38_weights.h"
 #include "q38_session_types.h"
@@ -20,6 +21,7 @@ typedef struct q38_forward_cuda_context q38_forward_cuda_context;
 
 typedef struct {
     q38_gguf *model;
+    q38_nvfp4_runtime_model *nvfp4_runtime;
     q38_tokenizer tokenizer;
     q38_weights weights;
     q38_forward_cuda_context *cuda;
@@ -48,6 +50,13 @@ typedef void (*q38_token_callback)(uint32_t token, const char *piece,
 bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
                       const char *tokenizer_path, char *error,
                       size_t error_len);
+bool q38_runtime_init_ex(q38_runtime *runtime, const char *model_path,
+                         const char *source_root,
+                         const char *tokenizer_path, char *error,
+                         size_t error_len);
+bool q38_runtime_preflight_native_nvfp4(
+    const char *pack_path, const char *source_root,
+    char *error, size_t error_len);
 void q38_runtime_destroy(q38_runtime *runtime);
 bool q38_runtime_load_directional_steering(
     q38_runtime *runtime, const char *path, float ffn_scale,

@@ -10,6 +10,8 @@
 #include <string.h>
 #include <time.h>
 
+#define Q38_RUNTIME_BF16_TYPE 30u
+
 void q38_ngram_history_reset(q38_ngram_history *history) {
     if (!history) return;
     history->prev_token_1 = 0;
@@ -77,9 +79,97 @@ static bool validate_lm_head_geometry(const q38_tensor *tensor,
     return true;
 }
 
+static bool validate_native_nvfp4_binding(
+    const q38_runtime *runtime, char *error, size_t error_len) {
+    if (!runtime || !runtime->nvfp4_runtime ||
+        !runtime->model || !runtime->model->native_nvfp4 ||
+        runtime->weights.bound_layers != Q38_MODEL_LAYERS)
+        return fail(error, error_len, "native NVFP4 layer binding is incomplete");
+    for (uint32_t layer = 0; layer < Q38_MODEL_LAYERS; ++layer) {
+        const q38_layer_weights *weights = &runtime->weights.layer[layer];
+        if (weights->experts.bank_count != 1 ||
+            weights->experts.bank[0].expert_count != Q38_MODEL_EXPERTS ||
+            weights->experts.bank[0].qtype != Q38_QUANT_NVIDIA_NVFP4 ||
+            !weights->experts.bank[0].gate_up ||
+            !weights->experts.bank[0].down ||
+            !weights->router || weights->router->type != Q38_RUNTIME_BF16_TYPE ||
+            !weights->shared_gate_proj ||
+            weights->shared_gate_proj->type != Q38_RUNTIME_BF16_TYPE ||
+            !weights->shared_up_proj ||
+            weights->shared_up_proj->type != Q38_RUNTIME_BF16_TYPE ||
+            !weights->shared_down_proj ||
+            weights->shared_down_proj->type != Q38_RUNTIME_BF16_TYPE ||
+            !weights->shared_expert_gate ||
+            weights->shared_expert_gate->type != Q38_RUNTIME_BF16_TYPE)
+            return fail(error, error_len,
+                        "native NVFP4 layer dispatch binding is incomplete");
+    }
+    const q38_ple_store *ple = &runtime->weights.layer[1].ple_store;
+    if (!ple->model || !ple->shard_count ||
+        ple->qtype != Q38_DTYPE_NVIDIA_FP8_E4M3 ||
+        !ple->global_scale || ple->global_scale->type != Q38_RUNTIME_BF16_TYPE)
+        return fail(error, error_len, "native NVIDIA PLE binding is incomplete");
+    return true;
+}
+
 bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
                       const char *tokenizer_path, char *error,
                       size_t error_len) {
+    return q38_runtime_init_ex(runtime, model_path, NULL, tokenizer_path,
+                               error, error_len);
+}
+
+bool q38_runtime_preflight_native_nvfp4(
+    const char *pack_path, const char *source_root,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!pack_path || !pack_path[0])
+        return fail(error, error_len, "invalid native NVFP4 pack path");
+    q38_nvfp4_runtime_model *native = NULL;
+    if (!q38_nvfp4_runtime_model_open(
+            pack_path, source_root && source_root[0] ? source_root : ".",
+            &native, error, error_len))
+        return false;
+    q38_gguf *model = q38_nvfp4_runtime_model_gguf(native);
+    bool has_embed = false, has_lm_head = false;
+    for (uint64_t i = 0; i < model->n_tensors; ++i) {
+        const q38_tensor *tensor = &model->tensors[i];
+        if (tensor->name.len == strlen("model.language_model.embed_tokens.weight") &&
+            memcmp(tensor->name.ptr, "model.language_model.embed_tokens.weight",
+                   tensor->name.len) == 0)
+            has_embed = true;
+        if (tensor->name.len == strlen("lm_head.weight") &&
+            memcmp(tensor->name.ptr, "lm_head.weight", tensor->name.len) == 0)
+            has_lm_head = true;
+    }
+    if (!has_embed || !has_lm_head) {
+        q38_nvfp4_runtime_model_close(native);
+        return fail(error, error_len,
+                    !has_embed ? "native bridge missing embed descriptor"
+                               : "native bridge missing LM-head descriptor");
+    }
+    q38_weights weights;
+    memset(&weights, 0, sizeof(weights));
+    bool ok = q38_weights_bind_subset(model, 47, &weights, error, error_len);
+    if (ok) {
+        weights.layer[1].ple_store.global_scale =
+            q38_nvfp4_runtime_model_ple_scale(native);
+        q38_runtime probe;
+        memset(&probe, 0, sizeof(probe));
+        probe.model = model;
+        probe.nvfp4_runtime = native;
+        probe.weights = weights;
+        ok = validate_native_nvfp4_binding(&probe, error, error_len);
+    }
+    q38_weights_release(&weights);
+    q38_nvfp4_runtime_model_close(native);
+    return ok;
+}
+
+bool q38_runtime_init_ex(q38_runtime *runtime, const char *model_path,
+                         const char *source_root,
+                         const char *tokenizer_path, char *error,
+                         size_t error_len) {
     if (error && error_len) error[0] = '\0';
     if (!runtime || !model_path || !tokenizer_path || !tokenizer_path[0])
         return fail(error, error_len, "invalid runtime initialization arguments");
@@ -91,7 +181,17 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     double binding_ms = 0.0;
     double cuda_prepare_ms = 0.0;
 #endif
-    runtime->model = q38_gguf_open(model_path, error, error_len);
+    if (q38_nvfp4_path_is_pack(model_path)) {
+        runtime->nvfp4_runtime = NULL;
+        if (!q38_nvfp4_runtime_model_open(
+                model_path, source_root ? source_root : ".",
+                &runtime->nvfp4_runtime, error, error_len))
+            goto fail_runtime;
+        runtime->model = q38_nvfp4_runtime_model_gguf(
+            runtime->nvfp4_runtime);
+    } else {
+        runtime->model = q38_gguf_open(model_path, error, error_len);
+    }
 #if Q38_DIAGNOSTICS
     gguf_open_ms = session_now_ms() - init_started;
 #endif
@@ -119,6 +219,12 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
     if (!q38_weights_bind_subset(runtime->model, 47, &runtime->weights,
                                  error, error_len))
         goto fail_runtime;
+    if (runtime->nvfp4_runtime) {
+        runtime->weights.layer[1].ple_store.global_scale =
+            q38_nvfp4_runtime_model_ple_scale(runtime->nvfp4_runtime);
+        if (!validate_native_nvfp4_binding(runtime, error, error_len))
+            goto fail_runtime;
+    }
 #if Q38_DIAGNOSTICS
     binding_ms = session_now_ms() - binding_started;
 #endif
@@ -131,13 +237,25 @@ bool q38_runtime_init(q38_runtime *runtime, const char *model_path,
         0.0;
 #endif
     runtime->cuda = q38_forward_cuda_context_create(error, error_len);
-    if (!runtime->cuda ||
-        !q38_forward_cuda_enable_all_non_ple_residency(
-            runtime->cuda, runtime->model, error, error_len) ||
-        !q38_forward_cuda_prepare_lm_head(
-            runtime->cuda, runtime->model, runtime->weights.output,
-            error, error_len))
+    if (!runtime->cuda)
         goto fail_runtime;
+    if (runtime->nvfp4_runtime) {
+        if (!q38_forward_cuda_enable_nvfp4_residency(
+                runtime->cuda, q38_nvfp4_runtime_model_pack(
+                    runtime->nvfp4_runtime), runtime->model,
+                error, error_len) ||
+            !q38_forward_cuda_prepare_nvfp4_lm_head(
+                runtime->cuda, q38_nvfp4_runtime_model_pack(
+                    runtime->nvfp4_runtime), runtime->weights.output,
+                error, error_len))
+            goto fail_runtime;
+    } else if (!q38_forward_cuda_enable_all_non_ple_residency(
+                   runtime->cuda, runtime->model, error, error_len) ||
+               !q38_forward_cuda_prepare_lm_head(
+                   runtime->cuda, runtime->model, runtime->weights.output,
+                   error, error_len)) {
+        goto fail_runtime;
+    }
 #if Q38_DIAGNOSTICS
     cuda_prepare_ms = session_now_ms() - cuda_prepare_started;
     q38_forward_cuda_residency_stats startup_stats;
@@ -238,7 +356,11 @@ void q38_runtime_destroy(q38_runtime *runtime) {
     if (runtime->tokenizer_initialized)
         q38_tokenizer_destroy(&runtime->tokenizer);
     runtime->tokenizer_initialized = false;
-    q38_gguf_close(runtime->model);
+    if (runtime->nvfp4_runtime)
+        q38_nvfp4_runtime_model_close(runtime->nvfp4_runtime);
+    else
+        q38_gguf_close(runtime->model);
+    runtime->nvfp4_runtime = NULL;
     runtime->model = NULL;
 }
 

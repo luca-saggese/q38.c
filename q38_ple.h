@@ -15,6 +15,7 @@ extern "C" {
 
 typedef struct {
     const q38_tensor *tensor;
+    const q38_tensor *global_scale;
     const q38_gguf *model;
     const q38_tensor *shard[Q38_PLE_MAX_SHARDS];
     uint64_t shard_first_row[Q38_PLE_MAX_SHARDS];

@@ -44,6 +44,7 @@ static void usage(FILE *fp) {
         "  --list-tensors <model.gguf> List individual tensors\n"
         "  --memory-plan <model.gguf> Dry-run memory plan (no allocation)\n"
         "  --load-only <q38_nvfp4.pack> Bind NVFP4 pack; no inference\n"
+        "  --preflight <q38_nvfp4.pack> Validate native NVFP4 bindings; no CUDA load\n"
         "  --generate <model.gguf>    CUDA greedy session generation\n"
         "\n"
         "options:\n"
@@ -406,6 +407,31 @@ static int cmd_load_only(const q38_options *opt) {
     q38_nvfp4_cuda_residency_destroy(&residency);
     q38_forward_cuda_context_destroy(context);
     q38_nvfp4_pack_close(pack);
+    return 0;
+}
+
+static int cmd_preflight(const q38_options *opt) {
+    if (!opt->model_path || !opt->model_path[0]) {
+        fprintf(stderr, "q38: --preflight requires a Q38_NVFP4_PACK_V1 file\n");
+        return 2;
+    }
+    char error[256] = {0};
+    const char *source_root = opt->source_root && opt->source_root[0]
+        ? opt->source_root : ".";
+    if (!q38_runtime_preflight_native_nvfp4(
+            opt->model_path, source_root, error, sizeof(error))) {
+        fprintf(stderr, "q38: NVFP4 preflight: %s\n", error);
+        return 1;
+    }
+    puts("native NVFP4 preflight: PASS");
+    puts("layers: 48");
+    puts("routed experts per layer: 512");
+    puts("projections: gate/up/down");
+    puts("BF16 tensors: bound");
+    puts("PLE: NVIDIA FP8 rows + BF16 global scale");
+    puts("MTP: skipped");
+    puts("vision: skipped");
+    puts("Q2/NVFP4 dispatch: separated");
     return 0;
 }
 
@@ -1294,8 +1320,9 @@ static int cmd_generate(const q38_options *opt) {
     }
 #endif
 
-    if (!q38_runtime_init(&runtime, opt->model_path, opt->tokenizer_path,
-                          error, sizeof(error)) ||
+    if (!q38_runtime_init_ex(
+            &runtime, opt->model_path, opt->source_root,
+            opt->tokenizer_path, error, sizeof(error)) ||
         !q38_tokenizer_encode(&runtime.tokenizer, opt->prompt, false, &prompt,
                               error, sizeof(error)) ||
         !prompt.token_count) {
@@ -1689,6 +1716,10 @@ int main(int argc, char **argv) {
             mode = Q38_MODE_LOAD_ONLY;
             opt.load_only = true;
             if (i + 1 < argc) opt.model_path = argv[++i];
+        } else if (strcmp(a, "--preflight") == 0) {
+            mode = Q38_MODE_PREFLIGHT;
+            opt.preflight = true;
+            if (i + 1 < argc) opt.model_path = argv[++i];
         } else if (strcmp(a, "--generate") == 0) {
             mode = Q38_MODE_GENERATE;
             if (i + 1 < argc) opt.model_path = argv[++i];
@@ -1801,6 +1832,9 @@ int main(int argc, char **argv) {
         break;
     case Q38_MODE_LOAD_ONLY:
         rc = cmd_load_only(&opt);
+        break;
+    case Q38_MODE_PREFLIGHT:
+        rc = cmd_preflight(&opt);
         break;
     case Q38_MODE_GENERATE:
 #if Q38_DIAGNOSTICS

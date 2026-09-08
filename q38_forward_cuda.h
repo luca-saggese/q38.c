@@ -9,6 +9,7 @@
 #include "q38_forward.h"
 #include "q38_qsa_candidate.h"
 #include "q38_directional_steering.h"
+#include "q38_nvfp4_pack.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -195,11 +196,17 @@ bool q38_forward_cuda_apply_directional_steering(
 bool q38_forward_cuda_enable_all_non_ple_residency(
     q38_forward_cuda_context *context, const q38_gguf *model,
     char *error, size_t error_len);
+bool q38_forward_cuda_enable_nvfp4_residency(
+    q38_forward_cuda_context *context, const q38_nvfp4_pack *pack,
+    const q38_gguf *model, char *error, size_t error_len);
 void q38_forward_cuda_set_residency_progress_observer(
     q38_forward_cuda_context *context,
     q38_forward_cuda_residency_progress_observer observer, void *user);
 bool q38_forward_cuda_prepare_lm_head(
     q38_forward_cuda_context *context, const q38_gguf *model,
+    const q38_tensor *tensor, char *error, size_t error_len);
+bool q38_forward_cuda_prepare_nvfp4_lm_head(
+    q38_forward_cuda_context *context, const q38_nvfp4_pack *pack,
     const q38_tensor *tensor, char *error, size_t error_len);
 void q38_forward_cuda_get_residency_stats(
     const q38_forward_cuda_context *context,

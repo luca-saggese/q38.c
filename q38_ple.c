@@ -1,4 +1,5 @@
 #include "q38_ple.h"
+#include "q38_quant.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,8 +83,12 @@ bool q38_ple_store_bind_gguf(const q38_gguf *model, const char *shard_prefix,
         }
         if (tensor->ndim != 2 || tensor->dim[1] != row_width ||
             tensor->dim[0] == 0 || tensor->bytes == 0 ||
-            !q38_gguf_type_nbytes(tensor->type, row_width,
-                                   &bound.row_bytes)) {
+            (tensor->type != Q38_DTYPE_NVIDIA_FP8_E4M3 &&
+             !q38_gguf_type_nbytes(tensor->type, row_width,
+                                   &bound.row_bytes)) ||
+            (tensor->type == Q38_DTYPE_NVIDIA_FP8_E4M3 &&
+             (tensor->bytes % tensor->dim[0] != 0 ||
+              (bound.row_bytes = tensor->bytes / tensor->dim[0]) == 0))) {
             char message[256];
             snprintf(message, sizeof(message), "invalid PLE shard geometry %u", i);
             return fail(error, error_len, message);
@@ -98,6 +103,8 @@ bool q38_ple_store_bind_gguf(const q38_gguf *model, const char *shard_prefix,
             return fail(error, error_len, "PLE shard quantization types differ");
         }
         bound.shard[i] = tensor;
+        if (tensor->type == Q38_DTYPE_NVIDIA_FP8_E4M3)
+            bound.row_bytes = tensor->bytes / tensor->dim[0];
         bound.shard_rows[i] = tensor->dim[0];
         bound.shard_first_row[i] = bound.rows;
         if (bound.rows > UINT64_MAX - tensor->dim[0])
@@ -150,17 +157,41 @@ bool q38_ple_store_read_row(const q38_ple_store *store, uint64_t row,
                             void *row_data, size_t row_data_bytes,
                             char *error, size_t error_len) {
     if (error && error_len > 0) error[0] = '\0';
-    if (!store || !store->model || !store->model->map || !row_data ||
+    if (!store || !store->model || !row_data ||
         row_data_bytes < store->row_bytes) {
         return fail(error, error_len, "invalid PLE row read arguments");
     }
     uint64_t offset;
     if (!q38_ple_store_row_range(store, row, &offset, error, error_len))
         return false;
-    if (offset > store->model->size ||
-        store->row_bytes > store->model->size - offset) {
-        return fail(error, error_len, "PLE row exceeds mapped GGUF");
+    const q38_tensor *source = NULL;
+    uint64_t local_offset = offset;
+    if (store->shard_count != 0) {
+        for (uint32_t i = 0; i < store->shard_count; ++i) {
+            const q38_tensor *shard = store->shard[i];
+            if (!shard || !shard->data) continue;
+            uint64_t first = store->shard_first_row[i];
+            if (row >= first && row - first < store->shard_rows[i]) {
+                source = shard;
+                local_offset = (row - first) * store->row_bytes;
+                break;
+            }
+        }
+    } else if (store->tensor && store->tensor->data) {
+        source = store->tensor;
+        local_offset = row * store->row_bytes;
     }
+    if (source) {
+        if (local_offset > source->bytes ||
+            store->row_bytes > source->bytes - local_offset)
+            return fail(error, error_len, "PLE row exceeds source tensor");
+        memcpy(row_data, (const unsigned char *)source->data + local_offset,
+               (size_t)store->row_bytes);
+        return true;
+    }
+    if (!store->model->map || offset > store->model->size ||
+        store->row_bytes > store->model->size - offset)
+        return fail(error, error_len, "PLE row exceeds mapped GGUF");
     memcpy(row_data, store->model->map + offset, (size_t)store->row_bytes);
     return true;
 }

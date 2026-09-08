@@ -246,6 +246,28 @@ static bool resolve_ref(const q38_nvfp4_pack *pack,
     return true;
 }
 
+static bool resolve_named_record(const q38_nvfp4_pack *pack,
+                                 uint32_t dtype, uint32_t ndim,
+                                 const uint64_t shape[4], uint32_t source_id,
+                                 uint64_t source_offset, uint64_t pack_offset,
+                                 uint64_t bytes, q38_nvfp4_view *out,
+                                 const char **name, uint64_t name_offset,
+                                 uint32_t name_len, char *error,
+                                 size_t error_len) {
+    if (!out || !name ||
+        !range_ok(pack->header.string_table_bytes, name_offset, name_len))
+        return set_error(error, error_len, "invalid NVFP4 named record");
+    q38_nvfp4_disk_ref ref = {
+        source_id, 0, source_offset, pack_offset, bytes
+    };
+    if (!resolve_ref(pack, &ref, out, error, error_len)) return false;
+    out->dtype = dtype;
+    out->rows = ndim > 0 ? shape[0] : 0;
+    out->cols = ndim > 1 ? shape[1] : 0;
+    *name = pack_string(pack, name_offset, name_len);
+    return *name != NULL;
+}
+
 bool q38_nvfp4_pack_open(const char *pack_path, const char *source_root,
                          q38_nvfp4_pack **out, char *error,
                          size_t error_len) {
@@ -457,6 +479,97 @@ bool q38_nvfp4_pack_get_bf16_count(const q38_nvfp4_pack *pack,
                                    uint32_t *count) {
     if (!pack || !count) return false;
     *count = pack->header.bf16_count;
+    return true;
+}
+
+bool q38_nvfp4_pack_get_bf16_name_length(
+    const q38_nvfp4_pack *pack, uint32_t index, uint32_t *name_len) {
+    if (!pack || !name_len || index >= pack->header.bf16_count) return false;
+    const q38_nvfp4_disk_bf16 *record =
+        (const q38_nvfp4_disk_bf16 *)((const uint8_t *)pack->map +
+                                      pack->header.bf16_table_offset) + index;
+    *name_len = record->name_len;
+    return true;
+}
+
+bool q38_nvfp4_pack_get_aux_count(const q38_nvfp4_pack *pack,
+                                  uint32_t *count) {
+    if (!pack || !count) return false;
+    *count = pack->header.aux_count;
+    return true;
+}
+
+bool q38_nvfp4_pack_get_aux_name_length(
+    const q38_nvfp4_pack *pack, uint32_t index, uint32_t *name_len) {
+    if (!pack || !name_len || index >= pack->header.aux_count) return false;
+    const q38_nvfp4_disk_aux *record =
+        (const q38_nvfp4_disk_aux *)((const uint8_t *)pack->map +
+                                     pack->header.aux_table_offset) + index;
+    *name_len = record->name_len;
+    return true;
+}
+
+bool q38_nvfp4_pack_get_aux_view(
+    const q38_nvfp4_pack *pack, uint32_t index, q38_nvfp4_view *out,
+    const char **name, uint32_t *class_id, uint32_t *ndim,
+    uint64_t shape[4], char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!pack || !out || !name || !class_id || !ndim || !shape ||
+        index >= pack->header.aux_count ||
+        !table_ok(pack, pack->header.aux_table_offset,
+                  pack->header.aux_count, Q38_NVFP4_AUX_BYTES))
+        return set_error(error, error_len, "invalid NVFP4 auxiliary tensor index");
+    const q38_nvfp4_disk_aux *record =
+        (const q38_nvfp4_disk_aux *)((const uint8_t *)pack->map +
+                                     pack->header.aux_table_offset) + index;
+    if (!resolve_named_record(pack, record->dtype, record->ndim, record->shape,
+                              record->source_id, record->source_offset,
+                              record->pack_offset, record->bytes, out, name,
+                              record->name_offset, record->name_len, error,
+                              error_len))
+        return false;
+    *class_id = record->class_id;
+    *ndim = record->ndim;
+    memcpy(shape, record->shape, sizeof(record->shape));
+    return true;
+}
+
+bool q38_nvfp4_pack_get_ple_count(const q38_nvfp4_pack *pack,
+                                  uint32_t *count) {
+    if (!pack || !count) return false;
+    *count = pack->header.ple_count;
+    return true;
+}
+
+bool q38_nvfp4_pack_get_ple_tensor_view(
+    const q38_nvfp4_pack *pack, uint32_t index, q38_nvfp4_view *out,
+    const char **name, uint32_t *shard_id, uint32_t *ndim,
+    uint64_t shape[4], char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!pack || !out || !name || !shard_id || !ndim || !shape ||
+        index >= pack->header.ple_count ||
+        !table_ok(pack, pack->header.ple_table_offset,
+                  pack->header.ple_count, Q38_NVFP4_PLE_BYTES))
+        return set_error(error, error_len, "invalid NVFP4 PLE tensor index");
+    const q38_nvfp4_disk_ple *record =
+        (const q38_nvfp4_disk_ple *)((const uint8_t *)pack->map +
+                                     pack->header.ple_table_offset) + index;
+    q38_nvfp4_disk_ref ref = {
+        record->source_id, 0, record->source_offset,
+        record->pack_offset, record->bytes,
+    };
+    if (!resolve_ref(pack, &ref, out, error, error_len)) return false;
+    out->dtype = record->dtype;
+    out->rows = record->shape[0];
+    out->cols = record->shape[1];
+    *shard_id = record->shard_id;
+    *ndim = record->ndim;
+    memcpy(shape, record->shape, sizeof(record->shape));
+    *name = NULL;
+    if (record->shard_id == UINT32_MAX) {
+        *name = "model.language_model.layers.1.ple.ple_embedding."
+                "ngram_embedding.weight_scale";
+    }
     return true;
 }
 

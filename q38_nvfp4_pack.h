@@ -78,9 +78,25 @@ bool q38_nvfp4_pack_get_bf16_view(const q38_nvfp4_pack *pack, uint32_t index,
                                   q38_nvfp4_view *out, const char **name,
                                   uint32_t *ndim, uint64_t shape[4],
                                   char *error, size_t error_len);
+bool q38_nvfp4_pack_get_bf16_name_length(
+    const q38_nvfp4_pack *pack, uint32_t index, uint32_t *name_len);
 
 bool q38_nvfp4_pack_get_bf16_count(const q38_nvfp4_pack *pack,
                                    uint32_t *count);
+bool q38_nvfp4_pack_get_aux_view(
+    const q38_nvfp4_pack *pack, uint32_t index, q38_nvfp4_view *out,
+    const char **name, uint32_t *class_id, uint32_t *ndim,
+    uint64_t shape[4], char *error, size_t error_len);
+bool q38_nvfp4_pack_get_aux_count(const q38_nvfp4_pack *pack,
+                                  uint32_t *count);
+bool q38_nvfp4_pack_get_aux_name_length(
+    const q38_nvfp4_pack *pack, uint32_t index, uint32_t *name_len);
+bool q38_nvfp4_pack_get_ple_tensor_view(
+    const q38_nvfp4_pack *pack, uint32_t index, q38_nvfp4_view *out,
+    const char **name, uint32_t *shard_id, uint32_t *ndim,
+    uint64_t shape[4], char *error, size_t error_len);
+bool q38_nvfp4_pack_get_ple_count(const q38_nvfp4_pack *pack,
+                                  uint32_t *count);
 bool q38_nvfp4_pack_get_region_view(
     const q38_nvfp4_pack *pack, uint32_t region,
     q38_nvfp4_region_view *out, char *error, size_t error_len);

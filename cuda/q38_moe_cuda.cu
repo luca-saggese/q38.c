@@ -16,6 +16,244 @@ static bool fail(char *error, size_t error_len, const char *message) {
     return false;
 }
 
+__device__ __forceinline__ static float nvfp4_decode_fp4(uint32_t nibble) {
+    constexpr float values[16] = {
+        0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f,
+        0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f,
+    };
+    return values[nibble & 0xFu];
+}
+
+__device__ __forceinline__ static float nvfp4_decode_e4m3(uint32_t value) {
+    const int sign = (value & 0x80u) ? -1 : 1;
+    const int exponent = (value >> 3) & 0xFu;
+    const int mantissa = value & 0x7u;
+    float decoded;
+    if (exponent == 0)
+        decoded = (static_cast<float>(mantissa) / 8.0f) * exp2f(-6.0f);
+    else if (exponent == 0xFu)
+        decoded = (1.0f + static_cast<float>(mantissa) / 8.0f) * 256.0f;
+    else
+        decoded = (1.0f + static_cast<float>(mantissa) / 8.0f) *
+                  exp2f(static_cast<float>(exponent - 7));
+    return static_cast<float>(sign) * decoded;
+}
+
+__device__ __forceinline__ static int nvfp4_round_even(float value) {
+    const float lower = floorf(value);
+    const float fraction = value - lower;
+    if (fraction < 0.5f) return static_cast<int>(lower);
+    if (fraction > 0.5f) return static_cast<int>(lower + 1.0f);
+    const int integer = static_cast<int>(lower);
+    return (integer & 1) == 0 ? integer : integer + 1;
+}
+
+__device__ __forceinline__ static uint32_t nvfp4_encode_e4m3(float value) {
+    const uint32_t sign = value < 0.0f ? 0x80u : 0u;
+    const float magnitude = fabsf(value);
+    if (magnitude == 0.0f) return sign;
+    if (!isfinite(magnitude) || magnitude >= 448.0f) return sign | 0x7Eu;
+    if (magnitude < exp2f(-6.0f)) {
+        int mantissa = nvfp4_round_even(magnitude * exp2f(9.0f));
+        if (mantissa >= 8) mantissa = 8;
+        return sign | static_cast<uint32_t>(mantissa);
+    }
+    const int exponent = static_cast<int>(floorf(log2f(magnitude)));
+    int exponent_field = exponent + 7;
+    int mantissa = nvfp4_round_even(
+        (magnitude / exp2f(static_cast<float>(exponent)) - 1.0f) * 8.0f);
+    if (mantissa >= 8) {
+        ++exponent_field;
+        mantissa = 0;
+    }
+    if (exponent_field >= 15) return sign | 0x7Eu;
+    return sign | (static_cast<uint32_t>(exponent_field) << 3) |
+           static_cast<uint32_t>(mantissa & 7);
+}
+
+__device__ __forceinline__ static uint32_t nvfp4_encode_fp4(float value) {
+    const float magnitude = fabsf(value);
+    uint32_t code;
+    if (magnitude <= 0.25f) code = 0;
+    else if (magnitude < 0.75f) code = 1;
+    else if (magnitude <= 1.25f) code = 2;
+    else if (magnitude < 1.75f) code = 3;
+    else if (magnitude <= 2.5f) code = 4;
+    else if (magnitude < 3.5f) code = 5;
+    else if (magnitude <= 5.0f) code = 6;
+    else code = 7;
+    return code | (value < 0.0f ? 0x8u : 0u);
+}
+
+__global__ static void nvfp4_quantize_kernel(
+    const float *input, uint8_t *packed, uint8_t *scales,
+    const float *input_scale, const uint16_t *expert_ids) {
+    __shared__ float values[16];
+    __shared__ float block_scale;
+    const unsigned lane = threadIdx.x;
+    const unsigned start = blockIdx.x * 16u;
+    if (lane < 16u) values[lane] = input[start + lane];
+    __syncthreads();
+    if (lane == 0) {
+        float amax = 0.0f;
+        for (unsigned i = 0; i < 16u; ++i)
+            amax = fmaxf(amax, fabsf(values[i]));
+        const float scale = input_scale[expert_ids[0]];
+        const uint8_t encoded =
+            static_cast<uint8_t>(nvfp4_encode_e4m3(amax / (6.0f * scale)));
+        scales[blockIdx.x] = encoded;
+        block_scale = nvfp4_decode_e4m3(encoded) * scale;
+        if (block_scale < 1.0e-5f) block_scale = 1.0f;
+    }
+    __syncthreads();
+    if (lane < 8u) {
+        const uint32_t lo = nvfp4_encode_fp4(values[lane * 2] / block_scale);
+        const uint32_t hi =
+            nvfp4_encode_fp4(values[lane * 2 + 1] / block_scale);
+        packed[blockIdx.x * 8u + lane] =
+            static_cast<uint8_t>(lo | (hi << 4));
+    }
+}
+
+__global__ static void nvfp4_grouped_gate_up_kernel(
+    const uint8_t *gate_weight, const uint8_t *gate_scale,
+    const float *gate_scale_2, const float *gate_input_scale,
+    const uint8_t *up_weight, const uint8_t *up_scale,
+    const float *up_scale_2, const float *up_input_scale,
+    const uint8_t *activation, const uint8_t *activation_scale,
+    const uint16_t *expert_ids, float *mid, size_t experts) {
+    extern __shared__ uint8_t staged[];
+    uint8_t *staged_activation = staged;
+    uint8_t *staged_scale = staged + 1280u;
+    for (unsigned i = threadIdx.x; i < 1280u; i += blockDim.x)
+        staged_activation[i] = activation[i];
+    for (unsigned i = threadIdx.x; i < 160u; i += blockDim.x)
+        staged_scale[i] = activation_scale[i];
+    __syncthreads();
+    const unsigned warp = threadIdx.x / 32u;
+    const unsigned lane = threadIdx.x & 31u;
+    const size_t global_row = (size_t)blockIdx.x * 4u + warp;
+    const size_t total_rows = experts * 640u;
+    if (global_row >= total_rows) return;
+    const size_t selected = global_row / 640u;
+    const uint32_t expert = expert_ids[selected];
+    const uint32_t row = global_row % 640u;
+    const size_t weight_stride = 640u * 1280u;
+    const size_t scale_stride = 640u * 160u;
+    float gate = 0.0f, up = 0.0f;
+    for (uint32_t k = lane; k < 2560u; k += 32u) {
+        const uint8_t a = staged_activation[k / 2u];
+        const uint32_t an = (k & 1u) ? a >> 4 : a & 0xFu;
+        const float activation_value =
+            nvfp4_decode_fp4(an) *
+            nvfp4_decode_e4m3(staged_scale[k / 16u]) *
+            gate_input_scale[expert];
+        const uint8_t gw = gate_weight[expert * weight_stride +
+                                        row * 1280u + k / 2u];
+        const uint8_t uw = up_weight[expert * weight_stride +
+                                      row * 1280u + k / 2u];
+        const uint8_t ws = gate_scale[expert * scale_stride +
+                                      row * 160u + k / 16u];
+        const uint8_t us = up_scale[expert * scale_stride +
+                                    row * 160u + k / 16u];
+        gate += nvfp4_decode_fp4((k & 1u) ? gw >> 4 : gw & 0xFu) *
+                nvfp4_decode_e4m3(ws) * gate_scale_2[expert] *
+                activation_value;
+        up += nvfp4_decode_fp4((k & 1u) ? uw >> 4 : uw & 0xFu) *
+              nvfp4_decode_e4m3(us) * up_scale_2[expert] *
+              activation_value;
+    }
+    for (unsigned offset = 16; offset; offset >>= 1) {
+        gate += __shfl_down_sync(0xffffffffu, gate, offset);
+        up += __shfl_down_sync(0xffffffffu, up, offset);
+    }
+    if (lane == 0)
+        mid[selected * 640u + row] = gate / (1.0f + expf(-gate)) * up;
+}
+
+__global__ static void nvfp4_grouped_quantize_kernel(
+    const float *input, uint8_t *packed, uint8_t *scales,
+    const float *input_scale, const uint16_t *expert_ids, size_t experts) {
+    __shared__ float values[16];
+    __shared__ float block_scale;
+    const unsigned lane = threadIdx.x;
+    const unsigned expert = blockIdx.x;
+    const unsigned block = blockIdx.y;
+    if (expert >= experts) return;
+    if (lane < 16u)
+        values[lane] = input[expert * 640u + block * 16u + lane];
+    __syncthreads();
+    if (lane == 0) {
+        float amax = 0.0f;
+        for (unsigned i = 0; i < 16u; ++i)
+            amax = fmaxf(amax, fabsf(values[i]));
+        const float scale = input_scale[expert_ids[expert]];
+        const uint8_t encoded =
+            static_cast<uint8_t>(nvfp4_encode_e4m3(amax / (6.0f * scale)));
+        scales[expert * 40u + block] = encoded;
+        block_scale = nvfp4_decode_e4m3(encoded) * scale;
+        if (block_scale < 1.0e-5f) block_scale = 1.0f;
+    }
+    __syncthreads();
+    if (lane < 8u) {
+        const uint32_t lo = nvfp4_encode_fp4(values[lane * 2] / block_scale);
+        const uint32_t hi =
+            nvfp4_encode_fp4(values[lane * 2 + 1] / block_scale);
+        packed[expert * 320u + block * 8u + lane] =
+            static_cast<uint8_t>(lo | (hi << 4));
+    }
+}
+
+__global__ static void nvfp4_grouped_down_kernel(
+    const uint8_t *weight, const uint8_t *scale, const float *scale_2,
+    const float *input_scale, const uint8_t *activation,
+    const uint8_t *activation_scale, const uint16_t *expert_ids,
+    const float *route_weights, float *output, size_t experts) {
+    extern __shared__ uint8_t staged[];
+    uint8_t *staged_activation = staged;
+    uint8_t *staged_scale = staged + experts * 320u;
+    for (size_t i = threadIdx.x; i < experts * 320u; i += blockDim.x)
+        staged_activation[i] = activation[i];
+    for (size_t i = threadIdx.x; i < experts * 40u; i += blockDim.x)
+        staged_scale[i] = activation_scale[i];
+    __syncthreads();
+    const unsigned warp = threadIdx.x / 32u;
+    const unsigned lane = threadIdx.x & 31u;
+    const uint32_t row = blockIdx.x * 4u + warp;
+    if (row >= 2560u) return;
+    float weighted_sum = 0.0f;
+    const size_t weight_stride = 2560u * 320u;
+    const size_t scale_stride = 2560u * 40u;
+    for (unsigned selected = 0; selected < experts; ++selected) {
+        const uint32_t expert = expert_ids[selected];
+        float sum = 0.0f;
+        for (uint32_t k = lane; k < 640u; k += 32u) {
+            const uint8_t packed =
+                weight[expert * weight_stride + row * 320u + k / 2u];
+            const uint8_t act =
+                staged_activation[selected * 320u + k / 2u];
+            const uint32_t wn = (k & 1u) ? packed >> 4 : packed & 0xFu;
+            const uint32_t an = (k & 1u) ? act >> 4 : act & 0xFu;
+            const float weight_value =
+                nvfp4_decode_fp4(wn) *
+                nvfp4_decode_e4m3(scale[expert * scale_stride +
+                                         row * 40u + k / 16u]) *
+                scale_2[expert];
+            const float activation_value =
+                nvfp4_decode_fp4(an) *
+                nvfp4_decode_e4m3(staged_scale[selected * 40u + k / 16u]) *
+                input_scale[expert];
+            sum += weight_value * activation_value;
+        }
+        for (unsigned offset = 16; offset; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        if (lane == 0)
+            weighted_sum = __fadd_rn(
+                weighted_sum, __fmul_rn(route_weights[selected], sum));
+    }
+    if (lane == 0) output[row] = weighted_sum;
+}
+
 __global__ static void route_weights_kernel(
     const float *logits, const uint32_t *indices, size_t tokens,
     uint16_t *expert_ids, float *weights) {
@@ -231,6 +469,56 @@ extern "C" bool q38_moe_cuda_route(
     }
     free(logits);
     return true;
+}
+
+extern "C" bool q38_moe_cuda_nvfp4_grouped_indexed(
+    const uint8_t *gate_weight, const uint8_t *gate_scale,
+    const float *gate_scale_2, const float *gate_input_scale,
+    const uint8_t *up_weight, const uint8_t *up_scale,
+    const float *up_scale_2, const float *up_input_scale,
+    const uint8_t *down_weight, const uint8_t *down_scale,
+    const float *down_scale_2, const float *down_input_scale,
+    const float *device_hidden, const uint16_t *device_expert_ids,
+    const float *device_route_weights, size_t expert_count,
+    float *device_output, float *device_mid,
+    uint8_t *device_activation, uint8_t *device_activation_scale,
+    uint8_t *device_down_activation,
+    uint8_t *device_down_activation_scale, cudaStream_t stream,
+    char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!gate_weight || !gate_scale || !gate_scale_2 ||
+        !gate_input_scale || !up_weight || !up_scale || !up_scale_2 ||
+        !up_input_scale || !down_weight || !down_scale || !down_scale_2 ||
+        !down_input_scale || !device_hidden || !device_expert_ids ||
+        !device_route_weights || !device_output || !device_mid ||
+        !device_activation || !device_activation_scale ||
+        !device_down_activation || !device_down_activation_scale ||
+        expert_count == 0 || expert_count > Q38_MOE_TOP_K)
+        return fail(error, error_len, "invalid CUDA NVFP4 grouped arguments");
+    nvfp4_quantize_kernel<<<160u, 32u, 0, stream>>>(
+        device_hidden, device_activation, device_activation_scale,
+        gate_input_scale, device_expert_ids);
+    nvfp4_grouped_gate_up_kernel<<<
+        (unsigned)((expert_count * 640u + 3u) / 4u), 128u,
+        1280u + 160u, stream>>>(
+        gate_weight, gate_scale, gate_scale_2, gate_input_scale,
+        up_weight, up_scale, up_scale_2, up_input_scale,
+        device_activation, device_activation_scale, device_expert_ids,
+        device_mid, expert_count);
+    dim3 quant_grid((unsigned)expert_count, 40u, 1u);
+    nvfp4_grouped_quantize_kernel<<<quant_grid, 32u, 0, stream>>>(
+        device_mid, device_down_activation, device_down_activation_scale,
+        down_input_scale, device_expert_ids, expert_count);
+    nvfp4_grouped_down_kernel<<<
+        (unsigned)((2560u + 3u) / 4u), 128u,
+        (unsigned)(expert_count * (320u + 40u)), stream>>>(
+        down_weight, down_scale, down_scale_2, down_input_scale,
+        device_down_activation, device_down_activation_scale,
+        device_expert_ids, device_route_weights, device_output,
+        expert_count);
+    const cudaError_t status = cudaGetLastError();
+    return status == cudaSuccess ||
+           fail(error, error_len, cudaGetErrorString(status));
 }
 
 __device__ static float q2_value(const q38_q2_k_block *blocks,

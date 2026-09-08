@@ -77,6 +77,23 @@ bool q38_moe_cuda_accumulate_weighted(
     float *device_accum, const float *device_expert, float weight,
     cudaStream_t stream, char *error, size_t error_len);
 
+/* Native NVIDIA NVFP4 grouped top-k path.  All component arrays are already
+ * resident on CUDA and use the canonical [layer][projection][expert] layout. */
+bool q38_moe_cuda_nvfp4_grouped_indexed(
+    const uint8_t *gate_weight, const uint8_t *gate_scale,
+    const float *gate_scale_2, const float *gate_input_scale,
+    const uint8_t *up_weight, const uint8_t *up_scale,
+    const float *up_scale_2, const float *up_input_scale,
+    const uint8_t *down_weight, const uint8_t *down_scale,
+    const float *down_scale_2, const float *down_input_scale,
+    const float *device_hidden, const uint16_t *device_expert_ids,
+    const float *device_route_weights, size_t expert_count,
+    float *device_output, float *device_mid,
+    uint8_t *device_activation, uint8_t *device_activation_scale,
+    uint8_t *device_down_activation,
+    uint8_t *device_down_activation_scale, cudaStream_t stream,
+    char *error, size_t error_len);
+
 /* Structural candidate: execute all selected routed experts with one grouped
  * gate/up launch and one down/weighted-accumulation launch. */
 bool q38_moe_cuda_q2_grouped(

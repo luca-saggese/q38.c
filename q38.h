@@ -27,6 +27,7 @@ typedef enum {
     Q38_MODE_LIST_TENSORS, /* --list-tensors model.gguf */
     Q38_MODE_MEMORY_PLAN,  /* --memory-plan model.gguf */
     Q38_MODE_LOAD_ONLY,    /* --load-only q38_nvfp4.pack */
+    Q38_MODE_PREFLIGHT,    /* --preflight q38_nvfp4.pack */
     Q38_MODE_GENERATE,     /* --generate model.gguf */
 } q38_mode;
 
@@ -44,6 +45,7 @@ typedef struct {
     bool list_tensors;    /* --list-tensors */
     bool memory_plan;     /* --memory-plan */
     bool load_only;       /* --load-only */
+    bool preflight;      /* --preflight */
     bool platform;        /* --platform */
     const char *source_root; /* NVFP4 source-backed payload root */
     bool disable_ple;     /* --disable-ple diagnostic */

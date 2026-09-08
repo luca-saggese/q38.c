@@ -40,6 +40,7 @@ typedef struct {
     uint32_t ndim;
     uint64_t dim[Q38_MAX_DIMS];
     uint32_t type;
+    const void *data;
     uint64_t rel_offset;
     uint64_t abs_offset;
     uint64_t elements;
@@ -60,6 +61,7 @@ typedef struct {
 
     q38_kv *kv;
     q38_tensor *tensors;
+    bool native_nvfp4;
 } q38_gguf;
 
 /* Open + map + parse. On failure returns NULL and writes a message into

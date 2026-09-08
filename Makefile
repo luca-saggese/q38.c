@@ -37,7 +37,7 @@ PRODUCTION_C_OBJS := \
 	q38_model_config.o q38_ple.o q38_qsa.o q38_state.o q38_quant.o \
 	q38_ple_ref.o q38_gdn_ref.o q38_gr_ref.o q38_replay.o \
 	q38_residency.o q38_directional_steering.o q38_session.o q38_residency_plan.o \
-	q38_nvfp4_pack.o
+	q38_nvfp4_pack.o q38_nvfp4_runtime.o
 PRODUCTION_CUDA_OBJS := \
 	q38_cuda.o q38_forward_cuda.o q38_qsa_cuda.o q38_cuda_primitives.o \
 	q38_gdn.o q38_moe_cuda.o q38_cuda_timing.o q38_profile_cuda.o \
@@ -170,6 +170,7 @@ q38_server.o q38_server_engine.o q38_server_engine_mock.o \
 q38_server_protocol.o q38_kvstore.o: q38_server_engine.h
 q38_decode.o q38_forward.o q38_session.o: q38_forward.h
 q38_decode.o q38_session.o: q38_session.h
+q38_nvfp4_runtime.o: q38_nvfp4_runtime.h q38_nvfp4_pack.h
 q38_forward.o q38_session.o: q38_forward_cuda.h
 q38_forward_cuda.o: q38_forward.h q38_forward_cuda.h
 q38_session.o q38_directional_steering.o: q38_directional_steering.h
