@@ -17,6 +17,25 @@ MoE routing, not by the decoder-layer device chain itself.
 
 The generic multi-token routing path remains unchanged.
 
+## Frozen Q2 precision baseline
+
+The current Q2 device-chain result is frozen as **Q2_DEVICE_CHAIN_V1** before
+the next precision change. No additional benchmark campaign is required for
+this baseline.
+
+| Gate | Frozen value |
+|---|---|
+| Decode latency | 76.282 ms/token |
+| Decode throughput | 13.109 tok/s |
+| Generated token sequence | equal: yes |
+| PLE critical stall | 0 |
+| `decoder_layer_chain` | enabled |
+| MoE single-token cooperative routing | enabled |
+
+This baseline is the performance and correctness reference for the precision
+change. Do not overwrite these values with measurements from the next
+precision variant.
+
 ## Scope
 
 This is a static comparison of the two single-token decoder paths:
